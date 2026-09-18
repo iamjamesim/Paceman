@@ -9,11 +9,13 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import Mock
 
 from service.hub import Server, Store
 from service.omarchy import OmarchySource, appearance
 from service.push import Worker
 from service.status import DesktopStatus
+from service.processes import CodexProcesses, ProcessIdentity
 from test_push import FakeSender
 
 
@@ -26,14 +28,20 @@ class OmarchyTests(unittest.TestCase):
         self.theme = self.root / 'omarchy/current/theme'
         self.theme.mkdir(parents=True)
         self.write_theme()
+        self.owners = {}
+        self.processes = Mock(spec=CodexProcesses)
+        self.processes.identify.return_value = ProcessIdentity(100, '1', 'test-boot')
+        self.processes.is_alive.return_value = True
         self.source = self.enterContext(OmarchySource(self.store,
-            socket_path=self.root / 'omarchy-watch.sock', state_dir=self.root / 'omarchy'))
+            socket_path=self.root / 'omarchy-watch.sock', state_dir=self.root / 'omarchy', processes=self.processes))
 
     def write_theme(self, accent='#FF88AA'):
         (self.theme / 'colors.toml').write_text(f'background="#101010"\nforeground="#FFFFFF"\naccent="{accent}"\n')
         (self.theme.parent / 'theme.name').write_text('Test theme')
 
     def event(self, event, session='one', turn='turn-1', **extra):
+        self.owners.setdefault(session, ProcessIdentity(100 + len(self.owners), '1', 'test-boot'))
+        self.processes.identify.return_value = self.owners[session]
         body = dict(command='agent-event', source='codex', session=session, turn=turn, event=event, **extra)
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.settimeout(2)
@@ -85,11 +93,11 @@ class OmarchyTests(unittest.TestCase):
         value = published()
         self.assertEqual(value['activity'], 'needs_input')
         self.assertEqual(value['sessions'], 2)
-        self.assertEqual(value['sessionCounts'], {'needs_input': 1, 'working': 1, 'finished': 0})
+        self.assertEqual(value['sessionCounts'], {'needs_input': 1, 'working': 1, 'finished': 0, 'idle': 0})
         self.event('completed', session='two')
         value = published()
         self.assertEqual(value['activity'], 'working')
-        self.assertEqual(value['sessionCounts'], {'needs_input': 0, 'working': 1, 'finished': 1})
+        self.assertEqual(value['sessionCounts'], {'needs_input': 0, 'working': 1, 'finished': 1, 'idle': 0})
         self.event('ended', session='two')
         self.assertEqual(published()['sessions'], 1)
         self.event('ended')
@@ -138,20 +146,23 @@ class OmarchyTests(unittest.TestCase):
         worker.step(now=time.time() + 20)
         self.assertEqual(len(sender.calls), 1)
 
-    def test_restart_retains_pairing_and_completion_but_clears_unverified_work(self):
+    def test_restart_retains_pairing_and_live_states_but_clears_unverified_records(self):
         pair = self.store.redeem(self.store.invite('https://test.example')['invitation'])
         self.event('completed')
         self.event('working', session='two')
+        with self.store.connect() as db:
+            db.execute("INSERT INTO omarchy_sessions VALUES ('legacy','codex','old','finished',?)", (time.time(),))
         self.source.__exit__(None, None, None)
         self.source.thread = None
-        with OmarchySource(Store(self.store.path), socket_path=self.root / 'other.sock', state_dir=self.root / 'omarchy'):
+        with OmarchySource(Store(self.store.path), socket_path=self.root / 'other.sock',
+                           state_dir=self.root / 'omarchy', processes=self.processes):
             value = self.store.snapshot()
-            self.assertEqual(value['state'], 'finished')
-            self.assertEqual(len(value['sessions']), 1)
+            self.assertEqual(value['state'], 'working')
+            self.assertEqual(len(value['sessions']), 2)
             self.assertEqual(value['sourceID'], pair['sourceID'])
             self.assertTrue(self.store.authorized(pair['credential']))
 
-    def test_synthetic_controls_are_disabled_and_expiry_clears_sessions(self):
+    def test_synthetic_controls_are_disabled_and_age_does_not_expire_live_sessions(self):
         with self.assertRaises(ValueError):
             self.store.emit('working')
         with self.store.connect() as db:
@@ -161,6 +172,9 @@ class OmarchyTests(unittest.TestCase):
         self.event('working')
         with self.store.connect() as db:
             db.execute('UPDATE omarchy_sessions SET updated=0')
+        self.source.tick(force=True)
+        self.assertEqual(self.store.snapshot()['state'], 'working')
+        self.processes.is_alive.return_value = False
         self.source.tick(force=True)
         self.assertEqual(self.store.snapshot()['state'], 'idle')
 

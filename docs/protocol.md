@@ -36,7 +36,10 @@ a new source identity and requires new pairing. Simple process restart does not.
 pairing contract. `revision` advances for activity or appearance changes; `eventID`
 and `changedAt` advance only for activity changes. They need not equal the latest
 snapshot revision. Appearance updates therefore cannot replay a watch alert.
-The source's `observedAt` establishes service liveness, not agent-process liveness.
+The source's `observedAt` establishes service liveness. Omarchy sources with
+`sessionLiveness: "process"` additionally verify each listed session's owning
+Codex process locally. Finished and Idle sessions can remain open. PID/start-time/
+boot metadata is never exported. Clients can ignore this optional marker.
 See [routing semantics and recovery limits](omarchy-routing.md).
 
 `GET /v1/events`: same authorization, `text/event-stream`. Each `data:` line

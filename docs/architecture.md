@@ -37,7 +37,10 @@ The installed systemd user service starts at login. `service/status.py` publishe
 an atomic, private runtime status file with a heartbeat, aggregate activity,
 per-state session counts and last authenticated client fetch. The panel expires a missing heartbeat and never
 claims Bluetooth or watch delivery status that the phone has not reported.
-The source runs independently of the shell. See [desktop setup](desktop.md).
+The source runs independently of the shell. On Linux, `service/processes.py`
+binds sessions to the Codex ancestor of the kernel-identified hook sender, then
+reconciles PID/start-time/boot identities on startup and about once a second.
+Activity and liveness are separate; a living process can remain Finished or Idle. See [desktop setup](desktop.md).
 
 ## iPhone and widgets
 

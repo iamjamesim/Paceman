@@ -35,13 +35,13 @@ PanelWindow {
       Repeater {
         model: Quickshell.env("PACEMAN_PREVIEW_SESSIONS") === "1" ? [
           {label: "One session", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3,
-            activity: "working", sessions: 1, sessionCounts: {needs_input: 0, working: 1, finished: 0}},
+            activity: "working", sessions: 1, sessionCounts: {needs_input: 0, working: 1, finished: 0, idle: 0}},
           {label: "Two working", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3,
-            activity: "working", sessions: 2, sessionCounts: {needs_input: 0, working: 2, finished: 0}},
+            activity: "working", sessions: 2, sessionCounts: {needs_input: 0, working: 2, finished: 0, idle: 0}},
           {label: "Mixed states", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3,
-            activity: "needs_input", sessions: 2, sessionCounts: {needs_input: 1, working: 1, finished: 0}},
-          {label: "Active work plus retained completion", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3,
-            activity: "needs_input", sessions: 6, sessionCounts: {needs_input: 2, working: 3, finished: 1}}
+            activity: "needs_input", sessions: 2, sessionCounts: {needs_input: 1, working: 1, finished: 0, idle: 0}},
+          {label: "Open sessions with finished work", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3,
+            activity: "needs_input", sessions: 6, sessionCounts: {needs_input: 2, working: 3, finished: 1, idle: 0}}
         ] : [
           {label: "Receiving updates", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3, activity: "working"},
           {label: "Phone away", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 900, activity: "needs_input"},
@@ -74,7 +74,7 @@ PanelWindow {
               y: Style.space(14)
               width: parent.width - Style.space(28)
               now: window.now
-              sourceState: Object.assign({computerName: "Omarchy", updatedAt: window.now, schema: 1}, modelData)
+              sourceState: Object.assign({computerName: "Omarchy", updatedAt: window.now, schema: 1, sessionLiveness: "process"}, modelData)
             }
           }
           Item { Layout.fillHeight: true }

@@ -71,18 +71,19 @@ never convert that into a fresh-pairing prompt.
 Activity uses per-state session counts from the same snapshot as its aggregate:
 
 - One session keeps the simple Codex/status row.
-- Multiple ongoing sessions show “Codex · N active.” Count only working and
-  needs-input states. If all share one state, the status reads “2 working” or
-  “2 need input,” with no extra line.
-- Mixed active states show the priority state on the main row and a smaller breakdown
+- Multiple process-verified sessions show “Codex · N sessions.” An open session
+  remains counted after its turn finishes or is interrupted. If all share one
+  state, the status reads “2 working,” “2 need input,” “2 finished,” or “2 idle.”
+- Mixed states show the priority state on the main row and a smaller breakdown
   below, such as “1 needs input · 1 working.” Priority is needs input, working,
-  then finished, matching the watch aggregate. Retained completions do not appear
-  in the active count or breakdown. With only completions, use the simple
-  “Codex / Finished” row; those records do not establish how many sessions are open.
-  This is an activity count, not an open-window count. Reliable liveness tracking
-  is a follow-up; open sessions should retain their latest status after a turn ends.
+  finished, then idle, matching the watch aggregate.
+- Counts represent observed sessions with living Codex owners, not terminal
+  windows. A detached tmux session remains live. Process exit removes its session;
+  old unowned completions cannot inflate the list. One open session retains its
+  latest state in the simple row, including Finished.
 - Off/stale sources hide historical counts. Older status files without counts
-  fall back to the aggregate; do not guess the distribution.
+  fall back to the aggregate; do not guess the distribution. Older sources without
+  the process-verification marker use the conservative working/needs-input count.
 
 This is a summary, not a session list. A future inline session list would need
 useful task/project names before it can explain which task needs attention.

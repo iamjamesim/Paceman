@@ -13,18 +13,20 @@ function activitySummary(state, available) {
   var result = {title: "Codex", label: labels[state.activity] || "Waiting for activity", breakdown: ""}
   if (!available) return result
   var counts = state.sessionCounts || {}
-  var order = ["needs_input", "working", "finished"]
+  var verified = state.sessionLiveness === "process"
+  var order = verified ? ["needs_input", "working", "finished", "idle"] : ["needs_input", "working", "finished"]
   var valid = order.every(function(key) { return Number.isInteger(counts[key]) && counts[key] >= 0 })
   var total = order.reduce(function(sum, key) { return sum + (counts[key] || 0) }, 0)
   // Older status files contain only an aggregate; never guess the breakdown.
   if (!valid || total !== state.sessions) return result
-  // Completions are retained history, not evidence of an ongoing session.
-  var active = counts.needs_input + counts.working
-  if (active < 2) return result
-  result.title = "Codex · " + active + " active"
-  var parts = ["needs_input", "working"].filter(function(key) { return counts[key] > 0 }).map(function(key) {
+  // New sources verify every session's process, including quiet/finished ones.
+  // Older sources retained completions without proving they were still open.
+  var visibleCount = verified ? total : counts.needs_input + counts.working
+  if (visibleCount < 2) return result
+  result.title = "Codex · " + visibleCount + (verified ? " sessions" : " active")
+  var parts = (verified ? order : ["needs_input", "working"]).filter(function(key) { return counts[key] > 0 }).map(function(key) {
     return counts[key] + (key === "needs_input" ? (counts[key] === 1 ? " needs input" : " need input")
-      : " working")
+      : " " + key)
   })
   if (parts.length === 1) result.label = parts[0]
   else {

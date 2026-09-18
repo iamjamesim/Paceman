@@ -1,7 +1,7 @@
 # Desktop visual reference
 
 Canonical Omarchy desktop states for design review and macOS implementation.
-Captured 2026-09-18 from the production panel components at `02ebc5c`.
+Captured 2026-09-18 from the production panel components in this revision.
 These are **sample states**, not live phone/watch delivery evidence. Times are
 frozen, animation is paused, and the pairing QR is deliberately nonfunctional.
 
@@ -32,7 +32,8 @@ new pairing. Escape collapses the details before closing the panel.
 
 The main row presents the highest-priority state. A smaller breakdown appears
 only when ongoing sessions have different states. Matching states stay on one
-line, such as “2 working.” Retained completions do not inflate the active count.
+line, such as “2 working.” Counts include process-verified open sessions: Finished
+remains visible while its process is alive. Closed or unowned records do not count.
 The robot's position stays fixed as the wording changes.
 
 ## Sharing off
@@ -72,9 +73,10 @@ and meaning of controls are the shared contract.
 
 “Your phone” describes the intended iPhone workflow; pairing currently identifies
 anonymous credentials, not distinct physical phones. Recent authenticated fetches
-also include diagnostic clients and do not prove watch delivery. “Active” counts
-reported Working/Needs input states, not verified open windows. Phone identity
-and session/process liveness are explicit [follow-ups](roadmap.md).
+also include diagnostic clients and do not prove watch delivery. Session counts
+describe verified Codex processes that have emitted a hook, not window visibility
+or real-time tool progress. Detached sessions stay listed.
+Phone identity remains an explicit [follow-up](roadmap.md).
 
 ## Refreshing the references
 

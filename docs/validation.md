@@ -5,7 +5,7 @@ It describes the private prototype as of 2026-09-18, not a reliability guarantee
 
 ## Automated checks
 
-- 52 Python desktop/service/push/Omarchy tests passed on Linux: API authorization, invitation expiry and
+- 68 Python desktop/service/push/Omarchy tests passed on Linux: API authorization, invitation expiry and
   single use, persistence, SSE, scheduling, revocation, token updates, hint content,
   signing, retry/coalescing and delivery bookkeeping. Apple responses are mocked.
   Omarchy coverage includes the installed v0.2.0 companion script with fixture
@@ -17,9 +17,17 @@ It describes the private prototype as of 2026-09-18, not a reliability guarantee
   Sharing tests cover persistence across upgrades, service-failure rollback and
   missing runtime files; pairing tests verify that panel metadata excludes secrets.
   Socket-driven tests verify per-state counts through transitions and cleanup.
-  Nine JavaScript presentation cases cover single, matching, mixed, idle, stale
-  and legacy states, including exclusion of retained completions from active
-  counts; these run through Python when Node.js is available.
+  Thirteen JavaScript presentation cases cover single, matching, mixed, idle, stale
+  and legacy states, including verified open completions versus older retained
+  records; these run through Python when Node.js is available.
+- Linux process tests use isolated fixture executables/sockets and real process
+  ancestry. They cover short-lived hook children, PTY hangup, SIGKILL, detached
+  tmux, quiet completion, source restart, dead owners during downtime, PID/boot
+  identity mismatch, conversation switching, late hooks, and aggregate event
+  identity. No user Codex process is killed by these tests.
+- The liveness update was installed on the Omarchy desktop. The real existing
+  hook registered one session with a verified living `codex` owner; the runtime
+  summary reported one session, and both saved client credentials remained.
 - The desktop installer ran on the Omarchy machine. The copied app and enabled
   user service use permanent user directories; the source identity and both
   existing client credentials were verified unchanged after migration. The bar

@@ -100,9 +100,9 @@ events, multi-session behavior, and recovery limitations.
 - **Activity:** the aggregate Codex state from this machine. This is a compact
   source summary, not a duplicate of the phone's activity feed. The watch's agent
   indicator sits in a fixed slot beside the words; Working pulses gently while
-  the panel is open. Multiple working/needs-input sessions show an active count,
-  with a smaller breakdown when those states differ. Retained completed records
-  are excluded; they are not evidence of ongoing sessions.
+  the panel is open. Multiple verified live sessions show a session count, with
+  a smaller breakdown when their states differ. An open session keeps Finished
+  after its turn ends. Process exit removes it even if its cleanup hook is missed.
 
 The source publishes a five-second heartbeat that expires after 20 seconds.
 “Receiving updates” means a successful authenticated snapshot response or stream
@@ -112,7 +112,8 @@ anonymous credentials; “Your phone” describes the intended iPhone workflow,
 not verified device identity. Device identification and credential replacement
 are follow-up work in the [roadmap](roadmap.md). Contact and last accepted
 agent-event timestamps are measured since source startup; current hooks have no
-heartbeat or replay.
+heartbeat or replay. The source separately checks the owning Codex processes
+about once a second; see [ownership and recovery](omarchy-routing.md#process-ownership-and-recovery).
 
 Expanded phone details show last contact and whether a pairing is saved. Stored
 credentials are not a count of physical phones and are not displayed. Contact

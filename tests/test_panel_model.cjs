@@ -77,3 +77,27 @@ test('zero sessions remains a simple idle row', () => {
   assert.equal(value.activity, 'No active work');
   assert.equal(value.activityBreakdown, '');
 });
+
+test('one verified finished session keeps its latest status', () => {
+  const value = present({ needs_input: 0, working: 0, finished: 1, idle: 0 }, { sessionLiveness: 'process' });
+  assert.equal(value.activityTitle, 'Codex');
+  assert.equal(value.activity, 'Finished');
+  assert.equal(value.activityBreakdown, '');
+});
+test('multiple verified finished sessions count as open sessions', () => {
+  const value = present({ needs_input: 0, working: 0, finished: 2, idle: 0 }, { sessionLiveness: 'process' });
+  assert.equal(value.activityTitle, 'Codex · 2 sessions');
+  assert.equal(value.activity, '2 finished');
+});
+test('a verified finished session stays in a mixed live summary', () => {
+  const value = present({ needs_input: 0, working: 1, finished: 1, idle: 0 }, { sessionLiveness: 'process' });
+  assert.equal(value.activityTitle, 'Codex · 2 sessions');
+  assert.equal(value.activity, 'Working');
+  assert.equal(value.activityBreakdown, '1 working · 1 finished');
+});
+test('interrupted but still-open sessions contribute an idle state', () => {
+  const value = present({ needs_input: 1, working: 0, finished: 0, idle: 1 }, { sessionLiveness: 'process' });
+  assert.equal(value.activityTitle, 'Codex · 2 sessions');
+  assert.equal(value.activity, 'Needs input');
+  assert.equal(value.activityBreakdown, '1 needs input · 1 idle');
+});

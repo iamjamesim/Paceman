@@ -25,7 +25,7 @@ class DesktopStatus:
             return
         snapshot = self.store.snapshot()
         session_counts = {state: sum(session["state"] == state for session in snapshot["sessions"])
-                          for state in ("needs_input", "working", "finished")}
+                          for state in ("needs_input", "working", "finished", "idle")}
         with self.store.connect() as db:
             paired = db.execute("SELECT COUNT(*) FROM clients").fetchone()[0]
         with self.lock:
@@ -36,6 +36,7 @@ class DesktopStatus:
             "computerName": socket.gethostname(),
             "activity": snapshot["state"], "sessions": len(snapshot["sessions"]),
             "sessionCounts": session_counts,
+            "sessionLiveness": snapshot.get("sessionLiveness"),
             "lastAgentEventAt": getattr(adapter, "last_event_at", 0),
             "pairedPhones": paired, "lastPhoneFetchAt": phone_seen,
         }

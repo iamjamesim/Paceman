@@ -20,6 +20,8 @@ import threading
 import time
 import tomllib
 
+from service.processes import CodexProcesses, ProcessIdentity
+
 MAX_AGE = 24 * 60 * 60
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
 EVENTS = {"working": "working", "needs-input": "needs_input", "completed": "finished",
@@ -67,14 +69,15 @@ class EventHandler(socketserver.StreamRequestHandler):
     def handle(self):
         self.connection.settimeout(.25)
         try:
+            peer_pid = None
             if hasattr(socket, "SO_PEERCRED"):
-                _, uid, _ = struct.unpack("3i", self.connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+                peer_pid, uid, _ = struct.unpack("3i", self.connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
                 if uid != os.getuid():
                     return
             raw = self.rfile.readline(4097)
             if len(raw) > 4096 or not raw.endswith(b"\n"):
                 raise ValueError("Invalid event")
-            changed = self.server.source.receive(json.loads(raw))
+            changed = self.server.source.receive(json.loads(raw), peer_pid=peer_pid)
             response = {"ok": True, "changed": changed}
         except (ValueError, TypeError, TimeoutError):
             response = {"ok": False, "error": "invalid_event"}
@@ -85,7 +88,7 @@ class EventHandler(socketserver.StreamRequestHandler):
 
 
 class OmarchySource:
-    def __init__(self, store, *, socket_path: Path | None = None, state_dir: Path | None = None):
+    def __init__(self, store, *, socket_path: Path | None = None, state_dir: Path | None = None, processes=None):
         self.store = store
         self.socket_path = socket_path or default_socket()
         self.state_dir = state_dir or Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy"
@@ -95,6 +98,7 @@ class OmarchySource:
         self.thread = None
         self.socket_inode = None
         self.last_event_at = 0
+        self.processes = processes if processes is not None else CodexProcesses()
 
     def __enter__(self):
         # Never steal a live desktop socket or remove an unrelated filesystem entry.
@@ -123,10 +127,15 @@ class OmarchySource:
             with self.store.connect() as db:
                 db.execute("CREATE TABLE IF NOT EXISTS omarchy_sessions (id TEXT PRIMARY KEY, "
                            "provider TEXT NOT NULL, turn TEXT NOT NULL, state TEXT NOT NULL, updated REAL NOT NULL)")
+                db.execute("CREATE TABLE IF NOT EXISTS omarchy_processes (session_id TEXT PRIMARY KEY, "
+                           "pid INTEGER NOT NULL, start_ticks TEXT NOT NULL, boot_id TEXT NOT NULL, "
+                           "closed INTEGER NOT NULL DEFAULT 0)")
                 db.execute("INSERT OR REPLACE INTO metadata VALUES ('mode','omarchy')")
                 db.execute("DELETE FROM schedule WHERE fired=0")
-                # Hooks have no heartbeat/replay. Don't claim interrupted activity survived a restart.
-                db.execute("DELETE FROM omarchy_sessions WHERE state IN ('working','needs_input')")
+                # Legacy records cannot establish ownership. A new hook registers
+                # them; don't carry old anonymous completions into the live list.
+                db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id NOT IN "
+                           "(SELECT session_id FROM omarchy_processes)")
             self.tick(force=True)
             self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=.05), daemon=True)
             self.thread.start()
@@ -147,7 +156,7 @@ class OmarchySource:
         except FileNotFoundError:
             pass
 
-    def receive(self, command: dict) -> bool:
+    def receive(self, command: dict, *, peer_pid=None) -> bool:
         if not isinstance(command, dict) or command.get("command") != "agent-event":
             raise ValueError("Unsupported command")
         source, session, turn = (command.get(key) for key in ("source", "session", "turn"))
@@ -159,28 +168,67 @@ class OmarchySource:
             raise ValueError("Invalid event")
         # Namespaced opaque keys keep session IDs out of the phone's presentation.
         key = hashlib.sha256(f"{source}:{session}".encode()).hexdigest()
+        owner = self.processes.identify(peer_pid) if source == "codex" else None
+        if owner is None:
+            # Neither a claimed PID in the payload nor a random local client is
+            # evidence of a live Codex session. Keep the protocol best-effort.
+            return False
         with self.lock, self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            self.prune_processes(db)
             previous = db.execute("SELECT * FROM omarchy_sessions WHERE id=?", (key,)).fetchone()
+            binding = db.execute("SELECT * FROM omarchy_processes WHERE session_id=?", (key,)).fetchone()
+            same_owner = binding is not None and self.identity(binding) == owner
+            if (binding is not None and not same_owner
+                    and (not binding["closed"] or event != "working" or previous["turn"] == turn)):
+                # A late event from another still-live process cannot take over
+                # an already registered session.
+                return self.publish(db, lifecycle_only=True)
             if not turn:
                 if previous is None:
-                    return False
+                    return self.publish(db, lifecycle_only=True)
                 turn = previous["turn"]
-            if ((previous is None or previous["state"] == "idle") and EVENTS[event] != "idle"
-                    and db.execute("SELECT COUNT(*) FROM omarchy_sessions WHERE state!='idle'").fetchone()[0] >= 100):
+            if ((binding is None or binding["closed"]) and event != "ended"
+                    and db.execute("SELECT COUNT(*) FROM omarchy_processes WHERE closed=0 AND NOT "
+                                   "(pid=? AND start_ticks=? AND boot_id=?)",
+                                   (owner.pid, owner.start_ticks, owner.boot_id)).fetchone()[0] >= 100):
                 raise ValueError("Too many active sessions")
             if previous:
-                if previous["turn"] != turn and event != "working":
-                    return False  # A delayed stop/input/cleanup cannot replace a newer turn.
+                if same_owner and previous["turn"] != turn and event != "working":
+                    return self.publish(db, lifecycle_only=True)
                 if previous["turn"] == turn:
-                    if previous["state"] == EVENTS[event]:
-                        return False
-                    if previous["state"] in ("idle", "finished") and event in ("working", "needs-input"):
-                        return False  # Do not resurrect a closed turn from delayed tool hooks.
+                    if same_owner and (binding["closed"] or (previous["state"] == "idle" and event != "ended")):
+                        return self.publish(db, lifecycle_only=True)
+                    if same_owner and previous["state"] == EVENTS[event] and event != "ended":
+                        return self.publish(db, lifecycle_only=True)
+                    if same_owner and previous["state"] in ("idle", "finished") and event in ("working", "needs-input"):
+                        return self.publish(db, lifecycle_only=True)
+            # A CLI can switch/resume conversations within one process. Its
+            # latest session replaces its old binding instead of counting twice.
+            replaced = db.execute("SELECT session_id FROM omarchy_processes WHERE pid=? AND "
+                                  "start_ticks=? AND boot_id=? AND session_id!=?",
+                                  (owner.pid, owner.start_ticks, owner.boot_id, key)).fetchall()
+            for row in replaced:
+                db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id=?", (row[0],))
+                db.execute("UPDATE omarchy_processes SET closed=1 WHERE session_id=?", (row[0],))
+            db.execute("INSERT OR REPLACE INTO omarchy_processes VALUES (?,?,?,?,0)",
+                       (key, owner.pid, owner.start_ticks, owner.boot_id))
             db.execute("INSERT OR REPLACE INTO omarchy_sessions VALUES (?,?,?,?,?)",
                        (key, source, turn, EVENTS[event], time.time()))
             self.last_event_at = time.time()
-            return self.publish(db)
+            if event == "ended":
+                db.execute("UPDATE omarchy_processes SET closed=1 WHERE session_id=?", (key,))
+            return self.publish(db, lifecycle_only=event == "ended")
+
+    @staticmethod
+    def identity(row):
+        return ProcessIdentity(row["pid"], row["start_ticks"], row["boot_id"])
+
+    def prune_processes(self, db):
+        for row in db.execute("SELECT * FROM omarchy_processes").fetchall():
+            if not self.processes.is_alive(self.identity(row)):
+                db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id=?", (row["session_id"],))
+                db.execute("DELETE FROM omarchy_processes WHERE session_id=?", (row["session_id"],))
 
     def tick(self, *, force=False):
         with self.lock:
@@ -188,24 +236,36 @@ class OmarchySource:
                 return
             with self.store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
-                db.execute("DELETE FROM omarchy_sessions WHERE updated<?", (time.time() - MAX_AGE,))
-                self.publish(db)
+                self.prune_processes(db)
+                # Live quiet sessions keep their latest state. Age out only
+                # closed-session tombstones, never a verified living process.
+                cutoff = time.time() - MAX_AGE
+                db.execute("DELETE FROM omarchy_processes WHERE closed=1 AND session_id IN "
+                           "(SELECT id FROM omarchy_sessions WHERE updated<?)", (cutoff,))
+                db.execute("DELETE FROM omarchy_sessions WHERE updated<? AND id NOT IN "
+                           "(SELECT session_id FROM omarchy_processes)", (cutoff,))
+                self.publish(db, lifecycle_only=True)
             self.next_poll = time.monotonic() + 1
 
-    def publish(self, db) -> bool:
-        records = db.execute("SELECT * FROM omarchy_sessions WHERE state!='idle' ORDER BY id").fetchall()
+    def publish(self, db, *, lifecycle_only=False) -> bool:
+        records = db.execute("SELECT s.* FROM omarchy_sessions s JOIN omarchy_processes p "
+                             "ON p.session_id=s.id WHERE p.closed=0 ORDER BY s.id").fetchall()
         sessions = [{"id": row["id"], "provider": row["provider"], "state": row["state"]} for row in records]
         # Needs-input takes precedence; active work wins over old completions.
         state = next((state for state in ("needs_input", "working", "finished")
                       if any(row["state"] == state for row in records)), "idle")
         activity_key = json.dumps([(row["id"], row["turn"], row["state"]) for row in records])
         previous_key = db.execute("SELECT value FROM metadata WHERE key='activity_key'").fetchone()
-        activity_changed = previous_key is None or previous_key[0] != activity_key
+        sessions_changed = previous_key is None or previous_key[0] != activity_key
         payload = {"sourceName": "Omarchy", "mode": "omarchy", "state": state, "sessions": sessions,
+                   "sessionLiveness": "process",
                    "appearance": appearance(self.state_dir)}
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         old = json.loads(last["payload"]) if last["payload"] else {}
-        if not activity_changed and all(old.get(key) == value for key, value in payload.items()):
+        # Membership-only cleanup isn't a new alert. An aggregate state change
+        # still needs a new event identity so an acknowledged watch state clears.
+        activity_changed = sessions_changed and (not lifecycle_only or old.get("state") != state)
+        if not sessions_changed and all(old.get(key) == value for key, value in payload.items()):
             return False
         now = time.time()
         kind = "activity" if activity_changed else "presentation"

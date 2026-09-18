@@ -14,14 +14,14 @@ Scope {
   readonly property string output: Quickshell.env("PACEMAN_REFERENCE_DIR") + "/" + scenario + ".png"
   readonly property double now: 1800000000
   readonly property var fixture: Object.assign({
-    schema: 1, running: true, sharingEnabled: true, updatedAt: now,
+    schema: 1, sessionLiveness: "process", running: true, sharingEnabled: true, updatedAt: now,
     pairedPhones: 1, lastPhoneFetchAt: now - 3,
     activity: "working", sessions: 1,
-    sessionCounts: {needs_input: 0, working: 1, finished: 0}
+    sessionCounts: {needs_input: 0, working: 1, finished: 0, idle: 0}
   }, scenario === "phone-details" ? {lastPhoneFetchAt: now - 900}
     : scenario === "multiple-sessions" ? {
       activity: "needs_input", sessions: 2,
-      sessionCounts: {needs_input: 1, working: 1, finished: 0}
+      sessionCounts: {needs_input: 1, working: 1, finished: 0, idle: 0}
     } : scenario === "sharing-off" ? {running: false, sharingEnabled: false} : {})
 
   PanelWindow {

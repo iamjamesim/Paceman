@@ -94,7 +94,8 @@ real task, then a blocking input request, resume it, and finish the turn.
 | Blocking question or permission request | needs_input | Needs input |
 | Resolve that request | working | Working |
 | Turn stops | finished | Finished |
-| Session ends or is interrupted | idle, unless another session is active | Idle/other session |
+| Turn is interrupted | session stays open with idle state | Idle/other session |
+| Session/process ends | session removed; remaining sessions determine state | Idle/other session |
 
 The app polls in the foreground; developer streaming uses the same snapshot
 contract. Compare the event identity in the phone's diagnostics with the source's
@@ -116,14 +117,40 @@ configured [APNs worker](direct-push-test.md), recording APNs acceptance, phone
 fetch, BLE receipt and screen rendering as separate observations. Foreground
 success does not establish locked-phone delivery.
 
-The companion has no replay or heartbeat. Only events received while Paceman is
-running are known. On source restart, working/input records are cleared because
-continued activity cannot be verified; the next hook repopulates them. Finished
-records survive restart, and session records expire after 24 hours. `observedAt`
-means the source is reachable, not that the agent process was independently
-checked. A missed hook can leave last-known session state until the next event
-or expiry. Watch acknowledgement remains local to the phone/watch and does not
-change the source session's state.
+## Process ownership and recovery
+
+Paceman obtains the sending hook process's PID from Linux `SO_PEERCRED`, follows
+its same-user `/proc` ancestry to the nearest `codex` executable, and records that
+owner's PID, kernel start ticks and boot ID. It never reads command arguments,
+environment variables or conversations. Ownership is inferred by the receiver;
+existing trusted hooks need no changes or reinstallation. Claimed process IDs in
+payloads are ignored. Events whose Codex owner cannot be verified are not added
+to the live session list.
+
+The source rechecks owners about once a second. Closing a terminal or killing
+Codex removes its session even if SessionEnd never arrives. A detached tmux
+session stays visible while its Codex process remains alive. An open session
+retains its last activity, including Finished or interrupted/Idle. Source restart
+rechecks persisted identities and preserves surviving sessions; PID reuse and a
+new boot cannot revive old records. Switching conversations within one CLI
+replaces its current session rather than counting the process twice.
+
+Legacy records without ownership are removed from the current summary on upgrade.
+An existing session registers on its next state-changing hook. A newly opened
+CLI that has not emitted any activity is not discovered by scanning processes.
+The snapshot marks verified lists with `sessionLiveness: "process"`; only opaque
+session IDs and activity states leave the machine, never process identities.
+The desktop's five-second heartbeat adds up to five seconds of display delay
+after the source detects an exit.
+
+Activity remains the **latest observed state**, not a heartbeat or replay from
+Codex. Hooks missed while the source is stopped are not recovered; the next
+state-changing hook corrects activity. Process liveness does not prove tool
+progress, nor does a terminal window closing prove its detached process ended.
+Closed record tombstones expire after 24 hours; verified quiet sessions do not.
+An aggregate-state change advances event identity so the watch can clear an old
+acknowledged state. Membership-only cleanup preserves event identity when the
+aggregate is unchanged. Watch acknowledgement stays local to the phone/watch.
 
 ## Repeatable routing regression
 
