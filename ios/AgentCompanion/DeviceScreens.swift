@@ -174,7 +174,7 @@ struct WatchDetail: View {
             }
             CompanionRule(theme: theme)
             VStack(spacing: 0) {
-                DetailRow(title: "Status") { Text(preview ? "Connected" : model.watch.ready ? "Connected" : model.watch.enabled ? "Reconnecting" : "Paused") }
+                DetailRow(title: "Bluetooth") { Text(preview ? "Connected" : model.watch.connectionStatus) }
                 DetailRow(title: "Last sent") {
                     if preview { Text("Just now") }
                     else if let date = model.watch.lastDelivered { Text("\(date, style: .relative) ago") }
@@ -182,6 +182,10 @@ struct WatchDetail: View {
                 }
             }
             if !preview && !model.watch.ready { Text(model.watch.status).font(.footnote).foregroundStyle(.secondary) }
+            if !preview && model.watch.canRetryConnection {
+                Button("Retry connection") { model.watch.retryConnection() }
+                    .font(.subheadline).frame(minHeight: 44)
+            }
             CompanionButton(title: model.watch.enabled || preview ? "Pause updates" : "Resume updates", theme: theme) {
                 model.watch.setEnabled(!model.watch.enabled)
             }.disabled(preview)

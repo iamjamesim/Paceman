@@ -36,6 +36,18 @@ It describes the private prototype as of 2026-09-18, not a reliability guarantee
   path, clarify reconnect/removal, and place notification and sound controls on
   their relevant screens. Camera-permission recovery and watch sound still need
   physical interaction checks; fixture review does not establish these behaviors.
+- The watch reconnect follow-up passed 26 iOS tests and simulator/signed-device
+  builds. New regression cases cover restoring a connected peripheral only after
+  Bluetooth is powered on, preserving pending requests, honoring pause,
+  bounded retry backoff, recovery eligibility after stalled cancellation, and
+  peripheral invalidation when the manager state moves below poweredOff. The
+  latter now drops invalid objects and retains only the identifier for retrieval.
+  The app uses native auto-reconnect, retries failed paired-watch connections,
+  recovers stalled handshakes/requests, and replaces a manager whose cancellation
+  does not complete. Manager replacement preserves watch ownership and saves a
+  fresh Core Bluetooth restoration identifier. Bluetooth status is separate from
+  retry progress. These policy tests do not establish radio or locked-phone
+  reliability; physical out-of-range and Bluetooth-toggle checks remain required.
 - The installed pairing upgrade preserved the source ID and both existing
   credential hashes. Its two legacy connections remain unidentified until the
   updated app registers ownership. The live panel rendered correctly. An isolated
@@ -81,6 +93,25 @@ It describes the private prototype as of 2026-09-18, not a reliability guarantee
 
 ## Physical-device evidence
 
+- A watch reconnect investigation on 2026-09-18 found an inherited Core Bluetooth
+  request stuck connecting, then disconnecting without a completion callback.
+  A bounded, opt-in DEBUG radio scan saw the saved, app-authorized watch advertising.
+  A fresh-manager diagnostic connected, completed ownership/profile setup and
+  accepted activity writes without Settings or re-pairing. The final build also
+  connected on normal launch and accepted repeated activity writes. This does not
+  establish every automatic fallback, repeated range recovery, locked-phone
+  reliability or visible rendering. The temporary radio probe was removed after
+  diagnosis. Raw logs remain under ignored runtime storage.
+- Lifecycle review found that the earlier app retained peripheral objects across
+  manager reset, contrary to Core Bluetooth's invalidation contract. This is
+  corrected and installed on the iPhone. The installed build restored an existing
+  connected peripheral, completed the ownership/profile handshake after poweredOn,
+  and accepted repeated activity writes. A subsequent app relaunch repeated that
+  restoration and accepted writes without Settings or re-pairing. The original
+  incident lacks enough state logging to prove that reset was its trigger.
+  A long pending connection is valid while out of range; timeout-driven
+  cancellation and manager replacement remain defensive
+  recovery policies, not evidence that every restored request is invalid.
 - On 2026-09-18, the pairing/removal update was installed in place and launched
   on the existing iPhone 16. App diagnostics recorded repeated successful
   foreground snapshots and push destination registration without re-pairing,

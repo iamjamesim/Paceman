@@ -1,8 +1,64 @@
 import XCTest
 import UserNotifications
+import CoreBluetooth
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    func testBluetoothResetInvalidatesPeripheralObjectsButPowerToggleDoesNot() {
+        for state in [CBManagerState.unknown, .resetting, .unsupported, .unauthorized] {
+            XCTAssertTrue(WatchConnectionStep.invalidatesPeripherals(state))
+        }
+        XCTAssertFalse(WatchConnectionStep.invalidatesPeripherals(.poweredOff))
+        XCTAssertFalse(WatchConnectionStep.invalidatesPeripherals(.poweredOn))
+    }
+
+    func testRestoredConnectedWatchResumesHandshakeOnlyWhenBluetoothIsReady() {
+        XCTAssertEqual(WatchConnectionStep.next(enabled: true, poweredOn: false,
+            state: .connected, ready: false, preparing: false), .wait)
+        XCTAssertEqual(WatchConnectionStep.next(enabled: true, poweredOn: true,
+            state: .connected, ready: false, preparing: false), .prepare)
+        XCTAssertEqual(WatchConnectionStep.next(enabled: true, poweredOn: true,
+            state: .connected, ready: false, preparing: true), .wait)
+        XCTAssertEqual(WatchConnectionStep.next(enabled: true, poweredOn: true,
+            state: .connected, ready: true, preparing: false), .wait)
+    }
+
+    func testReconnectPreservesPendingRequestsAndHonorsPause() {
+        for state in [CBPeripheralState.connected, .connecting, .disconnecting, .disconnected] {
+            XCTAssertEqual(WatchConnectionStep.next(enabled: false, poweredOn: true,
+                state: state, ready: false, preparing: false), .wait)
+        }
+        for state in [CBPeripheralState.connecting, .disconnecting] {
+            XCTAssertEqual(WatchConnectionStep.next(enabled: true, poweredOn: true,
+                state: state, ready: false, preparing: false), .wait)
+        }
+        XCTAssertEqual(WatchConnectionStep.next(enabled: true, poweredOn: true,
+            state: .disconnected, ready: false, preparing: false), .connect)
+    }
+
+    func testReconnectBackoffIsBoundedAndResetsAfterSuccess() {
+        var backoff = WatchReconnectBackoff()
+        XCTAssertEqual((0..<7).map { _ in backoff.nextDelay() }, [2, 4, 8, 16, 30, 30, 30])
+        backoff.reset()
+        XCTAssertEqual(backoff.nextDelay(), 2)
+    }
+
+    func testStalledCancellationRebuildsOnlyAnEnabledPairedConnection() {
+        for state in [CBPeripheralState.connecting, .disconnecting] {
+            XCTAssertTrue(WatchConnectionStep.shouldRebuildAfterCancellation(enabled: true,
+                paired: true, poweredOn: true, ready: false, state: state))
+            for flags in [(false, true, true, false), (true, false, true, false),
+                          (true, true, false, false), (true, true, true, true)] {
+                XCTAssertFalse(WatchConnectionStep.shouldRebuildAfterCancellation(enabled: flags.0,
+                    paired: flags.1, poweredOn: flags.2, ready: flags.3, state: state))
+            }
+        }
+        for state in [CBPeripheralState.connected, .disconnected] {
+            XCTAssertFalse(WatchConnectionStep.shouldRebuildAfterCancellation(enabled: true,
+                paired: true, poweredOn: true, ready: false, state: state))
+        }
+    }
+
     func testActivityLayoutMatchesFirmware() {
         let packet = WatchWire.activity(state: .needsInput, revision: 0x01020304,
                                        alert: true, sound: true, acknowledged: 0x05060708)

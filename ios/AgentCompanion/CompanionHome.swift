@@ -157,8 +157,11 @@ struct CompanionHome: View {
                     if hasWatch {
                         HStack(spacing: 5) {
                             Circle().fill(watchReady ? theme.tint : theme.ink.opacity(0.3)).frame(width: 5, height: 5)
-                            Text(watchReady ? "Connected" : model.watch.enabled ? "Reconnecting" : "Paused").font(.footnote)
+                            Text(watchReady ? "Connected" : model.watch.connectionStatus).font(.footnote)
                         }.foregroundStyle(theme.ink.opacity(0.65))
+                        if !presentation.preview && !watchReady && model.watch.enabled {
+                            Text(model.watch.status).font(.caption).foregroundStyle(theme.ink.opacity(0.6))
+                        }
                         if presentation.preview { Text("Last sent 12s ago").font(.caption).foregroundStyle(theme.ink.opacity(0.5)) }
                         else if let date = model.watch.lastDelivered {
                             Text("Last sent \(date, style: .relative) ago").font(.caption).foregroundStyle(theme.ink.opacity(0.5))

@@ -129,6 +129,7 @@ final class CompanionModel: ObservableObject {
         polling = nil
         Diagnostics.shared.record(value ? "app_foreground" : "app_background")
         if value {
+            watch.reconnectIfNeeded()
             polling = Task { [weak self] in
                 while !Task.isCancelled {
                     if self?.streaming != true { await self?.refresh() }
