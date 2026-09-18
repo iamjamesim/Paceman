@@ -32,7 +32,7 @@ final class PresentationModel: ObservableObject {
         default: return .idle
         }
     }
-    var previewOffline: Bool { previewScreen == "offline" }
+    var previewOffline: Bool { ["offline", "computer-offline"].contains(previewScreen) }
     var previewSessions: [AgentSession] {
         guard previewScreen != "empty" else { return [] }
         return [AgentSession(id: "1", provider: "codex", state: .needsInput, name: "Fix checkout redirect", project: "storefront"),
@@ -63,7 +63,7 @@ struct AgentSession: Codable, Identifiable, Equatable {
     var displayName: String { String((name ?? (provider == "fixture" ? "Test agent" : provider.capitalized)).prefix(80)) }
     var detail: String {
         if provider == "fixture" { return "Local test source" }
-        return [project, provider.capitalized].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        return [project, name == nil ? nil : provider.capitalized].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 }
 

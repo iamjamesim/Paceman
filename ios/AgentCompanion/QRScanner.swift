@@ -29,7 +29,7 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
         AVCaptureDevice.requestAccess(for: .video) { [weak self] allowed in
             guard let self else { return }
             if allowed { self.configure() }
-            else { DispatchQueue.main.async { self.showMessage("Camera access is off. Paste the invitation instead.") } }
+            else { DispatchQueue.main.async { self.showMessage("Allow camera access in Settings, then reopen the scanner to scan your computer’s QR code.", offerSettings: true) } }
         }
     }
     override func viewDidLayoutSubviews() { super.viewDidLayoutSubviews(); layer?.frame = view.bounds }
@@ -38,7 +38,7 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
             guard let self, !self.stopped else { return }
             guard let camera = AVCaptureDevice.default(for: .video),
                   let input = try? AVCaptureDeviceInput(device: camera), self.session.canAddInput(input) else {
-                DispatchQueue.main.async { self.showMessage("Camera unavailable. Paste the invitation instead.") }; return
+                DispatchQueue.main.async { self.showMessage("The camera is unavailable. Close the scanner and try again.") }; return
             }
             self.session.beginConfiguration()
             self.session.addInput(input)
@@ -62,13 +62,29 @@ final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsD
         stop()
         onResult?(text)
     }
-    private func showMessage(_ text: String) {
-        let label = UILabel(frame: view.bounds.insetBy(dx: 24, dy: 24))
-        label.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    private func showMessage(_ text: String, offerSettings: Bool = false) {
+        let label = UILabel()
         label.numberOfLines = 0
         label.textColor = .white
         label.textAlignment = .center
         label.text = text
-        view.addSubview(label)
+        let stack = UIStackView(arrangedSubviews: [label])
+        stack.axis = .vertical
+        stack.spacing = 20
+        if offerSettings {
+            let button = UIButton(type: .system)
+            button.setTitle("Open Settings", for: .normal)
+            button.addAction(UIAction { _ in
+                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+            }, for: .touchUpInside)
+            stack.addArrangedSubview(button)
+        }
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
+            stack.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor)
+        ])
     }
 }

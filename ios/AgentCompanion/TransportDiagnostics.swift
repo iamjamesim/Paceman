@@ -6,7 +6,6 @@ struct TransportDiagnostics: View {
     @State private var invitation = ""
     @State private var showScanner = false
     @State private var confirmWatch = false
-    @AppStorage("sound-enabled") private var soundEnabled = false
 
     var body: some View {
         NavigationStack {
@@ -20,7 +19,7 @@ struct TransportDiagnostics: View {
                             if let date = model.lastContact { Text("Last contact \(date.formatted(date: .omitted, time: .standard))").font(.caption) }
                         }.padding(.vertical, 8)
                     }
-                    Text("Synthetic events only. Finished means a turn ended.").font(.caption).foregroundStyle(.secondary)
+                    Text(model.snapshot?.mode == "synthetic" ? "Synthetic test source. Finished means a turn ended." : "Finished means a turn ended, not that the agent session closed.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Work source") {
                     Text(model.status)
@@ -74,7 +73,6 @@ struct TransportDiagnostics: View {
                     Text(model.watch.status)
                     Button("Add watch") { confirmWatch = true }.disabled(!model.watch.pickerReady)
                     Toggle("Forward activity", isOn: Binding(get: { model.watch.enabled }, set: { model.watch.setEnabled($0) }))
-                    Toggle("Alert sound", isOn: $soundEnabled)
                     if let date = model.watch.lastDelivered {
                         Text("Last BLE write accepted \(date.formatted(date: .omitted, time: .standard))").font(.caption)
                     }

@@ -53,10 +53,10 @@ struct CompanionRoot: View {
             switch presentation.previewScreen {
             case "settings": path = [.settings]
             case "widgets": path = [.settings, .widgets]
-            case "pairing": path = [.pairing]
+            case "pairing", "reconnect": path = [.pairing]
             case "notifications": path = [.notifications]
             case "watch", "watch-setup", "watch-paired", "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error", "watch-complete": path = [.watch]
-            case "computer": path = [.computer]
+            case "computer", "computer-offline": path = [.computer]
             default: break
             }
         }

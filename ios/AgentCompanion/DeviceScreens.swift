@@ -9,6 +9,7 @@ struct ComputerDetail: View {
     @State private var rename = false
     @State private var name = ""
     @State private var removalError: String?
+    @State private var removing = false
     private var connected: Bool { presentation.preview ? !presentation.previewOffline : model.fresh }
     var body: some View {
         List {
@@ -20,41 +21,47 @@ struct ComputerDetail: View {
             }.listRowBackground(Color.clear)
             Section("Connection") {
                 DetailRow(title: "Status") { Text(model.accessRevoked ? "Access removed" : connected ? "Up to date" : model.hasError || presentation.previewOffline ? "Unavailable" : "Waiting for update") }
-                DetailRow(title: "Last update") {
+                DetailRow(title: "Last received") {
                     if presentation.preview { Text(presentation.previewOffline ? "12 minutes ago" : "Just now") }
-                    else if let snapshot = model.snapshot { Text("\(Date(timeIntervalSince1970: snapshot.observedAt), style: .relative) ago") }
+                    else if let date = model.lastContact { Text("\(date, style: .relative) ago") }
                     else { Text("Not yet") }
                 }
                 Button { Task { await model.refresh() } } label: {
                     Label(model.busy ? "Checking connection…" : "Check connection", systemImage: "arrow.clockwise")
                 }.disabled(model.busy || presentation.preview)
                 if model.hasError || presentation.previewOffline {
-                    Text(model.accessRevoked ? "Access was removed on this computer. Scan a new pairing code to reconnect." : "Make sure this computer is awake and Tailscale is connected on both devices.").font(.footnote).foregroundStyle(.secondary)
+                    Text(model.accessRevoked ? "Access was removed on this computer. Scan a fresh QR code to reconnect." : "Make sure this computer is awake, Paceman sharing is on, and Tailscale is connected on both devices.").font(.footnote).foregroundStyle(.secondary)
                 }
                 if let notice = model.identityNotice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
-                NavigationLink("Reconnect with a code") { PairingFlow(model: model, theme: theme) }
-                    .disabled(model.busy || push.busy || presentation.preview)
             }.listRowBackground(theme.ink.opacity(0.04))
             Section {
-                Button("Rename computer") { name = presentation.displayName(source: model.source); rename = true }.disabled(presentation.preview)
+                NavigationLink(value: FeedDestination.notifications) { Label("Notifications", systemImage: "bell") }
+                    .disabled(model.accessRevoked || presentation.preview)
+                Button("Edit display name") { name = presentation.displayName(source: model.source); rename = true }.disabled(presentation.preview)
                 DisclosureGroup("Connection details") {
                     Text(model.source?.endpoint.absoluteString ?? "Preview computer").font(.footnote.monospaced()).textSelection(.enabled)
-                    Text("Pairing credentials are stored in the iPhone Keychain.").font(.footnote).foregroundStyle(.secondary)
                 }
             }.listRowBackground(theme.ink.opacity(0.04))
             Section {
-                Button("Remove computer", role: .destructive) { remove = true }.disabled(model.busy || push.busy || presentation.preview)
+                NavigationLink("Reconnect with QR code") { PairingFlow(model: model, theme: theme) }
+                    .disabled(model.busy || push.busy || presentation.preview)
+            } footer: { Text("Pairing is kept when the connection drops. A new QR code is only needed to renew or restore access.") }.listRowBackground(theme.ink.opacity(0.04))
+            Section {
+                Button(removing ? "Removing…" : "Remove computer", role: .destructive) { remove = true }.disabled(model.busy || push.busy || presentation.preview)
                 if let removalError { Text(removalError).font(.footnote).foregroundStyle(.secondary) }
-            } footer: { Text("Disconnecting this phone does not stop your agents.") }.listRowBackground(theme.ink.opacity(0.04))
+            } footer: { Text("Removes this phone’s access and notifications. Your agents keep running and your watch stays paired.") }.listRowBackground(theme.ink.opacity(0.04))
         }.scrollContentBackground(.hidden).background(theme.canvas).tint(theme.tint).navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
-            .alert("Rename computer", isPresented: $rename) {
+            .alert("Edit display name", isPresented: $rename) {
                 TextField("Name", text: $name)
                 Button("Save") { presentation.computerName = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)); model.publishWidget() }
                 Button("Cancel", role: .cancel) {}
-            }
-            .confirmationDialog("Remove this computer?", isPresented: $remove, titleVisibility: .visible) {
+            } message: { Text("This name is used in this app and its widgets. It does not rename the computer.") }
+            .confirmationDialog("Remove \(presentation.displayName(source: model.source))?", isPresented: $remove, titleVisibility: .visible) {
                 Button("Remove computer", role: .destructive) {
                     Task {
+                        removing = true
+                        removalError = nil
+                        defer { removing = false }
                         await model.removeSource()
                         if model.source == nil { presentation.computerName = "" }
                         else { removalError = model.status }
@@ -74,6 +81,7 @@ struct WatchDetail: View {
     @Environment(\.dismiss) private var dismiss
     @State private var startedHere = false
     @State private var justPaired = false
+    @AppStorage("sound-enabled") private var soundEnabled = false
     private var paired: Bool { preview ? previewConnected : model.watch.paired }
     private var phase: WatchSetupPhase { preview ? previewPhase : model.watch.setupPhase }
     private var inProgress: Bool { phase.inProgress }
@@ -112,8 +120,8 @@ struct WatchDetail: View {
                 Text(instructionDetail).font(.body).lineSpacing(4).foregroundStyle(theme.ink.opacity(0.65))
             }
             if !inProgress {
-                DisclosureGroup("Already paired to a computer?") {
-                    Text("The watch needs an ownership transfer before this phone can pair with it. Transfer isn't available in this build. Disconnecting Bluetooth alone won't free the watch.")
+                DisclosureGroup("Already paired to another device?") {
+                    Text("A watch can be paired to one phone or computer at a time. Transferring it to this phone isn't supported yet. Disconnecting Bluetooth on the other device won't make it available.")
                         .font(.footnote).foregroundStyle(theme.ink.opacity(0.65)).padding(.top, 8)
                 }.font(.footnote).padding(.top, 12)
             }
@@ -167,7 +175,7 @@ struct WatchDetail: View {
             CompanionRule(theme: theme)
             VStack(spacing: 0) {
                 DetailRow(title: "Status") { Text(preview ? "Connected" : model.watch.ready ? "Connected" : model.watch.enabled ? "Reconnecting" : "Paused") }
-                DetailRow(title: "Last update") {
+                DetailRow(title: "Last sent") {
                     if preview { Text("Just now") }
                     else if let date = model.watch.lastDelivered { Text("\(date, style: .relative) ago") }
                     else { Text("Not yet") }
@@ -177,8 +185,12 @@ struct WatchDetail: View {
             CompanionButton(title: model.watch.enabled || preview ? "Pause updates" : "Resume updates", theme: theme) {
                 model.watch.setEnabled(!model.watch.enabled)
             }.disabled(preview)
-            Text("The watch above is an illustration. Watch theme sync is not available yet.")
-                .font(.caption).foregroundStyle(theme.ink.opacity(0.5))
+            Text("Pausing stops updates from this phone and keeps your watch paired. The watch may continue showing its last received activity.")
+                .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+            CompanionRule(theme: theme)
+            Toggle("Alert sound", isOn: $soundEnabled).tint(theme.tint).disabled(preview)
+            Text("Applies to future activity updates on watches that support sound.")
+                .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
         }
     }
 }

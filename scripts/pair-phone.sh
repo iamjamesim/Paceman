@@ -11,5 +11,5 @@ if command -v qrencode >/dev/null 2>&1; then
   qrencode -o .runtime/invitation.png -s 8 < .runtime/invitation.json
   echo 'Open .runtime/invitation.png on the computer and scan it in the phone app.'
 else
-  echo 'qrencode is unavailable. Paste the contents of .runtime/invitation.json into the app.'
+  echo 'qrencode is unavailable. Paste the contents of .runtime/invitation.json into Settings → Developer tools in the app.'
 fi

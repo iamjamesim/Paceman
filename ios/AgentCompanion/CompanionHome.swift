@@ -10,6 +10,7 @@ struct CompanionHome: View {
     var hasWatch: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.paired }
     var watchReady: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.ready }
     var offline: Bool { presentation.preview ? presentation.previewOffline : model.hasError }
+    var stale: Bool { presentation.preview ? presentation.previewOffline : model.snapshot != nil && !model.fresh }
     var content: AgentFeedContent {
         if presentation.preview {
             if presentation.previewScreen == "waiting" { return .waiting }
@@ -35,7 +36,7 @@ struct CompanionHome: View {
                 else { agentSetup }
 
                 if paired && !presentation.preview && !model.accessRevoked && push.setupStep.needsAttention {
-                    feedNotice(title: "Finish notification setup", detail: push.setupStep == .blocked ? "Notifications are off in iOS Settings." : "Enable agent updates when you're away from your computer.", symbol: "bell", action: push.setupStep == .blocked ? "Open Settings" : "Continue") {
+                    feedNotice(title: push.setupStep == .needsPermission ? "Get agent notifications" : "Notification setup needs attention", detail: push.setupStep == .blocked ? "Notifications are off in iOS Settings." : push.setupStep == .needsRegistration ? "This phone couldn’t register for alerts on your computer." : "Optional alerts when an agent needs input or finishes a turn.", symbol: "bell", action: push.setupStep == .blocked ? "Open Settings" : push.setupStep == .needsPermission ? "Set up" : "Continue") {
                         if push.setupStep == .blocked { push.openSettings() } else { open(.notifications) }
                     }.padding(.top, 20)
                 }
@@ -78,11 +79,11 @@ struct CompanionHome: View {
             }.buttonStyle(.plain).accessibilityHint("Manage this computer's connection")
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(model.accessRevoked ? "Access removed" : offline ? "Computer unavailable" : content.headline)
+                Text(model.accessRevoked ? "Access removed" : offline ? "Computer unavailable" : stale ? "Waiting for fresh activity" : content.headline)
                     .font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
                     .tracking(-0.6).fixedSize(horizontal: false, vertical: true)
-                if offline {
-                    Text(model.accessRevoked ? "Open this computer’s connection to scan a new pairing code." : model.snapshot != nil || presentation.preview ? "Last received: \(content.headline.lowercased())" : "Check that your computer is awake and Tailscale is connected.")
+                if offline || stale {
+                    Text(model.accessRevoked ? "Open this computer’s connection to scan a fresh QR code." : model.snapshot != nil || presentation.preview ? "Your pairing is saved. Updates will resume when the connection returns." : "Check that your computer is awake and Tailscale is connected.")
                         .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
                 } else if let detail = content.supportingStatus {
                     Text(detail).font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
@@ -100,6 +101,7 @@ struct CompanionHome: View {
             }.padding(.top, 12).padding(.bottom, 18)
 
             if case .sessions(let sessions) = content {
+                if offline || stale { Eyebrow(text: "Last received activity").padding(.bottom, 10) }
                 ForEach(sessions) { session in
                     CompanionRule(theme: theme)
                     AgentFeedRow(session: session, theme: theme)
@@ -107,7 +109,7 @@ struct CompanionHome: View {
             }
             CompanionRule(theme: theme)
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { updateLabel; Spacer(minLength: 0); sourceBadge }
+                HStack(spacing: 12) { updateLabel.fixedSize(); Spacer(minLength: 12); sourceBadge.fixedSize() }
                 VStack(alignment: .leading, spacing: 8) { updateLabel; sourceBadge }
             }.padding(.top, 14)
         }
@@ -157,9 +159,9 @@ struct CompanionHome: View {
                             Circle().fill(watchReady ? theme.tint : theme.ink.opacity(0.3)).frame(width: 5, height: 5)
                             Text(watchReady ? "Connected" : model.watch.enabled ? "Reconnecting" : "Paused").font(.footnote)
                         }.foregroundStyle(theme.ink.opacity(0.65))
-                        if presentation.preview { Text("Last update 12s ago").font(.caption).foregroundStyle(theme.ink.opacity(0.5)) }
+                        if presentation.preview { Text("Last sent 12s ago").font(.caption).foregroundStyle(theme.ink.opacity(0.5)) }
                         else if let date = model.watch.lastDelivered {
-                            Text("Last update \(date, style: .relative) ago").font(.caption).foregroundStyle(theme.ink.opacity(0.5))
+                            Text("Last sent \(date, style: .relative) ago").font(.caption).foregroundStyle(theme.ink.opacity(0.5))
                         }
                     } else {
                         Text("Show agent status on your wrist.").font(.subheadline).foregroundStyle(theme.ink.opacity(0.6)).multilineTextAlignment(.leading)
@@ -184,7 +186,9 @@ struct AgentFeedRow: View {
                 .frame(width: 23, height: 28).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
                 Text(session.displayName).font(theme.monospaced ? theme.font(13, emphasis: true) : .subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
-                Text(session.detail).font(.caption).foregroundStyle(theme.ink.opacity(0.55)).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                if !session.detail.isEmpty {
+                    Text(session.detail).font(.caption).foregroundStyle(theme.ink.opacity(0.55)).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                }
                 if typeSize.isAccessibilitySize { stateLabel }
             }
             if !typeSize.isAccessibilitySize { Spacer(minLength: 7); stateLabel }

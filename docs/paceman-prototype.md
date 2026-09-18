@@ -36,8 +36,9 @@ adding a separate theme picker. The watch remains the glanceable display with
 lightweight local acknowledgement.
 
 This split is partly implemented. The phone has pairing, reconnection, last
-delivery and pause/resume. Sound is currently a developer control; brightness,
-watch theme forwarding and weather forwarding are unfinished. The next device UI
+send and pause/resume. Sound is available on the Watch screen and applies to
+future supported activity updates; brightness, watch theme forwarding and weather
+forwarding are unfinished. The next device UI
 work must restore those capabilities deliberately, rather than treating removal
 of the old desktop controls as a completed migration. Phone-reported connection
 and delivery receipts should also make the full route visible from the desktop.

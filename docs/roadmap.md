@@ -8,9 +8,9 @@ release-verified. Build the remaining feedback path and phone device controls
 before adding more platforms.
 
 The phone is the watch manager. Its Watch screen already has pairing, status,
-last delivery and pause/resume. Move the existing developer sound toggle there
-and implement brightness through the supported watch profile before considering
-the old desktop watch-management UI fully migrated. See the
+last send, pause/resume and alert sound. Implement brightness through the
+supported watch profile before considering the old desktop watch-management UI
+fully migrated. See the
 [product surface design](paceman-prototype.md#product-surfaces).
 
 1. **Phone and watch delivery receipts.** Have the phone report its latest fetch,

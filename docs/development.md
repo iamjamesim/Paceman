@@ -35,7 +35,9 @@ bash scripts/pair-phone.sh https://YOUR-MACHINE.YOUR-TAILNET.ts.net:8443
 Substitute the actual HTTPS hostname from Tailscale. Do not replace another Serve
 route or enable Funnel. The pairing script writes a five-minute invitation under
 `.runtime/`; with `qrencode` installed it also creates a QR image. In the app, use
-Connect computer to scan or paste the invitation and confirm the endpoint.
+Connect computer to scan the QR code and confirm the endpoint. For developer
+setups without a QR generator, Settings → Developer tools retains a JSON
+invitation field.
 Treat both the JSON and QR as secrets. Keep the source running during redemption.
 
 Emit synthetic transitions from another terminal:
