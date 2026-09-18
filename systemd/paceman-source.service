@@ -1,0 +1,16 @@
+[Unit]
+Description=Paceman desktop activity source
+Conflicts=omarchy-watch.service
+After=omarchy-watch.service
+
+[Service]
+Type=simple
+ExecCondition=/usr/bin/test ! -e "@STATE@/sharing-paused"
+ExecStart=/usr/bin/python3 -I "@APP@/desktop/launch.py" --data-dir "@STATE@" serve --source omarchy --status-file "%t/paceman/status.json"
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+UMask=0077
+
+[Install]
+WantedBy=default.target

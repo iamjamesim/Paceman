@@ -13,6 +13,7 @@ import unittest
 from service.hub import Server, Store
 from service.omarchy import OmarchySource, appearance
 from service.push import Worker
+from service.status import DesktopStatus
 from test_push import FakeSender
 
 
@@ -72,6 +73,29 @@ class OmarchyTests(unittest.TestCase):
             self.assertEqual(first['revision'], value['revision'])
             self.assertEqual(first['eventID'], value['eventID'])
             self.assertEqual(first['changedAt'], value['changedAt'])
+
+    def test_desktop_counts_follow_session_transitions_and_cleanup(self):
+        path = self.root / 'status.json'
+        status = DesktopStatus(path, self.store)
+        def published():
+            status.publish(self.source, force=True)
+            return json.loads(path.read_text())
+        self.event('working')
+        self.event('needs-input', session='two')
+        value = published()
+        self.assertEqual(value['activity'], 'needs_input')
+        self.assertEqual(value['sessions'], 2)
+        self.assertEqual(value['sessionCounts'], {'needs_input': 1, 'working': 1, 'finished': 0})
+        self.event('completed', session='two')
+        value = published()
+        self.assertEqual(value['activity'], 'working')
+        self.assertEqual(value['sessionCounts'], {'needs_input': 0, 'working': 1, 'finished': 1})
+        self.event('ended', session='two')
+        self.assertEqual(published()['sessions'], 1)
+        self.event('ended')
+        value = published()
+        self.assertEqual(value['sessions'], 0)
+        self.assertEqual(sum(value['sessionCounts'].values()), 0)
 
     def test_closed_turn_cannot_be_resurrected_and_session_end_can_omit_turn(self):
         self.event('completed')

@@ -197,9 +197,10 @@ class Store:
 class Server(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, store: Store, adapter=None):
+    def __init__(self, address, store: Store, adapter=None, desktop_status=None):
         self.store = store
         self.adapter = adapter
+        self.desktop_status = desktop_status
         self.started = time.monotonic()
         self.pair_attempts: list[float] = []
         self.pair_lock = threading.Lock()
@@ -210,6 +211,8 @@ class Server(ThreadingHTTPServer):
         self.store.tick()
         if self.adapter is not None:
             self.adapter.tick()
+        if self.desktop_status is not None:
+            self.desktop_status.publish(self.adapter)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -244,6 +247,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/v1/snapshot":
             self.reply(200, self.server.store.snapshot())
+            if self.server.desktop_status is not None:
+                self.server.desktop_status.phone_fetched()
             return
         if self.path == "/v1/push":
             value = self.server.store.push_device(token)
@@ -261,6 +266,8 @@ class Handler(BaseHTTPRequestHandler):
                 if value["revision"] != last_revision or time.monotonic() - last_sent >= 15:
                     self.wfile.write(b"data: " + json.dumps(value, separators=(",", ":")).encode() + b"\n\n")
                     self.wfile.flush()
+                    if self.server.desktop_status is not None:
+                        self.server.desktop_status.phone_fetched()
                     last_revision, last_sent = value["revision"], time.monotonic()
                 time.sleep(0.25)
         except (BrokenPipeError, ConnectionResetError, TimeoutError):
@@ -323,6 +330,7 @@ def main():
     run = sub.add_parser("serve")
     run.add_argument("--port", type=int, default=8765)
     run.add_argument("--source", choices=("synthetic", "omarchy"), default="synthetic")
+    run.add_argument("--status-file", type=Path, help="Private desktop status JSON (optional)")
     run.add_argument("--agent-socket", type=Path,
                      help="Omarchy event socket (default: $XDG_RUNTIME_DIR/omarchy-watch.sock)")
     run.add_argument("--omarchy-state", type=Path,
@@ -365,6 +373,11 @@ def main():
                         store.require_synthetic(db)
                     except ValueError as error:
                         parser.error(str(error))
+            if args.status_file:
+                from service.status import DesktopStatus
+                server.desktop_status = DesktopStatus(args.status_file, store)
+                server.desktop_status.publish(server.adapter, force=True)
+                stack.callback(server.desktop_status.publish, server.adapter, stopped=True, force=True)
             print(f"{args.source.title()} source listening on 127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever(poll_interval=0.25)

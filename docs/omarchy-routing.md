@@ -26,6 +26,11 @@ starting a synthetic source on the Mac will not exercise the desktop event route
 
 ## Start the desktop source
 
+For normal desktop use, follow the [desktop installer](desktop.md). The commands
+below are for foreground development; do not start a second source while the
+installed service is running. Installed data lives in `~/.local/state/paceman`,
+not the checkout's `.runtime/` directory.
+
 Python 3.11+ is required for the Omarchy TOML collector. The source itself has no
 third-party dependencies. The optional APNs worker uses requirements-push.txt.
 The existing Omarchy Watch for Codex companion must already be installed and its
@@ -141,6 +146,15 @@ Bluetooth bridge stopped while using the phone-owned watch. If deliberately
 returning to the old desktop setup, `systemctl --user start omarchy-watch.service`
 restores that service but cannot transfer the watch's Bluetooth ownership.
 
-For the temporary systemd setup described in HANDOFF.md, inspect with
-`systemctl --user status paceman-source.service` and stop with
-`systemctl --user stop paceman-source.service`. It does not persist across reboot.
+## Start automatically at login
+
+Use the standard per-user installer from the repository root:
+
+```sh
+bash scripts/install-desktop.sh
+```
+
+It installs the source and bar panel, migrates an existing checkout database on
+first install, and enables the user service. Re-run it to update installed code;
+editing a checkout does not change the installed app. See [desktop setup](desktop.md)
+for pairing, status, troubleshooting, removal and data locations.

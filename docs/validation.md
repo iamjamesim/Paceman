@@ -1,16 +1,35 @@
 # Validation
 
 This record separates implementation checks from physical-device evidence.
-It describes the private prototype as of 2026-09-17, not a reliability guarantee.
+It describes the private prototype as of 2026-09-18, not a reliability guarantee.
 
 ## Automated checks
 
-- 39 Python service/push/Omarchy tests passed on Linux: API authorization, invitation expiry and
+- 52 Python desktop/service/push/Omarchy tests passed on Linux: API authorization, invitation expiry and
   single use, persistence, SSE, scheduling, revocation, token updates, hint content,
   signing, retry/coalescing and delivery bookkeeping. Apple responses are mocked.
   Omarchy coverage includes the installed v0.2.0 companion script with fixture
   lifecycle/tool payloads, socket ingestion, authenticated HTTP/SSE, multiple
   sessions, delayed cleanup, restart behavior, and appearance-only alert suppression.
+- Desktop tests cover install/update/uninstall with mocked system services,
+  SQLite migration preserving credentials, symlink rejection, private-route
+  selection, authenticated fetch status, crash expiry and private status files.
+  Sharing tests cover persistence across upgrades, service-failure rollback and
+  missing runtime files; pairing tests verify that panel metadata excludes secrets.
+  Socket-driven tests verify per-state counts through transitions and cleanup.
+  Eight JavaScript presentation cases cover single, matching, mixed, idle, stale
+  and legacy states; these run through Python when Node.js is available.
+- The desktop installer ran on the Omarchy machine. The copied app and enabled
+  user service use permanent user directories; the source identity and both
+  existing client credentials were verified unchanged after migration. The bar
+  panel was opened and visually checked in the live shell. Real adapter events
+  appeared in its source status. The redesigned native panel was visually checked
+  while running, sharing off, and pairing. Keyboard controls opened the pairing
+  QR and toggled sharing. The revised phone row expands inline; the header QR
+  opens a workspace overlay. Both were visually checked, including Escape
+  collapse/dismiss behavior. Activity includes the watch glyph beside its label;
+  single, matching and mixed session layouts were checked in the isolated preview.
+  A real reinstall preserved Off; turning On restored the active, enabled user service. Phone fetch/watch delivery remain separate tests.
 - Host C profile and sound tests passed against the imported watch source.
 - A temporary source process successfully served an authenticated Omarchy
   snapshot with this desktop's Sakura Mochi palette, then removed its test socket

@@ -1,0 +1,11 @@
+#!/usr/bin/python3 -I
+from pathlib import Path
+import pwd
+import os
+import sys
+
+sys.path.insert(0, str(Path(pwd.getpwuid(os.getuid()).pw_dir) / ".local/lib/paceman"))
+from desktop.control import main
+
+if __name__ == "__main__":
+    main()

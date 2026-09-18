@@ -21,6 +21,29 @@ Acceptance checks:
 
 ## Organization
 
+### Product surfaces
+
+The desktop is the workspace companion: collect activity and appearance, connect
+a phone, show delivery status and recover the source service. Its bar panel uses
+Omarchy's native styling and stays small. It does not own the watch's Bluetooth
+connection.
+
+The phone is the primary Paceman app and device manager: activity feed, widgets,
+connected computer, watch pairing/reconnection, pause/resume and watch settings.
+Brightness and alert sound belong on its Watch screen. Workspace appearance
+originates at the desktop and should pass through the phone to the watch without
+adding a separate theme picker. The watch remains the glanceable display with
+lightweight local acknowledgement.
+
+This split is partly implemented. The phone has pairing, reconnection, last
+delivery and pause/resume. Sound is currently a developer control; brightness,
+watch theme forwarding and weather forwarding are unfinished. The next device UI
+work must restore those capabilities deliberately, rather than treating removal
+of the old desktop controls as a completed migration. Phone-reported connection
+and delivery receipts should also make the full route visible from the desktop.
+
+### Code boundaries
+
 One repo; separate source adapters and device presentations. The watch device package
 retains its internal upstream layout for build correctness. Do not add speculative
 frameworks, submodules or extra services. Extract Omarchy collectors when implementing

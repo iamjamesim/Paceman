@@ -21,7 +21,7 @@ It listens only on loopback. Tailscale Serve supplies private HTTPS.
 `service/omarchy.py` receives the existing desktop companion's local `agent-event`
 protocol and collects resolved Omarchy theme colors without starting a Bluetooth
 owner. Synthetic mode remains the default for isolated tests. See the
-[routing runbook](omarchy-routing.md) for the temporary service switch and limits.
+[routing runbook](omarchy-routing.md) for live event routing and limits.
 Activity and appearance both advance snapshot revisions; appearance-only changes
 retain the activity event ID and are excluded from APNs activity notifications.
 
@@ -29,6 +29,15 @@ retain the activity event ID and are excluded from APNs activity notifications.
 APNs hint; the phone fetches current data from its previously paired endpoint.
 The hint never provides a fetch URL or credentials. Apple decides whether to grant
 background runtime. SSE is useful in the foreground, not a suspension bypass.
+
+## Desktop package
+
+`desktop/` supplies a per-user installer, control command and Omarchy bar panel.
+The installed systemd user service starts at login. `service/status.py` publishes
+an atomic, private runtime status file with a heartbeat, aggregate activity,
+per-state session counts and last authenticated client fetch. The panel expires a missing heartbeat and never
+claims Bluetooth or watch delivery status that the phone has not reported.
+The source runs independently of the shell. See [desktop setup](desktop.md).
 
 ## iPhone and widgets
 

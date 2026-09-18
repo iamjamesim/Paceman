@@ -94,6 +94,7 @@ class OmarchySource:
         self.server = None
         self.thread = None
         self.socket_inode = None
+        self.last_event_at = 0
 
     def __enter__(self):
         # Never steal a live desktop socket or remove an unrelated filesystem entry.
@@ -178,6 +179,7 @@ class OmarchySource:
                         return False  # Do not resurrect a closed turn from delayed tool hooks.
             db.execute("INSERT OR REPLACE INTO omarchy_sessions VALUES (?,?,?,?,?)",
                        (key, source, turn, EVENTS[event], time.time()))
+            self.last_event_at = time.time()
             return self.publish(db)
 
     def tick(self, *, force=False):

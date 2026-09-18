@@ -26,6 +26,8 @@ protocol are retained; see its [provenance](firmware/esp32-watch/UPSTREAM.md).
 
 ## Start developing
 
+- [Desktop installation](docs/desktop.md): install/update the login service and Omarchy bar panel.
+- [Next milestones](docs/roadmap.md): phone identity, delivery status, background setup and adapter packaging.
 - [Setup](docs/development.md): source, private networking, iPhone and watch.
 - [Omarchy routing test](docs/omarchy-routing.md): connect existing desktop events to the phone.
 - [Architecture](docs/architecture.md): component boundaries and data flow.

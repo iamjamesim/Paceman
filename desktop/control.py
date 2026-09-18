@@ -1,0 +1,154 @@
+"""Small command boundary for the Paceman bar panel and terminal."""
+import argparse
+import json
+import os
+from contextlib import closing
+from pathlib import Path
+import socket
+import sqlite3
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+from service.hub import Store, endpoint
+
+SERVICE = "paceman-source.service"
+
+
+def state_directory():
+    return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "paceman"
+
+
+def status_path():
+    return Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "paceman/status.json"
+
+
+def pause_path():
+    return state_directory() / "sharing-paused"
+
+
+def set_sharing(enabled):
+    """A persistent user choice; upgrades and login must not silently undo it."""
+    marker = pause_path()
+    marker.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    was_paused = marker.exists()
+    if enabled:
+        marker.unlink(missing_ok=True)
+    else:
+        marker.write_text('{"paused":true}')
+        marker.chmod(0o600)
+    try:
+        subprocess.run(["/usr/bin/systemctl", "--user", "enable" if enabled else "disable",
+                        "--now", SERVICE], check=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        # Don't display a successful off state if systemd couldn't stop sharing.
+        if was_paused:
+            marker.write_text('{"paused":true}')
+        else:
+            marker.unlink(missing_ok=True)
+        raise
+
+
+def read_status(path=None, now=None):
+    try:
+        value = json.loads((path or status_path()).read_text())
+        if value.get("schema") != 1:
+            raise ValueError("Unknown status schema")
+        for key in ("updatedAt", "lastPhoneFetchAt"):
+            if not isinstance(value.get(key, 0), (float, int)):
+                raise ValueError("Invalid status timestamp")
+    except (OSError, ValueError, AttributeError):
+        value = {"schema": 1, "running": False, "phoneRecent": False}
+        if path is None:
+            database = state_directory() / "hub.sqlite3"
+            if database.is_file():
+                with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+                    value["pairedPhones"] = db.execute("SELECT COUNT(*) FROM clients").fetchone()[0]
+    if path is None:
+        value["sharingEnabled"] = not pause_path().exists()
+        value["computerName"] = socket.gethostname()
+    now = time.time() if now is None else now
+    value["running"] = bool(value.get("running")) and 0 <= now - value.get("updatedAt", 0) < 20
+    value["phoneRecent"] = value["running"] and value.get("lastPhoneFetchAt", 0) > 0 and 0 <= now - value.get("lastPhoneFetchAt", 0) < 30
+    return value
+
+
+def private_endpoint(config):
+    # Only reuse a private HTTPS root proxy for this exact local source.
+    origins = []
+    for host, web in config.get("Web", {}).items():
+        if web.get("Handlers", {}).get("/", {}).get("Proxy") != "http://127.0.0.1:8765":
+            continue
+        port = host.rsplit(":", 1)[-1]
+        if not config.get("TCP", {}).get(port, {}).get("HTTPS"):
+            continue
+        if config.get("AllowFunnel", {}).get(host):
+            continue
+        origins.append(endpoint("https://" + host))
+    if len(origins) != 1:
+        raise ValueError("Configure one private Tailscale HTTPS route to 127.0.0.1:8765; see the desktop setup guide.")
+    return origins[0]
+
+
+def pair_phone(open_image=False, json_output=False):
+    if not read_status().get("running"):
+        raise ValueError("Start Paceman before connecting a phone.")
+    route = subprocess.run(["/usr/bin/tailscale", "serve", "status", "--json"],
+                           check=True, capture_output=True, text=True, timeout=10)
+    origin = private_endpoint(json.loads(route.stdout))
+    try:
+        urllib.request.urlopen(origin + "/v1/snapshot", timeout=10).close()
+    except urllib.error.HTTPError as error:
+        if error.code != 401:
+            raise ValueError("The private source route is not ready.") from error
+    root = state_directory()
+    if not (root / "hub.sqlite3").is_file():
+        raise ValueError("Paceman's installed source database is missing.")
+    if json_output and not Path("/usr/bin/qrencode").exists():
+        raise ValueError("Install qrencode to show a pairing code in the panel.")
+    invitation = Store(root / "hub.sqlite3").invite(origin)
+    path = root / "invitation.json"
+    path.write_text(json.dumps(invitation, separators=(",", ":")))
+    path.chmod(0o600)
+    if Path("/usr/bin/qrencode").exists():
+        image = root / "invitation.png"
+        subprocess.run(["/usr/bin/qrencode", "-o", str(image), "-s", "8"],
+                       input=path.read_text(), text=True, check=True, timeout=10)
+        image.chmod(0o600)
+        if open_image:
+            subprocess.Popen(["/usr/bin/xdg-open", str(image)],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        if json_output:
+            print(json.dumps({"qrPath": str(image), "expiresAt": invitation["expiresAt"]}))
+        else:
+            print(f"Scan {image} in Paceman's Connect computer screen. Expires in five minutes.")
+    else:
+        print(f"Paste {path} into Paceman's Connect computer screen. Expires in five minutes.")
+        if open_image:
+            raise ValueError("Install qrencode to show a pairing QR. The private invitation JSON is ready.")
+
+
+def main():
+    os.umask(0o077)
+    parser = argparse.ArgumentParser(description="Manage the Paceman desktop source")
+    parser.add_argument("command", choices=("status", "start", "restart", "stop", "logs", "pair", "share-on", "share-off"))
+    parser.add_argument("--open", action="store_true", help="Open the phone-pairing QR")
+    parser.add_argument("--json", action="store_true", help="Return pairing image metadata for the panel")
+    args = parser.parse_args()
+    try:
+        if args.command == "status":
+            print(json.dumps(read_status(), indent=2))
+        elif args.command == "pair":
+            pair_phone(args.open, args.json)
+        elif args.command in ("share-on", "share-off"):
+            set_sharing(args.command == "share-on")
+        elif args.command == "logs":
+            subprocess.run(["/usr/bin/journalctl", "--user", "-u", SERVICE, "-n", "60", "--no-pager"], check=True)
+        else:
+            subprocess.run(["/usr/bin/systemctl", "--user", args.command, SERVICE], check=True, timeout=20)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        print(f"Paceman: {error}", file=sys.stderr)
+        raise SystemExit(1)

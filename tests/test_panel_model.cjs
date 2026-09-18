@@ -1,0 +1,72 @@
+const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { test } = require('node:test');
+
+const model = vm.createContext({});
+vm.runInContext(readFileSync(path.join(__dirname, '../desktop/plugin/PanelModel.js'), 'utf8'), model);
+const now = 1000;
+function present(counts, overrides = {}) {
+  const priority = ['needs_input', 'working', 'finished'];
+  return model.present({
+    running: true, sharingEnabled: true, updatedAt: now,
+    pairedPhones: 1, lastPhoneFetchAt: now - 3,
+    sessions: Object.values(counts).reduce((sum, count) => sum + count, 0),
+    sessionCounts: counts, activity: priority.find(key => counts[key]) || 'idle',
+    ...overrides
+  }, now);
+}
+
+test('one session keeps the simple row', () => {
+  const value = present({ needs_input: 0, working: 1, finished: 0 });
+  assert.equal(value.activityTitle, 'Codex');
+  assert.equal(value.activity, 'Working');
+  assert.equal(value.activityBreakdown, '');
+});
+test('matching states use a counted label without a second line', () => {
+  for (const [state, label] of [['working', '2 working'], ['needs_input', '2 need input'], ['finished', '2 finished']]) {
+    const value = present({ needs_input: 0, working: 0, finished: 0, [state]: 2 });
+    assert.equal(value.activityTitle, 'Codex · 2 sessions');
+    assert.equal(value.activity, label);
+    assert.equal(value.activityBreakdown, '');
+  }
+});
+test('attention takes priority without hiding work', () => {
+  const value = present({ needs_input: 1, working: 1, finished: 0 });
+  assert.equal(value.activityTitle, 'Codex · 2 sessions');
+  assert.equal(value.activity, 'Needs input');
+  assert.equal(value.activityBreakdown, '1 needs input · 1 working');
+});
+test('work takes priority over completion', () => {
+  const value = present({ needs_input: 0, working: 1, finished: 1 });
+  assert.equal(value.activity, 'Working');
+  assert.equal(value.activityBreakdown, '1 working · 1 finished');
+});
+test('all three states remain visible in priority order', () => {
+  const value = present({ needs_input: 2, working: 3, finished: 1 });
+  assert.equal(value.activityTitle, 'Codex · 6 sessions');
+  assert.equal(value.activityBreakdown, '2 need input · 3 working · 1 finished');
+});
+test('off and stale sources do not advertise old session counts', () => {
+  for (const [overrides, label] of [[{ sharingEnabled: false }, 'Paused'], [{ updatedAt: now - 20 }, 'Unavailable']]) {
+    const value = present({ needs_input: 1, working: 1, finished: 0 }, overrides);
+    assert.equal(value.activityTitle, 'Codex');
+    assert.equal(value.activity, label);
+    assert.equal(value.activityBreakdown, '');
+  }
+});
+test('legacy or inconsistent counts fall back to the known aggregate', () => {
+  for (const overrides of [{ sessionCounts: undefined }, { sessions: 3 }]) {
+    const value = present({ needs_input: 1, working: 1, finished: 0 }, overrides);
+    assert.equal(value.activityTitle, 'Codex');
+    assert.equal(value.activity, 'Needs your input');
+    assert.equal(value.activityBreakdown, '');
+  }
+});
+test('zero sessions remains a simple idle row', () => {
+  const value = present({ needs_input: 0, working: 0, finished: 0 });
+  assert.equal(value.activityTitle, 'Codex');
+  assert.equal(value.activity, 'No active work');
+  assert.equal(value.activityBreakdown, '');
+});

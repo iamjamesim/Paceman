@@ -5,7 +5,9 @@ Commands run from the repository root unless a section says otherwise.
 ## Source and tests (Mac or Linux)
 
 Use Python 3.11 or newer and a C compiler for the portable checks.
-The live Omarchy adapter uses the standard-library TOML parser.
+The live Omarchy adapter uses the standard-library TOML parser. Node.js 18+
+enables the desktop presentation tests; these are skipped when Node is absent.
+Node is not a desktop runtime dependency.
 For real desktop events, use the [Omarchy routing runbook](omarchy-routing.md).
 
 ```sh

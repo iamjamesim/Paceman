@@ -9,11 +9,20 @@ Connect real Omarchy activity and appearance through the source service to the
 existing iPhone app and phone-owned watch. Reuse relevant upstream collectors;
 do not start the old desktop Bluetooth owner or install duplicate agent hooks.
 
-The Omarchy machine is now running this checkout as the transient user service
-`paceman-source.service`; the old `omarchy-watch.service` is stopped. The existing
+The Omarchy machine uses the installed desktop package as the persistent user service
+`paceman-source.service`; the old Omarchy Watch desktop daemon and bar widget
+have been uninstalled. The separate Omarchy Watch for Codex event-hook plugin
+remains installed because Paceman receives its events. The existing
 private HTTPS route is reused. The prior Linux source database was migrated with
 SQLite backup, preserving its source identity and paired client credential.
-This service setup lasts for the current boot; it is not a permanent install.
+The source starts at login and restarts on failure. Run
+`bash scripts/install-desktop.sh` to install/update the app and status panel.
+Code lives in `~/.local/lib/paceman`; active data is in `~/.local/state/paceman`.
+The checkout database is retained as a pre-install copy. See docs/desktop.md for
+setup and docs/roadmap.md for the next product milestones. The panel has inline
+phone details, a workspace QR overlay, a persistent sharing switch and a compact
+multi-session activity summary. Pairing still stores anonymous credentials;
+phone identity and per-client contact are explicit follow-ups.
 Check it with `systemctl --user status paceman-source.service`. Do not start a
 second source while testing the phone.
 

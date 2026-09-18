@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.iamjamesim.paceman",
+  "name": "Paceman",
+  "version": "0.1.0",
+  "author": "James Im",
+  "description": "Desktop source status and phone connection for Paceman.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {"barWidget": "BarWidget.qml"},
+  "barWidget": {
+    "displayName": "Paceman",
+    "description": "Agent activity and phone connection",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {},
+    "schema": []
+  }
+}
