@@ -11,6 +11,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 from service.hub import Store, endpoint
 
@@ -61,18 +62,27 @@ def read_status(path=None, now=None):
                 raise ValueError("Invalid status timestamp")
     except (OSError, ValueError, AttributeError):
         value = {"schema": 1, "running": False, "phoneRecent": False}
-        if path is None:
-            database = state_directory() / "hub.sqlite3"
-            if database.is_file():
-                with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
-                    value["pairedPhones"] = db.execute("SELECT COUNT(*) FROM clients").fetchone()[0]
     if path is None:
+        database = state_directory() / "hub.sqlite3"
+        if database.is_file():
+            with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
+                value["clients"] = Store.client_list(db)
+                value["pairedPhones"] = len(value["clients"])
         value["sharingEnabled"] = not pause_path().exists()
         value["computerName"] = socket.gethostname()
     now = time.time() if now is None else now
     value["running"] = bool(value.get("running")) and 0 <= now - value.get("updatedAt", 0) < 20
     value["phoneRecent"] = value["running"] and value.get("lastPhoneFetchAt", 0) > 0 and 0 <= now - value.get("lastPhoneFetchAt", 0) < 30
     return value
+
+
+def remove_access(client_id):
+    client_id = str(uuid.UUID(client_id))
+    database = state_directory() / "hub.sqlite3"
+    if not database.is_file():
+        raise ValueError("Paceman's installed source database is missing.")
+    Store(database).revoke(client_id)
+    return read_status()
 
 
 def private_endpoint(config):
@@ -134,13 +144,18 @@ def pair_phone(open_image=False, json_output=False):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description="Manage the Paceman desktop source")
-    parser.add_argument("command", choices=("status", "start", "restart", "stop", "logs", "pair", "share-on", "share-off"))
+    parser.add_argument("command", choices=("status", "start", "restart", "stop", "logs", "pair", "share-on", "share-off", "remove-access"))
+    parser.add_argument("--client-id", help="Connection to remove (from pacemanctl status)")
     parser.add_argument("--open", action="store_true", help="Open the phone-pairing QR")
     parser.add_argument("--json", action="store_true", help="Return pairing image metadata for the panel")
     args = parser.parse_args()
     try:
         if args.command == "status":
             print(json.dumps(read_status(), indent=2))
+        elif args.command == "remove-access":
+            if not args.client_id:
+                raise ValueError("Specify --client-id from pacemanctl status.")
+            print(json.dumps(remove_access(args.client_id)))
         elif args.command == "pair":
             pair_phone(args.open, args.json)
         elif args.command in ("share-on", "share-off"):

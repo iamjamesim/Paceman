@@ -94,9 +94,10 @@ events, multi-session behavior, and recovery limitations.
 - **Header:** Paceman, sharing status, pairing QR button and sharing
   switch. Turning sharing off stops the source and disables login startup. That
   choice survives login and upgrades; turning it back on restores both.
-- **Phone:** receiving updates or waiting for contact, with a last-contact time
-  when available. An existing pairing is retained while the phone is away.
-  Click the row to expand contact details and reconnect guidance inline.
+- **Phone/connections:** the reported app name and its own last-contact time.
+  An existing pairing is retained while the phone is away. Click its row for
+  contact details, pairing date, reconnect guidance and **Remove access…**.
+  Removal requires confirmation and leaves the phone’s watch pairing intact.
 - **Activity:** the aggregate Codex state from this machine. This is a compact
   source summary, not a duplicate of the phone's activity feed. The watch's agent
   indicator sits in a fixed slot beside the words; Working pulses gently while
@@ -106,20 +107,25 @@ events, multi-session behavior, and recovery limitations.
 
 The source publishes a five-second heartbeat that expires after 20 seconds.
 “Receiving updates” means a successful authenticated snapshot response or stream
-write within 30 seconds, including diagnostic clients. It does not acknowledge
-watch delivery or identify a particular physical phone. Pairing currently stores
-anonymous credentials; “Your phone” describes the intended iPhone workflow,
-not verified device identity. Device identification and credential replacement
-are follow-up work in the [roadmap](roadmap.md). Contact and last accepted
-agent-event timestamps are measured since source startup; current hooks have no
+write for that connection within 30 seconds. It does not acknowledge watch delivery.
+Names/platforms are app-reported metadata, and names may be generic or duplicated.
+Pairing identifies app installations, not physical hardware.
+
+Existing credentials remain **Unidentified connection** until the updated iPhone
+app identifies the credential it owns. Earlier unused credentials remain separate;
+Paceman does not guess which ones belong together. Contact times persist across
+source restarts; older records with no observed fetch show “No contact yet.”
+See [pairing and removal](pairing-and-removal.md) for upgrade and recovery details.
+
+The iPhone’s **Remove computer** now revokes its access on the computer before
+forgetting the local pairing. If the computer is unreachable, reconnect and retry.
+Desktop removal is also available while sharing is off. Removing the last
+connection returns the panel to its setup state; reconnecting uses the header QR.
+
+Agent-event timestamps are measured since source startup; current hooks have no
 heartbeat or replay. The source separately checks the owning Codex processes
 about once a second; see [ownership and recovery](omarchy-routing.md#process-ownership-and-recovery).
-
-Expanded phone details show last contact and whether a pairing is saved. Stored
-credentials are not a count of physical phones and are not displayed. Contact
-history resets with the source, so absent contact reads “None since restart.”
-Restart appears only when the source needs recovery. Pairing has one entry point:
-the header QR button.
+Restart appears only when the source needs recovery.
 
 The private runtime status file contains identity, counts, activity and timestamps;
 credentials never go into it. Watch management and weather belong to the phone.

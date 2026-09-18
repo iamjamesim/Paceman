@@ -23,9 +23,10 @@ setup and docs/roadmap.md for the next product milestones. The panel has inline
 phone details, a workspace QR overlay, a persistent sharing switch and a compact
 multi-session activity summary. The receiver now tracks Codex process ownership
 through kernel peer credentials; quiet/finished open sessions survive restart,
-and exited owners leave the summary. Existing hooks are unchanged. Pairing still
-stores anonymous credentials; phone identity and per-client contact are explicit
-follow-ups.
+and exited owners leave the summary. Existing hooks are unchanged. Identified pairing, per-client contact and access
+removal from either side are implemented. Legacy credentials stay unidentified
+until the updated app registers them. The iPhone changes and tests require Xcode
+validation; follow docs/pairing-and-removal.md before a device release.
 Check it with `systemctl --user status paceman-source.service`. Do not start a
 second source while testing the phone.
 

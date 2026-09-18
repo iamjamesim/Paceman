@@ -47,7 +47,10 @@ Panel {
     pairingOpen = false
     pairing = ({})
     content.phoneExpanded = false
+    content.expandedClient = ""
+    content.removalClient = ""
     content.cursor = ""
+    scroll.contentY = 0
     actionError = ""
   }
   Timer {
@@ -106,6 +109,7 @@ Panel {
       if (code !== 0) {
         root.actionError = root.action === "pair"
           ? "Couldn't create a pairing code. Check Tailscale is connected and try again."
+          : root.action === "remove-access" ? "Couldn't remove access. Try again or check pacemanctl logs."
           : "Couldn't change sharing. Try again or check pacemanctl logs."
         console.warn("Paceman action failed:", String(errors.text || "Unknown error").trim())
       } else if (root.action === "pair") {
@@ -114,6 +118,12 @@ Panel {
       } else if (root.action === "share-off") {
         root.pairing = ({})
         root.pairingOpen = false
+      } else if (root.action === "remove-access") {
+        try { root.sourceState = JSON.parse(output.text) } catch (error) { root.refresh() }
+        content.removalClient = ""
+        content.expandedClient = ""
+        content.phoneExpanded = false
+        content.cursor = ""
       }
       root.refresh()
     }
@@ -140,21 +150,37 @@ Panel {
     focusTarget: content
     contentWidth: panel.fittedContentWidth(Style.space(380))
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
-    PanelContent {
-      id: content
-      width: parent.width
-      sourceState: root.displayState
-      now: root.now
-      busy: command.running
-      animateActivity: root.opened
-      actionError: root.actionError
-      foreground: root.foreground
-      fontFamily: root.fontFamily
-      onSharingRequested: function(enabled) { root.run([enabled ? "share-on" : "share-off"]) }
-      onRestartRequested: root.run(["restart"])
-      onPairRequested: root.showPairing()
-      onDismissRequested: root.close()
-      onPanelSwitchRequested: function(direction) { root.switchPanel(direction) }
+    Flickable {
+      id: scroll
+      anchors.fill: parent
+      contentWidth: width
+      contentHeight: content.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+      function reveal(item) {
+        var y = item.mapToItem(content, 0, 0).y
+        if (y < contentY) contentY = y
+        else if (y + item.height > contentY + height) contentY = y + item.height - height
+        contentY = Math.max(0, Math.min(contentY, contentHeight - height))
+      }
+      PanelContent {
+        id: content
+        width: parent.width
+        sourceState: root.displayState
+        now: root.now
+        busy: command.running
+        animateActivity: root.opened
+        actionError: root.actionError
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        onSharingRequested: function(enabled) { root.run([enabled ? "share-on" : "share-off"]) }
+        onRestartRequested: root.run(["restart"])
+        onPairRequested: root.showPairing()
+        onRemoveRequested: function(clientId) { root.run(["remove-access", "--client-id", clientId]) }
+        onDismissRequested: root.close()
+        onPanelSwitchRequested: function(direction) { root.switchPanel(direction) }
+        onRevealRequested: function(item) { scroll.reveal(item) }
+      }
     }
   }
   PairingOverlay {

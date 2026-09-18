@@ -19,7 +19,7 @@ struct ComputerDetail: View {
                 }.frame(maxWidth: .infinity).padding(.vertical, 16)
             }.listRowBackground(Color.clear)
             Section("Connection") {
-                DetailRow(title: "Status") { Text(connected ? "Up to date" : model.hasError || presentation.previewOffline ? "Unavailable" : "Waiting for update") }
+                DetailRow(title: "Status") { Text(model.accessRevoked ? "Access removed" : connected ? "Up to date" : model.hasError || presentation.previewOffline ? "Unavailable" : "Waiting for update") }
                 DetailRow(title: "Last update") {
                     if presentation.preview { Text(presentation.previewOffline ? "12 minutes ago" : "Just now") }
                     else if let snapshot = model.snapshot { Text("\(Date(timeIntervalSince1970: snapshot.observedAt), style: .relative) ago") }
@@ -29,8 +29,11 @@ struct ComputerDetail: View {
                     Label(model.busy ? "Checking connection…" : "Check connection", systemImage: "arrow.clockwise")
                 }.disabled(model.busy || presentation.preview)
                 if model.hasError || presentation.previewOffline {
-                    Text("Make sure this computer is awake and Tailscale is connected on both devices.").font(.footnote).foregroundStyle(.secondary)
+                    Text(model.accessRevoked ? "Access was removed on this computer. Scan a new pairing code to reconnect." : "Make sure this computer is awake and Tailscale is connected on both devices.").font(.footnote).foregroundStyle(.secondary)
                 }
+                if let notice = model.identityNotice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
+                NavigationLink("Reconnect with a code") { PairingFlow(model: model, theme: theme) }
+                    .disabled(model.busy || push.busy || presentation.preview)
             }.listRowBackground(theme.ink.opacity(0.04))
             Section {
                 Button("Rename computer") { name = presentation.displayName(source: model.source); rename = true }.disabled(presentation.preview)
@@ -57,7 +60,7 @@ struct ComputerDetail: View {
                         else { removalError = model.status }
                     }
                 }
-            } message: { Text("Agent notifications from this computer will stop. You can connect it again later.") }
+            } message: { Text("This phone’s access and notifications from this computer will be removed. Your watch stays paired. Keep the computer reachable to finish.") }
     }
 }
 

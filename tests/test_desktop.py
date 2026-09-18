@@ -14,7 +14,7 @@ import unittest
 from unittest.mock import patch
 
 from desktop import install
-from desktop.control import private_endpoint, read_status, set_sharing, pair_phone
+from desktop.control import private_endpoint, read_status, set_sharing, pair_phone, remove_access
 from service.hub import Server, Store
 from service.status import DesktopStatus
 
@@ -37,7 +37,9 @@ class DesktopStatusTests(unittest.TestCase):
         self.assertFalse(value["phoneRecent"])
         self.assertEqual(value["pairedPhones"], 1)
         self.assertNotIn(client["credential"], self.path.read_text())
-        self.assertNotIn(client["clientID"], self.path.read_text())
+        self.assertEqual(value["clients"][0]["id"], client["clientID"])
+        self.assertIsNone(value["clients"][0]["name"])
+        self.assertNotIn('"hash"', self.path.read_text())
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
         self.assertFalse(read_status(self.path, now=value["updatedAt"] + 20)["running"])
         self.assertFalse(read_status(self.path, now=value["updatedAt"] - 1)["running"])
@@ -78,6 +80,20 @@ class DesktopStatusTests(unittest.TestCase):
         for body in ("{", "[]", '{"schema":1,"updatedAt":"bad"}'):
             self.path.write_text(body)
             self.assertFalse(read_status(self.path)["running"])
+
+    def test_remove_access_works_while_paused_and_preserves_other_clients(self):
+        first, second = [self.store.redeem(self.store.invite('https://test.example')['invitation']) for _ in range(2)]
+        self.store.push_device(first['credential'], {'deviceToken': 'ab' * 32, 'environment': 'development', 'mode': 'alert'})
+        (self.root / 'sharing-paused').write_text('{}')
+        with patch('desktop.control.state_directory', return_value=self.root), patch('desktop.control.status_path', return_value=self.root / 'absent'):
+            status = remove_access(first['clientID'])
+            self.assertFalse(status['sharingEnabled'])
+            self.assertEqual([row['id'] for row in status['clients']], [second['clientID']])
+            self.assertFalse(self.store.authorized(first['credential']))
+            self.assertTrue(self.store.authorized(second['credential']))
+            self.assertEqual(remove_access(first['clientID'])['clients'], status['clients'])
+            with self.assertRaises(ValueError):
+                remove_access('../all')
 
     @unittest.skipUnless(shutil.which("node"), "Node.js is needed for panel presentation tests")
     def test_panel_presentation(self):

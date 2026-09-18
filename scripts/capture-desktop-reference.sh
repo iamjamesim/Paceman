@@ -13,7 +13,7 @@ ln -s /usr/share/omarchy/shell/Commons "$reference_dir/Commons"
 ln -s /usr/share/omarchy/shell/Ui "$reference_dir/Ui"
 ln -s "$source_root/desktop/plugin" "$reference_dir/plugin"
 cp "$source_root/desktop/reference.qml" "$reference_dir/shell.qml"
-for reference_state in overview phone-details multiple-sessions sharing-off pairing; do
+for reference_state in overview phone-details remove-access multiple-sessions sharing-off pairing; do
   PACEMAN_REFERENCE_STATE="$reference_state" quickshell -p "$reference_dir/shell.qml"
   test -s "$PACEMAN_REFERENCE_DIR/$reference_state.png"
 done

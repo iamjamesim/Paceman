@@ -34,6 +34,7 @@ protocol are retained; see its [provenance](firmware/esp32-watch/UPSTREAM.md).
 - [Architecture](docs/architecture.md): component boundaries and data flow.
 - [Protocol](docs/protocol.md): source API and phone-to-watch contract.
 - [Validation](docs/validation.md): verified behavior and remaining device tests.
+- [Pairing and removal](docs/pairing-and-removal.md): identified connections, upgrade behavior, and Mac acceptance.
 - [Prototype scope](docs/paceman-prototype.md): the experience we are finishing.
 - [Handoff](HANDOFF.md): next work and compatibility constraints.
 

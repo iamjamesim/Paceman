@@ -4,9 +4,42 @@ All remote paths require TLS from Tailscale Serve. The Python listener binds
 only to 127.0.0.1. This is a private development service, not an internet-facing
 production server. Limit tailnet access to the devices participating in the test.
 
-`POST /v1/pair`: JSON `{ "invitation": "single-use secret" }`. Returns schema,
-sourceID, clientID, and credential. Invalid/expired/used invitations return 401;
-invalid bodies 400; excessive attempts 429. Invitation expiry is five minutes.
+`POST /v1/pair`: JSON `{ "invitation": "single-use secret", "device": {
+"installationID": "UUID", "name": "Alex’s iPhone", "platform": "ios" } }`.
+Returns schema, sourceID, clientID, credential, and `clientManagement: 1`.
+Invalid/expired/used invitations return 401; invalid bodies 400; excessive attempts
+429. Invitation expiry is five minutes. Older clients may omit `device`; their
+credentials remain explicitly unidentified.
+
+Installation IDs are claims, not credentials. To re-pair an existing installation,
+include its current `Authorization: Bearer CREDENTIAL` and a fresh invitation.
+The source rotates the credential in place, keeps the client ID and pairing date,
+clears its old push registration and contact time, and closes old event streams.
+The phone must register push again. A claimed installation already owned by a
+different credential returns 409 without consuming the invitation. Matching device
+names never cause a merge. A revoked installation can pair afresh with a new code.
+
+`POST /v1/client`: authenticated JSON `{ "device": { ... } }` identifies the caller's
+existing credential or updates its reported name. Returns `clientManagement: 1`.
+It cannot adopt another credential's installation ID or change an established ID;
+conflicts return 409. Names are plain text, 1–80 characters with control characters
+excluded; supported platforms are `ios`, `android`, `macos`, `linux`, `diagnostic`.
+The iPhone stores its installation UUID in its device-local Keychain. Reported names
+may be generic or duplicated; this is app identity, not hardware attestation.
+
+`DELETE /v1/client`: authenticated removal of the caller's credential, identity
+record and push destination in one transaction. No target client ID is accepted.
+Returns `{ "revoked": true }`; an invalid or already removed credential returns 401.
+The iPhone treats 401 here as already removed. Network failures and other HTTP
+errors preserve the local pairing for retry. Desktop removal uses a local command,
+`pacemanctl remove-access --client-id UUID`, and works while sharing is off.
+
+Last successful snapshot/stream delivery is persisted per credential. Private local
+status exposes only client ID, reported name/platform, pairing time and contact
+time. Neither installation IDs, credential hashes nor secrets enter the panel's
+status or remote activity snapshots. Pre-upgrade contact is unknown.
+
+See [pairing and removal](pairing-and-removal.md) for migration and Mac acceptance.
 
 `GET /v1/snapshot`: `Authorization: Bearer CREDENTIAL`. Returns:
 

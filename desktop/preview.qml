@@ -74,7 +74,9 @@ PanelWindow {
               y: Style.space(14)
               width: parent.width - Style.space(28)
               now: window.now
-              sourceState: Object.assign({computerName: "Omarchy", updatedAt: window.now, schema: 1, sessionLiveness: "process"}, modelData)
+              sourceState: Object.assign({computerName: "Omarchy", updatedAt: window.now, schema: 1, sessionLiveness: "process",
+                clients: modelData.pairedPhones ? [{id: "example-phone", name: "Alex’s iPhone", platform: "ios",
+                  pairedAt: window.now - 86400, lastContactAt: modelData.lastPhoneFetchAt}] : []}, modelData)
             }
           }
           Item { Layout.fillHeight: true }

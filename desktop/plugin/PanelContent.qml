@@ -13,33 +13,56 @@ PanelKeyCatcher {
   property color foreground: Color.foreground
   property string fontFamily: Style.font.family
   property bool phoneExpanded: false
+  property string expandedClient: ""
+  property string removalClient: ""
   property bool animateActivity: true
   property string cursor: ""
   readonly property color dim: Qt.darker(foreground, 1.4)
   readonly property var view: Model.present(sourceState, now)
+  onCursorChanged: {
+    if (cursor === "pair" || cursor === "sharing") revealRequested(hero)
+    else if (cursor === "restart") revealRequested(restartButton)
+  }
   implicitHeight: content.implicitHeight
   signal sharingRequested(bool enabled)
+  signal removeRequested(string clientId)
   signal restartRequested()
   signal pairRequested()
   signal dismissRequested()
   signal panelSwitchRequested(int direction)
+  signal revealRequested(var item)
 
   function back() {
-    if (phoneExpanded) { phoneExpanded = false; cursor = "phone" }
+    if (removalClient) { cursor = "remove:" + removalClient; removalClient = "" }
+    else if (phoneExpanded || expandedClient) { phoneExpanded = false; expandedClient = "" }
     else dismissRequested()
   }
   function targets() {
     var items = busy ? [] : (view.running && view.sharing ? ["pair", "sharing"] : ["sharing"])
-    items.push("phone")
+    view.connections.forEach(function(client, index) {
+      items.push("phone:" + client.id)
+      if ((expandedClient === client.id || (phoneExpanded && index === 0)) && client.canRemove && !busy) {
+        if (removalClient === client.id) items.push("cancel:" + client.id, "confirm:" + client.id)
+        else items.push("remove:" + client.id)
+      }
+    })
     if ((view.sharing && !view.running) && !busy) items.push("restart")
     return items
   }
   function activate(target) {
-    if (target === "phone") phoneExpanded = !phoneExpanded
-    else if (!busy) {
-      if (target === "sharing") sharingRequested(!view.sharing)
-      else if (target === "pair") pairRequested()
-      else if (target === "restart") restartRequested()
+    var parts = target.split(":"), action = parts[0], id = parts.slice(1).join(":")
+    if (action === "phone") {
+      var wasExpanded = expandedClient === id || (phoneExpanded && view.connections[0].id === id)
+      phoneExpanded = false
+      expandedClient = wasExpanded ? "" : id
+      removalClient = ""
+    } else if (!busy) {
+      if (action === "sharing") sharingRequested(!view.sharing)
+      else if (action === "pair") pairRequested()
+      else if (action === "restart") restartRequested()
+      else if (action === "remove") { removalClient = id; cursor = "cancel:" + id }
+      else if (action === "cancel") { removalClient = ""; cursor = "remove:" + id }
+      else if (action === "confirm" && removalClient === id) removeRequested(id)
     }
   }
   onMoveRequested: function(dx, dy) {
@@ -58,6 +81,7 @@ PanelKeyCatcher {
     spacing: Style.space(14)
 
     PanelHero {
+      id: hero
       Layout.fillWidth: true
       title: "Paceman"
       meta: root.view.subtitle
@@ -115,124 +139,49 @@ PanelKeyCatcher {
       Layout.fillWidth: true
       spacing: Style.space(10)
       PanelSectionHeader {
-        text: "PHONE"
+        text: root.view.connectionHeading
         foreground: root.foreground
         fontFamily: root.fontFamily
       }
-      CursorSurface {
-        Layout.fillWidth: true
-        implicitHeight: phoneRow.implicitHeight + Style.space(16)
-        foreground: root.foreground
-        hasCursor: root.cursor === "phone"
-        Accessible.name: root.view.phoneTitle + ". " + root.view.phoneStatus
-        Accessible.role: Accessible.Button
-        Accessible.description: root.phoneExpanded ? "Collapse connection details" : "Expand connection details"
-        RowLayout {
-          id: phoneRow
-          anchors.left: parent.left
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          anchors.margins: Style.space(10)
-          spacing: Style.space(14)
-          Text {
-            text: "󰄜"
-            color: root.view.recent ? root.foreground : root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.display
-          }
-          ColumnLayout {
-            Layout.fillWidth: true
-            spacing: Style.space(3)
-            Text {
-              Layout.fillWidth: true
-              text: root.view.phoneTitle
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.subtitle
-            }
-            Text {
-              Layout.fillWidth: true
-              text: root.view.phoneStatus
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-            }
-          }
-          Text {
-            visible: root.view.paired && root.view.running && root.view.sharing && Number(root.sourceState.lastPhoneFetchAt || 0) > 0
-            text: Model.relativeTime(root.sourceState.lastPhoneFetchAt, root.now)
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-          Text {
-            text: root.phoneExpanded ? "󰅀" : "󰅂"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-          }
-        }
-        MouseArea {
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onContainsMouseChanged: if (containsMouse) root.cursor = "phone"
-          onClicked: root.activate("phone")
+      Repeater {
+        model: root.view.connections
+        delegate: ConnectionRow {
+          required property var modelData
+          Layout.fillWidth: true
+          connection: modelData
+          expanded: root.expandedClient === modelData.id || (root.phoneExpanded && root.view.connections[0].id === modelData.id)
+          confirming: root.removalClient === modelData.id
+          busy: root.busy
+          cursor: root.cursor
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          now: root.now
+          onActivateRequested: function(target) { root.activate(target) }
+          onCursorRequested: function(target) { root.cursor = target }
+          onRevealRequested: function(item) { root.revealRequested(item) }
         }
       }
       ColumnLayout {
-        visible: root.phoneExpanded
+        visible: root.view.connections.length === 0
         Layout.fillWidth: true
-        Layout.leftMargin: Style.space(10)
-        Layout.rightMargin: Style.space(10)
-        spacing: Style.space(12)
-        RowLayout {
-          Layout.fillWidth: true
-          Text {
-            text: "Last contact"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-          }
-          Item { Layout.fillWidth: true }
-          Text {
-            text: Number(root.sourceState.lastPhoneFetchAt || 0) > 0
-              ? Model.relativeTime(root.sourceState.lastPhoneFetchAt, root.now) : "None since restart"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-          }
+        spacing: Style.space(8)
+        Text {
+          text: "Connect your phone"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.subtitle
         }
         Text {
           Layout.fillWidth: true
-          text: root.view.paired ? "Your pairing is saved." : "Pair this computer with Paceman on your iPhone."
+          text: root.view.guidance
+          wrapMode: Text.WordWrap
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
-          wrapMode: Text.WordWrap
         }
-        Text {
-          Layout.fillWidth: true
-          visible: !root.view.recent
-          text: root.view.sharing && root.view.running && root.view.paired
-            ? "To resume updates, check that Tailscale is connected on both devices, then open Paceman on your iPhone."
-            : root.view.guidance
-          color: root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-          wrapMode: Text.WordWrap
-        }
-      }
-      Text {
-        Layout.fillWidth: true
-        visible: !root.view.recent && !root.phoneExpanded
-        text: root.view.guidance
-        wrapMode: Text.WordWrap
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.body
       }
       Button {
+        id: restartButton
         visible: root.view.sharing && !root.view.running
         Layout.fillWidth: true
         text: root.busy ? "STARTING…" : "RESTART PACEMAN"

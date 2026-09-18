@@ -5,7 +5,7 @@ It describes the private prototype as of 2026-09-18, not a reliability guarantee
 
 ## Automated checks
 
-- 68 Python desktop/service/push/Omarchy tests passed on Linux: API authorization, invitation expiry and
+- 79 Python desktop/service/push/Omarchy tests passed on Linux: API authorization, invitation expiry and
   single use, persistence, SSE, scheduling, revocation, token updates, hint content,
   signing, retry/coalescing and delivery bookkeeping. Apple responses are mocked.
   Omarchy coverage includes the installed v0.2.0 companion script with fixture
@@ -17,9 +17,22 @@ It describes the private prototype as of 2026-09-18, not a reliability guarantee
   Sharing tests cover persistence across upgrades, service-failure rollback and
   missing runtime files; pairing tests verify that panel metadata excludes secrets.
   Socket-driven tests verify per-state counts through transitions and cleanup.
-  Thirteen JavaScript presentation cases cover single, matching, mixed, idle, stale
+  Sixteen JavaScript presentation cases cover single, matching, mixed, idle, stale
   and legacy states, including verified open completions versus older retained
   records; these run through Python when Node.js is available.
+- Pairing tests cover authenticated credential rotation, unauthorized installation
+  claims, concurrent pairing, same-name distinct apps, legacy identification,
+  persisted per-client contact, self-scoped removal, stream revocation, private
+  status output, and removal while sharing is off.
+- Five iOS tests were added for legacy decoding, pairing request identity/origin
+  scoping, authenticated identification, idempotent removal and offline/server
+  failures. They have **not run on Linux**; Xcode build and XCTest remain required.
+- The installed pairing upgrade preserved the source ID and both existing
+  credential hashes. Its two legacy connections remain unidentified until the
+  updated app registers ownership. The live panel rendered correctly. An isolated
+  QML interaction check verified Cancel selection, Escape cancellation, rejection
+  of unconfirmed/busy removal, and emission of only the confirmed target; no real
+  client was removed. Named-connection and removal screenshots use sample data.
 - Linux process tests use isolated fixture executables/sockets and real process
   ancestry. They cover short-lived hook children, PTY hangup, SIGKILL, detached
   tmux, quiet completion, source restart, dead owners during downtime, PID/boot

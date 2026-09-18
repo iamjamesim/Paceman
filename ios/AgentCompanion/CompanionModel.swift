@@ -12,6 +12,8 @@ final class CompanionModel: ObservableObject {
     @Published var busy = false
     @Published var lastContact: Date?
     @Published var hasError = false
+    @Published var accessRevoked = false
+    @Published var identityNotice: String?
     @Published var streaming = false
     private let client = SourceClient()
     private var polling: Task<Void, Never>?
@@ -38,13 +40,20 @@ final class CompanionModel: ObservableObject {
         return ProcessInfo.processInfo.systemUptime - fetchedUptime < snapshot.freshFor
     }
 
-    func pair(text: String) async {
-        guard !busy else { return }
+    @discardableResult
+    func pair(text: String) async -> Bool {
+        guard !busy else { return false }
         busy = true
         defer { busy = false }
         do {
             let invitation = try JSONDecoder().decode(Invitation.self, from: Data(text.utf8))
-            let paired = try await client.pair(invitation)
+            let origin = try invitation.validatedURL()
+            if let source, source.sourceID != invitation.sourceID || source.endpoint != origin {
+                throw HubError.message("Remove the current computer before connecting a different one.")
+            }
+            // Stop old-stream callbacks before rotating its credential.
+            setStreaming(false)
+            let paired = try await client.pair(invitation, device: ClientDevice.current(), previous: source)
             try Vault.save(paired, key: "paired-source")
             sourceEpoch = UUID()
             source = paired
@@ -52,34 +61,66 @@ final class CompanionModel: ObservableObject {
             lastContact = nil
             fetchedUptime = nil
             hasError = false
+            accessRevoked = false
+            identityNotice = nil
             status = "Paired. Waiting for first snapshot."
             Diagnostics.shared.record("source_paired")
             Task { await PushCoordinator.shared.sync() }
-        } catch { status = error.localizedDescription; hasError = true }
+            return true
+        } catch { status = error.localizedDescription; hasError = true; return false }
     }
 
     func removeSource() async {
-        guard !busy else { return }
+        guard !busy, !PushCoordinator.shared.busy, let source else { return }
         busy = true
         defer { busy = false }
         do {
-            if PushCoordinator.shared.enabled {
-                guard await PushCoordinator.shared.disable() else {
-                    throw HubError.message("Could not remove push destination. Reconnect to the desktop before removing this source.")
-                }
-            }
+            try await client.remove(source)
+            PushCoordinator.shared.clearRemovedSource()
             try Vault.remove(key: "paired-source")
             setStreaming(false)
             sourceEpoch = UUID()
-            source = nil
+            self.source = nil
             snapshot = nil
             lastContact = nil
             fetchedUptime = nil
             watch.invalidatePending()
             publishWidget()
-            status = "Source removed. Revoke access on the computer if needed."
+            status = "Computer removed. This phone no longer has access."
             hasError = false
-        } catch { status = error.localizedDescription }
+            accessRevoked = false
+            identityNotice = nil
+        } catch { status = "Couldn't remove access: \(error.localizedDescription) Reconnect and try again; the pairing has been kept." }
+    }
+
+    private func identifyIfNeeded(_ paired: PairedSource) async throws {
+        guard paired.installationRegistered != true else { return }
+        do {
+            try await client.identify(paired, device: ClientDevice.current())
+            guard source?.credential == paired.credential else { return }
+            var upgraded = paired
+            upgraded.installationRegistered = true
+            try Vault.save(upgraded, key: "paired-source")
+            source = upgraded
+            identityNotice = nil
+        } catch let error as HubError where !error.isUnauthorized {
+            // Older desktops still serve activity. Identification failure must
+            // remain visible without pretending this credential is identified.
+            identityNotice = error.localizedDescription
+        }
+    }
+
+    private func sourceFailed(_ error: Error) {
+        hasError = true
+        accessRevoked = (error as? HubError)?.isUnauthorized == true
+        status = accessRevoked ? "Access removed on this computer. Scan a new pairing code to reconnect."
+            : "Source unavailable: \(error.localizedDescription)"
+        if accessRevoked {
+            snapshot = nil
+            PushCoordinator.shared.clearRemovedSource()
+        }
+        watch.invalidatePending()
+        publishWidget()
     }
 
     func setForeground(_ value: Bool) {
@@ -108,6 +149,7 @@ final class CompanionModel: ObservableObject {
         streamTask = Task { [weak self] in
             guard let self else { return }
             do {
+                try await self.identifyIfNeeded(source)
                 let bytes = try await self.client.events(source)
                 for try await line in bytes.lines {
                     guard !Task.isCancelled, epoch == self.sourceEpoch else { return }
@@ -118,8 +160,7 @@ final class CompanionModel: ObservableObject {
                 if !Task.isCancelled { throw HubError.message("Event stream closed") }
             } catch {
                 guard !Task.isCancelled, epoch == self.sourceEpoch else { return }
-                self.hasError = true
-                self.status = "Stream stopped: \(error.localizedDescription)"
+                self.sourceFailed(error)
                 self.streaming = false
                 self.watch.invalidatePending()
                 Diagnostics.shared.record("stream_failed")
@@ -139,6 +180,7 @@ final class CompanionModel: ObservableObject {
         lastContact = Date()
         fetchedUptime = ProcessInfo.processInfo.systemUptime - age
         hasError = false
+        accessRevoked = false
         status = age < value.freshFor
             ? (value.mode == "synthetic" ? "Connected · synthetic test source" : "Connected · Omarchy")
             : "Catching up · buffered snapshot is stale"
@@ -172,6 +214,7 @@ final class CompanionModel: ObservableObject {
         }
         Diagnostics.shared.record(fromPush ? "push_triggered_fetch" : fromWatch ? "watch_triggered_fetch" : "foreground_fetch")
         do {
+            try await identifyIfNeeded(source)
             let value = try await client.snapshot(source)
             guard epoch == sourceEpoch, !Task.isCancelled else { return .noData }
             try accept(value, stage: "snapshot_received")
@@ -186,10 +229,7 @@ final class CompanionModel: ObservableObject {
             guard epoch == sourceEpoch else { return .noData }
             // Cancelled foreground polling is not evidence that the source is offline.
             if Task.isCancelled { return .noData }
-            hasError = true
-            status = "Source unavailable: \(error.localizedDescription)"
-            watch.invalidatePending()
-            publishWidget()
+            sourceFailed(error)
             Diagnostics.shared.record("source_fetch_failed")
             return .failed
         }

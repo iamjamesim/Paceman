@@ -17,11 +17,30 @@ import secrets
 import sqlite3
 import threading
 import time
+import unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 import uuid
 
 STATES = {"idle", "working", "needs_input", "finished"}
+
+
+class PairingConflict(ValueError):
+    """An installation claim is not proof of ownership of an existing pairing."""
+
+
+def device_identity(value):
+    if not isinstance(value, dict):
+        raise ValueError("Invalid device identity")
+    if not isinstance(value.get("installationID"), str):
+        raise ValueError("Invalid installation ID")
+    installation = str(uuid.UUID(value["installationID"]))
+    name, platform = value.get("name"), value.get("platform")
+    if (not isinstance(name, str) or not 1 <= len(name.strip()) <= 80
+            or any(unicodedata.category(c).startswith("C") for c in name)
+            or platform not in ("ios", "macos", "linux", "android", "diagnostic")):
+        raise ValueError("Invalid device identity")
+    return installation, name.strip(), platform
 
 
 def endpoint(value: str) -> str:
@@ -51,6 +70,8 @@ class Store:
                 CREATE TABLE IF NOT EXISTS invitations(hash TEXT PRIMARY KEY, expires REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS clients(id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL,
                     created REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS client_devices(client_id TEXT PRIMARY KEY,
+                    installation_id TEXT UNIQUE NOT NULL, name TEXT NOT NULL, platform TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
                     at REAL NOT NULL, state TEXT NOT NULL, label TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS schedule(id INTEGER PRIMARY KEY, due REAL NOT NULL,
@@ -61,6 +82,8 @@ class Store:
                     attempts INTEGER NOT NULL DEFAULT 0, last_result TEXT, last_apns_id TEXT);
             """)
             db.execute("BEGIN IMMEDIATE")
+            if "last_seen" not in {row[1] for row in db.execute("PRAGMA table_info(clients)")}:
+                db.execute("ALTER TABLE clients ADD COLUMN last_seen REAL NOT NULL DEFAULT 0")
             columns = {row[1] for row in db.execute("PRAGMA table_info(events)")}
             if "payload" not in columns:
                 db.execute("ALTER TABLE events ADD COLUMN payload TEXT")
@@ -96,18 +119,67 @@ class Store:
         return {"schema": 1, "endpoint": origin, "sourceID": self.metadata("source_id"),
                 "invitation": token, "expiresAt": now + 300}
 
-    def redeem(self, token: str, now: float | None = None) -> dict | None:
+    def redeem(self, token: str, now: float | None = None, *, device=None, previous_token="") -> dict | None:
+        identity = device_identity(device) if device is not None else None
         now = time.time() if now is None else now
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT expires FROM invitations WHERE hash=?", (digest(token),)).fetchone()
             if row is None or row[0] <= now:
                 return None
-            db.execute("DELETE FROM invitations WHERE hash=?", (digest(token),))
             credential, client_id = secrets.token_urlsafe(32), str(uuid.uuid4())
-            db.execute("INSERT INTO clients VALUES (?,?,?)", (client_id, digest(credential), now))
+            previous = db.execute("SELECT id FROM clients WHERE hash=?", (digest(previous_token),)).fetchone() if previous_token else None
+            if identity is not None:
+                claimed = db.execute("SELECT client_id FROM client_devices WHERE installation_id=?", (identity[0],)).fetchone()
+                if claimed and (previous is None or claimed[0] != previous[0]):
+                    raise PairingConflict("Existing installation requires its current credential")
+                if previous:
+                    existing = db.execute("SELECT installation_id FROM client_devices WHERE client_id=?", (previous[0],)).fetchone()
+                    if existing and existing[0] != identity[0]:
+                        raise PairingConflict("Credential belongs to another installation")
+                    client_id = previous[0]
+                    db.execute("UPDATE clients SET hash=?,last_seen=0 WHERE id=?", (digest(credential), client_id))
+                    db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
+                else:
+                    db.execute("INSERT INTO clients(id,hash,created) VALUES (?,?,?)", (client_id, digest(credential), now))
+                db.execute("INSERT OR REPLACE INTO client_devices VALUES (?,?,?,?)", (client_id, *identity))
+            else:
+                db.execute("INSERT INTO clients(id,hash,created) VALUES (?,?,?)", (client_id, digest(credential), now))
+            db.execute("DELETE FROM invitations WHERE hash=?", (digest(token),))
         return {"schema": 1, "sourceID": self.metadata("source_id"),
-                "clientID": client_id, "credential": credential}
+                "clientID": client_id, "credential": credential, "clientManagement": 1}
+
+    def identify_client(self, credential, device):
+        identity = device_identity(device)
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            client = db.execute("SELECT id FROM clients WHERE hash=?", (digest(credential),)).fetchone()
+            if client is None:
+                return False
+            claimed = db.execute("SELECT client_id FROM client_devices WHERE installation_id=?", (identity[0],)).fetchone()
+            existing = db.execute("SELECT installation_id FROM client_devices WHERE client_id=?", (client[0],)).fetchone()
+            if (claimed and claimed[0] != client[0]) or (existing and existing[0] != identity[0]):
+                raise PairingConflict("Installation is already identified")
+            db.execute("INSERT OR REPLACE INTO client_devices VALUES (?,?,?,?)", (client[0], *identity))
+        return True
+
+    def client_fetched(self, credential):
+        with self.connect() as db:
+            db.execute("UPDATE clients SET last_seen=? WHERE hash=?", (time.time(), digest(credential)))
+
+    def clients(self):
+        with self.connect() as db:
+            return self.client_list(db)
+
+    @staticmethod
+    def client_list(db):
+        # Only non-secret presentation metadata crosses the local command boundary.
+        modern = "last_seen" in {row[1] for row in db.execute("PRAGMA table_info(clients)")}
+        query = ("SELECT c.id,c.created,c.last_seen,d.name,d.platform FROM clients c "
+                 "LEFT JOIN client_devices d ON d.client_id=c.id ORDER BY c.created,c.id") if modern else (
+                 "SELECT id,created,0,NULL,NULL FROM clients ORDER BY created,id")
+        return [dict(zip(("id", "pairedAt", "lastContactAt", "name", "platform"), row)) for row in db.execute(
+            query)]
 
     def authorized(self, token: str) -> bool:
         if not token:
@@ -117,8 +189,21 @@ class Store:
 
     def revoke(self, client_id: str) -> bool:
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
+            db.execute("DELETE FROM client_devices WHERE client_id=?", (client_id,))
             return db.execute("DELETE FROM clients WHERE id=?", (client_id,)).rowcount > 0
+
+    def revoke_self(self, credential):
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            client = db.execute("SELECT id FROM clients WHERE hash=?", (digest(credential),)).fetchone()
+            if client is None:
+                return False
+            db.execute("DELETE FROM push_devices WHERE client_id=?", (client[0],))
+            db.execute("DELETE FROM client_devices WHERE client_id=?", (client[0],))
+            db.execute("DELETE FROM clients WHERE id=?", (client[0],))
+            return True
 
     def push_device(self, credential: str, payload: dict | None = None, remove=False) -> dict | None:
         """The paired credential owns exactly one push destination; IDs aren't accepted from clients."""
@@ -247,6 +332,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/v1/snapshot":
             self.reply(200, self.server.store.snapshot())
+            self.server.store.client_fetched(token)
             if self.server.desktop_status is not None:
                 self.server.desktop_status.phone_fetched()
             return
@@ -266,6 +352,7 @@ class Handler(BaseHTTPRequestHandler):
                 if value["revision"] != last_revision or time.monotonic() - last_sent >= 15:
                     self.wfile.write(b"data: " + json.dumps(value, separators=(",", ":")).encode() + b"\n\n")
                     self.wfile.flush()
+                    self.server.store.client_fetched(token)
                     if self.server.desktop_status is not None:
                         self.server.desktop_status.phone_fetched()
                     last_revision, last_sent = value["revision"], time.monotonic()
@@ -274,6 +361,23 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def do_POST(self):
+        if self.path == "/v1/client":
+            prefix, _, token = self.headers.get("Authorization", "").partition(" ")
+            if prefix != "Bearer" or not self.server.store.authorized(token):
+                self.reply(401, {"error": "unauthorized"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 4096 or self.headers.get("Transfer-Encoding"):
+                    raise ValueError()
+                payload = json.loads(self.rfile.read(length))
+                accepted = self.server.store.identify_client(token, payload.get("device"))
+                self.reply(200 if accepted else 401, {"clientManagement": 1} if accepted else {"error": "unauthorized"})
+            except PairingConflict:
+                self.reply(409, {"error": "installation_conflict"})
+            except (ValueError, TypeError, AttributeError, TimeoutError):
+                self.reply(400, {"error": "invalid_request"})
+            return
         if self.path == "/v1/push":
             prefix, _, token = self.headers.get("Authorization", "").partition(" ")
             if prefix != "Bearer" or not self.server.store.authorized(token):
@@ -310,10 +414,24 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, AttributeError, TimeoutError):
             self.reply(400, {"error": "invalid_request"})
             return
-        result = self.server.store.redeem(token)
+        prefix, _, previous = self.headers.get("Authorization", "").partition(" ")
+        try:
+            result = self.server.store.redeem(token, device=payload.get("device"),
+                                              previous_token=previous if prefix == "Bearer" else "")
+        except PairingConflict:
+            self.reply(409, {"error": "installation_conflict"})
+            return
+        except (ValueError, TypeError, AttributeError):
+            self.reply(400, {"error": "invalid_request"})
+            return
         self.reply(200 if result else 401, result or {"error": "invitation_expired_or_used"})
 
     def do_DELETE(self):
+        if self.path == "/v1/client":
+            prefix, _, token = self.headers.get("Authorization", "").partition(" ")
+            revoked = self.server.store.revoke_self(token) if prefix == "Bearer" else False
+            self.reply(200 if revoked else 401, {"revoked": True} if revoked else {"error": "unauthorized"})
+            return
         if self.path != "/v1/push":
             self.reply(404, {"error": "not_found"})
             return

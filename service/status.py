@@ -26,8 +26,7 @@ class DesktopStatus:
         snapshot = self.store.snapshot()
         session_counts = {state: sum(session["state"] == state for session in snapshot["sessions"])
                           for state in ("needs_input", "working", "finished", "idle")}
-        with self.store.connect() as db:
-            paired = db.execute("SELECT COUNT(*) FROM clients").fetchone()[0]
+        clients = self.store.clients()
         with self.lock:
             phone_seen = self.phone_seen
         value = {
@@ -38,7 +37,8 @@ class DesktopStatus:
             "sessionCounts": session_counts,
             "sessionLiveness": snapshot.get("sessionLiveness"),
             "lastAgentEventAt": getattr(adapter, "last_event_at", 0),
-            "pairedPhones": paired, "lastPhoneFetchAt": phone_seen,
+            "clients": clients,
+            "pairedPhones": len(clients), "lastPhoneFetchAt": phone_seen,
         }
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         descriptor, temporary = tempfile.mkstemp(dir=self.path.parent, prefix=".status-")

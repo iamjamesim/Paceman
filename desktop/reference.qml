@@ -12,10 +12,12 @@ Scope {
   id: root
   readonly property string scenario: Quickshell.env("PACEMAN_REFERENCE_STATE")
   readonly property string output: Quickshell.env("PACEMAN_REFERENCE_DIR") + "/" + scenario + ".png"
-  readonly property double now: 1800000000
+  readonly property double now: 1789758000
   readonly property var fixture: Object.assign({
     schema: 1, sessionLiveness: "process", running: true, sharingEnabled: true, updatedAt: now,
     pairedPhones: 1, lastPhoneFetchAt: now - 3,
+    clients: [{id: "example-phone", name: "Alex’s iPhone", platform: "ios", pairedAt: now - 86400,
+      lastContactAt: scenario === "phone-details" ? now - 900 : now - 3}],
     activity: "working", sessions: 1,
     sessionCounts: {needs_input: 0, working: 1, finished: 0, idle: 0}
   }, scenario === "phone-details" ? {lastPhoneFetchAt: now - 900}
@@ -56,7 +58,8 @@ Scope {
           width: card.width - card.contentLeftInset - card.contentRightInset
           sourceState: root.fixture
           now: root.now
-          phoneExpanded: root.scenario === "phone-details"
+          phoneExpanded: root.scenario === "phone-details" || root.scenario === "remove-access"
+          removalClient: root.scenario === "remove-access" ? "example-phone" : ""
           animateActivity: false
         }
       }

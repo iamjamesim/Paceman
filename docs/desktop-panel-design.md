@@ -37,15 +37,15 @@ troubleshooting buttons. Normal content width is 380 logical style units.
    stops the service; On restores both. A service condition also prevents an
    accidental manual start from overriding the saved Off choice.
 2. **Phone contact.** A phone icon, understandable connection text and last-contact
-   time. There is no invented device name. A recent authenticated fetch supports
+   time. Names and platforms come from the paired app; unidentified credentials get a neutral connection row. A recent authenticated fetch supports
    “Receiving updates”; it does not support a watch-delivered claim.
 3. **What this computer contributes.** One compact adapter/activity summary:
    Codex working, needs input, finished or no active work. It remains useful
    while the phone is away. A full session feed duplicates the phone and does
    not belong in the default desktop view. Adapter/workspace selection belongs
    here when those controls exist; do not imply scope controls are implemented.
-4. **Details, inline.** Clicking the phone row expands last contact, saved-pairing
-   reassurance and contextual reconnect guidance below that row. Keep the header
+4. **Details, inline.** Clicking a connection row expands its own last contact, pairing date,
+   contextual reconnect guidance and a secondary “Remove access…” action. Keep the header
    and activity visible. No desktop diagnostics, credential counts, duplicate
    pairing action or routine restart action belong here. Restart appears only
    when the source is unavailable. The header QR is the single pairing action.
@@ -57,7 +57,7 @@ Example information layout (sample data, not a live status report):
                  SHARING ACTIVITY
 -----------------------------------------------------
 PHONE
-[phone]          Your phone                  Just now
+[phone]          Alex’s iPhone                  Just now
                  Receiving updates                   >
 -----------------------------------------------------
 ACTIVITY
@@ -113,16 +113,25 @@ The mark occupies a fixed trailing slot, with the state label right-aligned
 beside it. Reserve that slot in idle/off states too, so changing labels or hiding
 the mark never shifts the visual anchor or the row height.
 
-Normal removal belongs on the phone. A future desktop “Revoke phone access”
-control would support a lost phone, but requires reliable device identification
-and deliberate confirmation. Anonymous credential counts cannot identify physical
-phones. The sharing switch currently stops access while preserving pairing.
+Normal removal belongs on the phone. Desktop **Remove access…** supports a lost
+phone or obsolete connection. Its inline confirmation names the connection,
+explains that updates stop and watch pairing remains, and defaults keyboard focus
+to Cancel. Escape first cancels confirmation, then collapses details, then closes
+the panel. Removal is available while sharing is off. Long connection lists scroll
+within the panel, including keyboard focus following the selected control.
+
+Every credential has its own contact time. Named app installations get a phone
+icon only when their reported platform supports that description. Unknown records
+remain **Unidentified connection**, with a pairing date and update guidance. They
+are never merged by name or inferred to be physical phones. The section reads
+**CONNECTIONS** when it contains unidentified/non-phone clients. Re-pairing with
+proof of the current credential replaces that installation’s access in place.
 
 ## Evidence limits
 
 Contact expires after 30 seconds; the source heartbeat expires after 20 seconds.
-Phone contact is currently a successful authenticated snapshot response or stream
-write, including diagnostic clients. Do not infer an always-connected phone,
+Contact is a successful authenticated snapshot response or stream write for
+that particular credential; diagnostic clients cannot refresh another row. Do not infer an always-connected phone,
 working APNs or Bluetooth status. No watch/weather placeholder row appears until
 there is useful device-reported information to display.
 

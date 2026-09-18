@@ -57,11 +57,28 @@ struct PairedSource: Codable {
     let sourceID: String
     let clientID: String
     let credential: String
+    var installationRegistered: Bool? = nil
+}
+
+struct ClientDevice: Codable, Equatable {
+    let installationID: String
+    let name: String
+    let platform: String
 }
 
 enum HubError: LocalizedError {
     case message(String)
-    var errorDescription: String? { if case let .message(text) = self { return text }; return nil }
+    case http(Int)
+    var isUnauthorized: Bool { if case .http(401) = self { return true }; return false }
+    var errorDescription: String? {
+        switch self {
+        case .message(let text): return text
+        case .http(401): return "Access denied. The pairing code may have expired or access was removed."
+        case .http(409): return "This installation already has a connection. Remove its old access on the computer, then scan a new code."
+        case .http(404): return "Update Paceman on your computer to manage this connection."
+        case .http(let code): return "Source returned HTTP \(code)"
+        }
+    }
 }
 
 enum WatchWire {

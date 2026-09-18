@@ -16,7 +16,10 @@ Private source service ── HTTPS snapshot / foreground SSE ──► iPhone �
 ## Source service
 
 `service/hub.py` owns source snapshots, SQLite persistence, single-use
-pairing invitations, authenticated reads, revision ordering and push destinations.
+pairing invitations, installation metadata, per-client contact, authenticated reads,
+self-revocation, revision ordering and push destinations. Local desktop revocation
+and authenticated phone removal delete the credential, identity and push destination
+together. Installation claims alone cannot replace another credential.
 It listens only on loopback. Tailscale Serve supplies private HTTPS.
 `service/omarchy.py` receives the existing desktop companion's local `agent-event`
 protocol and collects resolved Omarchy theme colors without starting a Bluetooth

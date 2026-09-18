@@ -135,7 +135,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         await refreshAuthorization()
         guard enabled else { return }
         guard authorization != .denied else { status = "Notifications are off in iOS Settings"; return }
-        guard let source = model?.source else { status = "Connect your computer to finish setup"; return }
+        guard let source = model?.source, model?.accessRevoked != true else { status = "Connect your computer to finish setup"; return }
         guard let token = Vault.load(String.self, key: "apns-device-token") else {
             status = "Waiting for Apple push registration"
             awaitingToken = true
@@ -152,6 +152,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         }
         do {
             try await client.registerPush(source, token: token, environment: environment, mode: mode)
+            guard enabled, model?.source?.credential == source.credential, model?.accessRevoked != true else { return }
             registered = true
             registrationAttempted = true
             awaitingToken = false
@@ -186,6 +187,20 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             status = "Could not remove the desktop push destination. Retry when connected."
             return false
         }
+    }
+
+    // Server-side client revocation has already removed the push destination.
+    // Clear local setup without issuing another request with an invalid token.
+    func clearRemovedSource() {
+        registered = false
+        awaitingToken = false
+        registrationAttempted = false
+        enabled = false
+        syncPending = false
+        UserDefaults.standard.set(false, forKey: "push-enabled")
+        UIApplication.shared.unregisterForRemoteNotifications()
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        status = "Push is off"
     }
 
     func receive(_ userInfo: [AnyHashable: Any], stage: String) async -> UIBackgroundFetchResult {

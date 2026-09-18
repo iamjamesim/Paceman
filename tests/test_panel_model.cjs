@@ -101,3 +101,33 @@ test('interrupted but still-open sessions contribute an idle state', () => {
   assert.equal(value.activity, 'Needs input');
   assert.equal(value.activityBreakdown, '1 needs input · 1 idle');
 });
+
+
+test('connection names and contact are scoped to each installation', () => {
+  const value = present({}, {clients: [
+    {id: 'a', name: 'Alex’s iPhone', platform: 'ios', lastContactAt: now - 2},
+    {id: 'b', name: 'Alex’s iPhone', platform: 'ios', lastContactAt: now - 500},
+    {id: 'c', name: null, platform: null, lastContactAt: now - 1}
+  ]})
+  assert.equal(value.connections[0].recent, true)
+  assert.equal(value.connections[1].recent, false)
+  assert.equal(value.connections[2].title, 'Unidentified connection')
+  assert.equal(value.connections[2].phone, false)
+  assert.equal(value.connectionHeading, 'CONNECTIONS')
+})
+
+test('removing the last credential shows pairing despite stale legacy counts', () => {
+  const value = present({}, {clients: [], pairedPhones: 2})
+  assert.equal(value.paired, false)
+  assert.equal(value.connections.length, 0)
+})
+
+test('sharing off preserves connection identity and removal without claiming contact', () => {
+  const value = present({}, {sharingEnabled: false, clients: [
+    {id: 'a', name: '<b>My phone</b>', platform: 'ios', lastContactAt: now - 2}
+  ]})
+  assert.equal(value.connections[0].title, '<b>My phone</b>')
+  assert.equal(value.connections[0].status, 'Sharing is off')
+  assert.equal(value.connections[0].recent, false)
+  assert.equal(value.connections[0].canRemove, true)
+})

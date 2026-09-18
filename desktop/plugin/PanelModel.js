@@ -39,17 +39,34 @@ function activitySummary(state, available) {
 function present(state, now) {
   var age = now - Number(state.updatedAt || 0)
   var running = state.running === true && age >= 0 && age < 20
-  var contactAge = now - Number(state.lastPhoneFetchAt || 0)
-  var recent = running && Number(state.lastPhoneFetchAt || 0) > 0 && contactAge >= 0 && contactAge < 30
-  var paired = Number(state.pairedPhones || 0) > 0
+  var clients = Array.isArray(state.clients) ? state.clients : (Number(state.pairedPhones || 0) > 0
+    ? [{id: "legacy", name: null, lastContactAt: state.lastPhoneFetchAt, removable: false}] : [])
+  var paired = clients.length > 0
   var sharing = state.sharingEnabled !== false
   var activity = activitySummary(state, running && sharing)
+  var connections = clients.map(function(client) {
+    var contact = Number(client.lastContactAt || 0)
+    var age = now - contact
+    var recent = running && sharing && contact > 0 && age >= 0 && age < 30
+    var identified = !!client.name && !!client.platform
+    var phone = client.platform === "ios" || client.platform === "android"
+    return {id: client.id, title: identified ? client.name : "Unidentified connection",
+      identified: identified, phone: phone, recent: recent,
+      lastContactAt: contact, pairedAt: Number(client.pairedAt || 0),
+      canRemove: client.removable !== false && !!client.id,
+      status: !sharing ? "Sharing is off" : !running ? "Desktop unavailable"
+        : recent ? "Receiving updates" : "Waiting for contact",
+      guidance: !identified ? "Open the updated Paceman app to identify this connection. Earlier pairings cannot be matched to a phone automatically."
+        : !sharing ? "Turn sharing on to send updates from this computer."
+        : !running ? "Restart Paceman to resume sharing."
+        : "Check Tailscale on both devices, then open Paceman" + (phone ? " on your phone." : " on this device.")}
+  })
   return {
-    running: running, recent: recent && sharing, paired: paired, sharing: sharing,
+    connections: connections,
+    connectionHeading: connections.some(function(client) { return !client.phone }) ? "CONNECTIONS"
+      : connections.length > 1 ? "PHONES" : "PHONE",
+    running: running, paired: paired, sharing: sharing,
     subtitle: !sharing ? "SHARING OFF" : !running ? "SHARING UNAVAILABLE" : "SHARING ACTIVITY",
-    phoneTitle: paired ? "Your phone" : "Connect your phone",
-    phoneStatus: !sharing ? "Sharing is off" : !running ? "Desktop unavailable"
-      : !paired ? "Pair once to receive updates" : recent ? "Receiving updates" : "Waiting for contact",
     guidance: !sharing ? "Turn sharing on to send updates from this computer."
       : !running ? "Paceman isn't running. Restart it to resume sharing."
       : !paired ? "Open Paceman on your iPhone and scan a pairing code."

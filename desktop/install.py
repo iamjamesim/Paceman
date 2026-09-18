@@ -141,7 +141,7 @@ def main():
         write(ctl, (ROOT / "desktop/pacemanctl").read_bytes(), 0o755)
         write(unit, unit_content.encode())
         if not args.no_bar:
-            for name in ("manifest.json", "BarWidget.qml", "PanelContent.qml", "PacemanMark.qml", "PanelModel.js", "PairingOverlay.qml"):
+            for name in ("manifest.json", "BarWidget.qml", "PanelContent.qml", "ConnectionRow.qml", "PacemanMark.qml", "PanelModel.js", "PairingOverlay.qml"):
                 write(plugin / name, (ROOT / "desktop/plugin" / name).read_bytes())
         run("/usr/bin/systemctl", "--user", "daemon-reload")
         paused = (state / "sharing-paused").exists()

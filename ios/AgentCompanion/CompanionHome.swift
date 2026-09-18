@@ -34,7 +34,7 @@ struct CompanionHome: View {
                 if paired { agentContent }
                 else { agentSetup }
 
-                if paired && !presentation.preview && push.setupStep.needsAttention {
+                if paired && !presentation.preview && !model.accessRevoked && push.setupStep.needsAttention {
                     feedNotice(title: "Finish notification setup", detail: push.setupStep == .blocked ? "Notifications are off in iOS Settings." : "Enable agent updates when you're away from your computer.", symbol: "bell", action: push.setupStep == .blocked ? "Open Settings" : "Continue") {
                         if push.setupStep == .blocked { push.openSettings() } else { open(.notifications) }
                     }.padding(.top, 20)
@@ -78,11 +78,11 @@ struct CompanionHome: View {
             }.buttonStyle(.plain).accessibilityHint("Manage this computer's connection")
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(offline ? "Computer unavailable" : content.headline)
+                Text(model.accessRevoked ? "Access removed" : offline ? "Computer unavailable" : content.headline)
                     .font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
                     .tracking(-0.6).fixedSize(horizontal: false, vertical: true)
                 if offline {
-                    Text(model.snapshot != nil || presentation.preview ? "Last received: \(content.headline.lowercased())" : "Check that your computer is awake and Tailscale is connected.")
+                    Text(model.accessRevoked ? "Open this computer’s connection to scan a new pairing code." : model.snapshot != nil || presentation.preview ? "Last received: \(content.headline.lowercased())" : "Check that your computer is awake and Tailscale is connected.")
                         .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
                 } else if let detail = content.supportingStatus {
                     Text(detail).font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
@@ -126,7 +126,9 @@ struct CompanionHome: View {
         }.font(.caption).foregroundStyle(theme.ink.opacity(0.55))
     }
     @ViewBuilder private var sourceBadge: some View {
-        if offline {
+        if model.accessRevoked {
+            Button("Reconnect") { open(.computer) }.font(.caption.weight(.semibold)).frame(minHeight: 44)
+        } else if offline {
             Button("Try again") { if !presentation.preview { Task { await model.refresh() } } }
                 .font(.caption.weight(.semibold)).frame(minHeight: 44).disabled(model.busy)
         } else if !presentation.preview && model.snapshot?.mode == "synthetic" {

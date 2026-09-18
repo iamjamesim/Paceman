@@ -20,11 +20,19 @@ robot in a fixed trailing slot; Working gently pulses in the running app.
 
 ## Phone details expand inline
 
-<img src="images/desktop/phone-details.png" width="440" alt="Phone row expanded in place with last contact, saved-pairing reassurance, and reconnect instructions">
+<img src="images/desktop/phone-details.png" width="440" alt="Phone row expanded in place with last contact, pairing date, reconnect instructions, and removal action">
 
-Clicking the phone row reveals details directly below it. The header and local
-activity remain visible. A phone that has stopped fetching does not require a
+Clicking a named connection reveals its own contact and pairing details directly
+below it. The header and local activity remain visible. A phone that has stopped fetching does not require a
 new pairing. Escape collapses the details before closing the panel.
+
+## Remove access inline
+
+<img src="images/desktop/remove-access.png" width="440" alt="Inline confirmation to remove access for Alex’s iPhone, with Cancel and Remove access buttons">
+
+Removal names the selected connection and explains the effect before acting.
+The watch remains paired to the phone. Cancel is the initial keyboard selection;
+Escape cancels confirmation before collapsing the row. No navigation stack opens.
 
 ## Multiple active sessions
 
@@ -71,12 +79,12 @@ and meaning of controls are the shared contract.
 
 ## Current limits
 
-“Your phone” describes the intended iPhone workflow; pairing currently identifies
-anonymous credentials, not distinct physical phones. Recent authenticated fetches
-also include diagnostic clients and do not prove watch delivery. Session counts
-describe verified Codex processes that have emitted a hook, not window visibility
-or real-time tool progress. Detached sessions stay listed.
-Phone identity remains an explicit [follow-up](roadmap.md).
+Names and platforms are reported by the app; installation identity does not
+prove physical hardware identity. Older credentials stay **Unidentified connection**
+until their app supplies metadata. Recent contact proves a fetch for that
+credential, not watch delivery. Session counts describe verified Codex processes
+that have emitted a hook, not window visibility or real-time tool progress.
+Detached sessions stay listed.
 
 ## Refreshing the references
 
@@ -90,7 +98,7 @@ The script uses [reference.qml](../desktop/reference.qml) to render the same
 `PanelContent` and `PairingOverlay` used by the installed app. Fixtures are inert:
 they do not read the source database, contact the phone, or change sharing. It
 briefly displays each state, captures the component against a plain background,
-and replaces the five PNGs under `docs/images/desktop/` after successful capture.
+and replaces the six PNGs under `docs/images/desktop/` after successful capture.
 The active Omarchy theme and display scale determine rendering.
 
 Review every image, update the capture date/source revision above, and commit

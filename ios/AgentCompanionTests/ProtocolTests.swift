@@ -177,6 +177,91 @@ final class ProtocolTests: XCTestCase {
         XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["mode": "omarchy"]), source: source))
     }
 
+    func testLegacyPairingDecodesWithoutInstallationMarker() throws {
+        let data = Data(#"{"endpoint":"https://test.example","sourceID":"old","clientID":"client","credential":"secret"}"#.utf8)
+        let source = try JSONDecoder().decode(PairedSource.self, from: data)
+        XCTAssertNil(source.installationRegistered)
+        XCTAssertEqual(source.credential, "secret")
+    }
+
+    func testPairingSendsIdentityAndOnlyUsesCredentialAtTheSameOrigin() async throws {
+        let id = UUID().uuidString
+        let device = ClientDevice(installationID: UUID().uuidString, name: "Phone", platform: "ios")
+        let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: id,
+                                    invitation: String(repeating: "x", count: 43), expiresAt: Date().timeIntervalSince1970 + 300)
+        for sameOrigin in [true, false] {
+            let previous = PairedSource(endpoint: URL(string: sameOrigin ? "https://test.example" : "https://elsewhere.example")!,
+                                        sourceID: id, clientID: "client", credential: "old-secret")
+            let client = stubClient { request in
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.url?.path, "/v1/pair")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), sameOrigin ? "Bearer old-secret" : nil)
+                let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
+                XCTAssertEqual((body["device"] as? [String: String])?["installationID"], device.installationID)
+                return (200, try JSONSerialization.data(withJSONObject: ["schema": 1, "sourceID": id, "clientID": "client",
+                    "credential": "new-secret", "clientManagement": 1]))
+            }
+            let paired = try await client.pair(invitation, device: device, previous: previous)
+            XCTAssertEqual(paired.installationRegistered, true)
+            XCTAssertEqual(paired.credential, "new-secret")
+        }
+    }
+
+    func testIdentificationAuthenticatesExistingPairing() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "source", clientID: "client", credential: "secret")
+        let device = ClientDevice(installationID: UUID().uuidString, name: "Phone", platform: "ios")
+        let client = stubClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/v1/client")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
+            let body = try JSONDecoder().decode([String: ClientDevice].self, from: ClientURLProtocol.body(request))
+            XCTAssertEqual(body["device"], device)
+            return (200, Data(#"{"clientManagement":1}"#.utf8))
+        }
+        try await client.identify(source, device: device)
+    }
+
+    func testRemovalIsSelfScopedAndAlreadyRevokedIsSuccess() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "source", clientID: "client", credential: "secret")
+        for code in [200, 401] {
+            let client = stubClient { request in
+                XCTAssertEqual(request.httpMethod, "DELETE")
+                XCTAssertEqual(request.url?.path, "/v1/client")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
+                XCTAssertNil(request.httpBody)
+                return (code, Data(#"{"revoked":true}"#.utf8))
+            }
+            try await client.remove(source)
+        }
+    }
+
+    func testRemovalFailureDoesNotPretendAccessWasRevoked() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "source", clientID: "client", credential: "secret")
+        for code in [404, 500] {
+            let client = stubClient { _ in (code, Data("{}".utf8)) }
+            do {
+                try await client.remove(source)
+                XCTFail("Removal must report an unsupported or failed server")
+            } catch let error as HubError {
+                guard case .http(let result) = error else { return XCTFail("Unexpected error") }
+                XCTAssertEqual(result, code)
+            }
+        }
+        let offline = stubClient { _ in throw URLError(.notConnectedToInternet) }
+        do { try await offline.remove(source); XCTFail("Offline removal must fail") }
+        catch { XCTAssertEqual((error as? URLError)?.code, .notConnectedToInternet) }
+        let unconfirmed = stubClient { _ in (200, Data(#"{"revoked":false}"#.utf8)) }
+        do { try await unconfirmed.remove(source); XCTFail("An unconfirmed removal must fail") }
+        catch { XCTAssertTrue(error is HubError) }
+    }
+
+    private func stubClient(_ handler: @escaping (URLRequest) throws -> (Int, Data)) -> SourceClient {
+        ClientURLProtocol.handler = handler
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ClientURLProtocol.self]
+        return SourceClient(configuration: configuration)
+    }
+
     private func sourceFixture(_ extra: [String: Any] = [:]) throws -> Data {
         var value: [String: Any] = ["schema":1, "sourceID":UUID().uuidString, "generation":UUID().uuidString,
             "revision":7, "sourceName":"Desktop", "mode":"synthetic", "observedAt":100, "changedAt":90,
@@ -185,4 +270,34 @@ final class ProtocolTests: XCTestCase {
         return try JSONSerialization.data(withJSONObject: value)
     }
 
+}
+
+private final class ClientURLProtocol: URLProtocol {
+    static var handler: ((URLRequest) throws -> (Int, Data))?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        do {
+            let (code, data) = try Self.handler!(request)
+            let response = HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: "HTTP/1.1", headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch { client?.urlProtocol(self, didFailWithError: error) }
+    }
+    override func stopLoading() {}
+    static func body(_ request: URLRequest) -> Data {
+        if let data = request.httpBody { return data }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open()
+        defer { stream.close() }
+        var result = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count <= 0 { break }
+            result.append(contentsOf: buffer.prefix(count))
+        }
+        return result
+    }
 }

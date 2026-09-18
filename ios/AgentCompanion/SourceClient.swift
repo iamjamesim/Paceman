@@ -1,5 +1,21 @@
 import Foundation
 import Security
+import UIKit
+
+extension ClientDevice {
+    @MainActor static func current() throws -> ClientDevice {
+        let key = "client-installation-id"
+        let id: String
+        if let saved = Vault.load(String.self, key: key) { id = saved }
+        else {
+            id = UUID().uuidString
+            try Vault.save(id, key: key)
+        }
+        // The OS may provide a generic name. This is reported app metadata,
+        // never hardware identity or proof that two installations are one phone.
+        return ClientDevice(installationID: id, name: String(UIDevice.current.name.prefix(80)), platform: "ios")
+    }
+}
 
 enum Vault {
     static func save<T: Encodable>(_ value: T, key: String) throws {
@@ -48,8 +64,7 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
 final class SourceClient {
     private let session: URLSession
     private let streamSession: URLSession
-    init() {
-        let configuration = URLSessionConfiguration.ephemeral
+    init(configuration: URLSessionConfiguration = .ephemeral) {
         configuration.timeoutIntervalForRequest = 5
         configuration.timeoutIntervalForResource = 12
         configuration.waitsForConnectivity = false
@@ -60,19 +75,51 @@ final class SourceClient {
         streamSession = URLSession(configuration: streamConfiguration, delegate: NoRedirect(), delegateQueue: nil)
     }
 
-    func pair(_ invitation: Invitation) async throws -> PairedSource {
+    func pair(_ invitation: Invitation, device: ClientDevice, previous: PairedSource? = nil) async throws -> PairedSource {
         let origin = try invitation.validatedURL()
         var request = URLRequest(url: origin.appendingPathComponent("v1/pair"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["invitation": invitation.invitation])
+        struct PairRequest: Encodable { let invitation: String; let device: ClientDevice }
+        request.httpBody = try JSONEncoder().encode(PairRequest(invitation: invitation.invitation, device: device))
+        if let previous, previous.sourceID == invitation.sourceID, previous.endpoint == origin {
+            request.setValue("Bearer \(previous.credential)", forHTTPHeaderField: "Authorization")
+        }
         let data = try await response(request)
-        struct Redemption: Decodable { let schema: Int; let sourceID: String; let clientID: String; let credential: String }
+        struct Redemption: Decodable { let schema: Int; let sourceID: String; let clientID: String; let credential: String; let clientManagement: Int? }
         let result = try JSONDecoder().decode(Redemption.self, from: data)
         guard result.schema == 1, result.sourceID == invitation.sourceID,
               !result.credential.isEmpty else { throw HubError.message("Source identity mismatch") }
         return PairedSource(endpoint: origin, sourceID: result.sourceID,
-                            clientID: result.clientID, credential: result.credential)
+                            clientID: result.clientID, credential: result.credential,
+                            installationRegistered: result.clientManagement == 1)
+    }
+
+    func identify(_ source: PairedSource, device: ClientDevice) async throws {
+        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/client"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(["device": device])
+        struct Identification: Decodable { let clientManagement: Int }
+        let data = try await response(request)
+        let result = try JSONDecoder().decode(Identification.self, from: data)
+        guard result.clientManagement == 1 else { throw HubError.message("Unsupported connection management response") }
+    }
+
+    func remove(_ source: PairedSource) async throws {
+        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/client"))
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
+        do {
+            struct Removal: Decodable { let revoked: Bool }
+            let data = try await response(request)
+            let result = try JSONDecoder().decode(Removal.self, from: data)
+            guard result.revoked else { throw HubError.message("The computer did not confirm removal") }
+        }
+        catch let error as HubError where error.isUnauthorized {
+            // Already revoked (or the response to an earlier removal was lost).
+        }
     }
 
     func snapshot(_ source: PairedSource) async throws -> Snapshot {
@@ -87,9 +134,8 @@ final class SourceClient {
         request.timeoutInterval = 60 * 60 * 4
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         let (bytes, response) = try await streamSession.bytes(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw HubError.message("Event stream refused; check pairing and network")
-        }
+        guard let http = response as? HTTPURLResponse else { throw HubError.message("Invalid server response") }
+        guard http.statusCode == 200 else { throw HubError.http(http.statusCode) }
         return bytes
     }
 
@@ -124,8 +170,7 @@ final class SourceClient {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw HubError.message("Invalid server response") }
         guard http.statusCode == 200 else {
-            if http.statusCode == 401 { throw HubError.message("Access denied. Invitation expired, was used, or access was revoked.") }
-            throw HubError.message("Source returned HTTP \(http.statusCode)")
+            throw HubError.http(http.statusCode)
         }
         guard data.count <= 65536 else { throw HubError.message("Status response too large") }
         return data

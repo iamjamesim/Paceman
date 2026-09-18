@@ -4,6 +4,7 @@ struct PairingFlow: View {
     @ObservedObject var model: CompanionModel
     let theme: CompanionTheme
     var preview = false
+    @Environment(\.dismiss) private var dismiss
     @State private var scanner = false
     @State private var invitation = ""
     @State private var parsed: Invitation?
@@ -14,7 +15,7 @@ struct PairingFlow: View {
                 ComputerIllustration(theme: theme).frame(width: 210).frame(maxWidth: .infinity).padding(.vertical, 28)
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Connect your agents").font(theme.monospaced ? theme.font(27, emphasis: true) : .title.weight(.semibold))
-                    Text("Show the pairing code from the Agent Companion bridge on your computer.")
+                    Text("Open Paceman in your computer’s menu bar and show its pairing code.")
                         .font(.body).lineSpacing(4).foregroundStyle(theme.ink.opacity(0.65))
                     Text("Keep Tailscale connected on both devices.").font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
                 }
@@ -25,9 +26,11 @@ struct PairingFlow: View {
                             .font(.footnote.monospaced()).textSelection(.enabled)
                         CompanionButton(title: model.busy ? "Connecting…" : "Connect computer", theme: theme) {
                             Task {
-                                await model.pair(text: invitation)
-                                if model.source != nil { await model.refresh() }
-                                else { error = model.status }
+                                let reconnecting = model.source != nil
+                                if await model.pair(text: invitation) {
+                                    await model.refresh()
+                                    if reconnecting { dismiss() }
+                                } else { error = model.status }
                             }
                         }.disabled(model.busy || preview)
                         Button("Scan a different code") { self.parsed = nil; error = nil; scanner = true }
