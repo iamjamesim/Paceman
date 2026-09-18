@@ -4,7 +4,9 @@ Commands run from the repository root unless a section says otherwise.
 
 ## Source and tests (Mac or Linux)
 
-Use Python 3.10 or newer and a C compiler for the portable checks.
+Use Python 3.11 or newer and a C compiler for the portable checks.
+The live Omarchy adapter uses the standard-library TOML parser.
+For real desktop events, use the [Omarchy routing runbook](omarchy-routing.md).
 
 ```sh
 python3 -m venv .venv

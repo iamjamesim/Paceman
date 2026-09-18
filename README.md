@@ -7,8 +7,8 @@ widgets, and small displays that feel like yours. Easy pairing, shared visual
 character, and calm awareness come first; lightweight interactions are secondary.
 
 Paceman is a private prototype codename. The current implementation connects a
-synthetic desktop source to an iPhone and an ESP32 watch. Real Omarchy activity
-and appearance integration is the next milestone.
+desktop source to an iPhone and an ESP32 watch. The source supports synthetic
+tests and live Omarchy companion events with desktop appearance metadata.
 
 ## Components
 
@@ -27,6 +27,7 @@ protocol are retained; see its [provenance](firmware/esp32-watch/UPSTREAM.md).
 ## Start developing
 
 - [Setup](docs/development.md): source, private networking, iPhone and watch.
+- [Omarchy routing test](docs/omarchy-routing.md): connect existing desktop events to the phone.
 - [Architecture](docs/architecture.md): component boundaries and data flow.
 - [Protocol](docs/protocol.md): source API and phone-to-watch contract.
 - [Validation](docs/validation.md): verified behavior and remaining device tests.
@@ -44,7 +45,8 @@ On a Mac with Xcode, also run `bash scripts/check-on-mac.sh` and run the
 
 ## Current limits
 
-The source emits synthetic activity. The phone forwards basic clock/ownership
+Live Omarchy routing is implemented; physical end-to-end validation is pending.
+The phone forwards basic clock/ownership
 and activity packets; live watch theme, weather, allowance and source-freshness
 forwarding are not implemented. One locked-phone APNs-triggered fetch worked;
 continuous background delivery and full physical-watch rendering are not proven.

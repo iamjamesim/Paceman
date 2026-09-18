@@ -9,7 +9,7 @@ final class Diagnostics {
         url = root.appendingPathComponent("transport-test.jsonl")
     }
     func record(_ stage: String, event: String? = nil) {
-        // Only our fixed stage labels and synthetic event IDs; never credentials/URLs/errors.
+        // Only our fixed stage labels and opaque event IDs; never credentials/URLs/errors.
         var entry: [String: Any] = ["at": Date().timeIntervalSince1970,
                                   "uptime": ProcessInfo.processInfo.systemUptime, "stage": stage]
         if let event { entry["event"] = event }

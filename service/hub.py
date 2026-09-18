@@ -1,4 +1,4 @@
-"""Private, synthetic activity source for the first real-device transport tests.
+"""Private activity source for real-device transport tests.
 
 Run with python3 -m service.hub. No agent hooks or installed watch service touched.
 Only loopback HTTP is accepted; Tailscale Serve provides the remote TLS boundary.
@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+import fcntl
 import hashlib
 import json
 import os
@@ -59,6 +60,12 @@ class Store:
                     mode TEXT NOT NULL, cursor INTEGER NOT NULL, next_attempt REAL NOT NULL DEFAULT 0,
                     attempts INTEGER NOT NULL DEFAULT 0, last_result TEXT, last_apns_id TEXT);
             """)
+            db.execute("BEGIN IMMEDIATE")
+            columns = {row[1] for row in db.execute("PRAGMA table_info(events)")}
+            if "payload" not in columns:
+                db.execute("ALTER TABLE events ADD COLUMN payload TEXT")
+            if "kind" not in columns:
+                db.execute("ALTER TABLE events ADD COLUMN kind TEXT NOT NULL DEFAULT 'activity'")
             for key, value in [("source_id", str(uuid.uuid4())), ("generation", str(uuid.uuid4()))]:
                 db.execute("INSERT OR IGNORE INTO metadata VALUES (?, ?)", (key, value))
             if db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0:
@@ -148,6 +155,7 @@ class Store:
         if state not in STATES:
             raise ValueError("Unknown activity state")
         with self.connect() as db:
+            self.require_synthetic(db)
             return db.execute("INSERT INTO events(at,state,label) VALUES (?,?,?)",
                               (time.time(), state, label[:80])).lastrowid
 
@@ -155,6 +163,9 @@ class Store:
         now = time.time() if now is None else now
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
+            if mode and mode[0] == "omarchy":
+                return
             rows = db.execute("SELECT * FROM schedule WHERE fired=0 AND due<=? ORDER BY due,id", (now,)).fetchall()
             for row in rows:
                 db.execute("INSERT INTO events(at,state,label) VALUES (?,?,?)",
@@ -165,20 +176,30 @@ class Store:
         self.tick()
         with self.connect() as db:
             row = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
-        return {"schema": 1, "sourceID": self.metadata("source_id"),
+        value = {"schema": 1, "sourceID": self.metadata("source_id"),
                 "generation": self.metadata("generation"), "revision": row["seq"],
                 "sourceName": "Transport test", "mode": "synthetic",
                 "observedAt": time.time(), "changedAt": row["at"], "freshFor": 30,
                 "state": row["state"], "eventID": str(row["seq"]),
                 "sessions": [] if row["state"] == "idle" else [{
                     "id": "test-session", "provider": "fixture", "state": row["state"]}]}
+        if row["payload"]:
+            value.update(json.loads(row["payload"]))
+        return value
+
+    @staticmethod
+    def require_synthetic(db):
+        mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
+        if mode and mode[0] == "omarchy":
+            raise ValueError("Synthetic controls are disabled for an Omarchy source; use a separate data directory")
 
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, store: Store):
+    def __init__(self, address, store: Store, adapter=None):
         self.store = store
+        self.adapter = adapter
         self.started = time.monotonic()
         self.pair_attempts: list[float] = []
         self.pair_lock = threading.Lock()
@@ -187,6 +208,8 @@ class Server(ThreadingHTTPServer):
     def service_actions(self):
         # Scheduled events occur without a client request, essential for lock tests.
         self.store.tick()
+        if self.adapter is not None:
+            self.adapter.tick()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -299,6 +322,11 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("serve")
     run.add_argument("--port", type=int, default=8765)
+    run.add_argument("--source", choices=("synthetic", "omarchy"), default="synthetic")
+    run.add_argument("--agent-socket", type=Path,
+                     help="Omarchy event socket (default: $XDG_RUNTIME_DIR/omarchy-watch.sock)")
+    run.add_argument("--omarchy-state", type=Path,
+                     help="Omarchy state directory (default: $XDG_STATE_HOME/omarchy)")
     invitation = sub.add_parser("invite")
     invitation.add_argument("--endpoint", required=True)
     invitation.add_argument("--output", type=Path, default=Path(".runtime/invitation.json"))
@@ -316,14 +344,32 @@ def main():
     args = parser.parse_args()
     store = Store(args.data_dir / "hub.sqlite3")
     if args.command == "serve":
-        server = Server(("127.0.0.1", args.port), store)
-        print(f"Synthetic source listening on 127.0.0.1:{server.server_port}", flush=True)
-        try:
-            server.serve_forever(poll_interval=0.25)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            server.server_close()
+        from contextlib import ExitStack
+        with ExitStack() as stack:
+            lock = stack.enter_context((args.data_dir / "source.lock").open("a"))
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                parser.error("A source is already running for this data directory")
+            server = stack.enter_context(Server(("127.0.0.1", args.port), store))
+            if args.source == "omarchy":
+                from service.omarchy import OmarchySource
+                try:
+                    server.adapter = stack.enter_context(OmarchySource(
+                        store, socket_path=args.agent_socket, state_dir=args.omarchy_state))
+                except (OSError, ValueError) as error:
+                    parser.error(str(error))
+            else:
+                with store.connect() as db:
+                    try:
+                        store.require_synthetic(db)
+                    except ValueError as error:
+                        parser.error(str(error))
+            print(f"{args.source.title()} source listening on 127.0.0.1:{server.server_port}", flush=True)
+            try:
+                server.serve_forever(poll_interval=0.25)
+            except KeyboardInterrupt:
+                pass
     elif args.command == "invite":
         value = store.invite(args.endpoint)
         args.output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -332,11 +378,18 @@ def main():
             json.dump(value, file, separators=(",", ":"))
         print(f"Five-minute invitation saved to {args.output}. Treat it as a pairing secret.")
     elif args.command == "emit":
-        print(f"Synthetic event {store.emit(args.state)}: {args.state}")
+        try:
+            print(f"Synthetic event {store.emit(args.state)}: {args.state}")
+        except ValueError as error:
+            parser.error(str(error))
     elif args.command == "schedule":
         if args.delay < 0 or args.interval < 5 or not 1 <= args.count <= 100:
             parser.error("delay >= 0, interval >= 5, count 1..100 required")
         with store.connect() as db:
+            try:
+                store.require_synthetic(db)
+            except ValueError as error:
+                parser.error(str(error))
             db.execute("DELETE FROM schedule WHERE fired=0")
             sequence = ["working", "needs_input", "working", "finished", "idle"]
             db.executemany("INSERT INTO schedule(due,state) VALUES (?,?)", [

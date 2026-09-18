@@ -9,8 +9,18 @@ Connect real Omarchy activity and appearance through the source service to the
 existing iPhone app and phone-owned watch. Reuse relevant upstream collectors;
 do not start the old desktop Bluetooth owner or install duplicate agent hooks.
 
-1. Add the Omarchy source adapter while preserving synthetic mode for tests.
-2. Run the service on Omarchy and pair the phone over private HTTPS.
+The Omarchy machine is now running this checkout as the transient user service
+`paceman-source.service`; the old `omarchy-watch.service` is stopped. The existing
+private HTTPS route is reused. The prior Linux source database was migrated with
+SQLite backup, preserving its source identity and paired client credential.
+This service setup lasts for the current boot; it is not a permanent install.
+Check it with `systemctl --user status paceman-source.service`. Do not start a
+second source while testing the phone.
+
+1. Build/install the updated phone app: earlier builds reject non-synthetic mode.
+2. Connect the updated phone to the running Omarchy source over private HTTPS.
+   Existing pairing works if it belongs to the migrated Linux source; otherwise
+   generate a fresh invitation. See docs/omarchy-routing.md.
 3. Extend phone-to-watch profile forwarding for desktop appearance and freshness.
 4. Verify transitions, theme continuity, disconnect/reconnect and prolonged phone
    locking on physical devices; distinguish BLE acceptance from visible rendering.
@@ -32,7 +42,8 @@ Both use this repository; credentials and device-specific runtime state stay loc
 - Source presentation can customize palette and typography; no theme picker,
   wallpaper controls, extra tabs, or approval-centric dashboard are in scope.
 - No real-agent integration, reliable background delivery or hardware rendering
-  should be inferred from simulator fixtures or mocked push tests.
+  should be inferred from simulator fixtures or mocked push tests. The Omarchy
+  adapter has automated socket/HTTP/SSE coverage; live device evidence is pending.
 
 The earlier Android receiver experiment and development history were preserved
 outside this checkout before creating the initial Paceman commit. They are not

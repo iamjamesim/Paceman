@@ -139,7 +139,9 @@ final class CompanionModel: ObservableObject {
         lastContact = Date()
         fetchedUptime = ProcessInfo.processInfo.systemUptime - age
         hasError = false
-        status = age < value.freshFor ? "Connected · synthetic test source" : "Catching up · buffered snapshot is stale"
+        status = age < value.freshFor
+            ? (value.mode == "synthetic" ? "Connected · synthetic test source" : "Connected · Omarchy")
+            : "Catching up · buffered snapshot is stale"
         publishWidget(reload: changed)
         Diagnostics.shared.record(stage, event: value.identity)
         if age < value.freshFor { watch.forward(value) }

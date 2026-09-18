@@ -4,7 +4,7 @@ Paceman connects agent workspaces to personal gear. Work remains in the source
 agent environment; the hub presents current state and relays it to accessories.
 
 ```text
-Workspace adapter (planned: Omarchy)
+Omarchy companion events + desktop palette (or synthetic test source)
             │
             ▼
 Private source service ── HTTPS snapshot / foreground SSE ──► iPhone ── BLE ──► watch
@@ -15,11 +15,15 @@ Private source service ── HTTPS snapshot / foreground SSE ──► iPhone �
 
 ## Source service
 
-`service/hub.py` currently owns a synthetic source, SQLite persistence, single-use
+`service/hub.py` owns source snapshots, SQLite persistence, single-use
 pairing invitations, authenticated reads, revision ordering and push destinations.
-It listens only on loopback. Tailscale Serve supplies private HTTPS. The future
-Omarchy adapter should collect existing agent status and desktop appearance,
-then supply the same snapshot contract without depending on a particular display.
+It listens only on loopback. Tailscale Serve supplies private HTTPS.
+`service/omarchy.py` receives the existing desktop companion's local `agent-event`
+protocol and collects resolved Omarchy theme colors without starting a Bluetooth
+owner. Synthetic mode remains the default for isolated tests. See the
+[routing runbook](omarchy-routing.md) for the temporary service switch and limits.
+Activity and appearance both advance snapshot revisions; appearance-only changes
+retain the activity event ID and are excluded from APNs activity notifications.
 
 `service/push.py` is an optional process beside that source. It sends a minimal
 APNs hint; the phone fetches current data from its previously paired endpoint.

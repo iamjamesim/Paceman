@@ -32,6 +32,13 @@ or acknowledge attention. `observedAt` is the source's successful snapshot time;
 `changedAt` stays fixed for the same event. Deleting/replacing the database creates
 a new source identity and requires new pairing. Simple process restart does not.
 
+`mode` is `synthetic` or `omarchy`. Live Omarchy snapshots use the same API and
+pairing contract. `revision` advances for activity or appearance changes; `eventID`
+and `changedAt` advance only for activity changes. They need not equal the latest
+snapshot revision. Appearance updates therefore cannot replay a watch alert.
+The source's `observedAt` establishes service liveness, not agent-process liveness.
+See [routing semantics and recovery limits](omarchy-routing.md).
+
 `GET /v1/events`: same authorization, `text/event-stream`. Each `data:` line
 contains a full snapshot. Emit immediately, on revision change, and every 15
 seconds to establish source liveness. Event scheduling runs independently in
@@ -48,8 +55,8 @@ guarantee is made.
 
 The watch has no local upstream freshness lease in this protocol. Do not
 silently repurpose existing packet fields. Add negotiated protocol support
-before treating this as daily monitoring. Source state and local notification
-acknowledgement will remain separate in the future real-agent adapter.
+before treating this as daily monitoring. Source session state and local watch
+acknowledgement remain separate in the Omarchy adapter.
 # Direct push destination extension
 
 The optional direct-APNs probe adds `/v1/push` to this test source. All three
@@ -75,8 +82,9 @@ See [direct push test](direct-push-test.md) for modes, throttling, and limitatio
 ## Optional phone presentation metadata
 
 The iPhone can display `sessions` entries containing `id`, `provider`, and `state`,
-with optional `name` and `project` strings. The current test source already emits
-a fixture session; real agent adapters remain separate work.
+with optional `name` and `project` strings. Synthetic mode emits a fixture session;
+the Omarchy adapter emits opaque session IDs, providers and lifecycle states.
+It does not read task names, projects or conversation content from the companion.
 
 A snapshot may also carry a resolved appearance object:
 
@@ -95,6 +103,7 @@ Colors are six-digit RGB hex, optionally prefixed with `#`. `monospaced` selects
 the bundled JetBrains Mono family; arbitrary remote fonts/assets are not loaded.
 Missing or invalid optional presentation metadata is ignored without discarding
 a valid core snapshot. The app uses its neutral appearance until a valid source appearance
-is supplied. There is no user-facing local theme picker. A source should increment
-its revision when session content changes. No producer for live Omarchy themes
-and no BLE theme packet have been added in this pass.
+is supplied. There is no user-facing local theme picker. A source increments
+its revision when session content changes. The Omarchy collector supplies live
+appearance metadata using the desktop bar overrides and accent contrast fallback.
+BLE theme forwarding remains unimplemented.
