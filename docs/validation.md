@@ -17,8 +17,9 @@ It describes the private prototype as of 2026-09-18, not a reliability guarantee
   Sharing tests cover persistence across upgrades, service-failure rollback and
   missing runtime files; pairing tests verify that panel metadata excludes secrets.
   Socket-driven tests verify per-state counts through transitions and cleanup.
-  Eight JavaScript presentation cases cover single, matching, mixed, idle, stale
-  and legacy states; these run through Python when Node.js is available.
+  Nine JavaScript presentation cases cover single, matching, mixed, idle, stale
+  and legacy states, including exclusion of retained completions from active
+  counts; these run through Python when Node.js is available.
 - The desktop installer ran on the Omarchy machine. The copied app and enabled
   user service use permanent user directories; the source identity and both
   existing client credentials were verified unchanged after migration. The bar

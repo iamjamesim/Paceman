@@ -68,11 +68,16 @@ never convert that into a fresh-pairing prompt.
 Activity uses per-state session counts from the same snapshot as its aggregate:
 
 - One session keeps the simple Codex/status row.
-- Multiple sessions show “Codex · N sessions.” If all share one state, the status
-  reads “2 working,” “2 need input,” or “2 finished,” with no extra line.
-- Mixed states show the priority state on the main row and a smaller breakdown
+- Multiple ongoing sessions show “Codex · N active.” Count only working and
+  needs-input states. If all share one state, the status reads “2 working” or
+  “2 need input,” with no extra line.
+- Mixed active states show the priority state on the main row and a smaller breakdown
   below, such as “1 needs input · 1 working.” Priority is needs input, working,
-  then finished, matching the watch aggregate.
+  then finished, matching the watch aggregate. Retained completions do not appear
+  in the active count or breakdown. With only completions, use the simple
+  “Codex / Finished” row; those records do not establish how many sessions are open.
+  This is an activity count, not an open-window count. Reliable liveness tracking
+  is a follow-up; open sessions should retain their latest status after a turn ends.
 - Off/stale sources hide historical counts. Older status files without counts
   fall back to the aggregate; do not guess the distribution.
 

@@ -40,7 +40,7 @@ PanelWindow {
             activity: "working", sessions: 2, sessionCounts: {needs_input: 0, working: 2, finished: 0}},
           {label: "Mixed states", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3,
             activity: "needs_input", sessions: 2, sessionCounts: {needs_input: 1, working: 1, finished: 0}},
-          {label: "Three states", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3,
+          {label: "Active work plus retained completion", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3,
             activity: "needs_input", sessions: 6, sessionCounts: {needs_input: 2, working: 3, finished: 1}}
         ] : [
           {label: "Receiving updates", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3, activity: "working"},

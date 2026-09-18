@@ -17,11 +17,14 @@ function activitySummary(state, available) {
   var valid = order.every(function(key) { return Number.isInteger(counts[key]) && counts[key] >= 0 })
   var total = order.reduce(function(sum, key) { return sum + (counts[key] || 0) }, 0)
   // Older status files contain only an aggregate; never guess the breakdown.
-  if (!valid || total !== state.sessions || total < 2) return result
-  result.title = "Codex · " + total + " sessions"
-  var parts = order.filter(function(key) { return counts[key] > 0 }).map(function(key) {
+  if (!valid || total !== state.sessions) return result
+  // Completions are retained history, not evidence of an ongoing session.
+  var active = counts.needs_input + counts.working
+  if (active < 2) return result
+  result.title = "Codex · " + active + " active"
+  var parts = ["needs_input", "working"].filter(function(key) { return counts[key] > 0 }).map(function(key) {
     return counts[key] + (key === "needs_input" ? (counts[key] === 1 ? " needs input" : " need input")
-      : key === "working" ? " working" : " finished")
+      : " working")
   })
   if (parts.length === 1) result.label = parts[0]
   else {

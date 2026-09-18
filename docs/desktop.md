@@ -97,8 +97,9 @@ events, multi-session behavior, and recovery limitations.
 - **Activity:** the aggregate Codex state from this machine. This is a compact
   source summary, not a duplicate of the phone's activity feed. The watch's agent
   indicator sits in a fixed slot beside the words; Working pulses gently while
-  the panel is open. Multiple sessions show a count, with a smaller state
-  breakdown only when their states differ.
+  the panel is open. Multiple working/needs-input sessions show an active count,
+  with a smaller breakdown when those states differ. Retained completed records
+  are excluded; they are not evidence of ongoing sessions.
 
 The source publishes a five-second heartbeat that expires after 20 seconds.
 “Receiving updates” means a successful authenticated snapshot response or stream
