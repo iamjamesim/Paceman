@@ -1,8 +1,10 @@
 # Identified pairing and removal
 
 The source, Omarchy panel and iPhone code support named app installations and
-removal from either side. Linux protocol/desktop checks have run. The updated
-iPhone build and physical-device acceptance still require a Mac with Xcode.
+removal from either side. Linux protocol/desktop checks have run. Mac simulator
+and signed device builds passed, along with all 21 iOS tests. The update is
+installed on the existing iPhone, with successful foreground fetches; physical
+pairing/removal acceptance below remains pending. See [validation](validation.md).
 
 ## User behavior
 
@@ -67,7 +69,7 @@ See the [protocol](protocol.md) for request shapes and privacy boundaries.
 2. Install on the already-paired iPhone. Open the app; verify its desktop row
    becomes named, activity still reaches the phone, and other old credentials
    remain untouched.
-3. In Computer details, use **Reconnect with a code** and scan a new desktop QR.
+3. In Computer details, use **Reconnect with QR code** and scan a new desktop QR.
    Verify one row remains for that installation and push setup re-registers.
 4. Pair a second app installation, including a duplicate reported name. Verify
    independent contact times; removing one must preserve the other.

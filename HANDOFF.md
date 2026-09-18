@@ -25,15 +25,17 @@ multi-session activity summary. The receiver now tracks Codex process ownership
 through kernel peer credentials; quiet/finished open sessions survive restart,
 and exited owners leave the summary. Existing hooks are unchanged. Identified pairing, per-client contact and access
 removal from either side are implemented. Legacy credentials stay unidentified
-until the updated app registers them. The iPhone changes and tests require Xcode
-validation; follow docs/pairing-and-removal.md before a device release.
+until the updated app registers them. Mac builds and all 21 iOS tests passed;
+the updated app is installed on the iPhone and fetching successfully. Complete
+the physical acceptance in docs/pairing-and-removal.md before a device release.
 Check it with `systemctl --user status paceman-source.service`. Do not start a
 second source while testing the phone.
 
-1. Build/install the updated phone app: earlier builds reject non-synthetic mode.
-2. Connect the updated phone to the running Omarchy source over private HTTPS.
-   Existing pairing works if it belongs to the migrated Linux source; otherwise
-   generate a fresh invitation. See docs/omarchy-routing.md.
+1. Complete physical pairing/removal acceptance: legacy identification is verified;
+   test same-installation reconnection, independent connections and removal failures.
+2. Verify live Omarchy transitions on the updated phone over private HTTPS.
+   The in-place update preserved working fetches; full live-event and visible
+   watch routing still need acceptance. See docs/omarchy-routing.md.
 3. Extend phone-to-watch profile forwarding for desktop appearance and freshness.
 4. Verify transitions, theme continuity, disconnect/reconnect and prolonged phone
    locking on physical devices; distinguish BLE acceptance from visible rendering.

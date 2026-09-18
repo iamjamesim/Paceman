@@ -24,9 +24,18 @@ It describes the private prototype as of 2026-09-18, not a reliability guarantee
   claims, concurrent pairing, same-name distinct apps, legacy identification,
   persisted per-client contact, self-scoped removal, stream revocation, private
   status output, and removal while sharing is off.
-- Five iOS tests were added for legacy decoding, pairing request identity/origin
+- On the Mac, Xcode 26.5 built the updated app and widget for simulator and signed
+  device use. All 21 XCTest cases passed on the iPhone 17 Pro simulator (iOS 26.5),
+  including the five new cases for legacy decoding, pairing request identity/origin
   scoping, authenticated identification, idempotent removal and offline/server
-  failures. They have **not run on Linux**; Xcode build and XCTest remain required.
+  failures. Physical pairing/removal acceptance remains pending.
+- The subsequent iPhone UI clarity pass also passed all 21 tests and simulator/
+  signed-device builds. Simulator fixtures were visually reviewed for setup,
+  activity, offline, reconnect, computer, paired watch and notifications. Changes
+  distinguish cached activity and last watch send, remove the normal JSON paste
+  path, clarify reconnect/removal, and place notification and sound controls on
+  their relevant screens. Camera-permission recovery and watch sound still need
+  physical interaction checks; fixture review does not establish these behaviors.
 - The installed pairing upgrade preserved the source ID and both existing
   credential hashes. Its two legacy connections remain unidentified until the
   updated app registers ownership. The live panel rendered correctly. An isolated
@@ -64,15 +73,21 @@ It describes the private prototype as of 2026-09-18, not a reliability guarantee
   The migrated Linux source identity and original paired client were preserved.
 - Prior iOS XCTest run passed 15 tests covering wire layout, ownership receipts,
   invitations, source metadata, push hints and presentation ordering/state.
-- This Linux change adds an iOS test for accepting Omarchy mode while rejecting
-  unknown modes and mismatched source identities. The updated iOS tests/build
-  have not run here; Xcode is required on the Mac.
+- The iOS test for accepting Omarchy mode while rejecting unknown modes and
+  mismatched source identities passed in the 21-test Mac run above.
 - iPhone app and widget built for simulator and device; signed build installed.
 - Firmware sources and simulator C code were imported byte-for-byte from v0.6.1.
   A full ESP-IDF source build and LVGL rendering have not been rerun on this Mac.
 
 ## Physical-device evidence
 
+- On 2026-09-18, the pairing/removal update was installed in place and launched
+  on the existing iPhone 16. App diagnostics recorded repeated successful
+  foreground snapshots and push destination registration without re-pairing,
+  plus BLE restoration. The user confirmed that the existing desktop connection
+  now reads “iPhone,” verifying legacy identification. Watch rendering and
+  physical removal/reconnection behavior remain unverified. Raw diagnostics
+  remain in ignored runtime storage.
 - Source pairing, push registration, foreground APNs receipt and authenticated
   Tailscale fetch succeeded on an iPhone 16.
 - In one locked-phone run, a callback occurred about 16 minutes 29 seconds after
