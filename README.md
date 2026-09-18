@@ -1,0 +1,60 @@
+# Paceman
+
+**Take your agents with you.**
+
+Personal gear for working with agents: connect your workspaces to watches,
+widgets, and small displays that feel like yours. Easy pairing, shared visual
+character, and calm awareness come first; lightweight interactions are secondary.
+
+Paceman is a private prototype codename. The current implementation connects a
+synthetic desktop source to an iPhone and an ESP32 watch. Real Omarchy activity
+and appearance integration is the next milestone.
+
+## Components
+
+| Directory | Responsibility |
+| --- | --- |
+| `ios/` | SwiftUI iPhone app, WidgetKit extension, source pairing and Bluetooth relay |
+| `service/` | Private Python source, snapshots, event stream, pairing and optional APNs sender |
+| `firmware/esp32-watch/` | ESP32 watch firmware, simulator, fonts and build tools |
+| `tests/` | Source API, persistence and APNs tests |
+| `scripts/` | Local checks, source pairing and iOS asset/project generation |
+| `docs/` | Setup, architecture, contracts and validation |
+
+The watch package comes from Omarchy Watch v0.6.1. Its existing layout and wire
+protocol are retained; see its [provenance](firmware/esp32-watch/UPSTREAM.md).
+
+## Start developing
+
+- [Setup](docs/development.md): source, private networking, iPhone and watch.
+- [Architecture](docs/architecture.md): component boundaries and data flow.
+- [Protocol](docs/protocol.md): source API and phone-to-watch contract.
+- [Validation](docs/validation.md): verified behavior and remaining device tests.
+- [Prototype scope](docs/paceman-prototype.md): the experience we are finishing.
+- [Handoff](HANDOFF.md): next work and compatibility constraints.
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-push.txt
+PATH="$PWD/.venv/bin:$PATH" bash scripts/check.sh
+```
+
+On a Mac with Xcode, also run `bash scripts/check-on-mac.sh` and run the
+`AgentCompanion` scheme's tests on an installed iPhone simulator.
+
+## Current limits
+
+The source emits synthetic activity. The phone forwards basic clock/ownership
+and activity packets; live watch theme, weather, allowance and source-freshness
+forwarding are not implemented. One locked-phone APNs-triggered fetch worked;
+continuous background delivery and full physical-watch rendering are not proven.
+WidgetKit and iOS control background update timing.
+
+Keep runtime state and credentials in ignored `.runtime/`. Never distribute an
+APNs private key in the app or repository. Direct APNs is a personal prototype
+arrangement, not a shared-key distribution design. The private source is intended
+for Tailscale access, not direct public internet exposure.
+
+The Xcode scheme, bundle IDs and Bluetooth protocol still use legacy names to
+preserve installed-device pairing. Product naming does not imply an identity migration.
+See [third-party notices](THIRD_PARTY_NOTICES.md) for included code and fonts.

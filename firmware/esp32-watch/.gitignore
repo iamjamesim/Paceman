@@ -1,0 +1,9 @@
+.tooling/
+firmware/build/
+firmware/managed_components/
+firmware/sdkconfig
+simulator/build/
+simulator/output/
+dist/
+**/__pycache__/
+*.pyc

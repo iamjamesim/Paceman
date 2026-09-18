@@ -1,0 +1,363 @@
+"""Private, synthetic activity source for the first real-device transport tests.
+
+Run with python3 -m service.hub. No agent hooks or installed watch service touched.
+Only loopback HTTP is accepted; Tailscale Serve provides the remote TLS boundary.
+"""
+from __future__ import annotations
+
+import argparse
+from contextlib import contextmanager
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import sqlite3
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
+import uuid
+
+STATES = {"idle", "working", "needs_input", "finished"}
+
+
+def endpoint(value: str) -> str:
+    parsed = urlsplit(value)
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+            or parsed.password or parsed.query or parsed.fragment
+            or parsed.path not in ("", "/")):
+        raise ValueError("Use an HTTPS origin with no path, credentials, or query")
+    return value.rstrip("/")
+
+
+def digest(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+class Store:
+    def __init__(self, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # Create with private permissions from the first write.
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        os.close(fd)
+        os.chmod(path, 0o600)
+        self.path = path
+        with self.connect() as db:
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS invitations(hash TEXT PRIMARY KEY, expires REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS clients(id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL,
+                    created REAL NOT NULL);
+                CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                    at REAL NOT NULL, state TEXT NOT NULL, label TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS schedule(id INTEGER PRIMARY KEY, due REAL NOT NULL,
+                    state TEXT NOT NULL, fired INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS push_devices(
+                    client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
+                    mode TEXT NOT NULL, cursor INTEGER NOT NULL, next_attempt REAL NOT NULL DEFAULT 0,
+                    attempts INTEGER NOT NULL DEFAULT 0, last_result TEXT, last_apns_id TEXT);
+            """)
+            for key, value in [("source_id", str(uuid.uuid4())), ("generation", str(uuid.uuid4()))]:
+                db.execute("INSERT OR IGNORE INTO metadata VALUES (?, ?)", (key, value))
+            if db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0:
+                db.execute("INSERT INTO events(at,state,label) VALUES (?,?,?)",
+                           (time.time(), "idle", "Initial synthetic state"))
+
+    @contextmanager
+    def connect(self):
+        db = sqlite3.connect(self.path, timeout=5)
+        db.row_factory = sqlite3.Row
+        try:
+            with db:
+                yield db
+        finally:
+            db.close()
+
+    def metadata(self, key: str) -> str:
+        with self.connect() as db:
+            return db.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()[0]
+
+    def invite(self, origin: str, now: float | None = None) -> dict:
+        origin = endpoint(origin)
+        now = time.time() if now is None else now
+        token = secrets.token_urlsafe(32)
+        with self.connect() as db:
+            db.execute("DELETE FROM invitations WHERE expires<=?", (now,))
+            db.execute("INSERT INTO invitations VALUES (?,?)", (digest(token), now + 300))
+        return {"schema": 1, "endpoint": origin, "sourceID": self.metadata("source_id"),
+                "invitation": token, "expiresAt": now + 300}
+
+    def redeem(self, token: str, now: float | None = None) -> dict | None:
+        now = time.time() if now is None else now
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT expires FROM invitations WHERE hash=?", (digest(token),)).fetchone()
+            if row is None or row[0] <= now:
+                return None
+            db.execute("DELETE FROM invitations WHERE hash=?", (digest(token),))
+            credential, client_id = secrets.token_urlsafe(32), str(uuid.uuid4())
+            db.execute("INSERT INTO clients VALUES (?,?,?)", (client_id, digest(credential), now))
+        return {"schema": 1, "sourceID": self.metadata("source_id"),
+                "clientID": client_id, "credential": credential}
+
+    def authorized(self, token: str) -> bool:
+        if not token:
+            return False
+        with self.connect() as db:
+            return db.execute("SELECT 1 FROM clients WHERE hash=?", (digest(token),)).fetchone() is not None
+
+    def revoke(self, client_id: str) -> bool:
+        with self.connect() as db:
+            db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
+            return db.execute("DELETE FROM clients WHERE id=?", (client_id,)).rowcount > 0
+
+    def push_device(self, credential: str, payload: dict | None = None, remove=False) -> dict | None:
+        """The paired credential owns exactly one push destination; IDs aren't accepted from clients."""
+        if payload is not None:
+            if (not isinstance(payload, dict)
+                    or not isinstance(payload.get("deviceToken"), str)
+                    or not re.fullmatch(r"[0-9a-f]{32,512}", payload["deviceToken"])
+                    or len(payload["deviceToken"]) % 2
+                    or payload.get("environment") not in ("development", "production")
+                    or payload.get("mode") not in ("alert", "background")):
+                raise ValueError("Invalid push registration")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            client = db.execute("SELECT id FROM clients WHERE hash=?", (digest(credential),)).fetchone()
+            if not client:
+                return None
+            client_id = client[0]
+            if remove:
+                db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
+            elif payload is not None:
+                old = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
+                values = (payload["deviceToken"], payload["environment"], payload["mode"])
+                if old is None or tuple(old[k] for k in ("token", "environment", "mode")) != values:
+                    revision = db.execute("SELECT MAX(seq) FROM events").fetchone()[0]
+                    db.execute("INSERT OR REPLACE INTO push_devices(client_id,token,environment,mode,cursor) "
+                               "VALUES (?,?,?,?,?)", (client_id, *values, revision))
+            row = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
+        if not row:
+            return {"registered": False}
+        return {"registered": True, "environment": row["environment"], "mode": row["mode"],
+                "lastResult": row["last_result"], "lastAPNsID": row["last_apns_id"]}
+
+    def emit(self, state: str, label: str = "Manual synthetic event") -> int:
+        if state not in STATES:
+            raise ValueError("Unknown activity state")
+        with self.connect() as db:
+            return db.execute("INSERT INTO events(at,state,label) VALUES (?,?,?)",
+                              (time.time(), state, label[:80])).lastrowid
+
+    def tick(self, now: float | None = None):
+        now = time.time() if now is None else now
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute("SELECT * FROM schedule WHERE fired=0 AND due<=? ORDER BY due,id", (now,)).fetchall()
+            for row in rows:
+                db.execute("INSERT INTO events(at,state,label) VALUES (?,?,?)",
+                           (now, row["state"], "Scheduled synthetic event"))
+                db.execute("UPDATE schedule SET fired=1 WHERE id=?", (row["id"],))
+
+    def snapshot(self) -> dict:
+        self.tick()
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
+        return {"schema": 1, "sourceID": self.metadata("source_id"),
+                "generation": self.metadata("generation"), "revision": row["seq"],
+                "sourceName": "Transport test", "mode": "synthetic",
+                "observedAt": time.time(), "changedAt": row["at"], "freshFor": 30,
+                "state": row["state"], "eventID": str(row["seq"]),
+                "sessions": [] if row["state"] == "idle" else [{
+                    "id": "test-session", "provider": "fixture", "state": row["state"]}]}
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, address, store: Store):
+        self.store = store
+        self.started = time.monotonic()
+        self.pair_attempts: list[float] = []
+        self.pair_lock = threading.Lock()
+        super().__init__(address, Handler)
+
+    def service_actions(self):
+        # Scheduled events occur without a client request, essential for lock tests.
+        self.store.tick()
+
+
+class Handler(BaseHTTPRequestHandler):
+    server: Server
+
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(5)
+
+    def log_message(self, *_):
+        # Request bodies, URLs, credentials, and invitation values never logged.
+        pass
+
+    def reply(self, status: int, payload: dict):
+        data = json.dumps(payload, separators=(",", ":")).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        if self.path not in ("/v1/snapshot", "/v1/events", "/v1/push"):
+            self.reply(404, {"error": "not_found"})
+            return
+        prefix, _, token = self.headers.get("Authorization", "").partition(" ")
+        if prefix != "Bearer" or not self.server.store.authorized(token):
+            self.reply(401, {"error": "unauthorized"})
+            return
+        if self.path == "/v1/snapshot":
+            self.reply(200, self.server.store.snapshot())
+            return
+        if self.path == "/v1/push":
+            value = self.server.store.push_device(token)
+            self.reply(200 if value else 401, value or {"error": "unauthorized"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        last_revision, last_sent = None, 0.0
+        try:
+            while self.server.store.authorized(token):
+                value = self.server.store.snapshot()
+                if value["revision"] != last_revision or time.monotonic() - last_sent >= 15:
+                    self.wfile.write(b"data: " + json.dumps(value, separators=(",", ":")).encode() + b"\n\n")
+                    self.wfile.flush()
+                    last_revision, last_sent = value["revision"], time.monotonic()
+                time.sleep(0.25)
+        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+            pass
+
+    def do_POST(self):
+        if self.path == "/v1/push":
+            prefix, _, token = self.headers.get("Authorization", "").partition(" ")
+            if prefix != "Bearer" or not self.server.store.authorized(token):
+                self.reply(401, {"error": "unauthorized"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 4096 or self.headers.get("Transfer-Encoding"):
+                    raise ValueError()
+                value = self.server.store.push_device(token, json.loads(self.rfile.read(length)))
+                self.reply(200 if value else 401, value or {"error": "unauthorized"})
+            except (ValueError, AttributeError, TimeoutError):
+                self.reply(400, {"error": "invalid_request"})
+            return
+        if self.path != "/v1/pair":
+            self.reply(404, {"error": "not_found"})
+            return
+        # Global bounded pairing budget: an attacker cannot bypass it through proxy headers.
+        with self.server.pair_lock:
+            now = time.monotonic()
+            self.server.pair_attempts = [t for t in self.server.pair_attempts if now-t < 60]
+            if len(self.server.pair_attempts) >= 20:
+                self.reply(429, {"error": "try_later"})
+                return
+            self.server.pair_attempts.append(now)
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 4096 or self.headers.get("Transfer-Encoding"):
+                raise ValueError()
+            payload = json.loads(self.rfile.read(length))
+            token = payload.get("invitation")
+            if not isinstance(token, str) or not 20 <= len(token) <= 100:
+                raise ValueError()
+        except (ValueError, AttributeError, TimeoutError):
+            self.reply(400, {"error": "invalid_request"})
+            return
+        result = self.server.store.redeem(token)
+        self.reply(200 if result else 401, result or {"error": "invitation_expired_or_used"})
+
+    def do_DELETE(self):
+        if self.path != "/v1/push":
+            self.reply(404, {"error": "not_found"})
+            return
+        prefix, _, token = self.headers.get("Authorization", "").partition(" ")
+        value = self.server.store.push_device(token, remove=True) if prefix == "Bearer" else None
+        self.reply(200 if value else 401, value or {"error": "unauthorized"})
+
+
+def main():
+    os.umask(0o077)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-dir", type=Path, default=Path(".runtime"))
+    sub = parser.add_subparsers(dest="command", required=True)
+    run = sub.add_parser("serve")
+    run.add_argument("--port", type=int, default=8765)
+    invitation = sub.add_parser("invite")
+    invitation.add_argument("--endpoint", required=True)
+    invitation.add_argument("--output", type=Path, default=Path(".runtime/invitation.json"))
+    emit = sub.add_parser("emit")
+    emit.add_argument("state", choices=sorted(STATES))
+    schedule = sub.add_parser("schedule")
+    schedule.add_argument("--delay", type=int, default=900)
+    schedule.add_argument("--interval", type=int, default=360)
+    schedule.add_argument("--count", type=int, default=10)
+    sub.add_parser("clients")
+    revoke = sub.add_parser("revoke")
+    revoke.add_argument("client_id")
+    sub.add_parser("events")
+    sub.add_parser("cancel-schedule")
+    args = parser.parse_args()
+    store = Store(args.data_dir / "hub.sqlite3")
+    if args.command == "serve":
+        server = Server(("127.0.0.1", args.port), store)
+        print(f"Synthetic source listening on 127.0.0.1:{server.server_port}", flush=True)
+        try:
+            server.serve_forever(poll_interval=0.25)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
+    elif args.command == "invite":
+        value = store.invite(args.endpoint)
+        args.output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as file:
+            json.dump(value, file, separators=(",", ":"))
+        print(f"Five-minute invitation saved to {args.output}. Treat it as a pairing secret.")
+    elif args.command == "emit":
+        print(f"Synthetic event {store.emit(args.state)}: {args.state}")
+    elif args.command == "schedule":
+        if args.delay < 0 or args.interval < 5 or not 1 <= args.count <= 100:
+            parser.error("delay >= 0, interval >= 5, count 1..100 required")
+        with store.connect() as db:
+            db.execute("DELETE FROM schedule WHERE fired=0")
+            sequence = ["working", "needs_input", "working", "finished", "idle"]
+            db.executemany("INSERT INTO schedule(due,state) VALUES (?,?)", [
+                (time.time() + args.delay + i * args.interval, sequence[i % 5])
+                for i in range(args.count)])
+        print(f"Scheduled {args.count} synthetic transitions; first in {args.delay}s.")
+    elif args.command == "clients":
+        with store.connect() as db:
+            for row in db.execute("SELECT id,created FROM clients"):
+                print(dict(row))
+    elif args.command == "revoke":
+        print("Revoked" if store.revoke(args.client_id) else "Client not found")
+    elif args.command == "events":
+        with store.connect() as db:
+            for row in db.execute("SELECT * FROM events ORDER BY seq"):
+                print(json.dumps(dict(row)))
+    elif args.command == "cancel-schedule":
+        with store.connect() as db:
+            db.execute("DELETE FROM schedule WHERE fired=0")
+        print("Pending synthetic events cancelled")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.venv/
+.runtime/
+*.xcuserstate
+xcuserdata/
+DerivedData/
+.DS_Store
+*.zip
+*.p8
+
+# Local secrets and generated device builds
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.mobileprovision
+*.sqlite3
+*.sqlite3-*
+*.bundle
