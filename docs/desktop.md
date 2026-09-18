@@ -4,6 +4,9 @@ Paceman has a background source and a small Omarchy bar panel. The source starts
 at login and keeps running when the panel closes or the shell restarts. The phone
 fetches source activity over private HTTPS and owns the watch's Bluetooth link.
 
+See the [visual reference](desktop-visual-reference.md) for canonical screenshots
+and the behavior shared with the future macOS desktop client.
+
 ## Install or update
 
 Requirements: Python 3.11+, a running user systemd session, Omarchy 4.0+, and

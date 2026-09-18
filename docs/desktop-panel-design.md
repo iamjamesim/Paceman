@@ -1,5 +1,8 @@
 # Desktop panel design
 
+The [visual reference](desktop-visual-reference.md) shows the canonical rendered
+states and explains what the macOS implementation should preserve.
+
 ## Job
 
 Give someone a quick answer to “what is this computer contributing to Paceman,
