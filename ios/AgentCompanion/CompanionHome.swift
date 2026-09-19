@@ -3,7 +3,6 @@ import SwiftUI
 struct CompanionHome: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
-    @ObservedObject private var push = PushCoordinator.shared
     let theme: CompanionTheme
     let open: (FeedDestination) -> Void
     var paired: Bool { presentation.preview ? presentation.previewHasComputer : model.source != nil }
@@ -13,7 +12,7 @@ struct CompanionHome: View {
     var stale: Bool { presentation.preview ? presentation.previewOffline : model.snapshot != nil && !model.fresh }
     var content: AgentFeedContent {
         if presentation.preview {
-            if presentation.previewScreen == "waiting" { return .waiting }
+            if ["waiting", "offline-empty"].contains(presentation.previewScreen) { return .waiting }
             return presentation.previewSessions.isEmpty ? .empty : .sessions(presentation.previewSessions)
         }
         return AgentFeedContent.resolve(model.snapshot)
@@ -24,7 +23,7 @@ struct CompanionHome: View {
                 HStack {
                     HStack(spacing: 9) {
                         CompanionBrandMark().frame(width: 31, height: 31).foregroundStyle(theme.tint)
-                        Text("companion").font(.system(size: 21, weight: .medium, design: .rounded)).tracking(-0.5)
+                        Text("Paceman").font(.system(size: 21, weight: .medium, design: .rounded)).tracking(-0.5)
                     }
                     Spacer()
                     Button { open(.settings) } label: {
@@ -35,11 +34,6 @@ struct CompanionHome: View {
                 if paired { agentContent }
                 else { agentSetup }
 
-                if paired && !presentation.preview && !model.accessRevoked && push.setupStep.needsAttention {
-                    feedNotice(title: push.setupStep == .needsPermission ? "Get agent notifications" : "Notification setup needs attention", detail: push.setupStep == .blocked ? "Notifications are off in iOS Settings." : push.setupStep == .needsRegistration ? "This phone couldn’t register for alerts on your computer." : "Optional alerts when an agent needs input or finishes a turn.", symbol: "bell", action: push.setupStep == .blocked ? "Open Settings" : push.setupStep == .needsPermission ? "Set up" : "Continue") {
-                        if push.setupStep == .blocked { push.openSettings() } else { open(.notifications) }
-                    }.padding(.top, 20)
-                }
                 watchRow.padding(.top, 22)
                 if presentation.preview {
                     Text("Design preview · sample activity").font(.caption).foregroundStyle(theme.ink.opacity(0.5)).padding(.top, 22)
@@ -48,7 +42,7 @@ struct CompanionHome: View {
         }
         .refreshable { if !presentation.preview { await model.refresh() } }
         .foregroundStyle(theme.ink).background(CompanionCanvas(theme: theme))
-        .navigationTitle("Companion").toolbar(.hidden, for: .navigationBar)
+        .navigationTitle("Paceman").toolbar(.hidden, for: .navigationBar)
     }
     private var agentSetup: some View {
         VStack(alignment: .leading, spacing: 21) {
@@ -65,87 +59,93 @@ struct CompanionHome: View {
         }.padding(23).background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
             .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
+    private var historical: Bool { offline || stale }
     private var agentContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button { open(.computer) } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "laptopcomputer").font(.system(size: 15, weight: .medium)).foregroundStyle(theme.ink.opacity(0.65)).accessibilityHidden(true)
+                    Image(systemName: "laptopcomputer")
+                        .font(.system(size: 18, weight: .regular))
+                        .frame(width: 24).foregroundStyle(theme.ink.opacity(0.65)).accessibilityHidden(true)
                     Text(presentation.displayName(source: model.source))
-                        .font(theme.monospaced ? theme.font(13, emphasis: true) : .subheadline.weight(.medium))
+                        .font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold))
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).opacity(0.45)
-                }.frame(minHeight: 44).contentShape(Rectangle())
+                }.frame(minHeight: 32).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityHint("Manage this computer's connection")
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text(model.accessRevoked ? "Access removed" : offline ? "Computer unavailable" : stale ? "Waiting for fresh activity" : content.headline)
-                    .font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
-                    .tracking(-0.6).fixedSize(horizontal: false, vertical: true)
-                if offline || stale {
-                    Text(model.accessRevoked ? "Open this computer’s connection to scan a fresh QR code." : model.snapshot != nil || presentation.preview ? "Your pairing is saved. Updates will resume when the connection returns." : "Check that your computer is awake and Tailscale is connected.")
-                        .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
-                } else if let detail = content.supportingStatus {
-                    Text(detail).font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
-                } else {
-                    switch content {
-                    case .waiting:
-                        Text("Your agents will appear when the computer responds.").font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
-                    case .empty:
-                        Text("Activity will appear here when an agent starts.").font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
-                    case .summary:
-                        Text("Individual agent details aren't available yet.").font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
-                    case .sessions: EmptyView()
-                    }
-                }
-            }.padding(.top, 12).padding(.bottom, 18)
+            if model.accessRevoked {
+                HStack { connectionLabel; Spacer(); recoveryAction }.padding(.top, 3)
+            } else if historical {
+                connectionLabel.padding(.top, 8)
+            }
+            if presentation.preview ? presentation.previewScreen != "waiting" && presentation.previewScreen != "offline-empty" : model.lastContact != nil {
+                updateLabel.padding(.top, 5)
+            }
+            Color.clear.frame(height: 16)
 
-            if case .sessions(let sessions) = content {
-                if offline || stale { Eyebrow(text: "Last received activity").padding(.bottom, 10) }
-                ForEach(sessions) { session in
-                    CompanionRule(theme: theme)
-                    AgentFeedRow(session: session, theme: theme)
+            CompanionRule(theme: theme)
+            if model.accessRevoked {
+                Text("Reconnect to receive activity from this computer.")
+                    .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65)).padding(.top, 18)
+            } else {
+                if historical, case .sessions = content {
+                    Text("Last known activity").font(.caption).foregroundStyle(theme.ink.opacity(0.55))
+                        .padding(.top, 16)
+                }
+                switch content {
+                case .sessions(let sessions):
+                    let rows = AgentDisplayRow.rows(sessions)
+                    if rows.count > 1 && !historical {
+                        Text([content.headline, content.supportingStatus].compactMap { $0 }.joined(separator: " · "))
+                            .font(.caption).foregroundStyle(theme.ink.opacity(0.65)).padding(.top, 16)
+                    }
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        if index > 0 { CompanionRule(theme: theme) }
+                        AgentFeedRow(session: row.session, theme: theme, animate: !historical, detailOverride: row.detail)
+                    }
+                case .waiting:
+                    emptyActivity(historical ? "Waiting for the computer" : "Waiting for activity", detail: historical ? nil : "Your agents will appear here when the computer responds.")
+                case .empty:
+                    emptyActivity("No active sessions", detail: historical ? nil : "Activity appears when an agent starts.")
+                case .summary(let state):
+                    AgentFeedRow(session: AgentSession(id: "aggregate", provider: "", state: state, name: "Agent activity"), theme: theme, animate: !historical)
                 }
             }
-            CompanionRule(theme: theme)
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { updateLabel.fixedSize(); Spacer(minLength: 12); sourceBadge.fixedSize() }
-                VStack(alignment: .leading, spacing: 8) { updateLabel; sourceBadge }
-            }.padding(.top, 14)
+            if !presentation.preview && model.snapshot?.mode == "synthetic" {
+                Text("Test source").font(.caption2).foregroundStyle(theme.ink.opacity(0.5))
+            }
         }
-        .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 20)
+        .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 6)
         .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
         .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
+    private func emptyActivity(_ title: String, detail: String?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.subheadline.weight(.medium))
+            if let detail { Text(detail).font(.caption).foregroundStyle(theme.ink.opacity(0.55)) }
+        }.padding(.vertical, 20)
+    }
+    private var connectionLabel: some View {
+        Text(model.accessRevoked ? "Access removed" : "Reconnecting automatically")
+            .font(.caption).foregroundStyle(theme.ink.opacity(0.7))
+    }
+    private var recoveryAction: some View {
+        Button(model.accessRevoked ? "Reconnect" : "Retry") {
+            if model.accessRevoked { open(.computer) }
+            else if !presentation.preview { Task { await model.refresh() } }
+        }.buttonStyle(.plain).font(.caption.weight(.semibold)).frame(minHeight: 44)
+            .disabled(!model.accessRevoked && model.busy)
+    }
     private var updateLabel: some View {
-        HStack(spacing: 5) {
-            Image(systemName: offline ? "wifi.slash" : "clock").accessibilityHidden(true)
+        Group {
             if presentation.preview {
-                Text(presentation.previewScreen == "waiting" ? "No updates yet" : offline ? "Updated 12 minutes ago" : "Updated just now")
-            } else if let snapshot = model.snapshot {
-                Text("Updated \(Date(timeIntervalSince1970: snapshot.observedAt), style: .relative) ago")
+                Text(presentation.previewScreen == "waiting" ? "No updates yet" : offline ? "Last received 12 minutes ago" : "Last received just now")
+            } else if let received = model.lastContact {
+                ReceiptTimeLabel(prefix: "Last received", date: received)
             } else { Text("No updates yet") }
-        }.font(.caption).foregroundStyle(theme.ink.opacity(0.55))
-    }
-    @ViewBuilder private var sourceBadge: some View {
-        if model.accessRevoked {
-            Button("Reconnect") { open(.computer) }.font(.caption.weight(.semibold)).frame(minHeight: 44)
-        } else if offline {
-            Button("Try again") { if !presentation.preview { Task { await model.refresh() } } }
-                .font(.caption.weight(.semibold)).frame(minHeight: 44).disabled(model.busy)
-        } else if !presentation.preview && model.snapshot?.mode == "synthetic" {
-            Text("TEST SOURCE").font(.system(size: 8, weight: .semibold)).tracking(0.8).foregroundStyle(theme.ink.opacity(0.5))
-        }
-    }
-    private func feedNotice(title: String, detail: String, symbol: String, action: String, perform: @escaping () -> Void) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 15)).padding(.top, 2)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(detail).font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
-                Button(action, action: perform).font(.footnote.weight(.semibold)).frame(minHeight: 44, alignment: .leading)
-            }
-        }.padding(17).frame(maxWidth: .infinity, alignment: .leading).background(theme.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: 17))
+        }.font(.caption2).foregroundStyle(theme.ink.opacity(0.5))
     }
     private var watchRow: some View {
         Button { open(.watch) } label: {
@@ -153,7 +153,7 @@ struct CompanionHome: View {
                 WatchIllustration(theme: theme, paired: hasWatch).frame(width: hasWatch ? 45 : 55, height: hasWatch ? 68 : 83)
                 VStack(alignment: .leading, spacing: 7) {
                     Text(hasWatch ? "Omarchy Watch" : "Connect your watch")
-                        .font(theme.monospaced ? theme.font(17, emphasis: true) : .headline).multilineTextAlignment(.leading)
+                        .font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold)).multilineTextAlignment(.leading)
                     if hasWatch {
                         HStack(spacing: 5) {
                             Circle().fill(watchReady ? theme.tint : theme.ink.opacity(0.3)).frame(width: 5, height: 5)
@@ -164,7 +164,7 @@ struct CompanionHome: View {
                         }
                         if presentation.preview { Text("Last sent 12s ago").font(.caption).foregroundStyle(theme.ink.opacity(0.5)) }
                         else if let date = model.watch.lastDelivered {
-                            Text("Last sent \(date, style: .relative) ago").font(.caption).foregroundStyle(theme.ink.opacity(0.5))
+                            ReceiptTimeLabel(prefix: "Last sent", date: date).font(.caption).foregroundStyle(theme.ink.opacity(0.5))
                         }
                     } else {
                         Text("Show agent status on your wrist.").font(.subheadline).foregroundStyle(theme.ink.opacity(0.6)).multilineTextAlignment(.leading)
@@ -181,29 +181,72 @@ struct CompanionHome: View {
 struct AgentFeedRow: View {
     let session: AgentSession
     let theme: CompanionTheme
+    var animate = true
+    var detailOverride: String? = nil
+    private var detail: String { detailOverride ?? session.detail }
     @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: session.provider == "claude" ? "asterisk" : "terminal")
-                .font(.system(size: 16, weight: .medium)).foregroundStyle(theme.ink.opacity(0.65))
-                .frame(width: 23, height: 28).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
-                Text(session.displayName).font(theme.monospaced ? theme.font(13, emphasis: true) : .subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
-                if !session.detail.isEmpty {
-                    Text(session.detail).font(.caption).foregroundStyle(theme.ink.opacity(0.55)).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                Text(session.displayName).font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                if !detail.isEmpty {
+                    Text(detail).font(.caption).foregroundStyle(theme.ink.opacity(0.55)).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                 }
                 if typeSize.isAccessibilitySize { stateLabel }
             }
             if !typeSize.isAccessibilitySize { Spacer(minLength: 7); stateLabel }
-        }.padding(.vertical, 17).accessibilityElement(children: .combine)
+        }.padding(.vertical, 16).foregroundStyle(theme.ink.opacity(animate ? 1 : 0.6)).accessibilityElement(children: .combine)
     }
     private var stateLabel: some View {
-        VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
+        VStack(alignment: typeSize.isAccessibilitySize ? .leading : .center, spacing: 6) {
             if !typeSize.isAccessibilitySize {
-                Image(systemName: session.state == .needsInput ? "arrow.turn.down.right" : session.state == .finished ? "checkmark" : session.state == .working ? "ellipsis" : "minus")
-                    .font(.system(size: 15, weight: .medium)).foregroundStyle(theme.tint).accessibilityHidden(true)
+                if session.state != .idle {
+                    ActivityRobot(state: session.state, animate: animate)
+                        .frame(width: 20, height: 20).foregroundStyle(animate ? theme.tint : theme.ink.opacity(0.4))
+                }
             }
-            Text(session.state.title).font(.caption2.weight(.medium)).foregroundStyle(session.state == .needsInput ? theme.tint : theme.ink.opacity(0.6)).fixedSize(horizontal: true, vertical: false)
+            Text(session.state.title).font(.caption2.weight(.medium)).foregroundStyle(animate && session.state == .needsInput ? theme.tint : theme.ink.opacity(0.6)).fixedSize(horizontal: true, vertical: false)
+        }
+    }
+}
+
+/// Motion matches watch_face_layout.c; historical activity and Reduce Motion stay still.
+private struct ActivityRobot: View {
+    let state: ActivityState
+    let animate: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var visible = false
+    private var moving: Bool { animate && !reduceMotion && scenePhase == .active && visible }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !moving)) { context in
+            let time = moving ? context.date.timeIntervalSinceReferenceDate : 0
+            let pulse = (1 - cos(time * .pi / 1.3)) / 2
+            let bounceTime = time.truncatingRemainder(dividingBy: 1)
+            let bounce = bounceTime < 0.64 ? (1 - cos(bounceTime * .pi / 0.32)) / 2 : 0
+            let sway = sin(time * 2 * .pi / 4.2)
+            Image(state == .finished ? "Robot-happy" : "Robot-excited")
+                .resizable().scaledToFit()
+                .opacity(state == .working ? 1 - pulse * (155.0 / 255) : 1)
+                .rotationEffect(.degrees(state == .finished ? sway * 4 : 0))
+                .offset(x: state == .finished ? sway * 2 : 0, y: state == .needsInput ? -bounce * 3 : 0)
+        }
+        .onAppear { visible = true }.onDisappear { visible = false }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct ReceiptTimeLabel: View {
+    let prefix: String
+    let date: Date
+    var body: some View {
+        TimelineView(.periodic(from: date, by: 1)) { context in
+            if context.date.timeIntervalSince(date) < 10 {
+                Text("\(prefix) just now")
+            } else {
+                Text("\(prefix) \(date, style: .relative) ago")
+            }
         }
     }
 }

@@ -165,6 +165,23 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(snapshot.sessions?.first?.state, .working)
     }
 
+    func testUnnamedSessionsGroupWithoutLosingStatesOrNamedRows() {
+        let sessions = [AgentSession(id: "1", provider: "codex", state: .idle),
+                        AgentSession(id: "2", provider: "codex", state: .needsInput),
+                        AgentSession(id: "3", provider: "codex", state: .finished),
+                        AgentSession(id: "4", provider: "codex", state: .working, name: "Fix checkout"),
+                        AgentSession(id: "5", provider: "claude", state: .working)]
+        let rows = AgentDisplayRow.rows(sessions)
+        XCTAssertEqual(rows.count, 3)
+        XCTAssertEqual(rows.first?.session.displayName, "Codex · 3 sessions")
+        XCTAssertEqual(rows.first?.session.state, .needsInput)
+        XCTAssertEqual(rows.first?.detail, "1 needs input · 1 finished · 1 idle")
+        XCTAssertTrue(rows.contains { $0.session.displayName == "Fix checkout" })
+        XCTAssertTrue(rows.contains { $0.session.displayName == "Claude" })
+        XCTAssertEqual(rows.map(\.id), AgentDisplayRow.rows(Array(sessions.reversed())).map(\.id))
+        XCTAssertEqual(AgentDisplayRow.rows([]).count, 0)
+    }
+
     func testFeedDistinguishesFirstUpdateFromIdleAndOlderAggregateSources() throws {
         XCTAssertEqual(AgentFeedContent.resolve(nil), .waiting)
         let idle = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(["state":"idle", "sessions":[]]))

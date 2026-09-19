@@ -21,7 +21,7 @@ final class PresentationModel: ObservableObject {
         #endif
     }
     var previewHasComputer: Bool { !["setup", "pairing", "watch-only"].contains(previewScreen) }
-    var previewHasWatch: Bool { ["paired-watch", "watch-paired", "watch-only", "watch-complete"].contains(previewScreen) }
+    var previewHasWatch: Bool { ["paired-watch", "watch-paired", "watch-only", "watch-complete", "single-finished", "single-offline"].contains(previewScreen) }
     var previewWatchPhase: WatchSetupPhase {
         switch previewScreen {
         case "watch-select": return .selecting
@@ -32,9 +32,16 @@ final class PresentationModel: ObservableObject {
         default: return .idle
         }
     }
-    var previewOffline: Bool { ["offline", "computer-offline"].contains(previewScreen) }
+    var previewOffline: Bool { ["offline", "computer-offline", "single-offline", "offline-empty"].contains(previewScreen) }
     var previewSessions: [AgentSession] {
+        if previewScreen == "grouped" {
+            return [AgentSession(id: "1", provider: "codex", state: .needsInput),
+                    AgentSession(id: "2", provider: "codex", state: .working),
+                    AgentSession(id: "3", provider: "codex", state: .finished)]
+        }
         guard previewScreen != "empty" else { return [] }
+        if ["single-finished", "single-offline"].contains(previewScreen) { return [AgentSession(id: "1", provider: "codex", state: .finished)] }
+        if previewScreen == "single-working" { return [AgentSession(id: "1", provider: "codex", state: .working)] }
         return [AgentSession(id: "1", provider: "codex", state: .needsInput, name: "Fix checkout redirect", project: "storefront"),
                 AgentSession(id: "2", provider: "claude", state: .working, name: "API cleanup", project: "agent-companion"),
                 AgentSession(id: "3", provider: "codex", state: .finished, name: "Update watch theme", project: "omarchy-watch")]
@@ -100,7 +107,7 @@ enum AgentFeedContent: Equatable {
         let labels = activeStates.dropFirst().map { Self.countLabel(counts[$0]!, state: $0) }
         return labels.isEmpty ? nil : labels.joined(separator: " · ")
     }
-    private static func countLabel(_ count: Int, state: ActivityState) -> String {
+    fileprivate static func countLabel(_ count: Int, state: ActivityState) -> String {
         switch state {
         case .needsInput: return "\(count) \(count == 1 ? "needs" : "need") input"
         case .working: return "\(count) working"
@@ -108,7 +115,43 @@ enum AgentFeedContent: Equatable {
         case .idle: return "\(count) idle"
         }
     }
-    private static func priority(_ state: ActivityState) -> Int {
+    fileprivate static func priority(_ state: ActivityState) -> Int {
         switch state { case .needsInput: return 0; case .working: return 1; case .finished: return 2; case .idle: return 3 }
+    }
+}
+
+/// Preserve identifiable sessions; combine otherwise indistinguishable provider rows.
+struct AgentDisplayRow: Identifiable {
+    let id: String
+    let session: AgentSession
+    let detail: String
+
+    static func rows(_ sessions: [AgentSession]) -> [Self] {
+        var rows: [Self] = []
+        var unnamed: [String: [AgentSession]] = [:]
+        for session in sessions {
+            let identifiable = [session.name, session.project].compactMap { $0 }
+                .contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            if identifiable {
+                rows.append(Self(id: "session:" + session.id, session: session, detail: session.detail))
+            } else { unnamed[session.provider, default: []].append(session) }
+        }
+        for (provider, members) in unnamed {
+            if members.count == 1, let session = members.first {
+                rows.append(Self(id: "session:" + session.id, session: session, detail: session.detail))
+            } else {
+                let counts = Dictionary(grouping: members, by: \.state).mapValues(\.count)
+                let states = ActivityState.allCases.sorted { AgentFeedContent.priority($0) < AgentFeedContent.priority($1) }
+                    .filter { counts[$0] != nil }
+                let detail = states.map { AgentFeedContent.countLabel(counts[$0]!, state: $0) }.joined(separator: " · ")
+                let session = AgentSession(id: "group:" + provider, provider: provider, state: states.first ?? .idle,
+                    name: "\(provider.capitalized) · \(members.count) sessions")
+                rows.append(Self(id: session.id, session: session, detail: detail))
+            }
+        }
+        return rows.sorted {
+            let lhs = AgentFeedContent.priority($0.session.state), rhs = AgentFeedContent.priority($1.session.state)
+            return lhs == rhs ? $0.id < $1.id : lhs < rhs
+        }
     }
 }
