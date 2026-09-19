@@ -1,9 +1,69 @@
 import XCTest
 import UserNotifications
 import CoreBluetooth
+import CoreLocation
+import WeatherKit
+import MapKit
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    @MainActor func testPlaceSearchRequiresTwoTrimmedCharacters() {
+        XCTAssertNil(WeatherPlaceSearchModel.normalizedQuery("  S  "))
+        XCTAssertNil(WeatherPlaceSearchModel.normalizedQuery(" "))
+        XCTAssertEqual(WeatherPlaceSearchModel.normalizedQuery(" San fr "), "San fr")
+        XCTAssertEqual(WeatherPlaceSearchModel.normalizedQuery("東京"), "東京")
+    }
+
+    @MainActor func testClearingPlaceSearchCancelsDebounceAndIgnoresOldErrors() async throws {
+        let search = WeatherPlaceSearchModel()
+        search.update("San fr")
+        search.update("")
+        try await Task.sleep(for: .milliseconds(450))
+        search.completer(MKLocalSearchCompleter(), didFailWithError: NSError(domain: NSURLErrorDomain, code: -1009))
+        XCTAssertFalse(search.searching)
+        XCTAssertFalse(search.resolving)
+        XCTAssertTrue(search.results.isEmpty)
+        XCTAssertNil(search.message)
+    }
+
+    func testWeatherTravelRejectsStaleAndInaccurateLocations() {
+        let now = Date()
+        func fix(age: Double = 0, accuracy: Double = 3000) -> CLLocation {
+            CLLocation(coordinate: CLLocationCoordinate2D(latitude: 37, longitude: -122), altitude: 0,
+                horizontalAccuracy: accuracy, verticalAccuracy: -1, timestamp: now.addingTimeInterval(-age))
+        }
+        XCTAssertTrue(WeatherRefreshPolicy.accepts(fix(), now: now))
+        XCTAssertFalse(WeatherRefreshPolicy.accepts(fix(age: 3600), now: now))
+        XCTAssertFalse(WeatherRefreshPolicy.accepts(fix(age: -60), now: now))
+        XCTAssertFalse(WeatherRefreshPolicy.accepts(fix(accuracy: -1), now: now))
+        XCTAssertFalse(WeatherRefreshPolicy.accepts(fix(accuracy: 50_000), now: now))
+        XCTAssertFalse(WeatherRefreshPolicy.moved(fix(), from: CLLocation(latitude: 37.02, longitude: -122), accuracy: 3000))
+        XCTAssertTrue(WeatherRefreshPolicy.moved(fix(), from: CLLocation(latitude: 40.7, longitude: -74), accuracy: 3000))
+    }
+
+    func testArrivalAndRecoveryBypassTravelThrottleButRoutineMovementDoesNot() {
+        let now = Date()
+        XCTAssertFalse(WeatherRefreshPolicy.mayRequest(now: now, priority: false, foreground: false,
+            retryAfter: nil, lastBackgroundFetch: now.addingTimeInterval(-60)))
+        XCTAssertTrue(WeatherRefreshPolicy.mayRequest(now: now, priority: true, foreground: false,
+            retryAfter: now.addingTimeInterval(600), lastBackgroundFetch: now))
+        XCTAssertFalse(WeatherRefreshPolicy.mayRequest(now: now, priority: false, foreground: true,
+            retryAfter: now.addingTimeInterval(60), lastBackgroundFetch: nil))
+        XCTAssertTrue(WeatherRefreshPolicy.mayRequest(now: now, priority: false, foreground: false,
+            retryAfter: now.addingTimeInterval(-1), lastBackgroundFetch: now.addingTimeInterval(-120)))
+        XCTAssertEqual((1...6).map { WeatherRefreshPolicy.retryDelay(failures: $0) }, [60, 120, 240, 480, 900, 900])
+    }
+
+    func testWeatherRefreshUsesProviderExpiryWithStormAndDayBoundaryGuards() {
+        let now = Date()
+        XCTAssertEqual(WeatherRefreshPolicy.refreshDate(now: now, currentExpiry: now.addingTimeInterval(600),
+            dailyExpiry: now.addingTimeInterval(3600), dayExpiry: now.addingTimeInterval(7200)), now.addingTimeInterval(600))
+        XCTAssertEqual(WeatherRefreshPolicy.refreshDate(now: now, currentExpiry: now.addingTimeInterval(-10),
+            dailyExpiry: now.addingTimeInterval(3600), dayExpiry: now.addingTimeInterval(7200)), now.addingTimeInterval(300))
+        XCTAssertEqual(WeatherRefreshPolicy.refreshDate(now: now, currentExpiry: now.addingTimeInterval(3600),
+            dailyExpiry: now.addingTimeInterval(3600), dayExpiry: now.addingTimeInterval(100)), now.addingTimeInterval(100))
+    }
+
     func testBluetoothResetInvalidatesPeripheralObjectsButPowerToggleDoesNot() {
         for state in [CBManagerState.unknown, .resetting, .unsupported, .unauthorized] {
             XCTAssertTrue(WatchConnectionStep.invalidatesPeripherals(state))
@@ -396,6 +456,116 @@ final class ProtocolTests: XCTestCase {
         ComputerPreferences.remove("first", defaults: defaults)
         XCTAssertNil(ComputerPreferences.name(for: "first", defaults: defaults))
         XCTAssertEqual(ComputerPreferences.name(for: "second", defaults: defaults), "Second")
+    }
+
+    func testWatchDisplayPreferencesMigrateWithoutResettingExistingChoices() throws {
+        let legacy = Data(#"{"updates":false,"sound":false}"#.utf8)
+        let value = try JSONDecoder().decode(WatchPreferences.self, from: legacy)
+        XCTAssertFalse(value.updates)
+        XCTAssertFalse(value.sound)
+        XCTAssertEqual(value.brightness, 50)
+        XCTAssertEqual(value.timeFormat, .system)
+        let custom = WatchPreferences(updates: false, sound: false, brightness: 73, timeFormat: .twelve)
+        XCTAssertEqual(try JSONDecoder().decode(WatchPreferences.self, from: JSONEncoder().encode(custom)), custom)
+        XCTAssertEqual(WatchPreferences(brightness: 0).brightness, 20)
+        XCTAssertEqual(WatchPreferences(brightness: 200).brightness, 100)
+        XCTAssertEqual(WatchTimeFormat.system.hours(locale: Locale(identifier: "en_US")), 12)
+        XCTAssertEqual(WatchTimeFormat.system.hours(locale: Locale(identifier: "en_GB")), 24)
+    }
+
+    func testDisplaySettingsRespectFirmwareBoundsAndLegacyLayouts() {
+        for version: UInt8 in 1...5 {
+            let packet = WatchWire.profile(owner: UUID(), revision: 1, offset: 0, version: version, brightness: 0, hours: 12)
+            XCTAssertEqual(packet[18], 12)
+            if version >= 3 { XCTAssertEqual(packet[84], 20) }
+        }
+        let packet = WatchWire.profile(owner: UUID(), revision: 1, offset: 0, version: 5, brightness: 200, hours: 99)
+        XCTAssertEqual(packet[18], 24)
+        XCTAssertEqual(packet[84], 100)
+    }
+
+    func testWeatherDiagnosticsSeparateValidationAndAPIFailuresWithoutPrivateDetails() {
+        XCTAssertEqual(WeatherDiagnostics.describe(WeatherResponseFailure.observationInFuture), "Response rejected: observationInFuture")
+        XCTAssertEqual(WeatherDiagnostics.describe(WeatherError.permissionDenied), "WeatherKit authorization denied")
+        let error = NSError(domain: NSURLErrorDomain, code: -1009, userInfo: [NSLocalizedDescriptionKey: "private location and token", NSURLErrorFailingURLStringErrorKey: "https://private.invalid"])
+        XCTAssertEqual(WeatherDiagnostics.describe(error), "NSURLErrorDomain (-1009)")
+        XCTAssertEqual(WeatherDiagnostics.describe(NSError(domain: "private-value", code: 7)), "Unclassified error (7)")
+    }
+
+    func testWeatherPermissionPresentationDoesNotBlockFixedPlacesOrOff() {
+        var preferences = WeatherPreferences(enabled: true)
+        for status in [CLAuthorizationStatus.notDetermined, .denied, .restricted] {
+            XCTAssertNotNil(WeatherLocationIssue.resolve(preferences: preferences, authorization: status, unavailable: false))
+        }
+        XCTAssertNil(WeatherLocationIssue.resolve(preferences: preferences, authorization: .authorizedWhenInUse, unavailable: false))
+        XCTAssertEqual(WeatherLocationIssue.resolve(preferences: preferences, authorization: .authorizedWhenInUse, unavailable: true), .unavailable)
+        preferences.place = WeatherPlace(name: "Chosen place", latitude: 0, longitude: 0, timeZone: "UTC")
+        XCTAssertNil(WeatherLocationIssue.resolve(preferences: preferences, authorization: .denied, unavailable: true))
+        preferences.place = nil
+        preferences.enabled = false
+        XCTAssertNil(WeatherLocationIssue.resolve(preferences: preferences, authorization: .notDetermined, unavailable: true))
+    }
+
+    @MainActor func testExpiredOneTimePermissionAndRevocationClearFreshWeatherImmediately() {
+        for status in [CLAuthorizationStatus.notDetermined, .denied, .restricted] {
+            let model = PhoneWeather()
+            model.showPreview("weather-current")
+            XCTAssertNotNil(model.weather)
+            var cleared = false
+            model.onChange = { value, _ in cleared = value == nil }
+            model.applyAuthorization(status)
+            XCTAssertNil(model.weather)
+            XCTAssertTrue(cleared)
+            XCTAssertNotEqual(model.summary, "Current location")
+            model.applyAuthorization(.authorizedWhenInUse)
+            XCTAssertNil(model.locationIssue)
+            XCTAssertEqual(model.summary, "Current location")
+            XCTAssertNil(model.weather) // A permission grant cannot resurrect the old cache.
+        }
+    }
+
+    func testWeatherProfileConversionLayoutAndUTF8Boundary() {
+        let now = Date(timeIntervalSince1970: 1800000000)
+        let value = WatchWeather(observedAt: now.addingTimeInterval(-60), dayExpiresAt: now.addingTimeInterval(3600),
+            temperature: 0, high: 10, low: -5, code: 61, night: true, location: String(repeating: "東京", count: 10))
+        let packet = WatchWire.profile(owner: UUID(), revision: 1, now: now, offset: 0, version: 5, weather: value, fahrenheit: true)
+        XCTAssertEqual(packet.count, 111)
+        XCTAssertEqual(packet[19], 7)
+        XCTAssertEqual(WatchWire.read32(Array(packet), at: 42), 1799999940)
+        XCTAssertEqual(packet[50], 32)
+        XCTAssertEqual(packet[52], 50)
+        XCTAssertEqual(packet[54], 23)
+        XCTAssertEqual(packet[56], 61)
+        let name = packet[57..<81].prefix(while: { $0 != 0 })
+        XCTAssertNotNil(String(data: Data(name), encoding: .utf8))
+        XCTAssertLessThan(name.count, 24)
+        XCTAssertEqual(WatchWire.read32(Array(packet), at: 103), 1800003600)
+        let legacy = WatchWire.profile(owner: UUID(), revision: 1, now: now, offset: 0, version: 1, weather: value)
+        XCTAssertEqual(legacy.count, 36)
+        XCTAssertEqual(legacy[19], 0)
+    }
+
+    func testWeatherExpiryNeverBecomesFreshFromAProfileRewrite() {
+        let now = Date(timeIntervalSince1970: 1800000000)
+        var value = WatchWeather(observedAt: now.addingTimeInterval(-10800), dayExpiresAt: now.addingTimeInterval(3600),
+            temperature: 15, high: 20, low: 10, code: 0, night: false, location: "Test place")
+        XCTAssertFalse(value.usable(at: now))
+        XCTAssertEqual(WatchWire.profile(owner: UUID(), revision: 1, now: now, offset: 0, version: 5, weather: value)[19], 0)
+        value.observedAt = now.addingTimeInterval(1)
+        XCTAssertFalse(value.usable(at: now))
+        value.observedAt = now.addingTimeInterval(-600)
+        value.dayExpiresAt = now.addingTimeInterval(-1)
+        XCTAssertEqual(WatchWire.profile(owner: UUID(), revision: 1, now: now, offset: 0, version: 4, weather: value)[19], 0)
+        XCTAssertEqual(WatchWire.profile(owner: UUID(), revision: 1, now: now, offset: 0, version: 5, weather: value)[19], 1)
+        value.temperature = .nan
+        XCTAssertFalse(value.valid)
+    }
+
+    @MainActor func testWeatherConditionMappingCoversKnownConditions() {
+        for condition in WeatherCondition.allCases { XCTAssertNotNil(PhoneWeather.code(condition)) }
+        XCTAssertEqual(PhoneWeather.code(.clear), 0)
+        XCTAssertEqual(PhoneWeather.code(.freezingRain), 66)
+        XCTAssertEqual(PhoneWeather.code(.thunderstorms), 95)
     }
 
     func testRichProfileVersionsPreserveWireLayoutAndObservationTime() {

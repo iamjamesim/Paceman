@@ -157,9 +157,13 @@ info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Agent Compani
         "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "2", "LSRequiresIPhoneOS": True,
         "UILaunchScreen": {}, "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
         "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False},
-        "UIBackgroundModes": ["bluetooth-central", "remote-notification"],
+        "UIBackgroundModes": ["bluetooth-central", "remote-notification", "fetch"],
         "APNSEnvironment": "$(APNS_ENVIRONMENT)",
         "NSBluetoothAlwaysUsageDescription": "Connect your watch to receive agent updates on your wrist.",
+        "NSLocationWhenInUseUsageDescription": "Use your approximate location to show local weather on your watch.",
+        "NSLocationDefaultAccuracyReduced": True,
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Keep weather on your watch local as you travel, even when Paceman is closed.",
+        "BGTaskSchedulerPermittedIdentifiers": ["com.apselabs.agentcompanion.weather"],
         "NSCameraUsageDescription": "Scan a pairing invitation from your work computer.",
         "NSAccessorySetupKitSupports": ["Bluetooth"],
         "NSAccessorySetupBluetoothServices": ["7F510001-1B15-4F0D-B7A5-4CF3A2C98EE1"],
@@ -174,7 +178,9 @@ widget_info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Agent 
 with (root / "AgentCompanionWidgets/Info.plist").open("wb") as file: plistlib.dump(widget_info, file)
 for name in ("AgentCompanion", "AgentCompanionWidgets"):
     entitlement = {"com.apple.security.application-groups": ["group.com.apselabs.agentcompanion.prototype"]}
-    if name == "AgentCompanion": entitlement["aps-environment"] = "$(APNS_ENVIRONMENT)"
+    if name == "AgentCompanion":
+        entitlement["aps-environment"] = "$(APNS_ENVIRONMENT)"
+        entitlement["com.apple.developer.weatherkit"] = True
     with (root / name / (name + ".entitlements")).open("wb") as file: plistlib.dump(entitlement, file)
 with (root / "AgentCompanion/Info.plist").open("wb") as file:
     plistlib.dump(info, file)

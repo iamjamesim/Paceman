@@ -5,6 +5,7 @@ import UIKit
 @MainActor
 final class CompanionModel: ObservableObject {
     let watch: WatchLink
+    let weather: PhoneWeather
     let designPreview: Bool
     @Published var source: PairedSource?
     @Published var snapshot: Snapshot?
@@ -22,16 +23,27 @@ final class CompanionModel: ObservableObject {
     private var foreground = false
     private var fetchedUptime: TimeInterval?
     private var changeObserver: AnyCancellable?
+    private var weatherObserver: AnyCancellable?
 
     init(preview: Bool = false) {
         designPreview = preview
         watch = WatchLink(preview: preview)
+        weather = PhoneWeather()
         source = preview ? nil : Vault.load(PairedSource.self, key: "paired-source")
         if source != nil { status = "Paired; waiting for fresh status" }
         watch.onWatchEvent = { [weak self] in
             Task { @MainActor in await self?.refresh(fromWatch: true) }
         }
-        changeObserver = watch.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        weather.onChange = { [weak self] value, fahrenheit in self?.watch.setWeather(value, fahrenheit: fahrenheit) }
+        if !preview { weather.bind(watchID: watch.preferenceID, updates: watch.updatesEnabled) }
+        weatherObserver = weather.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        changeObserver = watch.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+            Task { @MainActor [weak self] in
+                guard let self, !self.designPreview else { return }
+                self.weather.bind(watchID: self.watch.preferenceID, updates: self.watch.updatesEnabled)
+            }
+        }
         if !preview { Diagnostics.shared.record("app_launched") }
     }
 
@@ -126,6 +138,7 @@ final class CompanionModel: ObservableObject {
 
     func setForeground(_ value: Bool) {
         foreground = value
+        weather.setForeground(value)
         polling?.cancel()
         polling = nil
         Diagnostics.shared.record(value ? "app_foreground" : "app_background")
@@ -133,6 +146,7 @@ final class CompanionModel: ObservableObject {
             watch.reconnectIfNeeded()
             polling = Task { [weak self] in
                 while !Task.isCancelled {
+                    self?.weather.refreshIfNeeded()
                     if self?.streaming != true && self?.accessRevoked != true { await self?.refresh() }
                     do { try await Task.sleep(nanoseconds: 5_000_000_000) }
                     catch { break }
@@ -194,6 +208,7 @@ final class CompanionModel: ObservableObject {
 
     @discardableResult
     func refresh(fromWatch: Bool = false, fromPush: Bool = false) async -> UIBackgroundFetchResult {
+        weather.refreshIfNeeded()
         guard !busy, let source else {
             if fromPush { Diagnostics.shared.record("push_fetch_skipped_busy_or_unpaired") }
             return .noData

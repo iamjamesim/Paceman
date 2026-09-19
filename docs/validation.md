@@ -141,7 +141,7 @@ It describes the private prototype as of 2026-09-18, not a reliability guarantee
 - Bluetooth/source/VPN disconnect and recovery without re-pairing.
 - Honest stale state across devices. The current legacy BLE activity packet does
   not give the watch an upstream freshness lease.
-- Theme/appearance forwarding to the watch and visible widget refresh behavior.
+- Visible widget refresh behavior. Theme forwarding is confirmed below.
 
 An APNs 200 is server acceptance, not phone delivery. A notification is not proof
 of background execution. A BLE write is not proof of visible rendering. Record
@@ -160,4 +160,112 @@ remain follow-up alpha features.
 Validation: 90 Python tests passed with 17 platform-dependent skips using Python
 3.14 and a resolved temporary directory; 35 iOS tests passed, including rich-profile
 wire offsets and legacy versus v5 expiry semantics. Signed device build succeeded.
-This does not establish deployment to the Omarchy service or physical watch display.
+Physical evidence: on 2026-09-19, the user confirmed theme and allowance sync end
+to end. This closes the basic profile restoration check. It does not independently
+verify reconnect recovery, alert deduplication, expiry behavior or locked-phone
+delivery.
+
+## Watch display preferences — 2026-09-19
+
+Added hardware-scoped brightness (20–100%, matching firmware validation) and time
+format (Match iPhone / 12-hour / 24-hour). Existing update/sound choices survive
+decoding the expanded preference record. Settings are included in profile
+reconciliation and restored before the reconnect handshake writes its profile.
+Brightness writes occur on slider release rather than every drag step.
+
+All 37 iOS tests passed, including preference migration, hour-cycle resolution,
+firmware bounds and legacy packet layouts. Simulator and signed device builds
+passed. Connected and updates-off layouts were reviewed in the simulator. Physical
+brightness/time changes and persistence across a watch restart remain unverified.
+
+An isolated WeatherKit signing check failed because the app's current development
+provisioning profile does not include the WeatherKit capability. WeatherKit has
+not been enabled in the normal app build. Weather fetching remains unimplemented.
+
+## Phone weather — 2026-09-19
+
+WeatherKit capability was enabled by the user. The signed app now contains the
+WeatherKit entitlement and builds successfully. The project generator preserves
+that capability and emits approximate, when-in-use location permission text.
+
+40 iOS tests pass, including Celsius/Fahrenheit wire encoding, UTF-8 truncation,
+original observation times, future/expired readings, forecast-day expiry and
+WeatherKit-to-WMO condition coverage. Fixed-place and denied-location settings
+were reviewed using simulator fixtures. These fixtures do not establish API
+success or physical rendering. Test on the phone through Watch → Weather, then
+confirm current temperature/high/low/place on the watch. Weather starts off.
+
+No desktop change, extra APNs key, or firmware upgrade is required for the
+existing v5 watch. The app fetches current/daily conditions together, reuses a
+successful cache for 30 minutes and retries failures no sooner than five minutes.
+Current-location acquisition is foreground-only. WeatherKit attribution is linked
+in weather settings; confirm the accessory-display attribution arrangement before
+external distribution. No release-compliance claim is made by this alpha build.
+
+Weather permission recovery: 42 iOS tests pass, including immediate clearing on
+Allow Once expiry/revocation despite a fresh cache, and fixed-place/off independence
+from location permission. Watch details reports Location access needed; Weather
+contains the matching Allow location access or Open Settings action. Restricted
+access and temporary location failures have distinct guidance. Simulator fixtures
+cover denial, first-time permission and the watch-detail summary. Signed build
+passes; physical permission changes and Settings round-trip remain unverified.
+
+Weather failure diagnostics: 43 iOS tests pass. Developer tools reports sanitized
+error domains/codes and separates WeatherKit errors from rejected response data;
+it does not expose coordinates, request URLs, tokens or error userInfo. WeatherKit
+API success on the physical phone remains unverified.
+
+Developer tools navigation: reproduced Settings → Developer tools unexpectedly
+returning home, followed by a crash on reopening Settings. The simulator reported
+`SwiftUI.AnyNavigationPath.Error.comparisonTypeMismatch`. Removed the nested
+navigation stack and routed diagnostics through the root's typed destination path.
+Simulator and signed device builds pass. Manually verified opening Developer tools,
+returning through Settings to home, then reopening both pages without a crash.
+
+Weather settings refinement — 2026-09-19: user confirmed WeatherKit requests now
+work on the phone. Replaced the expanded source choices and inline search with a
+single Location menu and a place-search sheet. Location recovery appears beneath
+the location control only when applicable; search failures no longer overwrite
+weather-fetch status. Temperature remains separate; attribution is unboxed and
+its monochrome mark uses contrast against the app theme. Reviewed simulator
+fixtures for Off (light), current location, denied permission, a long selected
+place, and opening/canceling place search. 43 existing tests pass; simulator and
+signed device builds pass. Live geocoder selection and downloaded attribution
+rendering remain physical-device checks.
+
+Place autocomplete — 2026-09-19: replaced partial-address geocoding with
+MKLocalSearchCompleter address suggestions filtered to localities/sublocalities.
+Native searchable list focuses on opening; queries require two trimmed characters
+and wait 350 ms before submission. Result rows show title and regional subtitle.
+A small spinner below search replaces the searching card. Selecting a completion
+uses MKLocalSearch to resolve coordinates/time zone before saving. Canceling,
+clearing or changing queries invalidates pending completions and selection work.
+Search state belongs to the sheet, independent of current-location geocoding.
+Manually checked one-character idle, 'San fr' suggestions headed by San Francisco,
+and successful selection resolution in Simulator. All 45 tests pass, including
+short-query filtering and clearing during debounce with a stale error callback.
+Signed device build passes.
+
+Weather refresh coordinator — 2026-09-19: retained WeatherKit. Location validity is
+independent of forecast expiry; foreground entry rechecks location, accepted
+movement clears the old location's weather, and obsolete responses are generation
+checked. Added optional Always authorization, significant-change/visit monitoring,
+BGAppRefresh registration, bounded background execution, network-recovery retry,
+provider expiry, and exponential failure backoff. Background monitoring stops on
+Off, watch pause/removal, or loss of Always authorization. Permission upgrade is
+explicit in the current-location footer. Project generator preserves configuration.
+
+All 48 tests pass, including stale/future/inaccurate fixes, cross-country movement
+versus accuracy noise, arrival/recovery throttle bypass, retry progression and
+provider-expiry/day-boundary guards. Signed and simulator builds pass; reviewed
+current-location permission footer in Simulator. Physical travel, OS-scheduled
+background wakeups and Always-permission upgrade are not established by these
+checks and remain real-device acceptance checks.
+
+Weather cold-launch fix — 2026-09-19: physical-device launch with a saved watch
+and enabled weather raised `NSInternalInconsistencyException`: scheduling occurred
+before the background task handler was registered. Registration now precedes model
+construction. Signed build and installation passed; a 20-second console observation
+of the same phone launch no longer reproduced the immediate crash. This check does
+not establish overnight background delivery. Periodic accessory weather requests
+remain unimplemented; existing watch events only provide opportunistic refreshes.

@@ -59,9 +59,10 @@ v4 receives unavailable once a reading is stale or reset.
 ## Validation and feedback
 
 Automated checks passed: 35 iOS tests; 90 Python tests with 17 platform-dependent
-skips on macOS. Simulator and signed device builds passed. Physical display and
-installed Linux collector behavior still need the checks above. This handoff is
-for foreground alpha verification, not a claim of reliable locked-phone delivery.
+skips on macOS. Simulator and signed device builds passed. On 2026-09-19, the user
+confirmed theme and allowance sync end to end. Reconnect, alert deduplication and
+locked-phone delivery remain separate checks; that confirmation does not establish
+those behaviors.
 
 Return the tested commit, install result, and observed palette/allowance/activity
 behavior. Keep identifying device/account details and raw diagnostics local.

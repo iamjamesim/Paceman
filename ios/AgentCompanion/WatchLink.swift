@@ -49,8 +49,24 @@ struct WatchReconnectBackoff {
 struct WatchPairingReceipt: Codable, Equatable {
     let bluetoothID: UUID
     let watchID: String
+    var profileVersion: UInt8? = nil
+    var capabilities: UInt32? = nil
     func canRestore(authorizedIDs: [UUID], ownedWatchID: String?, hasOwner: Bool) -> Bool {
         hasOwner && ownedWatchID == watchID && authorizedIDs.contains(bluetoothID)
+    }
+}
+
+enum WatchTimeFormat: String, Codable, CaseIterable {
+    case system, twelve, twentyFour
+    var title: String {
+        switch self { case .system: return "Match iPhone"; case .twelve: return "12-hour"; case .twentyFour: return "24-hour" }
+    }
+    func hours(locale: Locale = .current) -> UInt8 {
+        switch self {
+        case .twelve: return 12
+        case .twentyFour: return 24
+        case .system: return DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: locale)?.contains("a") == true ? 12 : 24
+        }
     }
 }
 
@@ -58,6 +74,20 @@ struct WatchPairingReceipt: Codable, Equatable {
 struct WatchPreferences: Codable, Equatable {
     var updates = true
     var sound = true
+    var brightness = 50
+    var timeFormat = WatchTimeFormat.system
+    enum CodingKeys: String, CodingKey { case updates, sound, brightness, timeFormat }
+    init(updates: Bool = true, sound: Bool = true, brightness: Int = 50, timeFormat: WatchTimeFormat = .system) {
+        self.updates = updates; self.sound = sound
+        self.brightness = min(100, max(20, brightness)); self.timeFormat = timeFormat
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(updates: try c.decodeIfPresent(Bool.self, forKey: .updates) ?? true,
+                  sound: try c.decodeIfPresent(Bool.self, forKey: .sound) ?? true,
+                  brightness: try c.decodeIfPresent(Int.self, forKey: .brightness) ?? 50,
+                  timeFormat: (try? c.decode(WatchTimeFormat.self, forKey: .timeFormat)) ?? .system)
+    }
     private static func key(_ id: String) -> String { "watch-preferences." + id }
     static func load(_ id: String, defaults: UserDefaults = .standard, migrateLegacy: Bool = false) -> Self {
         if let data = defaults.data(forKey: key(id)), let value = try? JSONDecoder().decode(Self.self, from: data) { return value }
@@ -116,6 +146,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     @Published var enabled = false
     @Published private(set) var updatesEnabled = false
     @Published private(set) var soundEnabled = true
+    @Published private(set) var brightness = 50
+    @Published private(set) var timeFormat = WatchTimeFormat.system
+    @Published private(set) var supportsBrightness = false
     @Published var pickerReady = false
     @Published var configured = false
     @Published private(set) var paired = false
@@ -141,6 +174,15 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private var acceptedProfile = false
     private var profileVersion: UInt8 = 1
     private var desiredSnapshot: Snapshot?
+    private var weather: WatchWeather?
+    private var weatherFahrenheit = false
+    var preferenceID: String? { pairingReceipt?.watchID }
+    func setWeather(_ value: WatchWeather?, fahrenheit: Bool) {
+        guard weather != value || weatherFahrenheit != fahrenheit else { return }
+        weather = value
+        weatherFahrenheit = fahrenheit
+        writeProfileIfNeeded()
+    }
     private var profileWritePending = false
     private var sentProfileFingerprint: Data?
     private var acceptedProfileFingerprint: Data?
@@ -174,9 +216,12 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         }
         if let receipt = pairingReceipt {
             let preferences = WatchPreferences.load(receipt.watchID, migrateLegacy: true)
+            supportsBrightness = (receipt.profileVersion ?? 1) >= 3 && (receipt.capabilities ?? 0) & (1 << 5) != 0
             enabled = preferences.updates
             updatesEnabled = preferences.updates
             soundEnabled = preferences.sound
+            brightness = preferences.brightness
+            timeFormat = preferences.timeFormat
         }
         if enabled { startBluetooth() }
         setupSession.activate(on: .main) { [weak self] event in
@@ -297,11 +342,16 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         guard let receipt = pairingReceipt, receipt.bluetoothID == identifier else { return }
         setEnabled(false, userInitiated: false)
         WatchPreferences.remove(receipt.watchID)
+        WeatherPreferences.remove(receipt.watchID)
+        weather = nil
         pairingReceipt = nil
         UserDefaults.standard.removeObject(forKey: Self.receiptKey)
         paired = false
         updatesEnabled = false
         soundEnabled = true
+        brightness = 50
+        timeFormat = .system
+        supportsBrightness = false
         lastDelivered = nil
         setupPhase = .idle
         // Retain ownership credentials so this phone can pair again. Removal of
@@ -313,7 +363,25 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     func setSoundEnabled(_ value: Bool) {
         guard let id = pairingReceipt?.watchID else { return }
         soundEnabled = value
-        WatchPreferences(updates: updatesEnabled, sound: value).save(id)
+        preferences.save(id)
+    }
+
+    private var preferences: WatchPreferences {
+        WatchPreferences(updates: updatesEnabled, sound: soundEnabled, brightness: brightness, timeFormat: timeFormat)
+    }
+
+    func setBrightness(_ value: Int) {
+        guard let id = pairingReceipt?.watchID else { return }
+        brightness = min(100, max(20, value))
+        preferences.save(id)
+        writeProfileIfNeeded()
+    }
+
+    func setTimeFormat(_ value: WatchTimeFormat) {
+        guard let id = pairingReceipt?.watchID else { return }
+        timeFormat = value
+        preferences.save(id)
+        writeProfileIfNeeded()
     }
 
     func setEnabled(_ value: Bool, userInitiated: Bool = true) {
@@ -324,7 +392,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         if userInitiated {
             updatesEnabled = value
             if setupPhase == .failed { setupPhase = .idle }
-            if let id = pairingReceipt?.watchID { WatchPreferences(updates: value, sound: soundEnabled).save(id) }
+            if let id = pairingReceipt?.watchID { preferences.save(id) }
         }
         if !value {
             pairingTimeout?.cancel()
@@ -716,6 +784,10 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 deviceID = identity.id
                 capabilities = identity.capabilities
                 profileVersion = identity.profileVersion
+                supportsBrightness = profileVersion >= 3 && capabilities & (1 << 5) != 0
+                let preferences = WatchPreferences.load(identity.id)
+                brightness = preferences.brightness
+                timeFormat = preferences.timeFormat
                 guard owner != nil, profile != nil else { return }
                 acceptedProfileFingerprint = nil
                 profileWritePending = false
@@ -734,7 +806,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             acknowledged = max(acknowledged, newAck)
             let first = !ready
             if let deviceID {
-                let receipt = WatchPairingReceipt(bluetoothID: peripheral.identifier, watchID: deviceID)
+                let receipt = WatchPairingReceipt(bluetoothID: peripheral.identifier, watchID: deviceID, profileVersion: profileVersion, capabilities: capabilities)
                 if receipt != pairingReceipt, let data = try? JSONEncoder().encode(receipt) {
                     UserDefaults.standard.set(data, forKey: Self.receiptKey)
                     pairingReceipt = receipt
@@ -862,7 +934,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         let now = Date()
         let packet = WatchWire.profile(owner: owner, revision: 1, now: now,
             offset: TimeZone.current.secondsFromGMT() / 60, version: profileVersion,
-            theme: desiredSnapshot?.appearance ?? .solitude, allowance: desiredSnapshot?.allowance)
+            theme: desiredSnapshot?.appearance ?? .solitude, allowance: desiredSnapshot?.allowance,
+            brightness: brightness, hours: timeFormat.hours(), weather: weather, fahrenheit: weatherFahrenheit)
         // Clock passage does not trigger writes on every poll. Reconnection always
         // resyncs time, and changes in timezone/data/appearance update the profile.
         var fingerprint = packet
@@ -872,7 +945,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         guard revision > 0 else { return }
         let payload = WatchWire.profile(owner: owner, revision: revision, now: now,
             offset: TimeZone.current.secondsFromGMT() / 60, version: profileVersion,
-            theme: desiredSnapshot?.appearance ?? .solitude, allowance: desiredSnapshot?.allowance)
+            theme: desiredSnapshot?.appearance ?? .solitude, allowance: desiredSnapshot?.allowance,
+            brightness: brightness, hours: timeFormat.hours(), weather: weather, fahrenheit: weatherFahrenheit)
         sentProfileFingerprint = fingerprint
         profileWritePending = true
         Diagnostics.shared.record("ble_profile_requested")

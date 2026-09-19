@@ -9,11 +9,21 @@ block watch restoration on solving the final push-service architecture.
 
 1. Restore desktop theme and Codex limits on the watch. Reuse Omarchy's existing
    agents-panel allowance record. Negotiate the richer watch profile and update
-   it when data changes, independently of agent alerts.
+   it when data changes, independently of agent alerts. Complete: theme and
+   allowance sync verified end to end by the user on 2026-09-19.
 2. Restore weather from the phone; add brightness and time/unit preferences.
    Prefer WeatherKit pending its accessory-display attribution fit. Offer current
    location or a chosen location; preserve original observation times and the
    watch's existing cached/expired states. No desktop weather polling.
+   Brightness and time-format controls are implemented and tested on iOS;
+   physical watch acceptance remains to be checked. Phone-owned WeatherKit is
+   implemented with opt-in current/chosen location, units, bounded caching and
+   profile encoding. Weather retrieval on the phone is confirmed; 48 iOS tests
+   and signed builds pass. Visible watch display, travel and overnight background
+   behavior remain physical-device acceptance checks. A periodic weather request
+   from the Bluetooth watch is a follow-up, not part of the current firmware;
+   current background opportunities are OS refresh, location, push and existing
+   watch events. None guarantees a fixed refresh cadence.
 3. Fix daily-use lifecycle gaps: reconnects, stale agent activity, settings recovery,
    remove/re-pair, and acknowledgments. Test the actual routes we use during alpha.
 4. Add basic optional phone alerts through the existing development APNs setup.
@@ -24,6 +34,9 @@ Alpha is feature complete when the full watch face, its settings, and basic agen
 attention work on this setup, with known background-delivery limitations recorded.
 Multi-workstation UI, account linking, Apple Watch integration, and a theme gallery
 are not prerequisites.
+
+See [data ownership and persistence](data-lifecycle.md) for the current memory,
+disk and device-storage boundaries.
 
 ## Omarchy allowance decision
 

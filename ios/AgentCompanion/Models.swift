@@ -107,23 +107,40 @@ enum WatchWire {
 
     static func profile(owner: UUID, revision: UInt32, now: Date = Date(), offset: Int,
                         version: UInt8 = 1, theme: CompanionTheme = .solitude,
-                        allowance: CodexAllowance? = nil) -> Data {
+                        allowance: CodexAllowance? = nil, brightness: Int = 50, hours: UInt8 = 24,
+                        weather: WatchWeather? = nil, fahrenheit: Bool = false) -> Data {
         let version = min(5, max(1, version))
+        let weather = weather.flatMap { value -> WatchWeather? in
+            guard version >= 2, value.usable(at: now), version >= 5 || now < value.dayExpiresAt else { return nil }
+            return value
+        }
         var data = Data([79, 87, version, 1])
         data.appendLE(revision)
         data.appendLE(Int64(now.timeIntervalSince1970))
         data.appendLE(Int16(clamping: offset))
-        data.append(24)
-        data.append(0) // Weather remains absent until the phone weather provider exists.
+        data.append(hours == 12 ? 12 : 24)
+        data.append(weather == nil ? 0 : 1 | (fahrenheit ? 2 : 0) | (weather!.night ? 4 : 0))
         var raw = owner.uuid
         withUnsafeBytes(of: &raw) { data.append(contentsOf: $0) }
         if version >= 2 {
             let palette = theme.valid ? theme : .solitude
             for hex in [palette.background, palette.foreground] { data.appendRGB(hex) }
-            data.append(Data(repeating: 0, count: 39)) // Weather timestamp, values, code, location.
+            if let weather {
+                data.appendLE(Int64(weather.observedAt.timeIntervalSince1970))
+                for value in [weather.temperature, weather.high, weather.low] { data.appendLE(weather.degrees(value, fahrenheit: fahrenheit)) }
+                data.append(weather.code)
+                var name = Data()
+                for character in weather.location {
+                    let bytes = Data(String(character).utf8)
+                    if name.count + bytes.count > 23 { break }
+                    name.append(bytes)
+                }
+                data.append(name)
+                data.append(Data(repeating: 0, count: 24 - name.count))
+            } else { data.append(Data(repeating: 0, count: 39)) }
             if version >= 3 {
                 data.appendRGB(palette.accent)
-                data.append(50) // Existing watch default; per-watch brightness follows next.
+                data.append(UInt8(clamping: min(100, max(20, brightness))))
             }
         }
         if version >= 4 {
@@ -138,7 +155,7 @@ enum WatchWire {
             data.appendLE(usable?.updatedAt ?? Int64(0))
             data.appendLE(usable?.resetsAt ?? Int64(0))
         }
-        if version >= 5 { data.appendLE(Int64(0)) } // No forecast day yet.
+        if version >= 5 { data.appendLE(weather.map { Int64($0.dayExpiresAt.timeIntervalSince1970) } ?? Int64(0)) }
         return data
     }
 

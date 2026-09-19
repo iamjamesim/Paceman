@@ -103,6 +103,7 @@ struct ComputerReceiptLabel: View {
 }
 
 struct WatchDetail: View {
+    @State private var brightnessDraft: Double?
     @ObservedObject var model: CompanionModel
     let theme: CompanionTheme
     var preview = false
@@ -117,6 +118,11 @@ struct WatchDetail: View {
     @State private var removalError: String?
     @State private var startedHere = false
     @State private var justPaired = false
+    private var timeFormatPicker: some View {
+        Picker("Time format", selection: Binding(get: { model.watch.timeFormat }, set: { model.watch.setTimeFormat($0) })) {
+            ForEach(WatchTimeFormat.allCases, id: \.self) { Text($0.title).tag($0) }
+        }.labelsHidden().tint(theme.tint).allowsHitTesting(!preview)
+    }
     private var paired: Bool { preview ? previewConnected : model.watch.paired }
     private var phase: WatchSetupPhase { preview ? previewPhase : model.watch.setupPhase }
     private var inProgress: Bool { phase.inProgress }
@@ -254,6 +260,41 @@ struct WatchDetail: View {
                 Text("Play a sound when an agent needs input or finishes.")
                     .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
             }
+            CompanionRule(theme: theme)
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) { Text("Time format"); timeFormatPicker }
+            } else {
+                HStack { Text("Time format"); Spacer(); timeFormatPicker }
+            }
+            if preview || model.watch.supportsBrightness {
+                CompanionRule(theme: theme)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Brightness")
+                        Spacer()
+                        Text("\(Int(brightnessDraft ?? Double(model.watch.brightness)))%")
+                            .foregroundStyle(theme.ink.opacity(0.65)).monospacedDigit()
+                    }
+                    Slider(value: Binding(get: { brightnessDraft ?? Double(model.watch.brightness) }, set: { brightnessDraft = $0 }),
+                           in: 20...100, step: 1, onEditingChanged: { editing in
+                        if !editing, let value = brightnessDraft {
+                            model.watch.setBrightness(Int(value))
+                            brightnessDraft = nil
+                        }
+                    }).tint(theme.tint).accessibilityLabel("Brightness").allowsHitTesting(!preview)
+                }
+            }
+            CompanionRule(theme: theme)
+            NavigationLink {
+                WeatherSettings(weather: model.weather, theme: theme)
+            } label: {
+                HStack {
+                    Text("Weather")
+                    Spacer()
+                    Text(model.weather.summary).foregroundStyle(theme.ink.opacity(0.65))
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.ink.opacity(0.4))
+                }
+            }.allowsHitTesting(!preview)
             CompanionRule(theme: theme)
             DeviceRemovalButton(title: removing ? "Removing…" : "Remove watch", theme: theme) { remove = true }
                 .disabled(removing).allowsHitTesting(!preview)

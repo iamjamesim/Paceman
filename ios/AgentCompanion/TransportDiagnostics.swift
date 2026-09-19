@@ -20,6 +20,10 @@ struct TransportDiagnostics: View {
                 }
                 Text(model.snapshot?.mode == "synthetic" ? "Synthetic test source. Finished means a turn ended." : "Finished means a turn ended, not that the agent session closed.").font(.caption).foregroundStyle(.secondary)
             }
+            Section("Weather") {
+                Text(model.weather.diagnostic).font(.caption.monospaced()).textSelection(.enabled)
+                Button("Retry weather request") { model.weather.retryForDiagnostics() }
+            }
             Section("Work source") {
                 Text(model.status)
                 if let source = model.source {

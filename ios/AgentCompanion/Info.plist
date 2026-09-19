@@ -4,6 +4,10 @@
 <dict>
 	<key>APNSEnvironment</key>
 	<string>$(APNS_ENVIRONMENT)</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.apselabs.agentcompanion.weather</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
@@ -51,6 +55,12 @@
 	<string>Connect your watch to receive agent updates on your wrist.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan a pairing invitation from your work computer.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Keep weather on your watch local as you travel, even when Paceman is closed.</string>
+	<key>NSLocationDefaultAccuracyReduced</key>
+	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Use your approximate location to show local weather on your watch.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>JetBrainsMono-Regular.ttf</string>
@@ -65,6 +75,7 @@
 	<array>
 		<string>bluetooth-central</string>
 		<string>remote-notification</string>
+		<string>fetch</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

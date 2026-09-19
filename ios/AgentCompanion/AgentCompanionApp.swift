@@ -9,6 +9,9 @@ struct AgentCompanionApp: App {
     @Environment(\.scenePhase) private var phase
     init() {
         let p = PresentationModel()
+        // Restoring a paired watch can schedule weather work during model initialization.
+        // Register its handler before constructing the model, not in didFinishLaunching.
+        if !p.preview { PhoneWeather.registerBackgroundRefresh() }
         let m = CompanionModel(preview: p.preview)
         _presentation = StateObject(wrappedValue: p)
         _model = StateObject(wrappedValue: m)
@@ -26,7 +29,7 @@ struct AgentCompanionApp: App {
     }
 }
 
-enum FeedDestination: Hashable { case computer, watch, pairing, notifications, settings, widgets, diagnostics }
+enum FeedDestination: Hashable { case computer, watch, pairing, notifications, settings, widgets, weather, diagnostics }
 
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
@@ -44,6 +47,7 @@ struct CompanionRoot: View {
                     case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview) { path = [] }
                     case .settings: CompanionSettings(model: model, presentation: presentation, theme: theme)
                     case .diagnostics: TransportDiagnostics(model: model)
+                    case .weather: WeatherSettings(weather: model.weather, theme: theme)
                     case .widgets: WidgetGuide(model: model, presentation: presentation, theme: theme)
                     }
                 }
@@ -52,6 +56,16 @@ struct CompanionRoot: View {
         .onAppear {
             guard presentation.preview else { return }
             switch presentation.previewScreen {
+            case "weather", "weather-current", "weather-place", "weather-denied", "weather-permission", "weather-unavailable":
+                #if DEBUG
+                model.weather.showPreview(presentation.previewScreen)
+                #endif
+                path = [.weather]
+            case "watch-weather-denied":
+                #if DEBUG
+                model.weather.showPreview("weather-denied")
+                #endif
+                path = [.watch]
             case "settings": path = [.settings]
             case "widgets": path = [.settings, .widgets]
             case "pairing", "reconnect": path = [.pairing]
