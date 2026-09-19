@@ -20,6 +20,7 @@ import threading
 import time
 import tomllib
 
+from service.allowance import allowance_snapshot
 from service.processes import CodexProcesses, ProcessIdentity
 
 MAX_AGE = 24 * 60 * 60
@@ -259,7 +260,8 @@ class OmarchySource:
         sessions_changed = previous_key is None or previous_key[0] != activity_key
         payload = {"sourceName": "Omarchy", "mode": "omarchy", "state": state, "sessions": sessions,
                    "sessionLiveness": "process",
-                   "appearance": appearance(self.state_dir)}
+                   "appearance": appearance(self.state_dir),
+                   "allowance": allowance_snapshot(self.state_dir / "agents/usage/codex.json", int(time.time()))}
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         old = json.loads(last["payload"]) if last["payload"] else {}
         # Membership-only cleanup isn't a new alert. An aggregate state change

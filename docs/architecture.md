@@ -61,9 +61,9 @@ age; WidgetKit schedules refreshes.
 
 `firmware/esp32-watch/` retains the upstream firmware/simulator/tools layout so
 shared C rendering code and relative build paths remain coherent. Firmware owns
-rendering, power, BLE bonding and persisted owner identity. The phone currently
-uses the v1 profile and activity packets; newer upstream display/freshness packets
-are available for future integration. Do not treat them as already forwarded.
+rendering, power, BLE bonding and persisted owner identity. The phone negotiates profile v1–v5 for time, palette and source-reported Codex
+allowance, and still uses activity v1. Weather/settings restoration and agent
+freshness leases remain follow-up work. See the alpha roadmap.
 
 The watch has one owner. A desktop disconnect does not transfer ownership.
 The old standalone desktop installer/bar plugin is deliberately not included.

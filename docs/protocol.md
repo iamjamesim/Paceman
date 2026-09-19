@@ -142,4 +142,21 @@ a valid core snapshot. The app uses its neutral appearance until a valid source 
 is supplied. There is no user-facing local theme picker. A source increments
 its revision when session content changes. The Omarchy collector supplies live
 appearance metadata using the desktop bar overrides and accent contrast fallback.
-BLE theme forwarding remains unimplemented.
+BLE theme forwarding is implemented by the alpha profile restoration below.
+
+## Alpha watch profile restoration
+
+The phone now negotiates profile v1–v5 from the watch identity. Rich profiles carry
+the source palette and optional Codex allowance; weather is absent pending the
+phone provider, brightness remains 50%, and hour cycle remains 24-hour in this
+first slice. Profile writes are serialized against activity writes and reconciled
+against the last successfully written content. Clock passage alone does not cause
+writes on every source poll; reconnect synchronizes time again. Original allowance
+observation/reset timestamps are never replaced by transmission time.
+
+Omarchy snapshots may include `allowance` with provider `codex`, remaining (0–100),
+window (1 weekly, 2 session), updatedAt and resetsAt (Unix seconds). Missing/invalid
+records produce null. This is source-scoped, not verified account identity.
+Allowance-only changes advance revision without changing activity eventID or
+triggering APNs activity alerts. Profile v4 receives unavailable after staleness or
+reset; v5 preserves historical values for the firmware's local expiry rules.

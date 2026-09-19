@@ -28,8 +28,9 @@ struct Snapshot: Codable {
     let state: ActivityState
     let eventID: String
     var appearance: CompanionTheme?
+    var allowance: CodexAllowance?
     var sessions: [AgentSession]?
-    enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, mode, observedAt, changedAt, freshFor, state, eventID, appearance, sessions }
+    enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, mode, observedAt, changedAt, freshFor, state, eventID, appearance, sessions, allowance }
     var identity: String { "\(sourceID)/\(generation)/\(eventID)" }
 }
 
@@ -82,14 +83,14 @@ enum HubError: LocalizedError {
 }
 
 enum WatchWire {
-    static func identity(_ data: Data) throws -> (id: String, owned: Bool, capabilities: UInt32) {
+    static func identity(_ data: Data) throws -> (id: String, owned: Bool, capabilities: UInt32, profileVersion: UInt8) {
         let bytes = Array(data)
         guard bytes.count == 32, bytes[0] == 79, bytes[1] == 87,
-              bytes[2] <= 1, bytes[3] >= 1 else {
+              bytes[2] >= 1, bytes[2] <= 5, bytes[3] >= bytes[2] else {
             throw HubError.message("Unsupported watch identity")
         }
         let id = bytes[8..<24].map { String(format: "%02x", $0) }.joined()
-        return (id, bytes[4] & 1 != 0, read32(bytes, at: 24))
+        return (id, bytes[4] & 1 != 0, read32(bytes, at: 24), min(5, bytes[3]))
     }
 
     static func read32(_ bytes: [UInt8], at offset: Int) -> UInt32 {
@@ -104,20 +105,63 @@ enum WatchWire {
         return data
     }
 
-    static func profile(owner: UUID, revision: UInt32, now: Date = Date(), offset: Int) -> Data {
-        var data = Data([79, 87, 1, 1])
+    static func profile(owner: UUID, revision: UInt32, now: Date = Date(), offset: Int,
+                        version: UInt8 = 1, theme: CompanionTheme = .solitude,
+                        allowance: CodexAllowance? = nil) -> Data {
+        let version = min(5, max(1, version))
+        var data = Data([79, 87, version, 1])
         data.appendLE(revision)
         data.appendLE(Int64(now.timeIntervalSince1970))
         data.appendLE(Int16(clamping: offset))
         data.append(24)
-        data.append(0)
+        data.append(0) // Weather remains absent until the phone weather provider exists.
         var raw = owner.uuid
         withUnsafeBytes(of: &raw) { data.append(contentsOf: $0) }
+        if version >= 2 {
+            let palette = theme.valid ? theme : .solitude
+            for hex in [palette.background, palette.foreground] { data.appendRGB(hex) }
+            data.append(Data(repeating: 0, count: 39)) // Weather timestamp, values, code, location.
+            if version >= 3 {
+                data.appendRGB(palette.accent)
+                data.append(50) // Existing watch default; per-watch brightness follows next.
+            }
+        }
+        if version >= 4 {
+            let epoch = now.timeIntervalSince1970
+            let usable = allowance.flatMap { value -> CodexAllowance? in
+                guard value.valid, Double(value.updatedAt) <= epoch else { return nil }
+                if version == 4 && (epoch - Double(value.updatedAt) > 1800 || Double(value.resetsAt) <= epoch) { return nil }
+                return value
+            }
+            data.append(UInt8(usable?.remaining ?? 255))
+            data.append(UInt8(usable?.window ?? 0))
+            data.appendLE(usable?.updatedAt ?? Int64(0))
+            data.appendLE(usable?.resetsAt ?? Int64(0))
+        }
+        if version >= 5 { data.appendLE(Int64(0)) } // No forecast day yet.
         return data
+    }
+
+}
+
+struct CodexAllowance: Codable, Equatable {
+    let provider: String
+    let remaining: Int
+    let window: Int
+    let updatedAt: Int64
+    let resetsAt: Int64
+    var valid: Bool {
+        provider == "codex" && (0...100).contains(remaining) && [1, 2].contains(window)
+            && updatedAt >= 1704067200 && resetsAt > updatedAt && resetsAt <= 3155759999
     }
 }
 
 extension Data {
+    mutating func appendRGB(_ value: String) {
+        let hex = CompanionTheme.hex(value) ?? 0
+        append(contentsOf: [UInt8((hex >> 16) & 255), UInt8((hex >> 8) & 255), UInt8(hex & 255)])
+    }
+
     mutating func appendLE<T: FixedWidthInteger>(_ value: T) {
         var little = value.littleEndian
         Swift.withUnsafeBytes(of: &little) { append(contentsOf: $0) }
@@ -143,5 +187,7 @@ extension Snapshot {
         let candidate = try? c.decode(CompanionTheme.self, forKey: .appearance)
         appearance = candidate?.valid == true ? candidate : nil
         sessions = try? c.decode([AgentSession].self, forKey: .sessions)
+        let limits = try? c.decode(CodexAllowance.self, forKey: .allowance)
+        allowance = limits?.valid == true ? limits : nil
     }
 }

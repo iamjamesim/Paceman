@@ -398,6 +398,47 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(ComputerPreferences.name(for: "second", defaults: defaults), "Second")
     }
 
+    func testRichProfileVersionsPreserveWireLayoutAndObservationTime() {
+        let now = Date(timeIntervalSince1970: 1800000000)
+        let owner = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let allowance = CodexAllowance(provider: "codex", remaining: 79, window: 1,
+            updatedAt: 1799999900, resetsAt: 1800086400)
+        for (version, count) in [(1, 36), (2, 81), (3, 85), (4, 103), (5, 111)] {
+            let packet = WatchWire.profile(owner: owner, revision: 7, now: now, offset: -420,
+                version: UInt8(version), theme: .solitude, allowance: allowance)
+            XCTAssertEqual(packet.count, count)
+            XCTAssertEqual(Array(packet.prefix(4)), [79, 87, UInt8(version), 1])
+            if version >= 2 { XCTAssertEqual(Array(packet[36..<42]), [16, 19, 21, 202, 204, 204]) }
+            if version >= 4 {
+                XCTAssertEqual(Array(packet[85..<87]), [79, 1])
+                XCTAssertEqual(WatchWire.read32(Array(packet), at: 87), 1799999900)
+                XCTAssertEqual(WatchWire.read32(Array(packet), at: 95), 1800086400)
+            }
+        }
+    }
+
+    func testLegacyAllowanceExpiresWhileV5RetainsHistoryWithoutRefill() {
+        let limits = CodexAllowance(provider: "codex", remaining: 0, window: 2,
+            updatedAt: 1800000000, resetsAt: 1800000100)
+        let now = Date(timeIntervalSince1970: 1800000200)
+        for version: UInt8 in [4, 5] {
+            let packet = WatchWire.profile(owner: UUID(), revision: 1, now: now, offset: 0,
+                version: version, allowance: limits)
+            XCTAssertEqual(packet[85], version == 4 ? 255 : 0)
+        }
+        let future = WatchWire.profile(owner: UUID(), revision: 1,
+            now: Date(timeIntervalSince1970: 1799999999), offset: 0, version: 5, allowance: limits)
+        XCTAssertEqual(future[85], 255)
+    }
+
+    func testInvalidOptionalAllowanceDoesNotDiscardActivity() throws {
+        let data = try sourceFixture(["allowance": ["provider": "codex", "remaining": 120,
+            "window": 1, "updatedAt": 1800000000, "resetsAt": 1800086400]])
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
+        XCTAssertNil(snapshot.allowance)
+        XCTAssertEqual(snapshot.state, .working)
+    }
+
     private func stubClient(_ handler: @escaping (URLRequest) throws -> (Int, Data)) -> SourceClient {
         ClientURLProtocol.handler = handler
         let configuration = URLSessionConfiguration.ephemeral

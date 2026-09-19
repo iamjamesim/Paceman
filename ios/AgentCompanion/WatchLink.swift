@@ -139,6 +139,12 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private var queuedAt: Date?
     private var pendingIdentifier: UUID?
     private var acceptedProfile = false
+    private var profileVersion: UInt8 = 1
+    private var desiredSnapshot: Snapshot?
+    private var profileWritePending = false
+    private var sentProfileFingerprint: Data?
+    private var acceptedProfileFingerprint: Data?
+
     private var pairingTimeout: DispatchWorkItem?
     private var reconnectWork: DispatchWorkItem?
     private var handshakeTimeout: DispatchWorkItem?
@@ -382,6 +388,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         ready = false
         preparing = false
         acceptedProfile = false
+        profileWritePending = false
+        acceptedProfileFingerprint = nil
         writePending = false
         restartRestoredRequest = false
         pendingIdentifier = identifier
@@ -499,6 +507,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         activity = nil
         profile = nil
         acceptedProfile = false
+        profileWritePending = false
+        acceptedProfileFingerprint = nil
         writePending = false
         status = message + " Retrying automatically."
         Diagnostics.shared.record("ble_connection_recovering")
@@ -516,6 +526,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             profile = nil
             deviceID = nil
             acceptedProfile = false
+            profileWritePending = false
+            acceptedProfileFingerprint = nil
             writePending = false
             if WatchConnectionStep.invalidatesPeripherals(central.state) {
                 // Keep only the identifier. Core Bluetooth invalidates peripheral
@@ -585,6 +597,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         profile = nil
         deviceID = nil
         acceptedProfile = false
+        profileWritePending = false
+        acceptedProfileFingerprint = nil
         writePending = false
         peripheral.delegate = self
         status = "Connecting to your watch…"
@@ -701,13 +715,12 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 }
                 deviceID = identity.id
                 capabilities = identity.capabilities
-                guard let owner, let profile else { return }
-                let revision = nextRevision()
-                let packet = WatchWire.profile(owner: owner, revision: revision,
-                    offset: TimeZone.current.secondsFromGMT() / 60)
+                profileVersion = identity.profileVersion
+                guard owner != nil, profile != nil else { return }
+                acceptedProfileFingerprint = nil
+                profileWritePending = false
                 status = paired ? "Restoring watch updates…" : "Confirm the pairing prompt on your iPhone. Enter the watch's code if asked."
-                Diagnostics.shared.record("ble_profile_requested")
-                peripheral.writeValue(packet, for: profile, type: .withResponse)
+                writeProfileIfNeeded()
             } catch { fail(error.localizedDescription) }
         } else if characteristic.uuid == activityUUID {
             guard acceptedProfile else { return }
@@ -763,12 +776,18 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             return
         }
         if characteristic.uuid == profileUUID {
+            let initialProfile = !acceptedProfile
+            profileWritePending = false
+            acceptedProfileFingerprint = sentProfileFingerprint
             acceptedProfile = true
             if let deviceID { UserDefaults.standard.set(deviceID, forKey: "owned-watch-id") }
-            if enabled, let activity {
+            if enabled, initialProfile, let activity {
                 if !paired { setupPhase = .checking }
                 status = "Checking the connection…"
                 peripheral.readValue(for: activity)
+            } else {
+                writeProfileIfNeeded()
+                if let desiredSnapshot { forward(desiredSnapshot) }
             }
         } else if characteristic.uuid == activityUUID {
             writePending = false
@@ -778,6 +797,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 UserDefaults.standard.set(Int(sentRevision), forKey: "delivered-revision")
                 Diagnostics.shared.record("ble_write_accepted", event: sentEvent)
             }
+            writeProfileIfNeeded()
             if let queued, let queuedAt, Date().timeIntervalSince(queuedAt) < queued.freshFor {
                 self.queued = nil
                 forward(queued)
@@ -786,6 +806,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     func invalidatePending() {
+        desiredSnapshot = nil
+        acceptedProfileFingerprint = nil
+        writeProfileIfNeeded()
         queued = nil
         queuedAt = nil
     }
@@ -803,6 +826,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     func forward(_ snapshot: Snapshot) {
+        desiredSnapshot = snapshot
+        writeProfileIfNeeded()
+        guard !profileWritePending else { return }
         guard enabled, ready, let activity, let peripheral else { return }
         guard Date().timeIntervalSince1970 - snapshot.observedAt < snapshot.freshFor else { return }
         if writePending {
@@ -828,6 +854,29 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         sentRevision = revision
         Diagnostics.shared.record("ble_write_started", event: snapshot.identity)
         peripheral.writeValue(packet, for: activity, type: .withResponse)
+    }
+
+    private func writeProfileIfNeeded() {
+        guard enabled, preparing || ready, deviceID != nil, !profileWritePending, !writePending,
+              let owner, let profile, let peripheral, peripheral.state == .connected else { return }
+        let now = Date()
+        let packet = WatchWire.profile(owner: owner, revision: 1, now: now,
+            offset: TimeZone.current.secondsFromGMT() / 60, version: profileVersion,
+            theme: desiredSnapshot?.appearance ?? .solitude, allowance: desiredSnapshot?.allowance)
+        // Clock passage does not trigger writes on every poll. Reconnection always
+        // resyncs time, and changes in timezone/data/appearance update the profile.
+        var fingerprint = packet
+        fingerprint.replaceSubrange(4..<16, with: Data(repeating: 0, count: 12))
+        guard fingerprint != acceptedProfileFingerprint else { return }
+        let revision = nextRevision()
+        guard revision > 0 else { return }
+        let payload = WatchWire.profile(owner: owner, revision: revision, now: now,
+            offset: TimeZone.current.secondsFromGMT() / 60, version: profileVersion,
+            theme: desiredSnapshot?.appearance ?? .solitude, allowance: desiredSnapshot?.allowance)
+        sentProfileFingerprint = fingerprint
+        profileWritePending = true
+        Diagnostics.shared.record("ble_profile_requested")
+        peripheral.writeValue(payload, for: profile, type: .withResponse)
     }
 
     private func nextRevision() -> UInt32 {

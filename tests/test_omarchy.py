@@ -35,6 +35,31 @@ class OmarchyTests(unittest.TestCase):
         self.source = self.enterContext(OmarchySource(self.store,
             socket_path=self.root / 'omarchy-watch.sock', state_dir=self.root / 'omarchy', processes=self.processes))
 
+    def test_allowance_changes_do_not_generate_activity_or_export_other_fields(self):
+        import datetime as dt
+        path = self.root / 'omarchy/agents/usage/codex.json'
+        path.parent.mkdir(parents=True)
+        now = int(time.time())
+        stamp = lambda epoch: dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat()
+        before = self.store.snapshot()
+        record = {"schemaVersion": 1, "id": "codex", "updatedAt": stamp(now),
+                  "privateExtra": "must not leave the source",
+                  "limits": [{"label": "5h window", "percent": 0.8, "resetsAt": stamp(now + 3600)}]}
+        path.write_text(json.dumps(record))
+        self.source.tick(force=True)
+        after = self.store.snapshot()
+        self.assertEqual(after['allowance'], {"provider": "codex", "remaining": 20,
+            "window": 2, "updatedAt": now, "resetsAt": now + 3600})
+        self.assertEqual(after['eventID'], before['eventID'])
+        self.assertGreater(after['revision'], before['revision'])
+        self.assertNotIn('privateExtra', json.dumps(after))
+        self.source.tick(force=True)
+        self.assertEqual(self.store.snapshot()['revision'], after['revision'])
+        path.unlink()
+        self.source.tick(force=True)
+        self.assertIsNone(self.store.snapshot()['allowance'])
+        self.assertEqual(self.store.snapshot()['eventID'], before['eventID'])
+
     def write_theme(self, accent='#FF88AA'):
         (self.theme / 'colors.toml').write_text(f'background="#101010"\nforeground="#FFFFFF"\naccent="{accent}"\n')
         (self.theme.parent / 'theme.name').write_text('Test theme')

@@ -147,3 +147,17 @@ An APNs 200 is server acceptance, not phone delivery. A notification is not proo
 of background execution. A BLE write is not proof of visible rendering. Record
 these stages separately in future tests. Keep raw device logs and identifiers
 under ignored runtime storage, not in this document.
+
+## Alpha profile restoration — 2026-09-19
+
+The Omarchy allowance parser was adapted from the previous watch daemon, without
+its weather collector, credentials access, or another periodic provider poller.
+Source changes export validated source-scoped limits as presentation metadata.
+The phone negotiates profile v1–v5 and forwards palette/allowance updates separately
+from agent event identity. Weather, brightness controls and hour-cycle preferences
+remain follow-up alpha features.
+
+Validation: 90 Python tests passed with 17 platform-dependent skips using Python
+3.14 and a resolved temporary directory; 35 iOS tests passed, including rich-profile
+wire offsets and legacy versus v5 expiry semantics. Signed device build succeeded.
+This does not establish deployment to the Omarchy service or physical watch display.
