@@ -201,14 +201,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 self.setupPhase = .failed
             case .accessoryRemoved:
                 self.configured = !self.setupSession.accessories.isEmpty
-                if event.accessory?.bluetoothIdentifier == self.pairingReceipt?.bluetoothID {
-                    if let id = self.pairingReceipt?.watchID { WatchPreferences.remove(id) }
-                    self.pairingReceipt = nil
-                    UserDefaults.standard.removeObject(forKey: Self.receiptKey)
+                if let identifier = event.accessory?.bluetoothIdentifier {
+                    self.finishRemoval(identifier)
                 }
-                self.restorePairingState()
-                self.setEnabled(false)
-                self.status = "Watch access removed"
             case .invalidated:
                 self.pickerReady = false
                 self.status = "Watch setup is unavailable. Reopen the app and try again."
@@ -274,6 +269,39 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 }
             }
         }
+    }
+
+    func removeWatch(completion: @escaping (Bool) -> Void) {
+        guard pickerReady, let identifier = pairingReceipt?.bluetoothID,
+              let accessory = setupSession.accessories.first(where: { $0.bluetoothIdentifier == identifier }) else {
+            completion(false)
+            return
+        }
+        setupSession.removeAccessory(accessory) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self else { completion(false); return }
+                guard error == nil else { completion(false); return }
+                self.finishRemoval(identifier)
+                completion(true)
+            }
+        }
+    }
+
+    private func finishRemoval(_ identifier: UUID) {
+        guard let receipt = pairingReceipt, receipt.bluetoothID == identifier else { return }
+        setEnabled(false, userInitiated: false)
+        WatchPreferences.remove(receipt.watchID)
+        pairingReceipt = nil
+        UserDefaults.standard.removeObject(forKey: Self.receiptKey)
+        paired = false
+        updatesEnabled = false
+        soundEnabled = true
+        lastDelivered = nil
+        setupPhase = .idle
+        // Retain ownership credentials so this phone can pair again. Removal of
+        // iOS accessory access is not a factory reset or an ownership transfer.
+        status = "Watch removed"
+        onWatchEvent?()
     }
 
     func setSoundEnabled(_ value: Bool) {

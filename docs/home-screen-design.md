@@ -95,3 +95,7 @@ This visual-only follow-up built successfully for simulator and device. Connecte
 reconnecting, revoked, maximum accessibility text, and the shared pairing
 illustration in the light theme were visually checked. Existing behavior tests
 were not rerun for these drawing and button-style changes.
+
+Watch detail now includes Remove watch below preferences, sharing DeviceRemovalButton
+with computer detail. Both require confirmation; removal errors preserve pairing.
+See pairing-and-removal.md for the watch ownership distinction and validation limits.

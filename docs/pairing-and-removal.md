@@ -86,3 +86,22 @@ See the [protocol](protocol.md) for request shapes and privacy boundaries.
 
 Use test pairings for destructive checks. Do not interpret protocol fixtures or
 desktop screenshots as physical iPhone/watch validation.
+
+## Remove a watch from the phone
+
+Watch detail offers Remove watch, using the same destructive action treatment as
+Remove computer. Confirmation explains that updates and this phone's access stop;
+the computer remains connected. AccessorySetupKit removes the selected accessory.
+On success, the app stops reconnecting, clears that watch's pairing receipt,
+preferences and displayed delivery timestamp, and leaves the detail page. A failed
+request retains the pairing and presents a retryable error. Removal events for
+other accessory IDs do not stop the selected watch.
+
+This is not a watch factory reset or ownership transfer. Ownership credentials are
+retained so the same phone can pair again; moving ownership to another phone is a
+separate firmware/protocol flow.
+
+Validation: simulator and signed device builds succeeded; existing 32 tests passed.
+The paired detail layout was visually checked. Actual AccessorySetupKit removal
+and re-pairing require physical acceptance; the user's watch was not unpaired as
+part of this change.

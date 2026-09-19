@@ -52,13 +52,8 @@ struct ComputerDetail: View {
                     }.font(.subheadline).frame(minHeight: 44).contentShape(Rectangle())
                 }.buttonStyle(.plain).disabled(removing).allowsHitTesting(!presentation.preview)
                 CompanionRule(theme: theme)
-                Button(role: .destructive) { remove = true } label: {
-                    Text(removing ? "Removing…" : "Remove computer")
-                        .font(.subheadline).foregroundStyle(.red)
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(theme.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
-                        .contentShape(RoundedRectangle(cornerRadius: 12))
-                }.buttonStyle(.plain).padding(.top, 8).disabled(removing).allowsHitTesting(!presentation.preview)
+                DeviceRemovalButton(title: removing ? "Removing…" : "Remove computer", theme: theme) { remove = true }
+                    .disabled(removing).allowsHitTesting(!presentation.preview)
                 if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.ink.opacity(0.65)) }
             }.padding(.horizontal, 26).padding(.bottom, 30)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
@@ -117,6 +112,9 @@ struct WatchDetail: View {
     var previewState = "connected"
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.dismiss) private var dismiss
+    @State private var remove = false
+    @State private var removing = false
+    @State private var removalError: String?
     @State private var startedHere = false
     @State private var justPaired = false
     private var paired: Bool { preview ? previewConnected : model.watch.paired }
@@ -147,6 +145,19 @@ struct WatchDetail: View {
             if !paired { pairingActions.padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12).background(theme.canvas) }
         }.foregroundStyle(theme.ink).background(theme.canvas)
             .navigationTitle(paired ? "Watch" : "Connect watch").navigationBarTitleDisplayMode(.inline)
+            .confirmationDialog("Remove Omarchy Watch?", isPresented: $remove, titleVisibility: .visible) {
+                Button("Remove watch", role: .destructive) {
+                    removing = true
+                    removalError = nil
+                    model.watch.removeWatch { success in
+                        removing = false
+                        if success { dismiss() }
+                        else { removalError = "Couldn’t remove the watch. Try again. Your pairing is kept." }
+                    }
+                }
+            } message: {
+                Text("Stop sending activity to this watch and remove this phone’s access. Your computer stays connected.")
+            }
             .onChange(of: model.watch.paired) { _, value in
                 if value && startedHere && !preview { justPaired = true }
             }
@@ -243,6 +254,25 @@ struct WatchDetail: View {
                 Text("Play a sound when an agent needs input or finishes.")
                     .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
             }
+            CompanionRule(theme: theme)
+            DeviceRemovalButton(title: removing ? "Removing…" : "Remove watch", theme: theme) { remove = true }
+                .disabled(removing).allowsHitTesting(!preview)
+            if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.ink.opacity(0.65)) }
         }.padding(.top, 12)
+    }
+}
+
+private struct DeviceRemovalButton: View {
+    let title: String
+    let theme: CompanionTheme
+    var action: () -> Void
+    var body: some View {
+        Button(role: .destructive, action: action) {
+            Text(title).font(.subheadline).foregroundStyle(.red)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(theme.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+                .contentShape(RoundedRectangle(cornerRadius: 12))
+        }.buttonStyle(.plain).padding(.top, 8)
     }
 }
