@@ -88,6 +88,8 @@ struct ComputerIllustration: View {
 struct WatchIllustration: View {
     let theme: CompanionTheme
     var paired = true
+    var timeFormat = WatchTimeFormat.system
+    var state = ActivityState.idle
     var body: some View {
         GeometryReader { g in
             let w = g.size.width
@@ -96,12 +98,28 @@ struct WatchIllustration: View {
                 RoundedRectangle(cornerRadius: w * 0.25).fill(LinearGradient(colors: [Color(companionHex: "626763"), Color(companionHex: "202321"), Color(companionHex: "525750")], startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: w * 0.86, height: w * 1.02)
                 RoundedRectangle(cornerRadius: w * 0.20).fill(theme.canvas).frame(width: w * 0.76, height: w * 0.92)
                 if paired {
-                    VStack(alignment: .leading, spacing: w * 0.09) {
-                    Text("THU 17").font(.custom("JetBrainsMono-Regular", size: w * 0.065)).foregroundStyle(theme.ink)
-                    Text("12:43").font(.custom("JetBrainsMono-Regular", size: w * 0.19)).tracking(-w * 0.016).foregroundStyle(theme.tint)
-                    Rectangle().fill(theme.ink.opacity(0.22)).frame(height: 0.5)
-                    HStack { AgentMark(state: "working").frame(width: w * 0.13); Spacer(); Text("WORKING").font(.custom("JetBrainsMono-Regular", size: w * 0.058)) }.foregroundStyle(theme.ink)
-                    }.frame(width: w * 0.58)
+                    TimelineView(.everyMinute) { context in
+                        VStack(alignment: .leading, spacing: w * 0.08) {
+                            Text(formatted(context.date, "EEE d MMM")).font(.custom("JetBrainsMono-Regular", size: w * 0.065))
+                            HStack(alignment: .top, spacing: w * 0.025) {
+                                Text(formatted(context.date, timeFormat.hours() == 12 ? "hh:mm" : "HH:mm"))
+                                    .font(.custom("JetBrainsMono-Regular", size: w * 0.19)).tracking(-w * 0.016)
+                                if timeFormat.hours() == 12 {
+                                    Text(formatted(context.date, "a")).font(.custom("JetBrainsMono-Regular", size: w * 0.055))
+                                        .padding(.top, w * 0.025)
+                                }
+                            }.foregroundStyle(theme.tint)
+                            Rectangle().fill(theme.ink.opacity(0.22)).frame(height: 0.5)
+                            HStack {
+                                if state != .idle {
+                                    ActivityRobot(state: state, animate: false).frame(width: w * 0.13, height: w * 0.13)
+                                        .foregroundStyle(theme.tint)
+                                }
+                                Spacer(minLength: 0)
+                                Text(state.title.uppercased()).font(.custom("JetBrainsMono-Regular", size: w * 0.058))
+                            }.frame(height: w * 0.13)
+                        }.foregroundStyle(theme.ink).frame(width: w * 0.58)
+                    }
                 } else {
                     VStack(spacing: w * 0.10) {
                         Image(systemName: "link").font(.system(size: w * 0.22, weight: .medium))
@@ -111,6 +129,13 @@ struct WatchIllustration: View {
             }.frame(width: w, height: g.size.height)
         }.aspectRatio(0.68, contentMode: .fit).dynamicTypeSize(.medium).accessibilityElement(children: .ignore).accessibilityLabel("Watch appearance preview, illustrative")
     }
+    private func formatted(_ date: Date, _ format: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = format
+        return formatter.string(from: date)
+    }
+
 }
 
 struct DetailRow<Content: View>: View {

@@ -130,7 +130,7 @@ struct WatchDetail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 if !paired || justPaired || previewComplete {
-                    WatchIllustration(theme: theme, paired: paired).frame(width: 90, height: 133)
+                    WatchIllustration(theme: theme, paired: paired, timeFormat: model.watch.timeFormat, state: preview ? .working : model.snapshot?.state ?? .idle).frame(width: 90, height: 133)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
                 if justPaired || (preview && previewComplete) {
@@ -226,7 +226,7 @@ struct WatchDetail: View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(spacing: 20) {
                 if !typeSize.isAccessibilitySize {
-                    WatchIllustration(theme: theme, paired: true).frame(width: 90, height: 133).accessibilityHidden(true)
+                    WatchIllustration(theme: theme, paired: true, timeFormat: model.watch.timeFormat, state: preview ? .working : model.snapshot?.state ?? .idle).frame(width: 90, height: 133).accessibilityHidden(true)
                 }
                 VStack(spacing: 9) {
                     Text("Omarchy Watch")

@@ -145,7 +145,7 @@ struct CompanionHome: View {
     private var watchRow: some View {
         Button { open(.watch) } label: {
             HStack(spacing: 20) {
-                WatchIllustration(theme: theme, paired: hasWatch).frame(width: hasWatch ? 45 : 55, height: hasWatch ? 68 : 83)
+                WatchIllustration(theme: theme, paired: hasWatch, timeFormat: model.watch.timeFormat, state: presentation.preview ? .working : model.snapshot?.state ?? .idle).frame(width: hasWatch ? 45 : 55, height: hasWatch ? 68 : 83)
                 VStack(alignment: .leading, spacing: 7) {
                     Text(hasWatch ? "Omarchy Watch" : "Connect your watch")
                         .font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold)).multilineTextAlignment(.leading)
@@ -196,7 +196,7 @@ struct AgentFeedRow: View {
 }
 
 /// Motion matches watch_face_layout.c; historical activity and Reduce Motion stay still.
-private struct ActivityRobot: View {
+struct ActivityRobot: View {
     let state: ActivityState
     let animate: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
