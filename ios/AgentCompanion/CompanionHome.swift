@@ -128,7 +128,7 @@ struct CompanionHome: View {
         }.padding(.vertical, 20)
     }
     private var connectionLabel: some View {
-        Text(model.accessRevoked ? "Access removed" : "Reconnecting…")
+        Text(presentation.computerState(model: model).rawValue)
             .font(.caption).foregroundStyle(theme.ink.opacity(0.7))
     }
     private var recoveryAction: some View {
@@ -139,13 +139,8 @@ struct CompanionHome: View {
             .disabled(!model.accessRevoked && model.busy)
     }
     private var updateLabel: some View {
-        Group {
-            if presentation.preview {
-                Text(presentation.previewScreen == "waiting" ? "No updates yet" : offline ? "Last received 12 minutes ago" : "Last received just now")
-            } else if let received = model.lastContact {
-                ReceiptTimeLabel(prefix: "Last received", date: received)
-            } else { Text("No updates yet") }
-        }.font(.caption2).foregroundStyle(theme.ink.opacity(0.5))
+        ComputerReceiptLabel(model: model, presentation: presentation)
+            .font(.caption2).foregroundStyle(theme.ink.opacity(0.5))
     }
     private var watchRow: some View {
         Button { open(.watch) } label: {

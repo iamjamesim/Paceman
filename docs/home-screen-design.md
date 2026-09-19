@@ -68,3 +68,30 @@ recovery attempt. User intent (updatesEnabled) is separate from transport runnin
 Detail shows short actionable guidance and Try again only for a stopped connection;
 transport diagnostics are not used as management-page copy. The expanded suite
 passes 30 tests, including state precedence and failure/off/recovery distinctions.
+
+## Computer detail refinement
+
+Match watch detail's centered illustration, name, connection status, and receipt
+time. Home and detail share ComputerConnectionState and ComputerReceiptLabel.
+A stale snapshot while requests succeed says Updating; a failed request says
+Reconnecting; revoked access takes precedence. Display name and Remove computer
+are the only routine actions. Recovery guidance appears while reconnecting; QR
+pairing appears only after access removal. Endpoint and identity diagnostics stay
+in developer tools. Removal failure preserves pairing and reports failure.
+
+Names belong to authenticated source IDs. The old global name migrates once to
+the paired source; successful removal clears only that source's name.
+Validation: 32 tests passed, including connection precedence and name migration /
+identity isolation. Connected, reconnecting, revoked, waiting, stale, and long-name
+maximum-accessibility previews were inspected. Both simulator and signed device
+builds succeeded. Accessibility names use proportional type to avoid broken words.
+
+Computer detail's removal action is separated from the editable-name row, centered
+and explicitly destructive, with a subtle neutral button background. Confirmation
+and server-confirmed removal behavior remain intact. The decorative laptop now
+shows two tiled terminal panes, without window-control dots, old branding, or a
+sample agent state.
+This visual-only follow-up built successfully for simulator and device. Connected,
+reconnecting, revoked, maximum accessibility text, and the shared pairing
+illustration in the light theme were visually checked. Existing behavior tests
+were not rerun for these drawing and button-style changes.

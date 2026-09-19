@@ -4,9 +4,7 @@ import SwiftUI
 
 @MainActor
 final class PresentationModel: ObservableObject {
-    @Published var computerName = UserDefaults.standard.string(forKey: "computer-name") ?? "" {
-        didSet { if !preview { UserDefaults.standard.set(computerName, forKey: "computer-name") } }
-    }
+    @Published private var nameRevision = 0
     let preview: Bool
     let previewScreen: String
     let neutralPreview: Bool
@@ -19,6 +17,14 @@ final class PresentationModel: ObservableObject {
         #else
         preview = false; previewScreen = "activity"; neutralPreview = false
         #endif
+        if !preview, let source = Vault.load(PairedSource.self, key: "paired-source") {
+            ComputerPreferences.migrateLegacy(to: source.sourceID)
+        }
+    }
+    func setDisplayName(_ name: String, source: PairedSource?) {
+        guard !preview, let source else { return }
+        ComputerPreferences.setName(name, for: source.sourceID)
+        nameRevision += 1
     }
     var previewHasComputer: Bool { !["setup", "pairing", "watch-only"].contains(previewScreen) }
     var previewHasWatch: Bool { ["paired-watch", "watch-paired", "watch-only", "watch-complete", "single-finished", "single-offline", "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(previewScreen) }
@@ -51,8 +57,8 @@ final class PresentationModel: ObservableObject {
         return source?.valid == true ? source! : .companion
     }
     func displayName(source: PairedSource?) -> String {
-        if preview { return neutralPreview ? "MacBook Pro" : "Omarchy" }
-        if !computerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return String(computerName.prefix(60)) }
+        if preview { return previewScreen == "computer-long" ? "James’s development workstation" : neutralPreview ? "MacBook Pro" : "Omarchy" }
+        if let source, let name = ComputerPreferences.name(for: source.sourceID), !name.isEmpty { return name }
         guard let host = source?.endpoint.host else { return "Your computer" }
         let short = String(host.split(separator: ".").first ?? "Computer")
         if short.contains("macbook") { return "MacBook Pro" }
@@ -153,5 +159,45 @@ struct AgentDisplayRow: Identifiable {
             let lhs = AgentFeedContent.priority($0.session.state), rhs = AgentFeedContent.priority($1.session.state)
             return lhs == rhs ? $0.id < $1.id : lhs < rhs
         }
+    }
+}
+
+enum ComputerPreferences {
+    private static func key(_ id: String) -> String { "computer-name." + id }
+    static func name(for id: String, defaults: UserDefaults = .standard) -> String? { defaults.string(forKey: key(id)) }
+    static func setName(_ name: String, for id: String, defaults: UserDefaults = .standard) {
+        let value = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
+        defaults.set(value, forKey: key(id))
+    }
+    static func migrateLegacy(to id: String, defaults: UserDefaults = .standard) {
+        if name(for: id, defaults: defaults) == nil, let legacy = defaults.string(forKey: "computer-name") {
+            setName(legacy, for: id, defaults: defaults)
+        }
+        defaults.removeObject(forKey: "computer-name")
+    }
+    static func remove(_ id: String, defaults: UserDefaults = .standard) { defaults.removeObject(forKey: key(id)) }
+}
+
+enum ComputerConnectionState: String {
+    case current = "Up to date", connecting = "Connecting…", reconnecting = "Reconnecting…"
+    case updating = "Updating…", revoked = "Access removed"
+    static func resolve(revoked: Bool, failed: Bool, hasSnapshot: Bool, fresh: Bool) -> Self {
+        if revoked { return .revoked }
+        if failed { return .reconnecting }
+        if !hasSnapshot { return .connecting }
+        return fresh ? .current : .updating
+    }
+}
+
+extension PresentationModel {
+    func computerState(model: CompanionModel) -> ComputerConnectionState {
+        if preview {
+            if previewScreen == "computer-revoked" { return .revoked }
+            if previewOffline { return .reconnecting }
+            if ["computer-waiting", "waiting"].contains(previewScreen) { return .connecting }
+            if previewScreen == "computer-stale" { return .updating }
+            return .current
+        }
+        return .resolve(revoked: model.accessRevoked, failed: model.hasError, hasSnapshot: model.snapshot != nil, fresh: model.fresh)
     }
 }

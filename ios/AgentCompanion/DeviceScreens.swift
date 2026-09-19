@@ -5,69 +5,105 @@ struct ComputerDetail: View {
     @ObservedObject var presentation: PresentationModel
     @ObservedObject private var push = PushCoordinator.shared
     let theme: CompanionTheme
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var remove = false
     @State private var rename = false
     @State private var name = ""
     @State private var removalError: String?
     @State private var removing = false
-    private var connected: Bool { presentation.preview ? !presentation.previewOffline : model.fresh }
+    private var connection: ComputerConnectionState { presentation.computerState(model: model) }
     var body: some View {
-        List {
-            Section {
-                VStack(spacing: 18) {
-                    ComputerIllustration(theme: theme).frame(width: 190)
-                    Text(presentation.displayName(source: model.source)).font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold)).multilineTextAlignment(.center)
-                }.frame(maxWidth: .infinity).padding(.vertical, 16)
-            }.listRowBackground(Color.clear)
-            Section("Connection") {
-                DetailRow(title: "Status") { Text(model.accessRevoked ? "Access removed" : connected ? "Up to date" : model.hasError || presentation.previewOffline ? "Unavailable" : "Waiting for update") }
-                DetailRow(title: "Last received") {
-                    if presentation.preview { Text(presentation.previewOffline ? "12 minutes ago" : "Just now") }
-                    else if let date = model.lastContact { Text("\(date, style: .relative) ago") }
-                    else { Text("Not yet") }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(spacing: 20) {
+                    if !typeSize.isAccessibilitySize { ComputerIllustration(theme: theme).frame(width: 190).accessibilityHidden(true) }
+                    VStack(spacing: 9) {
+                        Text(presentation.displayName(source: model.source))
+                            .font(theme.monospaced && !typeSize.isAccessibilitySize ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
+                        HStack(spacing: 5) {
+                            Circle().fill(connection == .current ? theme.tint : theme.ink.opacity(0.3)).frame(width: 5, height: 5)
+                            Text(connection.rawValue).font(.footnote)
+                        }.foregroundStyle(theme.ink.opacity(0.65))
+                        ComputerReceiptLabel(model: model, presentation: presentation)
+                            .font(.caption).foregroundStyle(theme.ink.opacity(0.5))
+                    }
+                }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.top, 20).padding(.bottom, 12)
+                if connection == .revoked {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Scan a new pairing code from this computer.").font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                        NavigationLink { PairingFlow(model: model, theme: theme) } label: {
+                            Label("Scan QR code", systemImage: "qrcode.viewfinder").font(.subheadline)
+                                .frame(minHeight: 44)
+                        }.disabled(removing || presentation.preview)
+                    }
+                } else if connection == .reconnecting {
+                    Text("Check that your computer is awake, sharing is on, and Tailscale is connected.")
+                        .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
                 }
-                Button { Task { await model.refresh() } } label: {
-                    Label(model.busy ? "Checking connection…" : "Check connection", systemImage: "arrow.clockwise")
-                }.disabled(model.busy || presentation.preview)
-                if model.hasError || presentation.previewOffline {
-                    Text(model.accessRevoked ? "Access was removed on this computer. Scan a fresh QR code to reconnect." : "Make sure this computer is awake, Paceman sharing is on, and Tailscale is connected on both devices.").font(.footnote).foregroundStyle(.secondary)
-                }
-                if let notice = model.identityNotice { Text(notice).font(.footnote).foregroundStyle(.secondary) }
-            }.listRowBackground(theme.ink.opacity(0.04))
-            Section {
-                NavigationLink(value: FeedDestination.notifications) { Label("Notifications", systemImage: "bell") }
-                    .disabled(model.accessRevoked || presentation.preview)
-                Button("Edit display name") { name = presentation.displayName(source: model.source); rename = true }.disabled(presentation.preview)
-                DisclosureGroup("Connection details") {
-                    Text(model.source?.endpoint.absoluteString ?? "Preview computer").font(.footnote.monospaced()).textSelection(.enabled)
-                }
-            }.listRowBackground(theme.ink.opacity(0.04))
-            Section {
-                NavigationLink("Reconnect with QR code") { PairingFlow(model: model, theme: theme) }
-                    .disabled(model.busy || push.busy || presentation.preview)
-            } footer: { Text("Pairing is kept when the connection drops. A new QR code is only needed to renew or restore access.") }.listRowBackground(theme.ink.opacity(0.04))
-            Section {
-                Button(removing ? "Removing…" : "Remove computer", role: .destructive) { remove = true }.disabled(model.busy || push.busy || presentation.preview)
-                if let removalError { Text(removalError).font(.footnote).foregroundStyle(.secondary) }
-            } footer: { Text("Removes this phone’s access and notifications. Your agents keep running and your watch stays paired.") }.listRowBackground(theme.ink.opacity(0.04))
-        }.scrollContentBackground(.hidden).background(theme.canvas).tint(theme.tint).navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
-            .alert("Edit display name", isPresented: $rename) {
+                CompanionRule(theme: theme)
+                Button { name = presentation.displayName(source: model.source); rename = true } label: {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) {
+                            Text("Display name")
+                            Spacer(minLength: 10)
+                            nameValue
+                        }
+                        VStack(alignment: .leading, spacing: 8) { Text("Display name"); nameValue }
+                    }.font(.subheadline).frame(minHeight: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain).disabled(removing).allowsHitTesting(!presentation.preview)
+                CompanionRule(theme: theme)
+                Button(role: .destructive) { remove = true } label: {
+                    Text(removing ? "Removing…" : "Remove computer")
+                        .font(.subheadline).foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(theme.ink.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
+                }.buttonStyle(.plain).padding(.top, 8).disabled(removing).allowsHitTesting(!presentation.preview)
+                if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.ink.opacity(0.65)) }
+            }.padding(.horizontal, 26).padding(.bottom, 30)
+        }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
+            .navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
+            .alert("Display name", isPresented: $rename) {
                 TextField("Name", text: $name)
-                Button("Save") { presentation.computerName = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)); model.publishWidget() }
+                Button("Save") { presentation.setDisplayName(name, source: model.source); model.publishWidget() }
                 Button("Cancel", role: .cancel) {}
-            } message: { Text("This name is used in this app and its widgets. It does not rename the computer.") }
+            } message: { Text("Shown in Paceman. Doesn’t rename your computer.") }
             .confirmationDialog("Remove \(presentation.displayName(source: model.source))?", isPresented: $remove, titleVisibility: .visible) {
                 Button("Remove computer", role: .destructive) {
+                    removing = true
+                    removalError = nil
                     Task {
-                        removing = true
-                        removalError = nil
                         defer { removing = false }
+                        // Let an in-flight refresh finish without making the row flicker each poll.
+                        while model.busy || push.busy {
+                            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                        }
                         await model.removeSource()
-                        if model.source == nil { presentation.computerName = "" }
-                        else { removalError = model.status }
+                        if model.source != nil {
+                            removalError = "Couldn’t remove access. Reconnect to the computer and try again. Your pairing is kept."
+                        }
                     }
                 }
-            } message: { Text("This phone’s access and notifications from this computer will be removed. Your watch stays paired. Keep the computer reachable to finish.") }
+            } message: { Text("Stop receiving activity from this computer and remove this phone’s access. Your agents keep running.") }
+    }
+    private var nameValue: some View {
+        HStack(spacing: 8) {
+            Text(presentation.displayName(source: model.source)).foregroundStyle(theme.ink.opacity(0.6))
+            Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(theme.ink.opacity(0.45))
+        }
+    }
+}
+
+struct ComputerReceiptLabel: View {
+    @ObservedObject var model: CompanionModel
+    @ObservedObject var presentation: PresentationModel
+    var body: some View {
+        Group {
+            if presentation.preview {
+                Text(["computer-waiting", "waiting", "offline-empty"].contains(presentation.previewScreen) ? "No activity received yet" : presentation.previewOffline ? "Last received 12 minutes ago" : "Last received just now")
+            } else if let date = model.lastContact { ReceiptTimeLabel(prefix: "Last received", date: date) }
+            else { Text("No activity received yet") }
+        }
     }
 }
 

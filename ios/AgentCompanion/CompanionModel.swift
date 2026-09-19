@@ -80,6 +80,7 @@ final class CompanionModel: ObservableObject {
             try Vault.remove(key: "paired-source")
             setStreaming(false)
             sourceEpoch = UUID()
+            ComputerPreferences.remove(source.sourceID)
             self.source = nil
             snapshot = nil
             lastContact = nil

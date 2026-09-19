@@ -54,32 +54,35 @@ struct ComputerIllustration: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: w * 0.037).fill(Color(companionHex: "323632"))
                     RoundedRectangle(cornerRadius: w * 0.024).fill(theme.canvas).padding(w * 0.016)
-                    VStack(alignment: .leading, spacing: w * 0.025) {
-                        HStack(spacing: 3) {
-                            ForEach(0..<3) { _ in Circle().fill(theme.ink.opacity(0.3)).frame(width: w * 0.018) }
-                            Spacer(); Text("COMPANION").font(.system(size: w * 0.025, weight: .medium)).tracking(1)
-                        }
-                        Spacer()
-                        HStack {
-                            VStack(alignment: .leading, spacing: w * 0.024) {
-                                Text("~/workspace").font(.custom("JetBrainsMono-Regular", size: w * 0.047))
-                                Rectangle().fill(theme.tint).frame(width: w * 0.19, height: 2)
-                                Rectangle().fill(theme.ink.opacity(0.15)).frame(width: w * 0.31, height: 2)
-                                Rectangle().fill(theme.ink.opacity(0.15)).frame(width: w * 0.24, height: 2)
-                            }
-                            Spacer()
-                            AgentMark(state: "working").frame(width: w * 0.19).foregroundStyle(theme.tint)
-                        }
-                        Spacer(minLength: 0)
-                    }.padding(w * 0.06).foregroundStyle(theme.ink)
+                    HStack(spacing: w * 0.018) {
+                        terminalPane(width: w, primary: true)
+                        terminalPane(width: w, primary: false)
+                    }.padding(w * 0.045)
                 }.frame(width: w * 0.84, height: w * 0.53)
                 ZStack(alignment: .top) {
                     UnevenRoundedRectangle(bottomLeadingRadius: w * 0.06, bottomTrailingRadius: w * 0.06).fill(LinearGradient(colors: [Color(companionHex: "C1C4C0"), Color(companionHex: "7C827D")], startPoint: .top, endPoint: .bottom)).frame(height: w * 0.045)
                     Capsule().fill(Color.black.opacity(0.17)).frame(width: w * 0.17, height: w * 0.013)
                 }.frame(width: w)
             }.frame(width: w, height: g.size.height)
-        }.aspectRatio(1.7, contentMode: .fit).dynamicTypeSize(.medium).accessibilityElement(children: .ignore).accessibilityLabel("Computer appearance preview")
+        }.aspectRatio(1.7, contentMode: .fit).dynamicTypeSize(.medium).accessibilityElement(children: .ignore).accessibilityLabel("Computer illustration with two terminal panes")
     }
+    private func terminalPane(width w: CGFloat, primary: Bool) -> some View {
+        VStack(alignment: .leading, spacing: w * 0.022) {
+            Text(">_").font(.system(size: w * 0.048, weight: .medium, design: .monospaced))
+                .foregroundStyle(primary ? theme.tint : theme.ink.opacity(0.5))
+            Rectangle().fill(theme.ink.opacity(0.28)).frame(width: w * (primary ? 0.21 : 0.17), height: w * 0.008)
+            Rectangle().fill(theme.ink.opacity(0.14)).frame(width: w * 0.23, height: w * 0.008)
+            Rectangle().fill(theme.ink.opacity(0.14)).frame(width: w * (primary ? 0.15 : 0.20), height: w * 0.008)
+            Spacer(minLength: 0)
+            HStack(spacing: w * 0.015) {
+                Text(">").font(.system(size: w * 0.036, weight: .medium, design: .monospaced))
+                Rectangle().frame(width: w * 0.014, height: w * 0.035)
+            }.foregroundStyle(theme.tint.opacity(primary ? 0.85 : 0.45))
+        }.padding(w * 0.022).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(theme.ink.opacity(0.025))
+            .overlay(Rectangle().strokeBorder(theme.ink.opacity(0.16), lineWidth: w * 0.003))
+    }
+
 }
 
 struct WatchIllustration: View {

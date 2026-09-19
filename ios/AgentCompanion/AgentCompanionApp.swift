@@ -56,7 +56,7 @@ struct CompanionRoot: View {
             case "pairing", "reconnect": path = [.pairing]
             case "notifications": path = [.notifications]
             case "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off", "watch", "watch-setup", "watch-paired", "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error", "watch-complete": path = [.watch]
-            case "computer", "computer-offline": path = [.computer]
+            case "computer", "computer-offline", "computer-revoked", "computer-stale", "computer-waiting", "computer-long": path = [.computer]
             default: break
             }
         }

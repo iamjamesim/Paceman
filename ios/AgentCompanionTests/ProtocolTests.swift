@@ -372,6 +372,32 @@ final class ProtocolTests: XCTestCase {
         catch { XCTAssertTrue(error is HubError) }
     }
 
+    func testComputerConnectionStatesDistinguishRecoveryFromStaleActivity() {
+        XCTAssertEqual(ComputerConnectionState.resolve(revoked: true, failed: true, hasSnapshot: true, fresh: true), .revoked)
+        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: true, hasSnapshot: true, fresh: true), .reconnecting)
+        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: false, fresh: false), .connecting)
+        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: true, fresh: false), .updating)
+        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: true, fresh: true), .current)
+    }
+
+    func testComputerNamesMigrateOnceAndStayScopedToSource() {
+        let suite = "computer-preferences-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("  My workstation  ", forKey: "computer-name")
+        ComputerPreferences.migrateLegacy(to: "first", defaults: defaults)
+        XCTAssertEqual(ComputerPreferences.name(for: "first", defaults: defaults), "My workstation")
+        ComputerPreferences.migrateLegacy(to: "second", defaults: defaults)
+        XCTAssertNil(ComputerPreferences.name(for: "second", defaults: defaults))
+        ComputerPreferences.setName("Second", for: "second", defaults: defaults)
+        defaults.set("Obsolete", forKey: "computer-name")
+        ComputerPreferences.migrateLegacy(to: "first", defaults: defaults)
+        XCTAssertEqual(ComputerPreferences.name(for: "first", defaults: defaults), "My workstation")
+        ComputerPreferences.remove("first", defaults: defaults)
+        XCTAssertNil(ComputerPreferences.name(for: "first", defaults: defaults))
+        XCTAssertEqual(ComputerPreferences.name(for: "second", defaults: defaults), "Second")
+    }
+
     private func stubClient(_ handler: @escaping (URLRequest) throws -> (Int, Data)) -> SourceClient {
         ClientURLProtocol.handler = handler
         let configuration = URLSessionConfiguration.ephemeral
