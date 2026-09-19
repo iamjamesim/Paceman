@@ -78,18 +78,21 @@ struct WatchDetail: View {
     var previewConnected = false
     var previewPhase = WatchSetupPhase.idle
     var previewComplete = false
+    var previewState = "connected"
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.dismiss) private var dismiss
     @State private var startedHere = false
     @State private var justPaired = false
-    @AppStorage("sound-enabled") private var soundEnabled = false
     private var paired: Bool { preview ? previewConnected : model.watch.paired }
     private var phase: WatchSetupPhase { preview ? previewPhase : model.watch.setupPhase }
     private var inProgress: Bool { phase.inProgress }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                WatchIllustration(theme: theme, paired: paired).frame(width: 90, height: 133)
-                    .frame(maxWidth: .infinity).padding(.vertical, 14)
+                if !paired || justPaired || previewComplete {
+                    WatchIllustration(theme: theme, paired: paired).frame(width: 90, height: 133)
+                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                }
                 if justPaired || (preview && previewComplete) {
                     VStack(alignment: .leading, spacing: 12) {
                         Label("Watch connected", systemImage: "checkmark.circle.fill")
@@ -165,36 +168,45 @@ struct WatchDetail: View {
             }
         }
     }
+    private var updatesEnabled: Bool { preview ? previewState != "off" : model.watch.updatesEnabled }
     private var watchManagement: some View {
         VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Omarchy Watch").font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
-                Text("Agent updates are relayed from this phone over Bluetooth.")
-                    .font(.body).foregroundStyle(theme.ink.opacity(0.65))
-            }
-            CompanionRule(theme: theme)
-            VStack(spacing: 0) {
-                DetailRow(title: "Bluetooth") { Text(preview ? "Connected" : model.watch.connectionStatus) }
-                DetailRow(title: "Last sent") {
-                    if preview { Text("Just now") }
-                    else if let date = model.watch.lastDelivered { Text("\(date, style: .relative) ago") }
-                    else { Text("Not yet") }
+            VStack(spacing: 20) {
+                if !typeSize.isAccessibilitySize {
+                    WatchIllustration(theme: theme, paired: true).frame(width: 90, height: 133).accessibilityHidden(true)
+                }
+                VStack(spacing: 9) {
+                    Text("Omarchy Watch")
+                        .font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
+                    WatchConnectionSummary(watch: model.watch, theme: theme, previewState: preview ? previewState : nil, centered: true)
+                }
+            }.multilineTextAlignment(.center).frame(maxWidth: .infinity)
+                .padding(.top, 8).padding(.bottom, 12)
+            if !preview, let guidance = model.watch.connectionPresentation.guidance {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(guidance).font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                    if model.watch.connectionPresentation == .disconnected {
+                        Button("Try again") { model.watch.setEnabled(true) }
+                            .font(.subheadline).frame(minHeight: 44)
+                    }
                 }
             }
-            if !preview && !model.watch.ready { Text(model.watch.status).font(.footnote).foregroundStyle(.secondary) }
-            if !preview && model.watch.canRetryConnection {
-                Button("Retry connection") { model.watch.retryConnection() }
-                    .font(.subheadline).frame(minHeight: 44)
-            }
-            CompanionButton(title: model.watch.enabled || preview ? "Pause updates" : "Resume updates", theme: theme) {
-                model.watch.setEnabled(!model.watch.enabled)
-            }.disabled(preview)
-            Text("Pausing stops updates from this phone and keeps your watch paired. The watch may continue showing its last received activity.")
-                .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
             CompanionRule(theme: theme)
-            Toggle("Alert sound", isOn: $soundEnabled).tint(theme.tint).disabled(preview)
-            Text("Applies to future activity updates on watches that support sound.")
-                .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
-        }
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Watch updates", isOn: Binding(get: { updatesEnabled }, set: { model.watch.setEnabled($0) }))
+                    .tint(theme.tint).allowsHitTesting(!preview)
+                if !updatesEnabled {
+                    Text(!preview && model.watch.lastDelivered != nil ? "Your watch stays paired. Its last activity may remain on screen." : "Your watch stays paired.")
+                        .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                }
+            }
+            CompanionRule(theme: theme)
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Alert sound", isOn: Binding(get: { preview ? true : model.watch.soundEnabled }, set: { model.watch.setSoundEnabled($0) }))
+                    .tint(theme.tint).allowsHitTesting(!preview)
+                Text("Play a sound when an agent needs input or finishes.")
+                    .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+            }
+        }.padding(.top, 12)
     }
 }

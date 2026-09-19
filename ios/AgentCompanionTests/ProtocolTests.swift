@@ -235,6 +235,41 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(AgentFeedContent.summary(.working).supportingStatus)
     }
 
+    func testWatchPresentationSeparatesUserOffFailureAndActiveRecovery() {
+        func state(_ updates: Bool = true, failed: Bool = false, bluetooth: CBManagerState? = .poweredOn,
+                   ready: Bool = false, preparing: Bool = false, recovering: Bool = false) -> WatchConnectionPresentation {
+            .resolve(updates: updates, failed: failed, bluetooth: bluetooth, ready: ready, preparing: preparing, recovering: recovering)
+        }
+        XCTAssertEqual(state(false, failed: true), .off)
+        XCTAssertEqual(state(failed: true), .disconnected)
+        XCTAssertEqual(state(), .disconnected)
+        XCTAssertEqual(state(recovering: true), .reconnecting)
+        XCTAssertEqual(state(preparing: true), .connecting)
+        XCTAssertEqual(state(ready: true), .connected)
+        XCTAssertEqual(state(bluetooth: .poweredOff, recovering: true), .bluetoothOff)
+        XCTAssertEqual(state(bluetooth: .unauthorized), .permission)
+        XCTAssertEqual(state(bluetooth: .unsupported), .unavailable)
+        XCTAssertEqual(state(bluetooth: .resetting), .connecting)
+        XCTAssertEqual(state(bluetooth: nil), .connecting)
+    }
+
+    func testWatchPreferencesMigrateOnlyToExistingIdentityAndRemainIsolated() {
+        let suite = "watch-preferences-tests-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "watch-enabled")
+        defaults.set(false, forKey: "sound-enabled")
+        XCTAssertEqual(WatchPreferences.load("original", defaults: defaults, migrateLegacy: true),
+                       WatchPreferences(updates: false, sound: false))
+        XCTAssertNil(defaults.object(forKey: "sound-enabled"))
+        XCTAssertEqual(WatchPreferences.load("new", defaults: defaults), WatchPreferences())
+        WatchPreferences(updates: true, sound: false).save("original", defaults: defaults)
+        XCTAssertEqual(WatchPreferences.load("original", defaults: defaults), WatchPreferences(updates: true, sound: false))
+        XCTAssertEqual(WatchPreferences.load("new", defaults: defaults), WatchPreferences())
+        WatchPreferences.remove("original", defaults: defaults)
+        XCTAssertEqual(WatchPreferences.load("original", defaults: defaults), WatchPreferences())
+    }
+
     func testSelectedAccessoryAloneCannotRestorePairedWatchState() {
         let bluetoothID = UUID()
         let receipt = WatchPairingReceipt(bluetoothID: bluetoothID, watchID: "verified-watch")

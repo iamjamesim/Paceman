@@ -38,3 +38,33 @@ connected, empty, and unavailable layouts were checked during this refinement pa
 Do not confuse visual acceptance with transport reliability. Background APNs
 delivery and sender throttling remain separate engineering concerns documented
 in `direct-push-test.md`.
+
+## Watch detail refinement
+
+Home and detail reuse WatchConnectionSummary and ReceiptTimeLabel for connection
+copy, status color, delivery time, and the ten-second “just now” window. Detail
+uses a centered, larger watch illustration and name, with the shared status below.
+The home card retains its compact header. Detail is followed by Watch updates and Alert
+sound switches. The relay explanation, metadata table, and large Pause action
+are removed. Updates-off retains pairing and the sound preference. Bluetooth
+availability guidance is contextual; ordinary recovery remains automatic.
+
+Preferences are stored per authenticated watch ID. Existing global values migrate
+only to the paired receipt's identity; new identities default to updates and sound
+on. Removing the matching accessory clears its preference record. This prepares
+preference ownership for multiple devices; it does not implement simultaneous
+multi-watch transport or workstation subscription/permission management.
+
+Validation: 29 tests passed including legacy preference migration, persistence,
+identity isolation, and removal. Connected, updates-off, disconnected and maximum
+accessibility-size detail previews were inspected. Phone build succeeded. Physical
+switch/resume and sound behavior still require hands-on acceptance.
+
+Watch status copy is shared by feed and detail: Connected, Connecting…,
+Reconnecting…, Updates off, Not connected, Bluetooth off, Bluetooth permission
+needed, and Bluetooth unavailable. Reconnecting requires an active/scheduled
+recovery attempt. User intent (updatesEnabled) is separate from transport running
+(enabled): a terminal failure stops transport without saving an Off preference.
+Detail shows short actionable guidance and Try again only for a stopped connection;
+transport diagnostics are not used as management-page copy. The expanded suite
+passes 30 tests, including state precedence and failure/off/recovery distinctions.

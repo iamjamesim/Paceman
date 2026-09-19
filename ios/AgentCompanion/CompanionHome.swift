@@ -128,7 +128,7 @@ struct CompanionHome: View {
         }.padding(.vertical, 20)
     }
     private var connectionLabel: some View {
-        Text(model.accessRevoked ? "Access removed" : "Reconnecting automatically")
+        Text(model.accessRevoked ? "Access removed" : "Reconnecting…")
             .font(.caption).foregroundStyle(theme.ink.opacity(0.7))
     }
     private var recoveryAction: some View {
@@ -155,17 +155,7 @@ struct CompanionHome: View {
                     Text(hasWatch ? "Omarchy Watch" : "Connect your watch")
                         .font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold)).multilineTextAlignment(.leading)
                     if hasWatch {
-                        HStack(spacing: 5) {
-                            Circle().fill(watchReady ? theme.tint : theme.ink.opacity(0.3)).frame(width: 5, height: 5)
-                            Text(watchReady ? "Connected" : model.watch.connectionStatus).font(.footnote)
-                        }.foregroundStyle(theme.ink.opacity(0.65))
-                        if !presentation.preview && !watchReady && model.watch.enabled {
-                            Text(model.watch.status).font(.caption).foregroundStyle(theme.ink.opacity(0.6))
-                        }
-                        if presentation.preview { Text("Last sent 12s ago").font(.caption).foregroundStyle(theme.ink.opacity(0.5)) }
-                        else if let date = model.watch.lastDelivered {
-                            ReceiptTimeLabel(prefix: "Last sent", date: date).font(.caption).foregroundStyle(theme.ink.opacity(0.5))
-                        }
+                        WatchConnectionSummary(watch: model.watch, theme: theme, previewState: presentation.preview ? "connected" : nil)
                     } else {
                         Text("Show agent status on your wrist.").font(.subheadline).foregroundStyle(theme.ink.opacity(0.6)).multilineTextAlignment(.leading)
                     }
@@ -237,7 +227,7 @@ private struct ActivityRobot: View {
     }
 }
 
-private struct ReceiptTimeLabel: View {
+struct ReceiptTimeLabel: View {
     let prefix: String
     let date: Date
     var body: some View {
@@ -247,6 +237,42 @@ private struct ReceiptTimeLabel: View {
             } else {
                 Text("\(prefix) \(date, style: .relative) ago")
             }
+        }
+    }
+}
+
+/// Shared by the home card and the watch detail header.
+struct WatchConnectionSummary: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ObservedObject var watch: WatchLink
+    let theme: CompanionTheme
+    var previewState: String? = nil
+    var centered = false
+    private var ready: Bool { previewState.map { $0 == "connected" || $0 == "empty" } ?? watch.ready }
+    private var status: String {
+        switch previewState {
+        case "connected", "empty": return "Connected"
+        case "off": return "Updates off"
+        case "disconnected": return "Reconnecting…"
+        case "bluetooth-off": return "Bluetooth off"
+        default: return watch.connectionStatus
+        }
+    }
+    var body: some View {
+        VStack(alignment: centered ? .center : .leading, spacing: 7) {
+            HStack(spacing: 5) {
+                if !typeSize.isAccessibilitySize {
+                    Circle().fill(ready ? theme.tint : theme.ink.opacity(0.3)).frame(width: 5, height: 5)
+                }
+                Text(status).font(.footnote)
+            }.foregroundStyle(theme.ink.opacity(0.65))
+            Group {
+                if previewState == "connected" { Text("Last sent just now") }
+                else if previewState != nil {
+                    if previewState != "off" { Text("No updates sent yet") }
+                } else if let date = watch.lastDelivered { ReceiptTimeLabel(prefix: "Last sent", date: date) }
+                else if watch.updatesEnabled { Text("No updates sent yet") }
+            }.font(.caption).foregroundStyle(theme.ink.opacity(0.5))
         }
     }
 }

@@ -21,7 +21,7 @@ final class PresentationModel: ObservableObject {
         #endif
     }
     var previewHasComputer: Bool { !["setup", "pairing", "watch-only"].contains(previewScreen) }
-    var previewHasWatch: Bool { ["paired-watch", "watch-paired", "watch-only", "watch-complete", "single-finished", "single-offline"].contains(previewScreen) }
+    var previewHasWatch: Bool { ["paired-watch", "watch-paired", "watch-only", "watch-complete", "single-finished", "single-offline", "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(previewScreen) }
     var previewWatchPhase: WatchSetupPhase {
         switch previewScreen {
         case "watch-select": return .selecting
@@ -40,7 +40,7 @@ final class PresentationModel: ObservableObject {
                     AgentSession(id: "3", provider: "codex", state: .finished)]
         }
         guard previewScreen != "empty" else { return [] }
-        if ["single-finished", "single-offline"].contains(previewScreen) { return [AgentSession(id: "1", provider: "codex", state: .finished)] }
+        if ["single-finished", "single-offline", "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(previewScreen) { return [AgentSession(id: "1", provider: "codex", state: .finished)] }
         if previewScreen == "single-working" { return [AgentSession(id: "1", provider: "codex", state: .working)] }
         return [AgentSession(id: "1", provider: "codex", state: .needsInput, name: "Fix checkout redirect", project: "storefront"),
                 AgentSession(id: "2", provider: "claude", state: .working, name: "API cleanup", project: "agent-companion"),

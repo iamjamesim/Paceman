@@ -39,7 +39,7 @@ struct CompanionRoot: View {
                 .navigationDestination(for: FeedDestination.self) { destination in
                     switch destination {
                     case .computer: ComputerDetail(model: model, presentation: presentation, theme: theme)
-                    case .watch: WatchDetail(model: model, theme: theme, preview: presentation.preview, previewConnected: presentation.previewHasWatch, previewPhase: presentation.previewWatchPhase, previewComplete: presentation.previewScreen == "watch-complete")
+                    case .watch: WatchDetail(model: model, theme: theme, preview: presentation.preview, previewConnected: presentation.previewHasWatch, previewPhase: presentation.previewWatchPhase, previewComplete: presentation.previewScreen == "watch-complete", previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen) ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected")
                     case .pairing: PairingFlow(model: model, theme: theme, preview: presentation.preview)
                     case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview) { path = [] }
                     case .settings: CompanionSettings(model: model, presentation: presentation, theme: theme)
@@ -55,7 +55,7 @@ struct CompanionRoot: View {
             case "widgets": path = [.settings, .widgets]
             case "pairing", "reconnect": path = [.pairing]
             case "notifications": path = [.notifications]
-            case "watch", "watch-setup", "watch-paired", "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error", "watch-complete": path = [.watch]
+            case "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off", "watch", "watch-setup", "watch-paired", "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error", "watch-complete": path = [.watch]
             case "computer", "computer-offline": path = [.computer]
             default: break
             }

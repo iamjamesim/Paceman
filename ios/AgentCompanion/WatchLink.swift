@@ -54,6 +54,58 @@ struct WatchPairingReceipt: Codable, Equatable {
     }
 }
 
+/// Preferences are keyed by the authenticated hardware identity, not the BLE address.
+struct WatchPreferences: Codable, Equatable {
+    var updates = true
+    var sound = true
+    private static func key(_ id: String) -> String { "watch-preferences." + id }
+    static func load(_ id: String, defaults: UserDefaults = .standard, migrateLegacy: Bool = false) -> Self {
+        if let data = defaults.data(forKey: key(id)), let value = try? JSONDecoder().decode(Self.self, from: data) { return value }
+        var value = Self()
+        if migrateLegacy {
+            if defaults.object(forKey: "watch-enabled") != nil { value.updates = defaults.bool(forKey: "watch-enabled") }
+            if defaults.object(forKey: "sound-enabled") != nil { value.sound = defaults.bool(forKey: "sound-enabled") }
+            defaults.removeObject(forKey: "watch-enabled")
+            defaults.removeObject(forKey: "sound-enabled")
+        }
+        value.save(id, defaults: defaults)
+        return value
+    }
+    func save(_ id: String, defaults: UserDefaults = .standard) {
+        if let data = try? JSONEncoder().encode(self) { defaults.set(data, forKey: Self.key(id)) }
+    }
+    static func remove(_ id: String, defaults: UserDefaults = .standard) { defaults.removeObject(forKey: key(id)) }
+}
+
+enum WatchConnectionPresentation: String {
+    case connected = "Connected", connecting = "Connecting…", reconnecting = "Reconnecting…"
+    case off = "Updates off", disconnected = "Not connected"
+    case bluetoothOff = "Bluetooth off", permission = "Bluetooth permission needed"
+    case unavailable = "Bluetooth unavailable"
+
+    static func resolve(updates: Bool, failed: Bool, bluetooth: CBManagerState?, ready: Bool,
+                        preparing: Bool, recovering: Bool) -> Self {
+        guard updates else { return .off }
+        if bluetooth == .poweredOff { return .bluetoothOff }
+        if bluetooth == .unauthorized { return .permission }
+        if bluetooth == .unsupported { return .unavailable }
+        if failed { return .disconnected }
+        if bluetooth == nil || bluetooth == .unknown || bluetooth == .resetting { return .connecting }
+        if ready { return .connected }
+        if preparing { return .connecting }
+        return recovering ? .reconnecting : .disconnected
+    }
+    var guidance: String? {
+        switch self {
+        case .bluetoothOff: return "Turn on Bluetooth on your iPhone."
+        case .permission: return "Allow Bluetooth access for Paceman in Settings."
+        case .unavailable: return "Bluetooth is unavailable on this iPhone."
+        case .disconnected: return "Keep your watch nearby and turned on, then try again."
+        default: return nil
+        }
+    }
+}
+
 final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     static let service = CBUUID(string: "7f510001-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private let profileUUID = CBUUID(string: "7f510002-1b15-4f0d-b7a5-4cf3a2c98ee1")
@@ -62,6 +114,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     @Published var status = "No watch selected"
     @Published var ready = false
     @Published var enabled = false
+    @Published private(set) var updatesEnabled = false
+    @Published private(set) var soundEnabled = true
     @Published var pickerReady = false
     @Published var configured = false
     @Published private(set) var paired = false
@@ -97,13 +151,13 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private static let receiptKey = "watch-pairing-receipt"
     private static let centralIDKey = "watch-central-restoration-id"
 
-    var connectionStatus: String {
-        if !enabled { return setupPhase == .failed ? "Not connected" : "Paused" }
-        if central?.state == .poweredOff { return "Bluetooth off" }
-        if central?.state == .unauthorized { return "Bluetooth access off" }
-        if ready { return "Connected" }
-        return preparing ? "Checking connection" : "Not connected"
+    var connectionPresentation: WatchConnectionPresentation {
+        .resolve(updates: updatesEnabled, failed: setupPhase == .failed, bluetooth: central?.state,
+                 ready: ready, preparing: preparing,
+                 recovering: enabled && (reconnectWork != nil || connectionTimeout != nil || cancellationTimeout != nil ||
+                    peripheral?.state == .connecting || peripheral?.state == .disconnecting))
     }
+    var connectionStatus: String { connectionPresentation.rawValue }
 
     init(preview: Bool = false) {
         super.init()
@@ -112,7 +166,12 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         if let data = UserDefaults.standard.data(forKey: Self.receiptKey) {
             pairingReceipt = try? JSONDecoder().decode(WatchPairingReceipt.self, from: data)
         }
-        enabled = UserDefaults.standard.bool(forKey: "watch-enabled")
+        if let receipt = pairingReceipt {
+            let preferences = WatchPreferences.load(receipt.watchID, migrateLegacy: true)
+            enabled = preferences.updates
+            updatesEnabled = preferences.updates
+            soundEnabled = preferences.sound
+        }
         if enabled { startBluetooth() }
         setupSession.activate(on: .main) { [weak self] event in
             guard let self else { return }
@@ -132,7 +191,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                     self.setupPhase = .connecting
                     self.startPairingTimeout()
                     self.enabled = true
-                    UserDefaults.standard.set(true, forKey: "watch-enabled")
+                    self.updatesEnabled = true
                     self.connect(identifier)
                 }
             case .pickerDidDismiss:
@@ -143,6 +202,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             case .accessoryRemoved:
                 self.configured = !self.setupSession.accessories.isEmpty
                 if event.accessory?.bluetoothIdentifier == self.pairingReceipt?.bluetoothID {
+                    if let id = self.pairingReceipt?.watchID { WatchPreferences.remove(id) }
                     self.pairingReceipt = nil
                     UserDefaults.standard.removeObject(forKey: Self.receiptKey)
                 }
@@ -216,12 +276,22 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         }
     }
 
-    func setEnabled(_ value: Bool) {
+    func setSoundEnabled(_ value: Bool) {
+        guard let id = pairingReceipt?.watchID else { return }
+        soundEnabled = value
+        WatchPreferences(updates: updatesEnabled, sound: value).save(id)
+    }
+
+    func setEnabled(_ value: Bool, userInitiated: Bool = true) {
         reconnectWork?.cancel()
         reconnectWork = nil
         reconnectBackoff.reset()
         enabled = value
-        UserDefaults.standard.set(value, forKey: "watch-enabled")
+        if userInitiated {
+            updatesEnabled = value
+            if setupPhase == .failed { setupPhase = .idle }
+            if let id = pairingReceipt?.watchID { WatchPreferences(updates: value, sound: soundEnabled).save(id) }
+        }
         if !value {
             pairingTimeout?.cancel()
             if setupPhase.inProgress { setupPhase = .idle }
@@ -238,6 +308,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             if let peripheral { central?.cancelPeripheralConnection(peripheral) }
             status = "Forwarding paused"
         } else if let identifier = preferredAccessoryID {
+            startBluetooth()
             connect(identifier)
         }
     }
@@ -626,6 +697,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 if receipt != pairingReceipt, let data = try? JSONEncoder().encode(receipt) {
                     UserDefaults.standard.set(data, forKey: Self.receiptKey)
                     pairingReceipt = receipt
+                    let preferences = WatchPreferences.load(receipt.watchID)
+                    soundEnabled = preferences.sound
+                    lastDelivered = nil
                 }
                 paired = true
             }
@@ -719,7 +793,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         let alert = !same && freshEvent && (snapshot.state == .needsInput || snapshot.state == .finished)
         let state = snapshot.state == .finished && capabilities & (1 << 8) == 0 ? ActivityState.needsInput : snapshot.state
         let packet = WatchWire.activity(state: state, revision: revision, alert: alert,
-            sound: defaults.bool(forKey: "sound-enabled") && capabilities & (1 << 7) != 0,
+            sound: soundEnabled && capabilities & (1 << 7) != 0,
             acknowledged: acknowledged)
         writePending = true
         sentEvent = snapshot.identity
@@ -738,7 +812,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     private func fail(_ message: String) {
-        setEnabled(false)
+        setEnabled(false, userInitiated: false)
         status = message
         setupPhase = .failed
         Diagnostics.shared.record("ble_error")
