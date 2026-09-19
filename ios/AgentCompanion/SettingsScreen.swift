@@ -10,7 +10,7 @@ struct CompanionSettings: View {
                 NavigationLink(value: FeedDestination.widgets) { Label("Widgets", systemImage: "square.grid.2x2") }
             }.listRowBackground(theme.ink.opacity(0.04))
             Section {
-                NavigationLink { TransportDiagnostics(model: model) } label: {
+                NavigationLink(value: FeedDestination.diagnostics) {
                     Label("Developer tools", systemImage: "wrench.and.screwdriver")
                 }.disabled(presentation.preview)
             } footer: { Text("Agent Companion · Prototype") }.listRowBackground(theme.ink.opacity(0.04))

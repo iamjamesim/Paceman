@@ -26,7 +26,7 @@ struct AgentCompanionApp: App {
     }
 }
 
-enum FeedDestination: Hashable { case computer, watch, pairing, notifications, settings, widgets }
+enum FeedDestination: Hashable { case computer, watch, pairing, notifications, settings, widgets, diagnostics }
 
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
@@ -43,6 +43,7 @@ struct CompanionRoot: View {
                     case .pairing: PairingFlow(model: model, theme: theme, preview: presentation.preview)
                     case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview) { path = [] }
                     case .settings: CompanionSettings(model: model, presentation: presentation, theme: theme)
+                    case .diagnostics: TransportDiagnostics(model: model)
                     case .widgets: WidgetGuide(model: model, presentation: presentation, theme: theme)
                     }
                 }
