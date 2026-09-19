@@ -70,40 +70,18 @@ struct NotificationSetup: View {
     let theme: CompanionTheme
     var preview = false
     let done: () -> Void
-    private var step: NotificationSetupStep { preview ? .needsPermission : push.setupStep }
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                Image(systemName: step == .ready ? "checkmark.circle" : "bell")
-                    .font(.system(size: 46, weight: .light)).foregroundStyle(theme.tint)
-                    .frame(maxWidth: .infinity).padding(.vertical, 40).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(step == .ready ? "Notifications are set up" : "Agent notifications").font(theme.monospaced ? theme.font(27, emphasis: true) : .title.weight(.semibold))
-                    Text("Receive alerts when an agent needs input or finishes a turn. Your computer must be set up to send notifications.")
-                        .font(.body).lineSpacing(4).foregroundStyle(theme.ink.opacity(0.65))
-                }
-                switch step {
-                case .needsPermission:
-                    CompanionButton(title: "Enable notifications", theme: theme) {
-                        model.setStreaming(false)
-                        Task { await push.enable() }
-                    }.disabled(preview || push.busy)
-                case .blocked:
-                    Text("Notifications are off in iOS Settings. Allow them to finish setup.")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    CompanionButton(title: "Open Settings", theme: theme) { push.openSettings() }
-                case .needsRegistration:
-                    Text(push.status).font(.subheadline).foregroundStyle(.secondary)
-                    CompanionButton(title: "Try again", theme: theme) { Task { await push.sync() } }.disabled(push.busy)
-                case .checking, .registering:
-                    HStack(spacing: 12) { ProgressView(); Text("Setting up notifications…").font(.subheadline) }
-                    Button("Try again") { Task { await push.sync() } }.disabled(push.busy)
-                case .ready:
-                    Button("Open notification settings") { push.openSettings() }.font(.subheadline)
-                    CompanionButton(title: "Done", theme: theme, action: done)
-                }
-            }.padding(.horizontal, 26).padding(.bottom, 30)
-        }.foregroundStyle(theme.ink).background(theme.canvas).navigationTitle("Notifications").navigationBarTitleDisplayMode(.inline)
-            .task { if !preview { await push.sync() } }
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Background updates").font(.title2.weight(.semibold))
+                Text("Activity updates are silent. You don’t need to allow banners, sounds, or badges.")
+                    .font(.body).foregroundStyle(theme.ink.opacity(0.7))
+                Text(preview ? "Waiting for the computer" : push.status).font(.subheadline)
+                Text("iOS controls when background updates run and may delay them. Opening Paceman refreshes activity automatically.")
+                    .font(.footnote).foregroundStyle(theme.ink.opacity(0.6))
+                CompanionButton(title: "Done", theme: theme, action: done)
+            }.padding(26)
+        }.foregroundStyle(theme.ink).background(theme.canvas)
+            .navigationTitle("Background updates").navigationBarTitleDisplayMode(.inline)
     }
 }

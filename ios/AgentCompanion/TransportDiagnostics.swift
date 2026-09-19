@@ -57,7 +57,7 @@ struct TransportDiagnostics: View {
                         Button("Retry registration") { Task { await push.sync() } }.disabled(push.busy || model.source == nil)
                         Button("Disable push") { Task { await push.disable() } }.disabled(push.busy)
                     } else {
-                        Button("Enable push notifications") {
+                        Button("Enable background updates") {
                             model.setStreaming(false)
                             Task { await push.enable() }
                         }.disabled(model.source == nil || push.busy)

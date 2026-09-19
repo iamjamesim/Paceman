@@ -65,7 +65,7 @@ final class CompanionModel: ObservableObject {
             identityNotice = nil
             status = "Paired. Waiting for first snapshot."
             Diagnostics.shared.record("source_paired")
-            Task { await PushCoordinator.shared.sync() }
+            Task { await PushCoordinator.shared.enable() }
             return true
         } catch { status = error.localizedDescription; hasError = true; return false }
     }
@@ -132,7 +132,7 @@ final class CompanionModel: ObservableObject {
             watch.reconnectIfNeeded()
             polling = Task { [weak self] in
                 while !Task.isCancelled {
-                    if self?.streaming != true { await self?.refresh() }
+                    if self?.streaming != true && self?.accessRevoked != true { await self?.refresh() }
                     do { try await Task.sleep(nanoseconds: 5_000_000_000) }
                     catch { break }
                 }
@@ -188,6 +188,7 @@ final class CompanionModel: ObservableObject {
         publishWidget(reload: changed)
         Diagnostics.shared.record(stage, event: value.identity)
         if age < value.freshFor { watch.forward(value) }
+        PushCoordinator.shared.recoverRegistrationIfNeeded()
     }
 
     @discardableResult

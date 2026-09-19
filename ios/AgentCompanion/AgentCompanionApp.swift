@@ -62,7 +62,7 @@ struct CompanionRoot: View {
         }
         .onChange(of: model.source?.sourceID) { old, new in
             guard !presentation.preview else { return }
-            if old == nil && new != nil { path = [.notifications] }
+            if old == nil && new != nil { path = [] }
             else if new == nil { path = [] }
         }
         .onOpenURL { url in

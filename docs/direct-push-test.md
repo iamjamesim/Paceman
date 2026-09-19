@@ -182,3 +182,21 @@ Apple references:
 - [Background notification limits](https://developer.apple.com/documentation/usernotifications/pushing-background-updates-to-your-app)
 - [Registering with APNs](https://developer.apple.com/documentation/usernotifications/registering-your-app-with-apns)
 - [Provider requests](https://developer.apple.com/documentation/usernotifications/sending-notification-requests-to-apns)
+
+## 2026-09-18 product behavior correction
+
+Normal iPhone activity delivery now registers for silent background pushes without
+requesting alert authorization. Existing prototype alert-mode preferences migrate
+once to background mode. Pairing enables background registration automatically;
+foreground fetch recovery retries an unsuccessful desktop registration, at most
+once per 30 seconds. Visible alerts remain an explicit developer-tool test only.
+The desktop must be reachable for the stored destination to change modes; pending
+APNs messages are not recalled by changing the local preference.
+
+The home screen no longer presents notification permission or registration as a
+setup requirement. Foreground activity polling retries after each request with a
+five-second delay (unless access was revoked), so connection recovery has a stable
+label rather than a Retry button that dims during each request. Background iOS
+execution is discretionary: this change does not establish continuous background
+watch updates. The existing background sender cap remains one attempt per 1201
+seconds, and physical background delivery acceptance still needs verification.

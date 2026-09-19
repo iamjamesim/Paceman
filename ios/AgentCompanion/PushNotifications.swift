@@ -28,7 +28,12 @@ enum NotificationSetupStep: Equatable {
     case checking, needsPermission, blocked, registering, needsRegistration, ready
     var needsAttention: Bool { self == .needsPermission || self == .blocked || self == .needsRegistration }
     static func resolve(authorization: UNAuthorizationStatus?, enabled: Bool, registered: Bool,
-                        busy: Bool, awaitingToken: Bool, attempted: Bool) -> Self {
+                        busy: Bool, awaitingToken: Bool, attempted: Bool, mode: String = "alert") -> Self {
+        if mode == "background" {
+            if registered && enabled { return .ready }
+            if busy || awaitingToken { return .registering }
+            return attempted ? .needsRegistration : .checking
+        }
         guard let authorization else { return .checking }
         if authorization == .denied { return .blocked }
         if authorization == .notDetermined || !enabled { return .needsPermission }
@@ -44,7 +49,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     weak var model: CompanionModel?
     @Published var status = "Push is off"
     @Published var enabled = UserDefaults.standard.bool(forKey: "push-enabled")
-    @Published var mode = UserDefaults.standard.string(forKey: "push-mode") ?? "alert"
+    @Published var mode = UserDefaults.standard.string(forKey: "push-mode") ?? "background"
     @Published var busy = false
     @Published var registered = false
     @Published private(set) var authorization: UNAuthorizationStatus?
@@ -52,7 +57,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     @Published private(set) var awaitingToken = false
     var setupStep: NotificationSetupStep {
         .resolve(authorization: authorization, enabled: enabled, registered: registered,
-                 busy: busy, awaitingToken: awaitingToken, attempted: registrationAttempted)
+                 busy: busy, awaitingToken: awaitingToken, attempted: registrationAttempted, mode: mode)
     }
     private let client = SourceClient()
     private var syncPending = false
@@ -61,6 +66,14 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--design-preview") { return }
         #endif
+        // Migrate the prototype's alert-based transport once. Activity delivery is silent.
+        if !UserDefaults.standard.bool(forKey: "silent-transport-v1") {
+            mode = "background"
+            enabled = true
+            UserDefaults.standard.set(mode, forKey: "push-mode")
+            UserDefaults.standard.set(true, forKey: "push-enabled")
+            UserDefaults.standard.set(true, forKey: "silent-transport-v1")
+        }
         UNUserNotificationCenter.current().delegate = self
         if enabled {
             awaitingToken = true
@@ -83,20 +96,23 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     }
 
     func enable() async {
-        guard !busy else { return }
-        busy = true
-        defer { finishOperation() }
-        do {
-            let granted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
-            await refreshAuthorization()
-            guard granted else { status = "Notifications are off in iOS Settings"; return }
-            enabled = true
-            UserDefaults.standard.set(true, forKey: "push-enabled")
-            awaitingToken = true
-            registrationAttempted = false
-            status = "Registering with Apple"
-            UIApplication.shared.registerForRemoteNotifications()
-        } catch { status = "Notification permission request failed" }
+        enabled = true
+        mode = "background"
+        UserDefaults.standard.set(true, forKey: "push-enabled")
+        UserDefaults.standard.set(mode, forKey: "push-mode")
+        awaitingToken = true
+        registrationAttempted = false
+        status = "Registering background updates with Apple"
+        UIApplication.shared.registerForRemoteNotifications()
+        await sync()
+    }
+
+    private var lastRecoveryAttempt: Date?
+    func recoverRegistrationIfNeeded() {
+        guard enabled, !registered, !busy,
+              lastRecoveryAttempt.map({ Date().timeIntervalSince($0) >= 30 }) ?? true else { return }
+        lastRecoveryAttempt = Date()
+        Task { await sync() }
     }
 
     func registrationFailed() {
@@ -123,6 +139,12 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
 
     func changeMode(_ value: String) async {
         guard value == "alert" || value == "background" else { return }
+        if value == "alert" {
+            // Visible alerts exist only as an explicit developer transport test.
+            let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])) == true
+            await refreshAuthorization()
+            guard granted else { status = "Alert permission was not granted; background updates remain available"; return }
+        }
         mode = value
         UserDefaults.standard.set(value, forKey: "push-mode")
         await sync()
@@ -134,7 +156,11 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         defer { finishOperation() }
         await refreshAuthorization()
         guard enabled else { return }
-        guard authorization != .denied else { status = "Notifications are off in iOS Settings"; return }
+        // Alert authorization controls presentation, never silent registration.
+        if mode == "alert" && authorization == .denied {
+            mode = "background"
+            UserDefaults.standard.set(mode, forKey: "push-mode")
+        }
         guard let source = model?.source, model?.accessRevoked != true else { status = "Connect your computer to finish setup"; return }
         guard let token = Vault.load(String.self, key: "apns-device-token") else {
             status = "Waiting for Apple push registration"
@@ -217,7 +243,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         Task { @MainActor in
             let valid = self.enabled && PushHint.decode(notification.request.content.userInfo, for: self.model?.source) != nil
-            completionHandler(valid ? [.banner, .sound, .list] : [])
+            completionHandler(valid && self.mode == "alert" ? [.banner, .sound, .list] : [])
             if valid { _ = await self.receive(notification.request.content.userInfo, stage: "push_foreground_received") }
         }
     }

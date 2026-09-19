@@ -100,6 +100,15 @@ final class ProtocolTests: XCTestCase {
         XCTAssertThrowsError(try expired.validatedURL(now: Date(timeIntervalSince1970: 100)))
     }
 
+    func testSilentPushSetupDoesNotRequireAlertAuthorization() {
+        for authorization: UNAuthorizationStatus in [.notDetermined, .denied, .authorized] {
+            XCTAssertEqual(NotificationSetupStep.resolve(authorization: authorization, enabled: true,
+                registered: true, busy: false, awaitingToken: false, attempted: true, mode: "background"), .ready)
+            XCTAssertEqual(NotificationSetupStep.resolve(authorization: authorization, enabled: true,
+                registered: false, busy: false, awaitingToken: false, attempted: true, mode: "background"), .needsRegistration)
+        }
+    }
+
     func testPushHintRequiresPairedSourceAndMatchingEventRevision() {
         let sourceID = "00112233-4455-6677-8899-aabbccddeeff"
         let generation = "11223344-5566-7788-99aa-bbccddeeff00"
