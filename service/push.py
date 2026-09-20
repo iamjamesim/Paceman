@@ -71,6 +71,25 @@ def notification(source_id: str, generation: str, event: dict, mode: str, now: f
     return payload, headers
 
 
+def live_notification(snapshot: dict, now: float, ending=False) -> tuple[dict, dict]:
+    """Display-only envelope shared with MonitoringActivity.ContentState; no private text."""
+    sessions = snapshot.get("sessions") or []
+    counts = {state: sum(s.get("state") == state for s in sessions) for state in ("working", "needs_input", "finished")}
+    if not sessions and snapshot["state"] in counts:
+        counts[snapshot["state"]] = 1
+    observed = min(now, snapshot["observedAt"])
+    fresh_until = observed + snapshot["freshFor"]
+    content = {"schema": 1, "generation": snapshot["generation"], "revision": snapshot["revision"],
+               "state": snapshot["state"], "working": counts["working"], "needsInput": counts["needs_input"],
+               "finished": counts["finished"], "observedAt": observed, "freshUntil": fresh_until}
+    aps = {"timestamp": int(now), "event": "end" if ending else "update", "content-state": content,
+           "stale-date": int(fresh_until)}
+    if ending:
+        aps["dismissal-date"] = int(now)
+    return {"aps": aps}, {"apns-push-type": "liveactivity", "apns-priority": "5",
+        "apns-expiration": str(int(now + 60)), "apns-id": str(uuid.uuid4())}
+
+
 class APNs:
     def __init__(self, config: Config, client=None):
         import httpx
@@ -96,7 +115,7 @@ class APNs:
         host = "api.sandbox.push.apple.com" if self.config.environment == "development" else "api.push.apple.com"
         try:
             response = self.client.post("https://" + host + "/3/device/" + device["token"],
-                json=payload, headers={**headers, "apns-topic": self.config.topic,
+                json=payload, headers={**headers, "apns-topic": self.config.topic + (".push-type.liveactivity" if device.get("mode") == "liveactivity" else ""),
                                       "authorization": "bearer " + self.jwt})
         except httpx.HTTPError:
             return Result(0, "TransportError", headers["apns-id"])
@@ -121,6 +140,7 @@ class Worker:
     def step(self, now=None):
         now = time.time() if now is None else now
         self.store.tick(now)
+        self.step_live_activities(now)
         source_id, generation = self.store.metadata("source_id"), self.store.metadata("generation")
         with self.store.connect() as db:
             # Appearance revisions must not generate activity alerts or hide pending activity.
@@ -167,6 +187,37 @@ class Worker:
                       "clientID": device["client_id"], "mode": device["mode"],
                       "stage": "apns_accepted" if result.status == 200 else "apns_failed",
                       "status": result.status, "reason": result.reason, "apnsID": result.apns_id})
+
+    def step_live_activities(self, now):
+        snapshot = self.store.snapshot()
+        with self.store.connect() as db:
+            devices = [dict(row) for row in db.execute(
+                "SELECT l.* FROM live_activities l JOIN clients c ON l.client_id=c.id WHERE l.next_attempt<=?", (now,))]
+        for device in devices:
+            ending = now >= device["expires"]
+            if not ending and device["cursor"] >= snapshot["revision"]:
+                continue
+            # A rotated token, replacement activity or revoked pairing invalidates this send.
+            with self.store.connect() as db:
+                current = db.execute("SELECT * FROM live_activities WHERE client_id=?", (device["client_id"],)).fetchone()
+                authorized = db.execute("SELECT 1 FROM clients WHERE id=?", (device["client_id"],)).fetchone()
+            if not authorized or current is None or dict(current) != device:
+                continue
+            payload, headers = live_notification(snapshot, now, ending=ending)
+            result = self.sender.send({**device, "mode": "liveactivity"}, payload, headers, now)
+            invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
+            accepted = result.status == 200
+            with self.store.connect() as db:
+                if invalid or (ending and accepted) or now > device["expires"] + 300:
+                    db.execute("DELETE FROM live_activities WHERE client_id=? AND token=? AND activity_id=?",
+                               (device["client_id"], device["token"], device["activity_id"]))
+                else:
+                    delay = 15 if accepted else min(300, 15 * 2 ** min(device["attempts"], 5))
+                    db.execute("UPDATE live_activities SET cursor=?,next_attempt=?,attempts=? WHERE client_id=? AND token=? AND activity_id=?",
+                               (snapshot["revision"] if accepted else device["cursor"], now + delay,
+                                0 if accepted else device["attempts"] + 1, device["client_id"], device["token"], device["activity_id"]))
+            self.log({"at": now, "stage": "live_activity_apns_accepted" if accepted else "live_activity_apns_failed",
+                      "revision": snapshot["revision"], "status": result.status, "reason": result.reason})
 
     def log(self, value):
         self.log_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
