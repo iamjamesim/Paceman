@@ -5,6 +5,7 @@ import UIKit
 @MainActor
 final class CompanionModel: ObservableObject {
     let watch: WatchLink
+    let monitoring = MonitoringCoordinator()
     let weather: PhoneWeather
     let designPreview: Bool
     @Published var source: PairedSource?
@@ -88,6 +89,7 @@ final class CompanionModel: ObservableObject {
         defer { busy = false }
         do {
             try await client.remove(source)
+            await monitoring.stop()
             PushCoordinator.shared.clearRemovedSource()
             try Vault.remove(key: "paired-source")
             setStreaming(false)
@@ -203,6 +205,8 @@ final class CompanionModel: ObservableObject {
         publishWidget(reload: changed)
         Diagnostics.shared.record(stage, event: value.identity)
         if age < value.freshFor { watch.forward(value) }
+        if let source { monitoring.restore(source: source) }
+        Task { await monitoring.registerIfNeeded() }
         PushCoordinator.shared.recoverRegistrationIfNeeded()
     }
 

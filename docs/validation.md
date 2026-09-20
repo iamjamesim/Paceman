@@ -269,3 +269,17 @@ construction. Signed build and installation passed; a 20-second console observat
 of the same phone launch no longer reproduced the immediate crash. This check does
 not establish overnight background delivery. Periodic accessory weather requests
 remain unimplemented; existing watch events only provide opportunistic refreshes.
+
+Phone monitoring foundation — 2026-09-19: preference/capability contract and
+workstation handoff documented. Added independent per-client ActivityKit update
+registration, scoped removal and pairing revocation, quiet display-only payloads,
+token rotation, coalescing/backoff and one-hour probe expiry. Manual start/stop
+lives in Developer Tools; existing app background push and BLE forwarding remain
+independent. New Swift and Python contract/lifecycle tests pass: 50 iOS tests;
+97 Python tests with 17 platform-dependent skips (resolved macOS temporary path
+for installer tests). Simulator and signed device builds pass. Simulator Lock
+Screen renders the mixed-session needs-input fixture and system permission prompt.
+Real APNs acceptance, locked-phone update delivery and comparative watch latency
+remain unverified until the updated source/worker is deployed on the workstation.
+Widget push, remote start, final ambient UI and optional alert policy are not part
+of this first probe. APNs credentials and test screenshots remain local and ignored.

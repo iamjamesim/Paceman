@@ -20,6 +20,7 @@ struct TransportDiagnostics: View {
                 }
                 Text(model.snapshot?.mode == "synthetic" ? "Synthetic test source. Finished means a turn ended." : "Finished means a turn ended, not that the agent session closed.").font(.caption).foregroundStyle(.secondary)
             }
+            MonitoringProbe(model: model, monitoring: model.monitoring)
             Section("Weather") {
                 Text(model.weather.diagnostic).font(.caption.monospaced()).textSelection(.enabled)
                 Button("Retry weather request") { model.weather.retryForDiagnostics() }
@@ -102,6 +103,27 @@ struct TransportDiagnostics: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This probe claims an unowned watch for this phone and writes a minimal clock profile. It refuses a watch owned by your desktop. Do not reset your daily watch without arranging migration.")
+        }
+    }
+}
+
+private struct MonitoringProbe: View {
+    @ObservedObject var model: CompanionModel
+    @ObservedObject var monitoring: MonitoringCoordinator
+    var body: some View {
+        Section("Live Activity test") {
+            Text(monitoring.status)
+            if monitoring.active {
+                Button("Stop Live Activity") { Task { await monitoring.stop() } }
+            } else {
+                Button("Start Live Activity") {
+                    if let source = model.source, let snapshot = model.snapshot {
+                        monitoring.start(source: source, snapshot: snapshot)
+                    }
+                }.disabled(model.source == nil || !model.fresh)
+            }
+            Text("Quiet, one-hour desktop push test. Updates do not imply the app or watch received them.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }

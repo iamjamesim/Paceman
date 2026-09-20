@@ -155,7 +155,7 @@ info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Agent Compani
         "CFBundleExecutable": "$(EXECUTABLE_NAME)", "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
         "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "$(PRODUCT_NAME)", "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "2", "LSRequiresIPhoneOS": True,
-        "UILaunchScreen": {}, "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
+        "NSSupportsLiveActivities": True, "UILaunchScreen": {}, "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
         "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False},
         "UIBackgroundModes": ["bluetooth-central", "remote-notification", "fetch"],
         "APNSEnvironment": "$(APNS_ENVIRONMENT)",

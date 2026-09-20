@@ -41,12 +41,19 @@ struct CompanionWidgetView: View {
     }
 }
 
-@main
-struct AgentCompanionWidgets: Widget {
+struct AgentCompanionWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: CompanionSharedStore.kind, provider: CompanionProvider()) { CompanionWidgetView(entry: $0) }
             .configurationDisplayName("Agent status")
             .description("The latest agent activity from your connected computer.")
             .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular])
+    }
+}
+
+@main
+struct AgentCompanionWidgets: WidgetBundle {
+    var body: some Widget {
+        AgentCompanionWidget()
+        MonitoringLiveActivity()
     }
 }

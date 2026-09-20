@@ -7,6 +7,27 @@ import MapKit
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    func testMonitoringPushContractAndAttentionPriority() throws {
+        let payload = Data(#"{"schema":1,"generation":"generation","revision":42,"state":"needs_input","working":3,"needsInput":2,"finished":1,"observedAt":1704067200,"freshUntil":1704067230}"#.utf8)
+        let state = try JSONDecoder().decode(MonitoringActivity.ContentState.self, from: payload)
+        XCTAssertEqual(state.title, "2 need input")
+        XCTAssertEqual(state.revision, 42)
+        XCTAssertEqual(state.freshUntil - state.observedAt, 30)
+        let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as! [String: Any]
+        XCTAssertNil(encoded["sourceName"])
+        XCTAssertNil(encoded["sessions"])
+        XCTAssertEqual(encoded["needsInput"] as? Int, 2)
+    }
+
+    func testMonitoringSummaryDoesNotTurnFinishedIntoSessionClosure() {
+        let state = MonitoringActivity.ContentState(generation: "generation", revision: 1,
+            state: "finished", working: 0, needsInput: 0, finished: 1, observedAt: 0, freshUntil: 30)
+        XCTAssertEqual(state.title, "Finished")
+        var mixed = state
+        mixed.working = 1
+        XCTAssertEqual(mixed.title, "Working")
+    }
+
     @MainActor func testPlaceSearchRequiresTwoTrimmedCharacters() {
         XCTAssertNil(WeatherPlaceSearchModel.normalizedQuery("  S  "))
         XCTAssertNil(WeatherPlaceSearchModel.normalizedQuery(" "))

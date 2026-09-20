@@ -20,6 +20,13 @@ struct AgentCompanionApp: App {
     var body: some Scene {
         WindowGroup {
             CompanionRoot(model: model, presentation: presentation)
+                .task {
+                    #if DEBUG
+                    if presentation.preview, let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--monitoring-preview=") }) {
+                        await model.monitoring.preview(String(argument.dropFirst("--monitoring-preview=".count)))
+                    }
+                    #endif
+                }
                 .onChange(of: phase, initial: true) { _, value in
                     guard !presentation.preview else { return }
                     model.setForeground(value == .active)

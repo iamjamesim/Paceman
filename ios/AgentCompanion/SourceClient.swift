@@ -166,6 +166,23 @@ final class SourceClient {
         _ = try await response(request)
     }
 
+    func registerLiveActivity(_ source: PairedSource, id: String, token: String, environment: String) async throws {
+        try await liveActivityRequest(source, payload: ["activityID": id, "deviceToken": token, "environment": environment])
+    }
+
+    func removeLiveActivity(_ source: PairedSource, id: String) async throws {
+        try await liveActivityRequest(source, payload: ["activityID": id, "action": "remove"])
+    }
+
+    private func liveActivityRequest(_ source: PairedSource, payload: [String: String]) async throws {
+        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/live-activity"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(payload)
+        _ = try await response(request)
+    }
+
     private func response(_ request: URLRequest) async throws -> Data {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw HubError.message("Invalid server response") }
