@@ -153,7 +153,7 @@ def build_ref(name):
 ''')
 info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Paceman",
         "CFBundleExecutable": "$(EXECUTABLE_NAME)", "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
-        "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "$(PRODUCT_NAME)", "CFBundlePackageType": "APPL",
+        "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "Paceman", "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "2", "LSRequiresIPhoneOS": True,
         "NSSupportsLiveActivities": True, "UILaunchScreen": {}, "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
         "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False},
@@ -172,7 +172,7 @@ info["UIAppFonts"] = ["JetBrainsMono-Regular.ttf", "JetBrainsMono-SemiBold.ttf"]
 info["CFBundleURLTypes"] = [{"CFBundleURLName": "companion", "CFBundleURLSchemes": ["agentcompanion"]}]
 widget_info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Paceman",
     "CFBundleExecutable": "$(EXECUTABLE_NAME)", "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
-    "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "$(PRODUCT_NAME)", "CFBundlePackageType": "XPC!",
+    "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "Paceman", "CFBundlePackageType": "XPC!",
     "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "2", "UIAppFonts": info["UIAppFonts"],
     "NSExtension": {"NSExtensionPointIdentifier": "com.apple.widgetkit-extension"}}
 with (root / "AgentCompanionWidgets/Info.plist").open("wb") as file: plistlib.dump(widget_info, file)
