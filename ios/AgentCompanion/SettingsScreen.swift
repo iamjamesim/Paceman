@@ -13,7 +13,7 @@ struct CompanionSettings: View {
                 NavigationLink(value: FeedDestination.diagnostics) {
                     Label("Developer tools", systemImage: "wrench.and.screwdriver")
                 }.disabled(presentation.preview)
-            } footer: { Text("Agent Companion · Prototype") }.listRowBackground(theme.ink.opacity(0.04))
+            } footer: { Text("Paceman · Prototype") }.listRowBackground(theme.ink.opacity(0.04))
         }.scrollContentBackground(.hidden).background(theme.canvas).navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -38,12 +38,12 @@ struct WidgetGuide: View {
                     .accessibilityElement(children: .ignore).accessibilityLabel("Widget preview: \(state.shortTitle)")
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Home Screen").font(.headline)
-                    Text("Touch and hold your Home Screen, choose Edit → Add Widget, then search for Agent Companion. Choose the small or medium widget.")
+                    Text("Touch and hold your Home Screen, choose Edit → Add Widget, then search for Paceman. Choose the small or medium widget.")
                         .font(.body).lineSpacing(4).foregroundStyle(theme.ink.opacity(0.65))
                 }
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Lock Screen").font(.headline)
-                    Text("Touch and hold your Lock Screen, choose Customize, then tap the widget area and add Agent Companion.")
+                    Text("Touch and hold your Lock Screen, choose Customize, then tap the widget area and add Paceman.")
                         .font(.body).lineSpacing(4).foregroundStyle(theme.ink.opacity(0.65))
                 }
                 Text("Widgets show the last received state. iOS controls refresh timing, so they can lag behind the app.")

@@ -61,7 +61,7 @@ def notification(source_id: str, generation: str, event: dict, mode: str, now: f
     aps = {"content-available": 1}
     if mode == "alert":
         title = "Agent needs input" if event["state"] == "needs_input" else "Agent finished"
-        aps.update({"alert": {"title": title, "body": "Open Agent Companion for the latest status."},
+        aps.update({"alert": {"title": title, "body": "Open Paceman for the latest status."},
                     "sound": "default", "thread-id": source_id})
     payload = {"aps": aps, "companion": {"schema": 1, "sourceID": source_id,
                "generation": generation, "eventID": str(event["seq"]), "revision": event["seq"]}}

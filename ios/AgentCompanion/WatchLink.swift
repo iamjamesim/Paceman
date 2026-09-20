@@ -616,10 +616,10 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             if central.state == .unknown || central.state == .resetting {
                 status = "Starting Bluetooth…"
             } else if !paired && setupPhase.inProgress {
-                fail(central.state == .unauthorized ? "Allow Bluetooth access for Agent Companion in iOS Settings, then try again." : "Turn on Bluetooth on your iPhone, then try again.")
+                fail(central.state == .unauthorized ? "Allow Bluetooth access for Paceman in iOS Settings, then try again." : "Turn on Bluetooth on your iPhone, then try again.")
             } else {
                 status = central.state == .poweredOff ? "Turn on Bluetooth on your iPhone. Your watch pairing is saved."
-                    : central.state == .unauthorized ? "Allow Bluetooth access for Agent Companion in iOS Settings."
+                    : central.state == .unauthorized ? "Allow Bluetooth access for Paceman in iOS Settings."
                     : "Bluetooth is unavailable. Your watch pairing is saved."
             }
             return

@@ -10,7 +10,7 @@ struct CompanionTheme: Codable, Equatable, Identifiable {
     var accent: String
     var monospaced: Bool
 
-    static let companion = Self(id: "companion", name: "Companion", background: "F5F4F0", foreground: "242823", accent: "456554", monospaced: false)
+    static let companion = Self(id: "companion", name: "Paceman", background: "F5F4F0", foreground: "242823", accent: "456554", monospaced: false)
     static let solitude = Self(id: "solitude", name: "Solitude", background: "101315", foreground: "CACCCC", accent: "A4B4BB", monospaced: true)
     static let rose = Self(id: "rose", name: "Rosé Pine", background: "191724", foreground: "E0DEF4", accent: "EBBCBA", monospaced: true)
     static let presets = [companion, solitude, rose]
@@ -117,7 +117,7 @@ struct ActivityWidgetFace: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(compact ? state.shortTitle : state.title).font(state.theme.font(compact ? 22 : 25, emphasis: true)).lineLimit(2).minimumScaleFactor(0.8).widgetAccentable()
                     if !compact {
-                        Text(state.paired ? (state.synthetic ? "Test source" : state.sessionCount > 0 ? "\(state.sessionCount) agent\(state.sessionCount == 1 ? "" : "s")" : "Agent status") : "Open Companion to begin.")
+                        Text(state.paired ? (state.synthetic ? "Test source" : state.sessionCount > 0 ? "\(state.sessionCount) agent\(state.sessionCount == 1 ? "" : "s")" : "Agent status") : "Open Paceman to begin.")
                             .font(.system(size: 11)).opacity(0.65)
                     }
                 }
@@ -129,7 +129,7 @@ struct ActivityWidgetFace: View {
                     Image(systemName: "clock").font(.system(size: 9))
                     Text("Updated").font(.system(size: 10))
                     Text("\(date, style: .relative) ago").font(.system(size: 10)).lineLimit(1)
-                } else { Text("OPEN COMPANION").font(.system(size: 9, weight: .semibold)).tracking(1) }
+                } else { Text("OPEN PACEMAN").font(.system(size: 9, weight: .semibold)).tracking(1) }
                 Spacer(minLength: 0)
                 Image(systemName: "arrow.up.right").font(.system(size: 10))
             }.opacity(0.6)

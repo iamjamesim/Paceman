@@ -151,7 +151,7 @@ def build_ref(name):
  <AnalyzeAction buildConfiguration="Debug"/><ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
 </Scheme>
 ''')
-info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Agent Companion",
+info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Paceman",
         "CFBundleExecutable": "$(EXECUTABLE_NAME)", "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
         "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "$(PRODUCT_NAME)", "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "2", "LSRequiresIPhoneOS": True,
@@ -170,7 +170,7 @@ info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Agent Compani
         "NSAccessorySetupBluetoothNames": ["Omarchy Watch"]}
 info["UIAppFonts"] = ["JetBrainsMono-Regular.ttf", "JetBrainsMono-SemiBold.ttf"]
 info["CFBundleURLTypes"] = [{"CFBundleURLName": "companion", "CFBundleURLSchemes": ["agentcompanion"]}]
-widget_info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Agent Companion",
+widget_info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Paceman",
     "CFBundleExecutable": "$(EXECUTABLE_NAME)", "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
     "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "$(PRODUCT_NAME)", "CFBundlePackageType": "XPC!",
     "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "2", "UIAppFonts": info["UIAppFonts"],

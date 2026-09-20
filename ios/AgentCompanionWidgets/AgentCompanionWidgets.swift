@@ -29,7 +29,7 @@ struct CompanionWidgetView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(entry.state.shortTitle).font(.headline).lineLimit(1)
                         if let date = entry.state.updatedAt { Text("Updated \(date, style: .relative) ago").font(.caption2).lineLimit(1) }
-                        else { Text("Open Companion").font(.caption2) }
+                        else { Text("Open Paceman").font(.caption2) }
                     }
                 }
             } else {

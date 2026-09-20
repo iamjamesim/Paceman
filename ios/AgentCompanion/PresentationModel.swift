@@ -49,7 +49,7 @@ final class PresentationModel: ObservableObject {
         if ["single-finished", "single-offline", "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(previewScreen) { return [AgentSession(id: "1", provider: "codex", state: .finished)] }
         if previewScreen == "single-working" { return [AgentSession(id: "1", provider: "codex", state: .working)] }
         return [AgentSession(id: "1", provider: "codex", state: .needsInput, name: "Fix checkout redirect", project: "storefront"),
-                AgentSession(id: "2", provider: "claude", state: .working, name: "API cleanup", project: "agent-companion"),
+                AgentSession(id: "2", provider: "claude", state: .working, name: "API cleanup", project: "paceman"),
                 AgentSession(id: "3", provider: "codex", state: .finished, name: "Update watch theme", project: "omarchy-watch")]
     }
     func theme(source: CompanionTheme?) -> CompanionTheme {
