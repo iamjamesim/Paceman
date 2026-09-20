@@ -113,7 +113,11 @@ The direct sender adds a `companion` hint alongside `aps`, with `schema: 1`,
 `sourceID`, `generation`, `eventID`, and integer `revision`. The phone validates
 the hint against its pairing, then fetches `/v1/snapshot` from its stored source.
 The push does not control the fetch URL, credentials, or resulting watch state.
-See [direct push test](direct-push-test.md) for modes, throttling, and limitations.
+In `alert` mode, working and idle updates use passive notification presentation;
+needs-input and finished updates use attention alerts. All include a background
+refresh request. Passive entries remain visible in the notification list.
+`background` mode stays silent and separately throttled. No watch polling is used.
+See [direct push delivery](direct-push-test.md) for validation and limitations.
 
 ## Optional phone presentation metadata
 

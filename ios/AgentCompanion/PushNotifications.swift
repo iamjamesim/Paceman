@@ -140,7 +140,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     func changeMode(_ value: String) async {
         guard value == "alert" || value == "background" else { return }
         if value == "alert" {
-            // Visible alerts exist only as an explicit developer transport test.
+            // Notification delivery is an explicit preference; background-only delivery needs no alert permission.
             let granted = (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])) == true
             await refreshAuthorization()
             guard granted else { status = "Alert permission was not granted; background updates remain available"; return }
@@ -243,7 +243,9 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         Task { @MainActor in
             let valid = self.enabled && PushHint.decode(notification.request.content.userInfo, for: self.model?.source) != nil
-            completionHandler(valid && self.mode == "alert" ? [.banner, .sound, .list] : [])
+            // Passive progress updates need no notification when the app is already open.
+            let attention = notification.request.content.interruptionLevel != .passive
+            completionHandler(valid && self.mode == "alert" && attention ? [.banner, .sound, .list] : [])
             if valid { _ = await self.receive(notification.request.content.userInfo, stage: "push_foreground_received") }
         }
     }

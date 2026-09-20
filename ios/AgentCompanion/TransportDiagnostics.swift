@@ -50,14 +50,14 @@ struct TransportDiagnostics: View {
                     }.disabled(invitation.isEmpty || model.busy)
                 }
             }
-            Section("Direct push test") {
+            Section("Push delivery") {
                 Text(push.status)
                 if push.enabled {
                     Picker("Delivery", selection: Binding(get: { push.mode }, set: { mode in
                         Task { await push.changeMode(mode) }
                     })) {
-                        Text("Alert + wake request").tag("alert")
-                        Text("Silent wake request").tag("background")
+                        Text("Notifications").tag("alert")
+                        Text("Background only").tag("background")
                     }.disabled(push.busy)
                     Button("Retry registration") { Task { await push.sync() } }.disabled(push.busy || model.source == nil)
                     Button("Disable push") { Task { await push.disable() } }.disabled(push.busy)
@@ -68,8 +68,8 @@ struct TransportDiagnostics: View {
                     }.disabled(model.source == nil || push.busy)
                 }
                 Text(push.mode == "background"
-                    ? "Silent requests are best effort and limited by this test sender to three attempts per hour. No visible notification is shown."
-                    : "The desktop sends alerts directly to Apple for needs-input and finished events. iOS decides whether to wake the app to fetch over Tailscale and update the watch.")
+                    ? "Background updates are best effort and limited by the sender to three attempts per hour. No notification is shown."
+                    : "Needs input and Finished can alert you. Working and Idle appear quietly in the notification list. Each update also requests a fetch for the watch; iOS controls background execution.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Keep streaming off during the locked-phone test. APNs acceptance, app wake, fetch, and watch write are separate log entries.")
                     .font(.caption).foregroundStyle(.secondary)

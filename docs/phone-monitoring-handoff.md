@@ -1,28 +1,34 @@
-# Quiet Live Activity alpha probe
+# Desktop notification delivery handoff
 
-The phone contract and preferences are in [phone-monitoring.md](phone-monitoring.md).
-This handoff is for the existing trusted Omarchy workstation, not external users.
+Use the existing trusted Omarchy source and APNs worker. This update adds passive
+working/idle notifications to the same delivery path already used for attention
+alerts. There is no watch polling, new service, new key, database migration or
+experimental command-line flag.
 
-1. Update the desktop checkout to the same revision as the iPhone build. Restart
-   the source so it creates the separate live-activity destination table and serves
-   `POST /v1/live-activity` under the existing paired-client authorization.
-2. Configure the existing `service.push` worker with a retained APNs key matching
-   the app's signing team/topic/environment. Use the existing direct-push setup,
-   with config and `.p8` outside the checkout, mode 600. Do not put real identifiers,
-   tokens, keys or logs in this document or a commit. No new key per workstation.
-3. Run the worker against the same data directory as the actual source, not a
-   separate synthetic test database. Only one worker per data directory is allowed.
-4. On iPhone open Settings → Developer tools → Live Activity test, and start it
-   with a fresh source snapshot. Confirm registration before locking the phone.
-5. Trigger real working/needs-input/finished transitions on desktop. Check the
-   Island and Lock Screen without opening the app. Observe the Omarchy watch too;
-   record the difference, not just APNs acceptance. Expect no phone sound/banner.
-6. Stop or dismiss the Live Activity; verify no automatic restart, and that watch
-   updates and the ordinary app push registration still work. Repeat after network
-   loss, source revocation and permission changes.
+1. Update the checkout to the shared revision and deploy the updated `service/`
+   package to the path used by the running worker. The source and worker must use
+   the existing source database. Do not start a second source or replace pairing.
+2. Restart the existing APNs worker with its existing config and data-directory
+   arguments. Inspect its actual executable/working directory; updating the
+   checkout alone does not reload an already-running Python process.
+3. Verify the installed sender uses Paceman in the notification body. Keep the
+   retained private APNs config/key in place; do not print or commit their contents.
+4. The phone remains registered in `alert` mode. In the current iPhone UI this is
+   **Settings → Developer tools → Push delivery → Notifications**. Older installed
+   builds label it **Alert + wake request**. No re-pairing is needed.
+5. With the phone locked, trigger Working → Needs input → Working → Finished →
+   Idle, holding each state for at least 15 seconds. Observe the watch without
+   tapping it or opening the phone. Working/Idle should be passive notification-list
+   entries; Needs input/Finished retain their normal alert presentation.
+6. Match the source's event identity and `presentation` field to the phone callback,
+   fetch and BLE-write records. Repeat after longer idle periods and on cellular.
+   A received notification alone does not prove a watch update.
 
-The first probe ends after one hour. A source observation expires after its normal
-freshness window; event-only pushes currently leave the activity stale between
-changes. This is expected during the probe and must be solved in the overall
-refresh contract before product rollout. Widget push, push-to-start, optional
-attention alerts and hosted relay enrollment are not implemented by this slice.
+The first visible Finished baseline succeeded with the phone backgrounded for
+approximately four minutes. Sustained and passive delivery remain to be verified.
+For the initial isolation run, leave foreground streaming and the Live Activity
+stopped. Then re-enable the Live Activity and compare both surfaces. The Live
+Activity is display-only delivery; it does not itself forward to the BLE watch.
+
+[Delivery policy and validation](direct-push-test.md) ·
+[Phone monitoring design](phone-monitoring.md)

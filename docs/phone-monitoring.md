@@ -60,7 +60,12 @@ Live Activity freshness is explicit and can expire without an app callback.
 
 Existing background pushes remain opportunistic and separately throttled. A Live
 Activity update does not imply the app ran or updated its widget cache/watch.
-Periodic Bluetooth weather/activity requests are a separate, unimplemented follow-up.
+The selected custom-watch delivery uses APNs callbacks and the existing BLE path;
+there is no accessory polling. With notification permission and notification mode,
+working/idle transitions use passive notifications, while needs-input and finished
+use attention notifications. Passive entries remain in the notification list.
+This alpha tradeoff does not establish guaranteed app execution or fully hidden
+status delivery. Background-only mode remains available without alert permission.
 Measure source-to-Live-Activity and source-to-watch latency together on a locked
 phone before claiming coherent background delivery.
 
@@ -79,6 +84,10 @@ The relay must enforce pairing authorization, destination revocation, payload bo
 and rate limits. It does not remove iOS runtime or push delivery restrictions.
 
 ## Implementation and acceptance sequence
+
+Current P0 is iPhone Live Activity/attention notifications, Apple Watch, and the
+custom watch. Widgets and complications are deferred. Validate the custom-watch
+APNs-to-BLE path before treating the earlier sequence below as complete.
 
 1. Quiet, manually started Live Activity in Developer Tools; independent token
    registration and direct APNs updates. Prove locked-phone updates before product UI.

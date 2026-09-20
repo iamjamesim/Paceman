@@ -78,16 +78,17 @@ class PushWorkerTests(unittest.TestCase):
             self.assertNotIn(secret, self.log.read_text())
         self.assertIn('"stage":"apns_accepted"', self.log.read_text())
 
-    def test_only_latest_state_is_sent_and_ordinary_working_state_is_skipped(self):
+    def test_only_latest_state_is_sent_without_replaying_attention_events(self):
         self.emit("needs_input")
         self.emit("working")
         self.worker.step(100)
-        self.assertFalse(self.sender.calls)
+        self.assertEqual(len(self.sender.calls), 1)
+        self.assertEqual(self.sender.calls[0][1]["aps"]["alert"]["title"], "Agent working")
         self.emit("needs_input")
         newest = self.emit("finished")
         self.worker.step(110)
-        self.assertEqual(len(self.sender.calls), 1)
-        self.assertEqual(self.sender.calls[0][1]["companion"]["revision"], newest)
+        self.assertEqual(len(self.sender.calls), 2)
+        self.assertEqual(self.sender.calls[-1][1]["companion"]["revision"], newest)
 
     def test_retry_is_persistent_bounded_and_coalesces_to_latest_event(self):
         self.emit("needs_input")
@@ -100,6 +101,57 @@ class PushWorkerTests(unittest.TestCase):
         Worker(Store(self.store.path), self.sender, self.log).step(111)
         self.assertEqual(len(self.sender.calls), 2)
         self.assertEqual(self.sender.calls[-1][1]["companion"]["revision"], newest)
+
+    def test_progress_is_passive_and_attention_alerts_keep_their_sound(self):
+        worker = Worker(self.store, self.sender, self.log)
+        self.emit("working", 100)
+        worker.step(100)
+        _, payload, headers, _ = self.sender.calls[0]
+        self.assertEqual(payload["aps"]["interruption-level"], "passive")
+        self.assertNotIn("sound", payload["aps"])
+        self.assertEqual(payload["aps"]["content-available"], 1)
+        self.assertEqual(payload["aps"]["alert"]["title"], "Agent working")
+        self.assertEqual(headers["apns-push-type"], "alert")
+        self.assertEqual(headers["apns-priority"], "10")
+        self.assertEqual(json.loads(self.log.read_text().splitlines()[0])["presentation"], "passive")
+        # The normal attempt spacing still applies. Only the newest state survives.
+        self.emit("working", 101)
+        worker.step(101)
+        self.assertEqual(len(self.sender.calls), 1)
+        newest = self.emit("needs_input", 102)
+        worker.step(110)
+        payload = self.sender.calls[-1][1]
+        self.assertEqual(payload["companion"]["revision"], newest)
+        self.assertEqual(payload["aps"]["sound"], "default")
+        self.assertNotIn("interruption-level", payload["aps"])
+        self.assertEqual(payload["aps"]["alert"]["title"], "Agent needs input")
+        self.emit("finished", 120)
+        worker.step(120)
+        self.assertEqual(self.sender.calls[-1][1]["aps"]["alert"]["title"], "Agent finished")
+        self.emit("idle", 130)
+        worker.step(130)
+        self.assertEqual(len(self.sender.calls), 4)
+        aps = self.sender.calls[-1][1]["aps"]
+        self.assertEqual(aps["alert"]["title"], "No active sessions")
+        self.assertEqual(aps["interruption-level"], "passive")
+        self.assertNotIn("sound", aps)
+
+    def test_notification_policy_preserves_silent_registration_and_limit(self):
+        self.register("background")
+        worker = Worker(self.store, self.sender, self.log)
+        self.emit("working", 100)
+        worker.step(100)
+        _, payload, headers, _ = self.sender.calls[0]
+        self.assertEqual(payload["aps"], {"content-available": 1})
+        self.assertEqual(headers["apns-push-type"], "background")
+        self.emit("working", 110)
+        worker.step(110)
+        self.assertEqual(len(self.sender.calls), 1)
+
+    def test_expired_progress_is_dropped(self):
+        self.emit("working", 100)
+        Worker(self.store, self.sender, self.log).step(401)
+        self.assertFalse(self.sender.calls)
 
     def test_expired_events_are_dropped_without_sending(self):
         self.emit("needs_input", 100)

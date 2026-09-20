@@ -3,6 +3,26 @@
 Start with README.md, docs/architecture.md and docs/validation.md. Keep this file
 focused on current next steps; do not append chronological development diaries.
 
+## Current delivery work
+
+P0 monitoring includes iPhone Live Activities/attention notifications, Apple Watch,
+and the custom watch. The selected phone-to-watch path is event-driven:
+source → APNs → phone callback → paired-source fetch → existing BLE write.
+The accessory polling experiment has been removed from the app and firmware.
+
+For phones registered in notification mode, the desktop worker sends needs-input
+and finished as attention notifications, and working/idle as passive notifications
+(no screen wake or sound; still present in the notification list). This is normal
+worker behavior with no test flag. Background-only registrations retain their
+existing low-frequency, best-effort behavior; enabling notifications still requires
+explicit permission. Live Activity delivery remains independent.
+
+One visible finished notification has been observed to update the watch while
+the phone was locked. Repeated delivery, passive transitions and longer idle periods
+still need physical validation. Follow [phone-monitoring-handoff.md](docs/phone-monitoring-handoff.md)
+for the single desktop deployment and [direct-push-test.md](docs/direct-push-test.md)
+for validation. Keep keys, actual configs and device logs out of commits.
+
 ## Next milestone
 
 Connect real Omarchy activity and appearance through the source service to the

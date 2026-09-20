@@ -60,9 +60,18 @@ def notification(source_id: str, generation: str, event: dict, mode: str, now: f
         raise ValueError("Unknown push mode")
     aps = {"content-available": 1}
     if mode == "alert":
-        title = "Agent needs input" if event["state"] == "needs_input" else "Agent finished"
-        aps.update({"alert": {"title": title, "body": "Open Paceman for the latest status."},
-                    "sound": "default", "thread-id": source_id})
+        passive = event["state"] in ("working", "idle")
+        titles = {"working": "Agent working", "idle": "No active sessions",
+                  "needs_input": "Agent needs input", "finished": "Agent finished"}
+        if event["state"] not in titles:
+            raise ValueError("Unknown activity state")
+        aps.update({"alert": {"title": titles[event["state"]],
+                              "body": "Open Paceman for the latest status."},
+                    "thread-id": source_id})
+        if passive:
+            aps["interruption-level"] = "passive"
+        else:
+            aps["sound"] = "default"
     payload = {"aps": aps, "companion": {"schema": 1, "sourceID": source_id,
                "generation": generation, "eventID": str(event["seq"]), "revision": event["seq"]}}
     headers = {"apns-push-type": mode, "apns-priority": "10" if mode == "alert" else "5",
@@ -150,8 +159,7 @@ class Worker:
                 (event["seq"],))]
         for device in devices:
             # Collapse obsolete intermediate states. Never replay a backlog on reconnect.
-            skip = now - event["at"] > 300 or (device["mode"] == "alert" and event["state"] not in ("needs_input", "finished"))
-            if skip:
+            if now - event["at"] > 300:
                 with self.store.connect() as db:
                     db.execute("UPDATE push_devices SET cursor=?,attempts=0 WHERE client_id=? AND token=? AND mode=?",
                                (event["seq"], device["client_id"], device["token"], device["mode"]))
@@ -185,6 +193,8 @@ class Worker:
                                 device["client_id"], device["token"], device["mode"]))
             self.log({"at": now, "event": f"{source_id}/{generation}/{event['seq']}",
                       "clientID": device["client_id"], "mode": device["mode"],
+                      "presentation": ("none" if device["mode"] == "background" else
+                                       payload["aps"].get("interruption-level", "active")),
                       "stage": "apns_accepted" if result.status == 200 else "apns_failed",
                       "status": result.status, "reason": result.reason, "apnsID": result.apns_id})
 
