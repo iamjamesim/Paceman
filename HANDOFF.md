@@ -6,22 +6,32 @@ focused on current next steps; do not append chronological development diaries.
 ## Current delivery work
 
 P0 monitoring includes iPhone Live Activities/attention notifications, Apple Watch,
-and the custom watch. The selected phone-to-watch path is event-driven:
-source → APNs → phone callback → paired-source fetch → existing BLE write.
-The accessory polling experiment has been removed from the app and firmware.
+and the custom watch. The custom-watch path is now:
+source → APNs → iOS ANCS → watch sync request → Core Bluetooth app wake →
+paired-source fetch → BLE write. It uses no periodic accessory polling or
+notification service extension. Firmware 0.6.2 requires the matching phone app
+and notification sharing enabled for the watch.
 
-For phones registered in notification mode, the desktop worker sends needs-input
-and finished as attention notifications, and working/idle as passive notifications
-(no screen wake or sound; still present in the notification list). This is normal
-worker behavior with no test flag. Background-only registrations retain their
-existing low-frequency, best-effort behavior; enabling notifications still requires
-explicit permission. Live Activity delivery remains independent.
+Distinct per-event notifications resolved missed subsequent updates in the latest
+physical run: seven successive background watch requests completed BLE writes,
+and the user confirmed the watch updated. Notifications remain grouped by source;
+retries of the same event retain their collapse identity. Working/idle are passive
+entries; needs-input/finished can alert, subject to system settings and Focus.
+Live Activity delivery remains independent. Background-only pushes cannot drive
+ANCS; their callbacks remain best effort.
 
-One visible finished notification has been observed to update the watch while
-the phone was locked. Repeated delivery, passive transitions and longer idle periods
-still need physical validation. Follow [phone-monitoring-handoff.md](docs/phone-monitoring-handoff.md)
-for the single desktop deployment and [direct-push-test.md](docs/direct-push-test.md)
-for validation. Keep keys, actual configs and device logs out of commits.
+A separate reconnect failure required opening the phone app before that run.
+The phone lifecycle correction removes timer-owned retries and preserves pending
+Core Bluetooth requests. Tests and device build pass; unattended reconnection,
+extended locked idle, and system restoration still need physical acceptance.
+See [bluetooth-lifecycle.md](docs/bluetooth-lifecycle.md) for the focused check.
+Do not describe all-stack connectivity as complete yet; Apple Watch acceptance
+is separate from the custom-watch run.
+
+Follow [phone-monitoring-handoff.md](docs/phone-monitoring-handoff.md) for desktop
+sync and [direct-push-test.md](docs/direct-push-test.md) for validation. The latest
+isolation run omitted content-available remotely; this is not the sender default.
+Keep keys, actual configurations and device traces outside commits.
 
 ## Next milestone
 

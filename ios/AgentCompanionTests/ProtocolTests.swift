@@ -117,11 +117,15 @@ final class ProtocolTests: XCTestCase {
             state: .disconnected, ready: false, preparing: false), .connect)
     }
 
-    func testReconnectBackoffIsBoundedAndResetsAfterSuccess() {
-        var backoff = WatchReconnectBackoff()
-        XCTAssertEqual((0..<7).map { _ in backoff.nextDelay() }, [2, 4, 8, 16, 30, 30, 30])
-        backoff.reset()
-        XCTAssertEqual(backoff.nextDelay(), 2)
+    func testPendingSystemConnectionSurvivesForegroundAndRestorationChecks() {
+        // Neither an ordinary reconnect check nor restoration should replace a
+        // pending system request, regardless of whether a handshake has started.
+        for state in [CBPeripheralState.connecting, .disconnecting] {
+            for preparing in [false, true] {
+                XCTAssertEqual(WatchConnectionStep.next(enabled: true, poweredOn: true,
+                    state: state, ready: false, preparing: preparing), .wait)
+            }
+        }
     }
 
     func testStalledCancellationRebuildsOnlyAnEnabledPairedConnection() {

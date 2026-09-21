@@ -35,16 +35,6 @@ enum WatchConnectionStep: Equatable {
     }
 }
 
-struct WatchReconnectBackoff {
-    private var failures = 0
-    mutating func nextDelay() -> TimeInterval {
-        let delay = min(30, 2 * pow(2, Double(failures)))
-        failures = min(failures + 1, 4)
-        return delay
-    }
-    mutating func reset() { failures = 0 }
-}
-
 /// Accessory access is not proof of a completed ownership/profile handshake.
 struct WatchPairingReceipt: Codable, Equatable {
     let bluetoothID: UUID
@@ -194,13 +184,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private var acceptedProfileFingerprint: Data?
 
     private var pairingTimeout: DispatchWorkItem?
-    private var reconnectWork: DispatchWorkItem?
     private var handshakeTimeout: DispatchWorkItem?
     private var preparing = false
-    private var restartRestoredRequest = false
-    private var connectionTimeout: DispatchWorkItem?
     private var cancellationTimeout: DispatchWorkItem?
-    private var reconnectBackoff = WatchReconnectBackoff()
     private var pairingReceipt: WatchPairingReceipt?
     private static let receiptKey = "watch-pairing-receipt"
     private static let centralIDKey = "watch-central-restoration-id"
@@ -208,7 +194,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     var connectionPresentation: WatchConnectionPresentation {
         .resolve(updates: updatesEnabled, failed: setupPhase == .failed, bluetooth: central?.state,
                  ready: ready, preparing: preparing,
-                 recovering: enabled && (reconnectWork != nil || connectionTimeout != nil || cancellationTimeout != nil ||
+                 recovering: enabled && (cancellationTimeout != nil ||
                     peripheral?.state == .connecting || peripheral?.state == .disconnecting))
     }
     var connectionStatus: String { connectionPresentation.rawValue }
@@ -391,9 +377,6 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     func setEnabled(_ value: Bool, userInitiated: Bool = true) {
-        reconnectWork?.cancel()
-        reconnectWork = nil
-        reconnectBackoff.reset()
         enabled = value
         if userInitiated {
             updatesEnabled = value
@@ -406,8 +389,6 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             ready = false
             preparing = false
             handshakeTimeout?.cancel()
-            connectionTimeout?.cancel()
-            connectionTimeout = nil
             cancellationTimeout?.cancel()
             cancellationTimeout = nil
             queued = nil
@@ -430,11 +411,12 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     private func cancelForRecovery(_ peripheral: CBPeripheral) {
         central.cancelPeripheralConnection(peripheral)
-        guard cancellationTimeout == nil else { return }
+        guard UIApplication.shared.applicationState == .active, cancellationTimeout == nil else { return }
         let timeout = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.cancellationTimeout = nil
-            guard self.peripheral?.identifier == peripheral.identifier,
+            guard UIApplication.shared.applicationState == .active,
+                  self.peripheral?.identifier == peripheral.identifier,
                   WatchConnectionStep.shouldRebuildAfterCancellation(enabled: self.enabled, paired: self.paired,
                     poweredOn: self.central?.state == .poweredOn, ready: self.ready, state: peripheral.state) else { return }
             self.rebuildStalledCentral()
@@ -445,10 +427,6 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     private func rebuildStalledCentral() {
         guard let identifier = preferredAccessoryID else { return }
-        reconnectWork?.cancel()
-        reconnectWork = nil
-        connectionTimeout?.cancel()
-        connectionTimeout = nil
         handshakeTimeout?.cancel()
         // Retire the stuck manager, not the accessory. Keep a new restoration
         // identifier so subsequent background launches can restore this manager.
@@ -465,7 +443,6 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         profileWritePending = false
         acceptedProfileFingerprint = nil
         writePending = false
-        restartRestoredRequest = false
         pendingIdentifier = identifier
         UserDefaults.standard.set("AgentCompanion.watch." + UUID().uuidString, forKey: Self.centralIDKey)
         status = "Restarting the Bluetooth connection. Your watch pairing is saved."
@@ -477,24 +454,12 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         pendingIdentifier = identifier
         if central == nil { startBluetooth(); return }
         guard enabled, central.state == .poweredOn else { return }
-        // An inherited pending request may have been waiting for hours. Replace
-        // it once after authorization is restored, rather than treating its
-        // .connecting state as evidence that a new attempt has been made.
-        if restartRestoredRequest {
-            guard pickerReady else { return }
-            restartRestoredRequest = false
-            if let peripheral, peripheral.state == .connecting || peripheral.state == .disconnecting {
-                Diagnostics.shared.record("ble_restored_request_restarted")
-                cancelForRecovery(peripheral)
-                scheduleReconnect()
-                return
-            }
-        }
+        // A restored pending connection belongs to Core Bluetooth. Keep it alive:
+        // iOS can complete it and wake us even while this process is suspended.
         guard let found = (peripheral?.identifier == identifier ? peripheral : nil)
                 ?? central.retrievePeripherals(withIdentifiers: [identifier]).first else {
             if paired {
                 status = "Waiting for your paired watch. Keep it nearby with Bluetooth on."
-                scheduleReconnect()
             } else { fail("Watch unavailable. Keep it nearby and try selecting it again.") }
             return
         }
@@ -509,48 +474,22 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             Diagnostics.shared.record("ble_connect_requested")
             central.connect(found, options: [CBConnectPeripheralOptionEnableAutoReconnect: true,
                                             CBConnectPeripheralOptionRequiresANCS: true])
-            armConnectionTimeout()
         case .wait:
             if found.state == .connecting {
                 status = "Trying to reconnect over Bluetooth. Keep your watch nearby and turned on."
-                if connectionTimeout == nil { armConnectionTimeout() }
-            } else if found.state == .disconnecting {
-                scheduleReconnect()
             }
             // Core Bluetooth keeps an outstanding connection pending.
         }
     }
 
-    private func armConnectionTimeout() {
-        connectionTimeout?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.connectionTimeout = nil
-            guard self.enabled, !self.ready, !self.preparing,
-                  self.central?.state == .poweredOn,
-                  let peripheral = self.peripheral, peripheral.state == .connecting else { return }
-            self.status = "The watch hasn’t connected yet. Restarting the Bluetooth attempt."
-            Diagnostics.shared.record("ble_connect_timed_out")
-            self.cancelForRecovery(peripheral)
-            self.scheduleReconnect()
-        }
-        connectionTimeout = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: work)
-    }
-
     func reconnectIfNeeded() {
-        guard enabled, !ready, reconnectWork == nil, let identifier = preferredAccessoryID else { return }
+        guard enabled, !ready, let identifier = preferredAccessoryID else { return }
         connect(identifier)
     }
 
     func retryConnection() {
         guard enabled, paired, central?.state == .poweredOn, !ready else { return }
-        reconnectWork?.cancel()
-        reconnectWork = nil
-        reconnectBackoff.reset()
         handshakeTimeout?.cancel()
-        connectionTimeout?.cancel()
-        connectionTimeout = nil
         preparing = false
         status = "Restarting the Bluetooth connection…"
         Diagnostics.shared.record("ble_retry_requested")
@@ -561,18 +500,6 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     var canRetryConnection: Bool { enabled && paired && central?.state == .poweredOn && !ready }
-
-    private func scheduleReconnect() {
-        guard enabled, paired, reconnectWork == nil else { return }
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.reconnectWork = nil
-            self.reconnectIfNeeded()
-        }
-        reconnectWork = work
-        Diagnostics.shared.record("ble_retry_scheduled")
-        DispatchQueue.main.asyncAfter(deadline: .now() + reconnectBackoff.nextDelay(), execute: work)
-    }
 
     private func recoverConnection(_ message: String) {
         guard paired else { fail(message); return }
@@ -587,8 +514,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         writePending = false
         status = message + " Retrying automatically."
         Diagnostics.shared.record("ble_connection_recovering")
-        scheduleReconnect()
         if let peripheral { cancelForRecovery(peripheral) }
+        else { reconnectIfNeeded() }
     }
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
@@ -610,16 +537,11 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 pendingIdentifier = peripheral?.identifier ?? pendingIdentifier
                 peripheral?.delegate = nil
                 peripheral = nil
-                restartRestoredRequest = false
                 Diagnostics.shared.record("ble_peripheral_invalidated")
             }
             handshakeTimeout?.cancel()
-            connectionTimeout?.cancel()
-            connectionTimeout = nil
             cancellationTimeout?.cancel()
             cancellationTimeout = nil
-            reconnectWork?.cancel()
-            reconnectWork = nil
             if central.state == .unknown || central.state == .resetting {
                 status = "Starting Bluetooth…"
             } else if !paired && setupPhase.inProgress {
@@ -641,7 +563,6 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         peripheral = restored
         pendingIdentifier = restored.identifier
         restored.delegate = self
-        restartRestoredRequest = restored.state == .connecting || restored.state == .disconnecting
         Diagnostics.shared.record(restored.state == .connected ? "ble_restored_connected"
             : restored.state == .connecting ? "ble_restored_connecting" : "ble_restored_disconnected")
         // Restoration can arrive before poweredOn. Discover services only after
@@ -662,11 +583,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     private func prepare(_ peripheral: CBPeripheral) {
         guard enabled, central.state == .poweredOn, !preparing else { return }
-        reconnectWork?.cancel()
-        reconnectWork = nil
         preparing = true
-        connectionTimeout?.cancel()
-        connectionTimeout = nil
         ready = false
         activity = nil
         profile = nil
@@ -679,14 +596,34 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         status = "Connecting to your watch…"
         if !paired { setupPhase = .connecting }
         Diagnostics.shared.record("ble_services_requested")
+        armHandshakeTimeout()
+        peripheral.discoverServices([Self.service])
+    }
+
+    // Timers are foreground diagnostics, never background connection owners.
+    // Discard elapsed watchdogs before suspension, so resuming cannot execute an
+    // old deadline ahead of queued Bluetooth delegate callbacks.
+    func setForeground(_ foreground: Bool) {
         handshakeTimeout?.cancel()
+        handshakeTimeout = nil
+        cancellationTimeout?.cancel()
+        cancellationTimeout = nil
+        if foreground {
+            if preparing { armHandshakeTimeout() }
+            reconnectIfNeeded()
+        }
+    }
+
+    private func armHandshakeTimeout() {
+        handshakeTimeout?.cancel()
+        guard UIApplication.shared.applicationState == .active else { return }
         let timeout = DispatchWorkItem { [weak self] in
-            guard let self, self.enabled, self.preparing, !self.ready else { return }
+            guard let self, UIApplication.shared.applicationState == .active,
+                  self.enabled, self.preparing, !self.ready else { return }
             self.recoverConnection("The watch did not finish connecting.")
         }
         handshakeTimeout = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: timeout)
-        peripheral.discoverServices([Self.service])
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
@@ -707,8 +644,6 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         ready = false
         preparing = false
         handshakeTimeout?.cancel()
-        connectionTimeout?.cancel()
-        connectionTimeout = nil
         writePending = false
         activity = nil
         profile = nil
@@ -717,8 +652,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             status = "Bluetooth disconnected. Trying to reconnect automatically."
             if isReconnecting {
                 Diagnostics.shared.record("ble_system_reconnecting")
-                armConnectionTimeout()
-            } else if reconnectWork == nil { connect(peripheral.identifier) }
+            } else { connect(peripheral.identifier) }
         }
     }
 
@@ -730,12 +664,12 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         ready = false
         preparing = false
         handshakeTimeout?.cancel()
-        connectionTimeout?.cancel()
-        connectionTimeout = nil
         guard enabled else { return }
         if paired {
             status = "Couldn’t reach your watch. Retrying automatically; keep it nearby."
-            scheduleReconnect()
+            // Submit before returning from this callback; a delayed app timer
+            // cannot reconnect us once iOS suspends the process.
+            connect(peripheral.identifier)
         }
         else { fail("Could not connect. Keep your watch nearby and try again.") }
         Diagnostics.shared.record("ble_connect_failed")
@@ -842,7 +776,6 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             pairingTimeout?.cancel()
             handshakeTimeout?.cancel()
             preparing = false
-            reconnectBackoff.reset()
             setupPhase = .idle
             ready = true
             status = "Connected · legacy activity protocol"

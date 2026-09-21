@@ -143,11 +143,11 @@ final class CompanionModel: ObservableObject {
     func setForeground(_ value: Bool) {
         foreground = value
         weather.setForeground(value)
+        watch.setForeground(value)
         polling?.cancel()
         polling = nil
         Diagnostics.shared.record(value ? "app_foreground" : "app_background")
         if value {
-            watch.reconnectIfNeeded()
             polling = Task { [weak self] in
                 while !Task.isCancelled {
                     self?.weather.refreshIfNeeded()

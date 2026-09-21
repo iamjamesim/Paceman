@@ -28,3 +28,12 @@ Before installing or presenting a design as finished:
 Use `docs/home-screen-design.md` for the current phone hierarchy and review notes.
 Desktop-specific decisions are in `docs/desktop-panel-design.md`. Cross-surface
 consistency means consistent semantics; layout differences need a user-facing reason.
+
+# Lifecycle engineering
+
+Use platform-owned pending operations and delegate callbacks for work that must
+survive suspension. Do not use app timers to maintain background connectivity,
+replace restored operations merely because they are pending, or treat elapsed
+time out of range as a stuck connection. Keep watchdogs scoped to active work
+and invalidate them across lifecycle transitions. Test reconnection separately
+from delivery on an already-connected device; document hardware-only gaps.
