@@ -4,7 +4,7 @@
 
 The phone exposes Settings → Notifications and watch setup/recovery guidance.
 The source stores optional `presentation` per push destination (`quiet` or
-`alerts`, default `alerts` for older clients) and acknowledges its effective value.
+`alerts`, default `quiet`) and acknowledges its effective value.
 Quiet makes all states passive without sound. Alerts keeps Working/Idle passive
 and permits Needs input/Finished to interrupt, subject to iOS settings. Both modes
 retain Notification Center entries for ANCS. Deploy the matching source before testing this preference on the phone.
@@ -18,8 +18,7 @@ computer and other-state counts without repeating the title.
 
 Update both `service/hub.py` and `service/push.py` through the existing desktop
 installation flow and restart the existing source service and APNs worker. The
-Store initialization adds a `presentation` column with a default preserving existing
-behavior. Keep the existing database, pairing, APNs key/config and worker arguments.
+Store initialization adds a `presentation` column with a Quiet default when absent. Keep the existing database, pairing, APNs key/config and worker arguments.
 No new key or re-pairing is needed. Reopening phone notification settings syncs its
 saved preference. Nothing is automatically pushed or deployed by this handoff.
 

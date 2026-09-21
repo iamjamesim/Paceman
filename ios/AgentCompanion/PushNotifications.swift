@@ -59,6 +59,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     func setPresentation(_ value: String) async {
         guard ["quiet", "alerts"].contains(value) else { return }
         presentation = value
+        registered = false
         UserDefaults.standard.set(value, forKey: "phone-notification-presentation")
         await sync()
     }
@@ -169,8 +170,10 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             status = "APNs environment is missing from this build"; return
         }
         do {
-            try await client.registerPush(source, token: token, environment: environment, presentation: presentation)
-            guard enabled, model?.source?.credential == source.credential, model?.accessRevoked != true else { return }
+            let requestedPresentation = presentation
+            try await client.registerPush(source, token: token, environment: environment, presentation: requestedPresentation)
+            guard enabled, model?.source?.credential == source.credential, model?.accessRevoked != true,
+                  requestedPresentation == presentation else { return }
             registered = true
             awaitingToken = false
             status = "Registered on desktop · \(environment)"

@@ -143,9 +143,10 @@ final class SourceClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token, "environment": environment, "mode": "alert", "presentation": presentation])
         let data = try await response(request)
-        struct Registration: Decodable { let registered: Bool }
-        guard try JSONDecoder().decode(Registration.self, from: data).registered else {
-            throw HubError.message("The computer did not confirm notification registration")
+        struct Registration: Decodable { let registered: Bool; let presentation: String }
+        let registration = try JSONDecoder().decode(Registration.self, from: data)
+        guard registration.registered, registration.presentation == presentation else {
+            throw HubError.message("The computer did not confirm the notification preference")
         }
     }
 

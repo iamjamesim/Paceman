@@ -38,4 +38,3 @@ extension Color {
         self.init(.sRGB, red: Double((n >> 16) & 255)/255, green: Double((n >> 8) & 255)/255, blue: Double(n & 255)/255, opacity: 1)
     }
 }
-

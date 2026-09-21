@@ -112,7 +112,7 @@ reads. The server derives ownership from that credential; callers cannot select
 another client ID. These are private Tailscale endpoints, not a public relay API.
 
 - `POST`: `{ "deviceToken": "lowercase hex", "environment": "development" | "production", "mode": "alert", "presentation": "quiet" | "alerts" }`.
-  `presentation` is optional and defaults to `alerts` for older clients. Changing it preserves
+  `presentation` is optional and defaults to `quiet`. Changing it preserves
   the delivery cursor and pending work; it applies only to attention notifications.
   Validated payloads upsert that client's destination. Re-registering an unchanged
   token preserves pending work and retry state. A changed token or environment starts

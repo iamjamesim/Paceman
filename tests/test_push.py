@@ -34,13 +34,26 @@ class PushWorkerTests(unittest.TestCase):
 
     def register(self, mode="alert"):
         return self.store.push_device(self.client["credential"], {
-            "deviceToken": self.device_token, "environment": "development", "mode": mode})
+            "deviceToken": self.device_token, "environment": "development", "mode": mode, "presentation": "alerts"})
 
     def emit(self, state, at=100):
         revision = self.store.emit(state)
         with self.store.connect() as db:
             db.execute("UPDATE events SET at=? WHERE seq=?", (at, revision))
         return revision
+
+    def test_missing_preference_defaults_to_quiet(self):
+        result = self.store.push_device(self.client["credential"], {
+            "deviceToken": self.device_token, "environment": "development", "mode": "alert"})
+        self.assertEqual(result["presentation"], "quiet")
+        self.emit("finished")
+        self.worker.step(100)
+        aps = self.sender.calls[0][1]["aps"]
+        self.assertEqual(aps["interruption-level"], "passive")
+        self.assertNotIn("sound", aps)
+        payload, _ = notification("source", "generation", {"seq": 1, "at": 100, "state": "finished"}, 100)
+        self.assertEqual(payload["aps"]["interruption-level"], "passive")
+        self.assertNotIn("sound", payload["aps"])
 
     def test_presentation_preference_survives_restart_without_skipping_pending_event(self):
         revision = self.emit("finished")

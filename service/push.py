@@ -81,7 +81,7 @@ def notification_copy(event: dict) -> dict:
     return {"title": titles[event["state"]], "body": body}
 
 
-def notification(source_id: str, generation: str, event: dict, now: float, presentation: str = "alerts") -> tuple[dict, dict]:
+def notification(source_id: str, generation: str, event: dict, now: float, presentation: str = "quiet") -> tuple[dict, dict]:
     """Push contains a hint only. The paired HTTPS source remains authoritative."""
     if presentation not in ("quiet", "alerts"):
         raise ValueError("Unknown notification presentation")

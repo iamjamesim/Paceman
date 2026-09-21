@@ -90,7 +90,7 @@ class Store:
             if "last_seen" not in {row[1] for row in db.execute("PRAGMA table_info(clients)")}:
                 db.execute("ALTER TABLE clients ADD COLUMN last_seen REAL NOT NULL DEFAULT 0")
             if "presentation" not in {row[1] for row in db.execute("PRAGMA table_info(push_devices)")}:
-                db.execute("ALTER TABLE push_devices ADD COLUMN presentation TEXT NOT NULL DEFAULT 'alerts'")
+                db.execute("ALTER TABLE push_devices ADD COLUMN presentation TEXT NOT NULL DEFAULT 'quiet'")
             # Silent-only registrations did not opt into notifications. Retire them
             # without changing consent; normal notification registrations stay intact.
             db.execute("DELETE FROM push_devices WHERE mode='background'")
@@ -227,7 +227,7 @@ class Store:
                     or len(payload["deviceToken"]) % 2
                     or payload.get("environment") not in ("development", "production")
                     or payload.get("mode") != "alert"
-                    or payload.get("presentation", "alerts") not in ("quiet", "alerts")):
+                    or payload.get("presentation", "quiet") not in ("quiet", "alerts")):
                 raise ValueError("Invalid push registration")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -246,7 +246,7 @@ class Store:
                                "VALUES (?,?,?,?,?)", (client_id, *values, revision))
             if payload is not None and not remove:
                 db.execute("UPDATE push_devices SET presentation=? WHERE client_id=?",
-                           (payload.get("presentation", "alerts"), client_id))
+                           (payload.get("presentation", "quiet"), client_id))
             row = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
         if not row:
             return {"registered": False}
