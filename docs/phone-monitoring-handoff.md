@@ -23,8 +23,11 @@ behavior. Keep the existing database, pairing, APNs key/config and worker argume
 No new key or re-pairing is needed. Reopening phone notification settings syncs its
 saved preference. Nothing is automatically pushed or deployed by this handoff.
 
-Preserve the remote content-available isolation choice for the ANCS test; changing
-notification text/presentation does not require changing the wake experiment.
+Notification-mode payloads omit `content-available`; the separate background-only
+mode retains it. This is now committed behavior, not a local test override. If a
+desktop checkout still has the earlier removal patch, verify that it contains only
+this change and replace that patch with the committed implementation before
+deploying. Preserve unrelated local changes.
 
 ## Acceptance
 

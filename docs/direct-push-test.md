@@ -27,8 +27,9 @@ permission. Its existing wire value is `alert`; no registration migration is nee
 | Finished | Passive in Quiet; attention alert in Alerts, subject to iOS settings |
 | Idle | Passive; authoritative sync clears the last activity |
 
-Every notification-mode payload includes `content-available: 1` and uses APNs
-push type `alert`. Passive entries additionally set `interruption-level: passive`
+Notification-mode payloads omit `content-available` and use APNs push type `alert`.
+ANCS and the accessory's Bluetooth request drive background watch synchronization.
+Passive entries additionally set `interruption-level: passive`
 and omit sound. The foreground app handles passive updates without presenting a
 banner, sound or list entry. This does not suppress their background presentation.
 

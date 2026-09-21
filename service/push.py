@@ -85,7 +85,9 @@ def notification(source_id: str, generation: str, event: dict, mode: str, now: f
     """Push contains a hint only. The paired HTTPS source remains authoritative."""
     if mode not in ("alert", "background"):
         raise ValueError("Unknown push mode")
-    aps = {"content-available": 1}
+    # Notification delivery reaches the accessory through ANCS. Background-only
+    # delivery remains a separate, opportunistic mode.
+    aps = {"content-available": 1} if mode == "background" else {}
     if mode == "alert":
         if presentation not in ("quiet", "alerts"):
             raise ValueError("Unknown notification presentation")

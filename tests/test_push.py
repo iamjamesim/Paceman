@@ -66,6 +66,7 @@ class PushWorkerTests(unittest.TestCase):
                     payload, headers = notification("source", "generation", {"seq": 1, "at": 100, "state": state}, "alert", 100, presentation=presentation)
                     passive = presentation == "quiet" or state in ("working", "idle")
                     self.assertIn("alert", payload["aps"])
+                    self.assertNotIn("content-available", payload["aps"])
                     self.assertEqual(headers["apns-push-type"], "alert")
                     self.assertEqual(payload["aps"].get("interruption-level", "active"), "passive" if passive else "active")
                     self.assertEqual("sound" in payload["aps"], not passive)
@@ -107,11 +108,11 @@ class PushWorkerTests(unittest.TestCase):
         Worker(Store(self.store.path), self.sender, self.log).step(200)
         self.assertEqual(len(self.sender.calls), 1)
 
-    def test_alert_has_hint_and_background_wake_request_but_no_private_content(self):
+    def test_alert_has_hint_without_background_wake_request_or_private_content(self):
         revision = self.emit("needs_input")
         self.worker.step(100)
         _, payload, headers, _ = self.sender.calls[0]
-        self.assertEqual(payload["aps"]["content-available"], 1)
+        self.assertNotIn("content-available", payload["aps"])
         self.assertEqual(payload["companion"]["revision"], revision)
         self.assertEqual(headers["apns-push-type"], "alert")
         self.assertEqual(headers["apns-priority"], "10")
@@ -153,7 +154,7 @@ class PushWorkerTests(unittest.TestCase):
         _, payload, headers, _ = self.sender.calls[0]
         self.assertEqual(payload["aps"]["interruption-level"], "passive")
         self.assertNotIn("sound", payload["aps"])
-        self.assertEqual(payload["aps"]["content-available"], 1)
+        self.assertNotIn("content-available", payload["aps"])
         self.assertEqual(payload["aps"]["alert"]["title"], "Agent is working")
         self.assertEqual(headers["apns-push-type"], "alert")
         self.assertEqual(headers["apns-priority"], "10")
