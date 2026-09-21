@@ -22,6 +22,8 @@ final class CompanionModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var sourceEpoch = UUID()
     private var foreground = false
+    private var watchRefreshPending = false
+    private var watchBackgroundTask = UIBackgroundTaskIdentifier.invalid
     private var fetchedUptime: TimeInterval?
     private var changeObserver: AnyCancellable?
     private var weatherObserver: AnyCancellable?
@@ -203,7 +205,7 @@ final class CompanionModel: ObservableObject {
             ? (value.mode == "synthetic" ? "Connected · synthetic test source" : "Connected · Omarchy")
             : "Catching up · buffered snapshot is stale"
         publishWidget(reload: changed)
-        Diagnostics.shared.record(stage, event: value.identity)
+        Diagnostics.shared.record(stage, event: value.identity, state: value.state)
         if age < value.freshFor { watch.forward(value) }
         if let source { monitoring.restore(source: source) }
         Task { await monitoring.registerIfNeeded() }
@@ -213,26 +215,34 @@ final class CompanionModel: ObservableObject {
     @discardableResult
     func refresh(fromWatch: Bool = false, fromPush: Bool = false) async -> UIBackgroundFetchResult {
         weather.refreshIfNeeded()
+        // Hold the accessory response window even when a foreground/APNs fetch
+        // is already in flight. Its queued follow-up shares this bounded task.
+        if fromWatch && !foreground && watchBackgroundTask == .invalid {
+            watchBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Watch status response") { [weak self] in
+                Diagnostics.shared.record("watch_fetch_time_expired")
+                self?.endWatchBackgroundTask()
+            }
+        }
         guard !busy, let source else {
+            // A notification can arrive while an older fetch/write is in flight.
+            // Coalesce a follow-up rather than losing that accessory request.
+            if fromWatch && source != nil { watchRefreshPending = true }
+            else if fromWatch { endWatchBackgroundTask() }
             if fromPush { Diagnostics.shared.record("push_fetch_skipped_busy_or_unpaired") }
             return .noData
         }
         let previousIdentity = snapshot?.identity
         let epoch = sourceEpoch
         busy = true
-        var backgroundTask = UIBackgroundTaskIdentifier.invalid
-        if fromWatch && !foreground {
-            backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Watch status response") {
-                Diagnostics.shared.record("watch_fetch_time_expired")
-                if backgroundTask != .invalid {
-                    UIApplication.shared.endBackgroundTask(backgroundTask)
-                    backgroundTask = .invalid
-                }
-            }
-        }
         defer {
             busy = false
-            if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask) }
+            if watchRefreshPending && epoch == sourceEpoch && !accessRevoked {
+                watchRefreshPending = false
+                Task { @MainActor [weak self] in await self?.refresh(fromWatch: true) }
+            } else {
+                watchRefreshPending = false
+                endWatchBackgroundTask()
+            }
         }
         Diagnostics.shared.record(fromPush ? "push_triggered_fetch" : fromWatch ? "watch_triggered_fetch" : "foreground_fetch")
         do {
@@ -240,11 +250,12 @@ final class CompanionModel: ObservableObject {
             let value = try await client.snapshot(source)
             guard epoch == sourceEpoch, !Task.isCancelled else { return .noData }
             try accept(value, stage: "snapshot_received")
-            if fromPush {
-                Diagnostics.shared.record("push_fetch_completed", event: value.identity)
+            if fromPush || fromWatch {
+                let prefix = fromPush ? "push" : "watch"
+                Diagnostics.shared.record("\(prefix)_fetch_completed", event: value.identity)
                 // Allow the already-queued BLE write a short window before returning our fetch completion.
                 let delivered = await watch.waitForDelivery(of: value.identity)
-                Diagnostics.shared.record(delivered ? "push_ble_accepted" : "push_ble_unconfirmed", event: value.identity)
+                Diagnostics.shared.record(delivered ? "\(prefix)_ble_accepted" : "\(prefix)_ble_unconfirmed", event: value.identity)
             }
             return value.identity == previousIdentity ? .noData : .newData
         } catch {
@@ -255,6 +266,11 @@ final class CompanionModel: ObservableObject {
             Diagnostics.shared.record("source_fetch_failed")
             return .failed
         }
+    }
+    private func endWatchBackgroundTask() {
+        guard watchBackgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(watchBackgroundTask)
+        watchBackgroundTask = .invalid
     }
     var widgetState: CompanionWidgetState {
         let p = PresentationModel()

@@ -83,6 +83,12 @@ enum HubError: LocalizedError {
 }
 
 enum WatchWire {
+    static func notificationSequence(_ data: Data) -> UInt32? {
+        let bytes = Array(data)
+        guard bytes.count == 8, bytes[0] == 79, bytes[1] == 78,
+              bytes[2] == 1, bytes[3] == 0 else { return nil }
+        return read32(bytes, at: 4)
+    }
     static func identity(_ data: Data) throws -> (id: String, owned: Bool, capabilities: UInt32, profileVersion: UInt8) {
         let bytes = Array(data)
         guard bytes.count == 32, bytes[0] == 79, bytes[1] == 87,

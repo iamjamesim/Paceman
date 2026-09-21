@@ -60,12 +60,19 @@ Live Activity freshness is explicit and can expire without an app callback.
 
 Existing background pushes remain opportunistic and separately throttled. A Live
 Activity update does not imply the app ran or updated its widget cache/watch.
-The selected custom-watch delivery uses APNs callbacks and the existing BLE path;
-there is no accessory polling. With notification permission and notification mode,
+The callback-only custom-watch route failed a locked-phone run: it fetched only
+after a notification tap. Its replacement integrates ANCS: iOS delivers the
+notification to the watch, which emits a BLE request for authoritative state.
+Core Bluetooth wakes the app to serve that request using the paired source.
+There is no accessory polling. Physical acceptance testing is still required. With notification permission and notification mode,
 working/idle transitions use passive notifications, while needs-input and finished
 use attention notifications. Passive entries remain in the notification list.
 This alpha tradeoff does not establish guaranteed app execution or fully hidden
-status delivery. Background-only mode remains available without alert permission.
+status delivery. Background-only mode remains available without alert permission, but cannot drive
+ANCS. The preference matrix above describes product intent; notification-free
+continuous custom-watch delivery is not implemented. Notification sharing and
+Notification Center delivery are requirements for this path. See
+`docs/direct-push-test.md` for setup, limitations and acceptance criteria.
 Measure source-to-Live-Activity and source-to-watch latency together on a locked
 phone before claiming coherent background delivery.
 

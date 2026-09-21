@@ -69,13 +69,20 @@ struct TransportDiagnostics: View {
                 }
                 Text(push.mode == "background"
                     ? "Background updates are best effort and limited by the sender to three attempts per hour. No notification is shown."
-                    : "Needs input and Finished can alert you. Working and Idle appear quietly in the notification list. Each update also requests a fetch for the watch; iOS controls background execution.")
+                    : "Needs input and Finished can alert you. Working and Idle appear quietly in the notification list. With notification sharing enabled, the watch requests the latest activity when a Paceman notification arrives.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Keep streaming off during the locked-phone test. APNs acceptance, app wake, fetch, and watch write are separate log entries.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Watch") {
                 Text(model.watch.status)
+                if model.watch.supportsNotificationSync {
+                    LabeledContent("Notification sharing", value: model.watch.notificationSharingAuthorized ? "Allowed" : "Not allowed")
+                    if !model.watch.notificationSharingAuthorized {
+                        Text("Allow Share System Notifications for this watch in Settings → Bluetooth to receive activity while Paceman is in the background.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Button("Add watch") { confirmWatch = true }.disabled(!model.watch.pickerReady)
                 Toggle("Forward activity", isOn: Binding(get: { model.watch.enabled }, set: { model.watch.setEnabled($0) }))
                 if let date = model.watch.lastDelivered {

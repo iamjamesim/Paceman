@@ -18,6 +18,7 @@
 #include "services/gatt/ble_svc_gatt.h"
 
 #include "watch_profile.h"
+#include "watch_ancs.h"
 #include "watch_rtc.h"
 #include "watch_ui.h"
 
@@ -39,6 +40,10 @@ static const ble_uuid128_t activity_uuid = BLE_UUID128_INIT(
     0xe1, 0x8e, 0xc9, 0xa2, 0xf3, 0x4c, 0xa5, 0xb7,
     0x0d, 0x4f, 0x15, 0x1b, 0x04, 0x00, 0x51, 0x7f
 );
+static const ble_uuid128_t sync_uuid = BLE_UUID128_INIT(
+    0xe1, 0x8e, 0xc9, 0xa2, 0xf3, 0x4c, 0xa5, 0xb7,
+    0x0d, 0x4f, 0x15, 0x1b, 0x05, 0x00, 0x51, 0x7f
+);
 
 static uint8_t own_addr_type;
 static uint32_t passkey;
@@ -49,6 +54,8 @@ static uint8_t owner_id[16];
 static uint16_t idle_params_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t activity_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t activity_attr_handle;
+static uint16_t sync_attr_handle;
+static uint32_t sync_sequence;
 static uint32_t last_alerted_activity_revision;
 static esp_pm_lock_handle_t work_pm_lock;
 static QueueHandle_t profile_queue;
@@ -75,6 +82,7 @@ typedef struct {
     union {
         struct {
             uint8_t state;
+            uint32_t revision;
             bool alert;
             bool sound;
         } activity;
@@ -238,6 +246,8 @@ static void apply_ui_task(void *argument)
                 pending.data.activity.alert,
                 pending.data.activity.sound
             );
+            ESP_LOGI(TAG, "Activity applied state=%u revision=%lu",
+                     pending.data.activity.state, (unsigned long)pending.data.activity.revision);
         } else {
             watch_ui_set_connected(pending.data.connected);
         }
@@ -332,12 +342,35 @@ static void notify_activity(void)
     }
 }
 
+static void notification_changed(void)
+{
+    if (!watch_owned || activity_conn_handle == BLE_HS_CONN_HANDLE_NONE) return;
+    sync_sequence++;
+    uint8_t value[] = {'O', 'N', 1, 0, sync_sequence, sync_sequence >> 8,
+                       sync_sequence >> 16, sync_sequence >> 24};
+    struct os_mbuf *packet = ble_hs_mbuf_from_flat(value, sizeof(value));
+    if (packet) {
+        int rc = ble_gatts_notify_custom(activity_conn_handle, sync_attr_handle, packet);
+        ESP_LOGI(TAG, "Notification sync request sequence=%lu result=%d", (unsigned long)sync_sequence, rc);
+    } else {
+        ESP_LOGW(TAG, "Notification sync allocation failed sequence=%lu", (unsigned long)sync_sequence);
+    }
+}
+
 static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
                        struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
     (void)conn_handle;
     (void)attr_handle;
     const ble_uuid_t *requested = (const ble_uuid_t *)arg;
+
+    if (ble_uuid_cmp(requested, &sync_uuid.u) == 0 &&
+        ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+        uint8_t value[] = {'O', 'N', 1, 0, sync_sequence, sync_sequence >> 8,
+                           sync_sequence >> 16, sync_sequence >> 24};
+        return os_mbuf_append(ctxt->om, value, sizeof(value)) == 0
+            ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
 
     if (ble_uuid_cmp(requested, &identity_uuid.u) == 0 &&
         ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
@@ -363,6 +396,8 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
             return BLE_ATT_ERR_UNLIKELY;
         }
         if (incoming.revision < activity.revision) {
+            ESP_LOGW(TAG, "Activity ignored older revision=%lu current=%lu",
+                     (unsigned long)incoming.revision, (unsigned long)activity.revision);
             return 0;
         }
         const bool alert = (incoming.state == OMARCHY_ACTIVITY_ATTENTION ||
@@ -378,6 +413,7 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
             .type = UI_EVENT_ACTIVITY,
             .data.activity = {
                 .state = state,
+                .revision = incoming.revision,
                 .alert = alert,
                 .sound = sound,
             },
@@ -391,6 +427,9 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
         activity.revision = incoming.revision;
         activity.flags = 0;
         activity.state = state;
+        ESP_LOGI(TAG, "Activity queued incoming=%u applied=%u revision=%lu ack=%lu",
+                 incoming.state, state, (unsigned long)incoming.revision,
+                 (unsigned long)activity.acknowledged_revision);
         if (alert) {
             last_alerted_activity_revision = incoming.revision;
         }
@@ -492,6 +531,14 @@ static const struct ble_gatt_svc_def services[] = {
                          BLE_GATT_CHR_F_WRITE_AUTHEN |
                          BLE_GATT_CHR_F_NOTIFY,
             },
+            {
+                .uuid = &sync_uuid.u,
+                .access_cb = gatt_access,
+                .arg = (void *)&sync_uuid.u,
+                .val_handle = &sync_attr_handle,
+                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC |
+                         BLE_GATT_CHR_F_NOTIFY,
+            },
             {0},
         },
     },
@@ -524,6 +571,7 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_DISCONNECT:
+        watch_ancs_disconnected(event->disconnect.conn.conn_handle);
         ESP_LOGI(TAG, "Disconnected, reason=%d; resuming advertising",
                  event->disconnect.reason);
         if (event->disconnect.conn.conn_handle == idle_params_conn_handle) {
@@ -565,11 +613,29 @@ static int gap_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_ENC_CHANGE:
         ESP_LOGI(TAG, "Encryption changed, status=%d", event->enc_change.status);
         if (event->enc_change.status == 0) {
+            watch_ancs_connected(event->enc_change.conn_handle);
             activity_conn_handle = event->enc_change.conn_handle;
             queue_connection_update(true);
             if (watch_owned && event->enc_change.conn_handle != idle_params_conn_handle) {
                 request_idle_connection_parameters(event->enc_change.conn_handle);
             }
+        }
+        return 0;
+
+    case BLE_GAP_EVENT_NOTIFY_RX:
+        watch_ancs_received(event);
+        return 0;
+
+    case BLE_GAP_EVENT_SUBSCRIBE:
+        if (event->subscribe.attr_handle == sync_attr_handle) {
+            ESP_LOGI(TAG, "Notification sync subscription notify=%u reason=%u",
+                     event->subscribe.cur_notify, event->subscribe.reason);
+        }
+        return 0;
+
+    case BLE_GAP_EVENT_NOTIFY_TX:
+        if (event->notify_tx.attr_handle == sync_attr_handle) {
+            ESP_LOGI(TAG, "Notification sync transmitted status=%d", event->notify_tx.status);
         }
         return 0;
 
@@ -655,7 +721,8 @@ esp_err_t watch_ble_start(uint32_t pairing_passkey, bool owned)
         .capabilities = OMARCHY_CAP_TIME_SYNC | OMARCHY_CAP_HOUR_CYCLE |
                         OMARCHY_CAP_RTC | OMARCHY_CAP_THEME | OMARCHY_CAP_WEATHER |
                         OMARCHY_CAP_DISPLAY_BRIGHTNESS | OMARCHY_CAP_AGENT_ACTIVITY |
-                        OMARCHY_CAP_COMPLETION_SOUND | OMARCHY_CAP_ACTIVITY_FINISHED,
+                        OMARCHY_CAP_COMPLETION_SOUND | OMARCHY_CAP_ACTIVITY_FINISHED |
+                        OMARCHY_CAP_NOTIFICATION_SYNC,
         .firmware_major = OMARCHY_FIRMWARE_VERSION_MAJOR,
         .firmware_minor = OMARCHY_FIRMWARE_VERSION_MINOR,
         .firmware_patch = OMARCHY_FIRMWARE_VERSION_PATCH,
@@ -674,6 +741,7 @@ esp_err_t watch_ble_start(uint32_t pairing_passkey, bool owned)
 
     ble_svc_gap_init();
     ble_svc_gatt_init();
+    watch_ancs_init(notification_changed);
     int rc = ble_gatts_count_cfg(services);
     if (rc == 0) {
         rc = ble_gatts_add_svcs(services);

@@ -93,6 +93,23 @@ The watch has no local upstream freshness lease in this protocol. Do not
 silently repurpose existing packet fields. Add negotiated protocol support
 before treating this as daily monitoring. Source session state and local watch
 acknowledgement remain separate in the Omarchy adapter.
+
+Firmware 0.6.2 adds notification synchronization capability bit 9 and an encrypted
+read/notify characteristic `7f510005-1b15-4f0d-b7a5-4cf3a2c98ee1`. Its eight bytes
+are `ON`, version 1, reserved zero, then a little-endian uint32 request sequence.
+The sequence increases when ANCS identifies a new/modified Paceman notification.
+It is a request for current source state, not an activity revision or a wearer
+acknowledgement. It resets on watch reboot; every new BLE handshake performs a
+current-state fetch regardless. Receivers coalesce duplicate sequences and queue
+one follow-up if a new request arrives during an existing fetch. Old firmware
+continues using the unchanged activity/profile formats.
+
+The ANCS client subscribes to iOS Service Changed, Data Source, and Notification
+Source on the existing encrypted connection. It requests AppIdentifier only,
+ignores notification removal and initial Added+PreExisting replay (but retains
+Modified events), and never parses human
+notification content as a data protocol. A bounded queue coalesces overflow into
+a current-state request. No periodic request or keepalive is emitted.
 # Direct push destination extension
 
 The optional direct-APNs probe adds `/v1/push` to this test source. All three

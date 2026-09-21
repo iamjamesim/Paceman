@@ -234,7 +234,9 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             Diagnostics.shared.record("push_ignored_unpaired_or_invalid")
             return .noData
         }
-        Diagnostics.shared.record(stage, event: hint.identity)
+        let aps = userInfo["aps"] as? [String: Any]
+        Diagnostics.shared.record(stage, event: hint.identity,
+                                  contentAvailable: (aps?["content-available"] as? NSNumber)?.intValue == 1)
         // Never use a URL or credential supplied in a push. Fetch only from our stored paired source.
         return await model.refresh(fromPush: true)
     }
@@ -262,6 +264,8 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
 @MainActor
 final class PushAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        if launchOptions?[.bluetoothCentrals] != nil { Diagnostics.shared.record("launch_bluetooth_restoration") }
+        if launchOptions?[.remoteNotification] != nil { Diagnostics.shared.record("launch_remote_notification") }
         PushCoordinator.shared.configure()
         return true
     }

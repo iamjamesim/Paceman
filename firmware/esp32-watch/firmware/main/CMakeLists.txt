@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.c"
         "watch_ble.c"
+        "watch_ancs.c"
         "watch_face_layout.c"
         "watch_allowance_layout.c"
         "watch_haptics.c"

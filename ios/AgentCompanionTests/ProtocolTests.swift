@@ -140,6 +140,16 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
+    func testWatchNotificationRequestContract() {
+        let packet = Data([79, 78, 1, 0, 4, 3, 2, 1])
+        XCTAssertEqual(WatchWire.notificationSequence(packet), 0x01020304)
+        XCTAssertEqual(WatchWire.notificationSequence(Data([79, 78, 1, 0, 0, 0, 0, 0])), 0)
+        XCTAssertNil(WatchWire.notificationSequence(packet.dropLast()))
+        XCTAssertNil(WatchWire.notificationSequence(Data([79, 78, 2, 0, 4, 3, 2, 1])))
+        XCTAssertNil(WatchWire.notificationSequence(Data([79, 78, 1, 1, 4, 3, 2, 1])))
+        XCTAssertNil(WatchWire.notificationSequence(Data([0, 78, 1, 0, 4, 3, 2, 1])))
+    }
+
     func testActivityLayoutMatchesFirmware() {
         let packet = WatchWire.activity(state: .needsInput, revision: 0x01020304,
                                        alert: true, sound: true, acknowledged: 0x05060708)

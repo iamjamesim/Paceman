@@ -141,6 +141,11 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private let profileUUID = CBUUID(string: "7f510002-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private let identityUUID = CBUUID(string: "7f510003-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private let activityUUID = CBUUID(string: "7f510004-1b15-4f0d-b7a5-4cf3a2c98ee1")
+    private let notificationUUID = CBUUID(string: "7f510005-1b15-4f0d-b7a5-4cf3a2c98ee1")
+    private var notificationSync: CBCharacteristic?
+    private var notificationSequence: UInt32?
+    @Published private(set) var notificationSharingAuthorized = false
+    var supportsNotificationSync: Bool { capabilities & (1 << 9) != 0 }
     @Published var status = "No watch selected"
     @Published var ready = false
     @Published var enabled = false
@@ -167,6 +172,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private var currentWatchRevision: UInt32 = 0
     private var writePending = false
     private var sentEvent: String?
+    private var sentState: ActivityState?
     private var sentRevision: UInt32 = 0
     private var queued: Snapshot?
     private var queuedAt: Date?
@@ -501,7 +507,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             status = "Trying to reconnect over Bluetooth. Keep your watch nearby and turned on."
             if !paired { setupPhase = .connecting }
             Diagnostics.shared.record("ble_connect_requested")
-            central.connect(found, options: [CBConnectPeripheralOptionEnableAutoReconnect: true])
+            central.connect(found, options: [CBConnectPeripheralOptionEnableAutoReconnect: true,
+                                            CBConnectPeripheralOptionRequiresANCS: true])
             armConnectionTimeout()
         case .wait:
             if found.state == .connecting {
@@ -742,7 +749,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             fail("Watch service unavailable"); return
         }
         Diagnostics.shared.record("ble_characteristics_requested")
-        peripheral.discoverCharacteristics([profileUUID, identityUUID, activityUUID], for: service)
+        peripheral.discoverCharacteristics([profileUUID, identityUUID, activityUUID, notificationUUID], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -757,6 +764,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         }
         self.profile = profile
         self.activity = activity
+        notificationSync = characteristics.first(where: { $0.uuid == notificationUUID })
+        notificationSequence = nil
+        notificationSharingAuthorized = peripheral.ancsAuthorized
         if !paired { setupPhase = .confirming }
         status = paired ? "Checking your paired watch…" : "Follow the pairing prompt on your iPhone. Enter the watch's code if asked."
         Diagnostics.shared.record("ble_identity_requested")
@@ -794,6 +804,19 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 status = paired ? "Restoring watch updates…" : "Confirm the pairing prompt on your iPhone. Enter the watch's code if asked."
                 writeProfileIfNeeded()
             } catch { fail(error.localizedDescription) }
+        } else if characteristic.uuid == notificationUUID {
+            guard ready, supportsNotificationSync,
+                  let sequence = WatchWire.notificationSequence(value),
+                  sequence != notificationSequence else { return }
+            let previous = notificationSequence
+            notificationSequence = sequence
+            // The first value can be our explicit read of a retained counter.
+            // It may prompt catch-up, but is not proof of a new background wake.
+            Diagnostics.shared.record(previous == nil ? "watch_notification_baseline" : "watch_notification_received",
+                                      sequence: sequence)
+            // A zero baseline means no notification has arrived on this boot.
+            guard previous != nil || sequence != 0 else { return }
+            onWatchEvent?()
         } else if characteristic.uuid == activityUUID {
             guard acceptedProfile else { return }
             let bytes = Array(value)
@@ -824,6 +847,10 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             ready = true
             status = "Connected · legacy activity protocol"
             if let activity, !activity.isNotifying { peripheral.setNotifyValue(true, for: activity) }
+            if first, supportsNotificationSync, let notificationSync {
+                peripheral.setNotifyValue(true, for: notificationSync)
+                peripheral.readValue(for: notificationSync)
+            }
             if first || changed {
                 Diagnostics.shared.record(first ? "ble_ready" : "watch_acknowledged")
                 onWatchEvent?()
@@ -834,8 +861,19 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         guard enabled, preparing || ready, peripheral.state == .connected,
               self.peripheral?.identifier == peripheral.identifier else { return }
-        Diagnostics.shared.record(error == nil ? "ble_subscribed" : "ble_subscription_failed")
+        if characteristic.uuid == notificationUUID {
+            Diagnostics.shared.record(error == nil && characteristic.isNotifying
+                ? "watch_notification_subscribed" : "watch_notification_subscription_failed")
+        } else {
+            Diagnostics.shared.record(error == nil && characteristic.isNotifying ? "ble_subscribed" : "ble_subscription_failed")
+        }
         if error != nil { status = "Connected, but watch event subscription failed" }
+    }
+
+    func centralManager(_ central: CBCentralManager, didUpdateANCSAuthorizationFor peripheral: CBPeripheral) {
+        guard self.peripheral?.identifier == peripheral.identifier else { return }
+        notificationSharingAuthorized = peripheral.ancsAuthorized
+        Diagnostics.shared.record(notificationSharingAuthorized ? "watch_notification_sharing_allowed" : "watch_notification_sharing_unavailable")
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
@@ -867,7 +905,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             if let sentEvent {
                 UserDefaults.standard.set(sentEvent, forKey: "delivered-event")
                 UserDefaults.standard.set(Int(sentRevision), forKey: "delivered-revision")
-                Diagnostics.shared.record("ble_write_accepted", event: sentEvent)
+                Diagnostics.shared.record("ble_write_accepted", event: sentEvent, state: sentState, revision: sentRevision)
             }
             writeProfileIfNeeded()
             if let queued, let queuedAt, Date().timeIntervalSince(queuedAt) < queued.freshFor {
@@ -923,8 +961,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             acknowledged: acknowledged)
         writePending = true
         sentEvent = snapshot.identity
+        sentState = state
         sentRevision = revision
-        Diagnostics.shared.record("ble_write_started", event: snapshot.identity)
+        Diagnostics.shared.record("ble_write_started", event: snapshot.identity, state: state, revision: revision)
         peripheral.writeValue(packet, for: activity, type: .withResponse)
     }
 

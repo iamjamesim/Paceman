@@ -8,11 +8,16 @@ final class Diagnostics {
         let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         url = root.appendingPathComponent("transport-test.jsonl")
     }
-    func record(_ stage: String, event: String? = nil) {
-        // Only our fixed stage labels and opaque event IDs; never credentials/URLs/errors.
+    func record(_ stage: String, event: String? = nil, state: ActivityState? = nil,
+                revision: UInt32? = nil, sequence: UInt32? = nil, contentAvailable: Bool? = nil) {
+        // Fixed labels, state enums and counters only; never payload text, credentials, URLs or errors.
         var entry: [String: Any] = ["at": Date().timeIntervalSince1970,
                                   "uptime": ProcessInfo.processInfo.systemUptime, "stage": stage]
         if let event { entry["event"] = event }
+        if let state { entry["state"] = state.rawValue }
+        if let revision { entry["watchRevision"] = revision }
+        if let sequence { entry["notificationSequence"] = sequence }
+        if let contentAvailable { entry["contentAvailable"] = contentAvailable }
         guard var data = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]) else { return }
         data.append(10)
         queue.sync {
