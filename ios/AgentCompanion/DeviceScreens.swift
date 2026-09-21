@@ -103,6 +103,8 @@ struct ComputerReceiptLabel: View {
 }
 
 struct WatchDetail: View {
+    @ObservedObject private var push = PushCoordinator.shared
+    @Environment(\.scenePhase) private var scenePhase
     @State private var brightnessDraft: Double?
     @ObservedObject var model: CompanionModel
     let theme: CompanionTheme
@@ -134,13 +136,12 @@ struct WatchDetail: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
                 if justPaired || (preview && previewComplete) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label("Watch connected", systemImage: "checkmark.circle.fill")
-                            .font(.title2.weight(.semibold)).foregroundStyle(theme.tint)
-                        Text(model.source == nil ? "Connect your computer next to start receiving agent updates." : "Your phone can now relay agent updates to this watch.")
-                            .font(.body).foregroundStyle(theme.ink.opacity(0.65))
+                    NotificationDeliveryControls(model: model, theme: theme, preview: preview, forWatch: true)
+                    if push.deliveryStep == .ready && model.watch.notificationSharingStatus == true {
+                        CompanionButton(title: "Done", theme: theme) { dismiss() }
+                    } else {
+                        Button("Finish later") { dismiss() }.frame(maxWidth: .infinity, minHeight: 44)
                     }
-                    CompanionButton(title: "Done", theme: theme) { dismiss() }
                 } else if paired {
                     watchManagement
                 } else {
@@ -164,8 +165,15 @@ struct WatchDetail: View {
             } message: {
                 Text("Stop sending activity to this watch and remove this phone’s access. Your computer stays connected.")
             }
+            .task { if !preview { await push.sync() } }
+            .onChange(of: scenePhase) { _, value in
+                if value == .active && !preview { Task { await push.sync() } }
+            }
             .onChange(of: model.watch.paired) { _, value in
-                if value && startedHere && !preview { justPaired = true }
+                if value && startedHere && !preview {
+                    justPaired = true
+                    Task { await push.sync() }
+                }
             }
     }
     private var pairingGuide: some View {
@@ -198,7 +206,7 @@ struct WatchDetail: View {
         case .idle: return "Keep your Omarchy Watch close to your iPhone. We'll look for it over Bluetooth."
         case .selecting: return "Choose Omarchy Watch in the nearby-devices picker."
         case .connecting: return "Connecting to your watch…"
-        case .confirming: return "Follow the prompt on your iPhone. Enter the code shown on your watch if asked."
+        case .confirming: return "Enter the code shown on your watch if asked. Allow notification sharing so your watch can receive updates while the phone is locked."
         case .checking: return "Checking the connection…"
         case .failed: return preview ? "Keep your watch nearby with Bluetooth on, then try again." : model.watch.status
         }
@@ -235,6 +243,17 @@ struct WatchDetail: View {
                 }
             }.multilineTextAlignment(.center).frame(maxWidth: .infinity)
                 .padding(.top, 8).padding(.bottom, 12)
+            if !preview && updatesEnabled {
+                if push.deliveryStep != .ready && push.deliveryStep != .checking && push.deliveryStep != .registering {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Background updates need notifications").font(.subheadline.weight(.semibold))
+                        NavigationLink("Set up notifications", value: FeedDestination.notifications)
+                            .font(.subheadline).frame(minHeight: 44)
+                    }
+                } else if push.deliveryStep == .ready {
+                    WatchSharingGuidance(watch: model.watch, theme: theme)
+                }
+            }
             if !preview, let guidance = model.watch.connectionPresentation.guidance {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(guidance).font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
@@ -257,7 +276,7 @@ struct WatchDetail: View {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Alert sound", isOn: Binding(get: { preview ? true : model.watch.soundEnabled }, set: { model.watch.setSoundEnabled($0) }))
                     .tint(theme.tint).allowsHitTesting(!preview)
-                Text("Play a sound when an agent needs input or finishes.")
+                Text("When an agent needs input or finishes a turn.")
                     .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
             }
             CompanionRule(theme: theme)
@@ -295,6 +314,11 @@ struct WatchDetail: View {
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.ink.opacity(0.4))
                 }
             }.allowsHitTesting(!preview)
+            CompanionRule(theme: theme)
+            NotificationPresentationControl(theme: theme, preview: preview)
+                .padding(.top, 8)
+            CompanionRule(theme: theme)
+            WatchNotificationHelp(theme: theme)
             CompanionRule(theme: theme)
             DeviceRemovalButton(title: removing ? "Removing…" : "Remove watch", theme: theme) { remove = true }
                 .disabled(removing).allowsHitTesting(!preview)

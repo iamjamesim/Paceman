@@ -3,6 +3,12 @@ import Combine
 import CoreBluetooth
 import UIKit
 
+enum WatchNotificationSharing {
+    static func resolve(authorized: Bool, changed: Bool) -> Bool? {
+        authorized ? true : (changed ? false : nil)
+    }
+}
+
 enum WatchSetupPhase: Equatable {
     case idle, selecting, connecting, confirming, checking, failed
     var inProgress: Bool { self == .selecting || self == .connecting || self == .confirming || self == .checking }
@@ -135,6 +141,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private var notificationSync: CBCharacteristic?
     private var notificationSequence: UInt32?
     @Published private(set) var notificationSharingAuthorized = false
+    @Published private(set) var notificationSharingObservation: Bool?
+    var notificationSharingStatus: Bool? { ready ? notificationSharingObservation : nil }
     var supportsNotificationSync: Bool { capabilities & (1 << 9) != 0 }
     @Published var status = "No watch selected"
     @Published var ready = false
@@ -584,6 +592,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private func prepare(_ peripheral: CBPeripheral) {
         guard enabled, central.state == .poweredOn, !preparing else { return }
         preparing = true
+        notificationSharingObservation = nil
         ready = false
         activity = nil
         profile = nil
@@ -609,6 +618,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         cancellationTimeout?.cancel()
         cancellationTimeout = nil
         if foreground {
+            if let peripheral { observeNotificationSharing(peripheral) }
             if preparing { armHandshakeTimeout() }
             reconnectIfNeeded()
         }
@@ -700,7 +710,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         self.activity = activity
         notificationSync = characteristics.first(where: { $0.uuid == notificationUUID })
         notificationSequence = nil
-        notificationSharingAuthorized = peripheral.ancsAuthorized
+        observeNotificationSharing(peripheral)
         if !paired { setupPhase = .confirming }
         status = paired ? "Checking your paired watch…" : "Follow the pairing prompt on your iPhone. Enter the watch's code if asked."
         Diagnostics.shared.record("ble_identity_requested")
@@ -803,9 +813,17 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         if error != nil { status = "Connected, but watch event subscription failed" }
     }
 
+    private func observeNotificationSharing(_ peripheral: CBPeripheral, changed: Bool = false) {
+        notificationSharingAuthorized = peripheral.ancsAuthorized
+        // A sampled false value has conflicted with Settings on an existing bond.
+        // Only a live authorization callback establishes a negative observation.
+        notificationSharingObservation = WatchNotificationSharing.resolve(
+            authorized: peripheral.ancsAuthorized, changed: changed)
+    }
+
     func centralManager(_ central: CBCentralManager, didUpdateANCSAuthorizationFor peripheral: CBPeripheral) {
         guard self.peripheral?.identifier == peripheral.identifier else { return }
-        notificationSharingAuthorized = peripheral.ancsAuthorized
+        observeNotificationSharing(peripheral, changed: true)
         Diagnostics.shared.record(notificationSharingAuthorized ? "watch_notification_sharing_allowed" : "watch_notification_sharing_unavailable")
     }
 

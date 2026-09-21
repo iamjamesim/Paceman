@@ -7,6 +7,13 @@ import MapKit
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    func testNotificationSharingDoesNotTreatUnconfirmedReadingAsDenial() {
+        XCTAssertNil(WatchNotificationSharing.resolve(authorized: false, changed: false))
+        XCTAssertEqual(WatchNotificationSharing.resolve(authorized: true, changed: false), true)
+        XCTAssertEqual(WatchNotificationSharing.resolve(authorized: false, changed: true), false)
+        XCTAssertEqual(WatchNotificationSharing.resolve(authorized: true, changed: true), true)
+    }
+
     func testMonitoringPushContractAndAttentionPriority() throws {
         let payload = Data(#"{"schema":1,"generation":"generation","revision":42,"state":"needs_input","working":3,"needsInput":2,"finished":1,"observedAt":1704067200,"freshUntil":1704067230}"#.utf8)
         let state = try JSONDecoder().decode(MonitoringActivity.ContentState.self, from: payload)
@@ -142,6 +149,29 @@ final class ProtocolTests: XCTestCase {
             XCTAssertFalse(WatchConnectionStep.shouldRebuildAfterCancellation(enabled: true,
                 paired: true, poweredOn: true, ready: false, state: state))
         }
+    }
+
+    func testNotificationDeliveryRecoveryStates() {
+        func state(_ auth: UNAuthorizationStatus?, _ center: UNNotificationSetting? = .enabled,
+                   enabled: Bool = true, mode: String = "alert", source: Bool = true,
+                   busy: Bool = false, registered: Bool = true) -> NotificationDeliveryStep {
+            .resolve(authorization: auth, center: center, enabled: enabled, mode: mode,
+                     source: source, busy: busy, registered: registered)
+        }
+        XCTAssertEqual(state(nil), .checking)
+        XCTAssertEqual(state(.notDetermined), .permission)
+        XCTAssertEqual(state(.denied, source: false, busy: true), .denied)
+        XCTAssertEqual(state(.authorized, .disabled), .notificationCenter)
+        XCTAssertEqual(state(.authorized, enabled: false), .enable)
+        XCTAssertEqual(state(.authorized, mode: "background"), .enable)
+        XCTAssertEqual(state(.authorized, source: false), .computer)
+        XCTAssertEqual(state(.authorized, busy: true), .registering)
+        XCTAssertEqual(state(.authorized, registered: false), .retry)
+        XCTAssertEqual(state(.authorized), .ready)
+        XCTAssertEqual(state(.provisional), .ready)
+        // Re-enabling permission recovers the same saved mode; no second opt-in.
+        XCTAssertEqual(state(.denied), .denied)
+        XCTAssertEqual(state(.authorized), .ready)
     }
 
     func testWatchNotificationRequestContract() {

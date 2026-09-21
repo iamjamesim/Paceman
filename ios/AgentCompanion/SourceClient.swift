@@ -150,13 +150,16 @@ final class SourceClient {
         return value
     }
 
-    func registerPush(_ source: PairedSource, token: String, environment: String, mode: String) async throws {
+    func registerPush(_ source: PairedSource, token: String, environment: String, mode: String, presentation: String) async throws -> Bool? {
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/push"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["deviceToken": token, "environment": environment, "mode": mode])
-        _ = try await response(request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token, "environment": environment, "mode": mode, "presentation": presentation])
+        let data = try await response(request)
+        let result = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let effective = result?["presentation"] as? String else { return nil }
+        return effective == presentation
     }
 
     func removePush(_ source: PairedSource) async throws {

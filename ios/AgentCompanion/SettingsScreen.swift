@@ -7,6 +7,7 @@ struct CompanionSettings: View {
     var body: some View {
         List {
             Section {
+                NavigationLink(value: FeedDestination.notifications) { Label("Notifications", systemImage: "bell") }
                 NavigationLink(value: FeedDestination.widgets) { Label("Widgets", systemImage: "square.grid.2x2") }
             }.listRowBackground(theme.ink.opacity(0.04))
             Section {
