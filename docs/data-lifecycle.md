@@ -17,10 +17,11 @@ cloud-synced preferences. The app currently connects one computer and one watch.
   revision, and the monotonically increasing watch revision. The latter delivery
   keys are still global to the current single-watch connection. They must become
   receiver-scoped before simultaneous multi-watch support.
-- **Live state:** the source snapshot (including sessions, palette and allowance),
-  freshness tracking, desired watch profile, pending BLE writes and last-sent UI
-  timestamp are in memory. There is no on-disk full feed or durable outbound queue.
-  Relaunch restores pairing and preferences, then fetches current source state.
+- **Source state:** one source-scoped last-known snapshot is stored in protected
+  Application Support. It restores the palette and allowance after phone or source
+  restart. Activity in that snapshot still obeys its short freshness lease and is
+  never presented or forwarded as current after expiry. Pending BLE writes and the
+  last-sent UI timestamp remain in memory; there is no durable outbound queue.
   Reconnect reconciles the latest profile; accepted-profile fingerprints suppress
   unchanged writes. Sound and activity flags travel separately from the profile.
 - **Diagnostics:** a local protected JSONL file holds fixed transport-stage labels,
@@ -30,7 +31,9 @@ cloud-synced preferences. The app currently connects one computer and one watch.
 Turning updates off retains preferences and pairing. Removing a watch clears its
 preferences and pairing receipt but retains ownership credentials to allow this
 phone to pair again; it is not a firmware factory reset. Removing a computer
-revokes its client access and clears local pairing/activity state.
+revokes its client access and clears local pairing, activity and cached profile
+state. A network failure never clears the cache. Confirmed credential revocation
+does, because the phone no longer owns that source relationship.
 
 ## Omarchy source and panel
 
@@ -46,6 +49,28 @@ retains pairing and stored state and reconciles tracked processes.
 The agents panel owns the upstream Codex allowance JSON. Paceman validates and
 reads it; it does not store provider credentials or create a second collector.
 Paceman does not poll weather on the desktop.
+
+The latest valid palette and allowance are retained in the current SQLite event
+when their upstream files are temporarily unavailable. This covers partial desktop
+startup and service restarts. Original allowance timestamps remain unchanged, so
+the watch can show cached history and then `AWAITING UPDATE` after the real reset;
+retention never invents fresh quota.
+
+## Disruption contract
+
+| Event | Activity | Theme and allowance | Recovery trigger |
+| --- | --- | --- | --- |
+| Desktop or network unavailable | Expires after its lease | Retain last known values | Foreground fetch, APNs event, or watch request |
+| Phone process restarts | Restore only as historical/stale | Restore protected cache | App lifecycle and Bluetooth restoration |
+| Watch disconnects while powered | Keep current activity in RAM | Keep its NVS profile | Core Bluetooth reconnect and profile reconciliation |
+| Watch loses power | Start without stale activity | Restore its NVS profile when RTC is trustworthy | Core Bluetooth reconnect and current snapshot fetch |
+| Desktop restarts | Reconcile live processes | Restore current SQLite event | Source startup reconciliation |
+| Source access is revoked | Clear | Clear | New pairing required |
+| User removes the source | Clear | Clear | New pairing required |
+
+Recovery is event-driven through the platform lifecycle callbacks above. Timers may
+refresh data while execution is available; they do not define correctness and do
+not erase last-known profile data.
 
 Old untracked session records are pruned after 24 hours. The events table currently
 has no retention limit. Add bounded retention that preserves push cursors and the

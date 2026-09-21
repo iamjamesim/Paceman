@@ -181,6 +181,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private var acceptedProfile = false
     private var profileVersion: UInt8 = 1
     private var desiredSnapshot: Snapshot?
+    private var sourceProfileResolved = true
     private var weather: WatchWeather?
     private var weatherFahrenheit = false
     var preferenceID: String? { pairingReceipt?.watchID }
@@ -862,12 +863,17 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         }
     }
 
-    func invalidatePending() {
+    func clearSourceProfile() {
+        sourceProfileResolved = true
         desiredSnapshot = nil
         acceptedProfileFingerprint = nil
         writeProfileIfNeeded()
         queued = nil
         queuedAt = nil
+    }
+
+    func awaitSourceProfile() {
+        sourceProfileResolved = false
     }
 
     @MainActor
@@ -883,6 +889,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     func forward(_ snapshot: Snapshot) {
+        sourceProfileResolved = true
         desiredSnapshot = snapshot
         writeProfileIfNeeded()
         guard !profileWritePending else { return }
@@ -915,7 +922,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     private func writeProfileIfNeeded() {
-        guard enabled, preparing || ready, deviceID != nil, !profileWritePending, !writePending,
+        guard sourceProfileResolved, enabled, preparing || ready, deviceID != nil,
+              !profileWritePending, !writePending,
               let owner, let profile, let peripheral, peripheral.state == .connected else { return }
         let now = Date()
         let packet = WatchWire.profile(owner: owner, revision: 1, now: now,

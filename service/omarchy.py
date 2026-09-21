@@ -258,12 +258,16 @@ class OmarchySource:
         activity_key = json.dumps([(row["id"], row["turn"], row["state"]) for row in records])
         previous_key = db.execute("SELECT value FROM metadata WHERE key='activity_key'").fetchone()
         sessions_changed = previous_key is None or previous_key[0] != activity_key
-        payload = {"sourceName": "Omarchy", "mode": "omarchy", "state": state, "sessions": sessions,
-                   "sessionLiveness": "process",
-                   "appearance": appearance(self.state_dir),
-                   "allowance": allowance_snapshot(self.state_dir / "agents/usage/codex.json", int(time.time()))}
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         old = json.loads(last["payload"]) if last["payload"] else {}
+        # Theme and allowance are durable last-known profile values. A source
+        # file being temporarily unavailable during restart must not erase them.
+        current_appearance = appearance(self.state_dir)
+        current_allowance = allowance_snapshot(self.state_dir / "agents/usage/codex.json", int(time.time()))
+        payload = {"sourceName": "Omarchy", "mode": "omarchy", "state": state, "sessions": sessions,
+                   "sessionLiveness": "process",
+                   "appearance": current_appearance if current_appearance is not None else old.get("appearance"),
+                   "allowance": current_allowance if current_allowance is not None else old.get("allowance")}
         # Membership-only cleanup isn't a new alert. An aggregate state change
         # still needs a new event identity so an acknowledged watch state clears.
         activity_changed = sessions_changed and (not lifecycle_only or old.get("state") != state)

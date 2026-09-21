@@ -666,6 +666,30 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(snapshot.state, .working)
     }
 
+    func testSourceSnapshotCacheSurvivesRestartAndIsSourceScoped() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let url = directory.appendingPathComponent("source-snapshot.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sourceID = UUID().uuidString
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture([
+            "sourceID": sourceID,
+            "appearance": ["id":"theme", "name":"Theme", "background":"101315",
+                "foreground":"CACCCC", "accent":"FF3388", "monospaced":true],
+            "allowance": ["provider":"codex", "remaining":62, "window":2,
+                "updatedAt":1800000000, "resetsAt":1800003600]
+        ]))
+        let receivedAt = Date(timeIntervalSince1970: 1800000010)
+        try SourceSnapshotCache.save(snapshot, receivedAt: receivedAt, to: url)
+        let restored = try XCTUnwrap(SourceSnapshotCache.load(sourceID: sourceID, from: url))
+        XCTAssertEqual(restored.0.identity, snapshot.identity)
+        XCTAssertEqual(restored.0.appearance?.accent, "FF3388")
+        XCTAssertEqual(restored.0.allowance?.remaining, 62)
+        XCTAssertEqual(restored.1, receivedAt)
+        XCTAssertNil(SourceSnapshotCache.load(sourceID: UUID().uuidString, from: url))
+        SourceSnapshotCache.remove(at: url)
+        XCTAssertNil(SourceSnapshotCache.load(sourceID: sourceID, from: url))
+    }
+
     private func stubClient(_ handler: @escaping (URLRequest) throws -> (Int, Data)) -> SourceClient {
         ClientURLProtocol.handler = handler
         let configuration = URLSessionConfiguration.ephemeral

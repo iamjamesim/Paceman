@@ -34,6 +34,44 @@ struct Snapshot: Codable {
     var identity: String { "\(sourceID)/\(generation)/\(eventID)" }
 }
 
+private struct StoredSourceSnapshot: Codable {
+    let schema: Int
+    let sourceID: String
+    let receivedAt: Date
+    let snapshot: Snapshot
+}
+
+/// A single, source-scoped last-known snapshot. Activity still obeys its short
+/// freshness lease; durable profile fields survive process and source outages.
+enum SourceSnapshotCache {
+    static var defaultURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("source-snapshot.json")
+    }
+
+    static func load(sourceID: String, from url: URL = defaultURL) -> (Snapshot, Date)? {
+        guard let data = try? Data(contentsOf: url),
+              let stored = try? JSONDecoder().decode(StoredSourceSnapshot.self, from: data),
+              stored.schema == 1, stored.sourceID == sourceID,
+              stored.snapshot.sourceID == sourceID else { return nil }
+        return (stored.snapshot, stored.receivedAt)
+    }
+
+    static func save(_ snapshot: Snapshot, receivedAt: Date, to url: URL = defaultURL) throws {
+        let directory = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+        let value = StoredSourceSnapshot(schema: 1, sourceID: snapshot.sourceID,
+            receivedAt: receivedAt, snapshot: snapshot)
+        try JSONEncoder().encode(value).write(to: url,
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    static func remove(at url: URL = defaultURL) {
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
 struct Invitation: Codable {
     let schema: Int
     let endpoint: String

@@ -31,12 +31,27 @@ final class CompanionModel: ObservableObject {
         watch = WatchLink(preview: preview)
         weather = PhoneWeather()
         source = preview ? nil : Vault.load(PairedSource.self, key: "paired-source")
-        if source != nil { status = "Paired; waiting for fresh status" }
+        if let source {
+            if let cached = SourceSnapshotCache.load(sourceID: source.sourceID) {
+                snapshot = cached.0
+                lastContact = cached.1
+                let age = max(0, Date().timeIntervalSince1970 - cached.0.observedAt)
+                fetchedUptime = ProcessInfo.processInfo.systemUptime - age
+                status = "Paired; restoring last known status"
+            } else {
+                status = "Paired; waiting for fresh status"
+                // An existing watch already has a durable profile. Do not
+                // replace it with fallback values while this phone is still
+                // learning the paired source after an upgrade or reinstall.
+                if watch.preferenceID != nil { watch.awaitSourceProfile() }
+            }
+        }
         watch.onWatchEvent = { [weak self] in
             Task { @MainActor in await self?.refresh(fromWatch: true) }
         }
         weather.onChange = { [weak self] value, fahrenheit in self?.watch.setWeather(value, fahrenheit: fahrenheit) }
         if !preview { weather.bind(watchID: watch.preferenceID, updates: watch.updatesEnabled) }
+        if let snapshot { watch.forward(snapshot) }
         weatherObserver = weather.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         changeObserver = watch.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
@@ -68,6 +83,7 @@ final class CompanionModel: ObservableObject {
             try Vault.save(paired, key: "paired-source")
             sourceEpoch = UUID()
             source = paired
+            SourceSnapshotCache.remove()
             snapshot = nil
             lastContact = nil
             fetchedUptime = nil
@@ -92,11 +108,12 @@ final class CompanionModel: ObservableObject {
             try Vault.remove(key: "paired-source")
             sourceEpoch = UUID()
             ComputerPreferences.remove(source.sourceID)
+            SourceSnapshotCache.remove()
             self.source = nil
             snapshot = nil
             lastContact = nil
             fetchedUptime = nil
-            watch.invalidatePending()
+            watch.clearSourceProfile()
             status = "Computer removed. This phone no longer has access."
             hasError = false
             accessRevoked = false
@@ -128,9 +145,12 @@ final class CompanionModel: ObservableObject {
             : "Source unavailable: \(error.localizedDescription)"
         if accessRevoked {
             snapshot = nil
+            lastContact = nil
+            fetchedUptime = nil
+            SourceSnapshotCache.remove()
             PushCoordinator.shared.clearRemovedSource()
+            watch.clearSourceProfile()
         }
-        watch.invalidatePending()
     }
 
     func setForeground(_ value: Bool) {
@@ -160,7 +180,8 @@ final class CompanionModel: ObservableObject {
             throw HubError.message("Source clock is ahead; synchronize device clocks before testing")
         }
         snapshot = value
-        lastContact = Date()
+        let receivedAt = Date()
+        lastContact = receivedAt
         fetchedUptime = ProcessInfo.processInfo.systemUptime - age
         hasError = false
         accessRevoked = false
@@ -168,7 +189,11 @@ final class CompanionModel: ObservableObject {
             ? (value.mode == "synthetic" ? "Connected · synthetic test source" : "Connected · Omarchy")
             : "Catching up · buffered snapshot is stale"
         Diagnostics.shared.record(stage, event: value.identity, state: value.state)
-        if age < value.freshFor { watch.forward(value) }
+        do { try SourceSnapshotCache.save(value, receivedAt: receivedAt) }
+        catch { Diagnostics.shared.record("source_cache_write_failed") }
+        // The watch link applies profile fields immediately and independently
+        // refuses activity whose lease has expired.
+        watch.forward(value)
         if let source { monitoring.restore(source: source) }
         Task { await monitoring.registerIfNeeded() }
         PushCoordinator.shared.recoverRegistrationIfNeeded()

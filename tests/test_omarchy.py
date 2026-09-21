@@ -57,8 +57,25 @@ class OmarchyTests(unittest.TestCase):
         self.assertEqual(self.store.snapshot()['revision'], after['revision'])
         path.unlink()
         self.source.tick(force=True)
-        self.assertIsNone(self.store.snapshot()['allowance'])
+        self.assertEqual(self.store.snapshot()['allowance'], after['allowance'])
         self.assertEqual(self.store.snapshot()['eventID'], before['eventID'])
+
+    def test_transient_profile_file_loss_keeps_last_known_values(self):
+        import datetime as dt
+        allowance = self.root / 'omarchy/agents/usage/codex.json'
+        allowance.parent.mkdir(parents=True)
+        now = int(time.time())
+        stamp = lambda epoch: dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat()
+        allowance.write_text(json.dumps({"schemaVersion": 1, "id": "codex", "updatedAt": stamp(now),
+            "limits": [{"label": "5h window", "percent": 0.25, "resetsAt": stamp(now + 3600)}]}))
+        self.source.tick(force=True)
+        before = self.store.snapshot()
+        (self.theme / 'colors.toml').unlink()
+        allowance.unlink()
+        self.source.tick(force=True)
+        after = self.store.snapshot()
+        self.assertEqual(after['appearance'], before['appearance'])
+        self.assertEqual(after['allowance'], before['allowance'])
 
     def write_theme(self, accent='#FF88AA'):
         (self.theme / 'colors.toml').write_text(f'background="#101010"\nforeground="#FFFFFF"\naccent="{accent}"\n')
