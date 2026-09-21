@@ -55,20 +55,44 @@ class Result:
     apns_id: str
 
 
-def notification(source_id: str, generation: str, event: dict, mode: str, now: float) -> tuple[dict, dict]:
+def notification_copy(event: dict) -> dict:
+    # Only bounded source/provider/state metadata goes on the lock screen.
+    # Never include event labels, prompts, paths or transcript content.
+    raw = event.get("payload")
+    value = json.loads(raw) if raw else {}
+    source = value.get("sourceName", "Computer")
+    source = " ".join(str(source).split())[:64] or "Computer"
+    sessions = value.get("sessions", [])
+    matching = [s for s in sessions if s.get("state") == event["state"]]
+    providers = {"codex": "Codex", "claude": "Claude", "claude-code": "Claude"}
+    subject = providers.get(matching[0].get("provider"), "Agent") if len(matching) == 1 else "Agent"
+    titles = {"working": f"{subject} is working", "needs_input": f"{subject} needs input",
+              "finished": f"{subject} finished its turn", "idle": "No active sessions"}
+    if len(matching) > 1:
+        count = len(matching)
+        titles.update(working=f"{count} sessions are working",
+                      needs_input=f"{count} sessions need input",
+                      finished=f"{count} sessions finished their turns")
+    counts = [(state, sum(s.get("state") == state for s in sessions))
+              for state in ("needs_input", "working", "finished")]
+    labels = {"needs_input": "need input", "working": "working", "finished": "finished"}
+    summary = " · ".join(f"{n} {labels[state]}" for state, n in counts if n and state != event["state"])
+    body = source + (" · " + summary if len(sessions) > 1 and summary else "")
+    return {"title": titles[event["state"]], "body": body}
+
+
+def notification(source_id: str, generation: str, event: dict, mode: str, now: float, presentation: str = "alerts") -> tuple[dict, dict]:
     """Push contains a hint only. The paired HTTPS source remains authoritative."""
     if mode not in ("alert", "background"):
         raise ValueError("Unknown push mode")
     aps = {"content-available": 1}
     if mode == "alert":
-        passive = event["state"] in ("working", "idle")
-        titles = {"working": "Agent working", "idle": "No active sessions",
-                  "needs_input": "Agent needs input", "finished": "Agent finished"}
-        if event["state"] not in titles:
+        if presentation not in ("quiet", "alerts"):
+            raise ValueError("Unknown notification presentation")
+        passive = presentation == "quiet" or event["state"] in ("working", "idle")
+        if event["state"] not in ("working", "idle", "needs_input", "finished"):
             raise ValueError("Unknown activity state")
-        aps.update({"alert": {"title": titles[event["state"]],
-                              "body": "Open Paceman for the latest status."},
-                    "thread-id": source_id})
+        aps.update({"alert": notification_copy(event), "thread-id": source_id})
         if passive:
             aps["interruption-level"] = "passive"
         else:
@@ -176,7 +200,7 @@ class Worker:
                 current = db.execute("SELECT * FROM push_devices WHERE client_id=?", (device["client_id"],)).fetchone()
             if current is None or dict(current) != device:
                 continue
-            payload, headers = notification(source_id, generation, event, device["mode"], now)
+            payload, headers = notification(source_id, generation, event, device["mode"], now, presentation=device["presentation"])
             result = self.sender.send(device, payload, headers, now)
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             retry = result.status in (0, 429, 500, 503) or result.reason == "ExpiredProviderToken"

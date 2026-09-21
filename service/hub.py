@@ -89,6 +89,8 @@ class Store:
             db.execute("BEGIN IMMEDIATE")
             if "last_seen" not in {row[1] for row in db.execute("PRAGMA table_info(clients)")}:
                 db.execute("ALTER TABLE clients ADD COLUMN last_seen REAL NOT NULL DEFAULT 0")
+            if "presentation" not in {row[1] for row in db.execute("PRAGMA table_info(push_devices)")}:
+                db.execute("ALTER TABLE push_devices ADD COLUMN presentation TEXT NOT NULL DEFAULT 'alerts'")
             columns = {row[1] for row in db.execute("PRAGMA table_info(events)")}
             if "payload" not in columns:
                 db.execute("ALTER TABLE events ADD COLUMN payload TEXT")
@@ -221,7 +223,8 @@ class Store:
                     or not re.fullmatch(r"[0-9a-f]{32,512}", payload["deviceToken"])
                     or len(payload["deviceToken"]) % 2
                     or payload.get("environment") not in ("development", "production")
-                    or payload.get("mode") not in ("alert", "background")):
+                    or payload.get("mode") not in ("alert", "background")
+                    or payload.get("presentation", "alerts") not in ("quiet", "alerts")):
                 raise ValueError("Invalid push registration")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -238,11 +241,14 @@ class Store:
                     revision = db.execute("SELECT MAX(seq) FROM events").fetchone()[0]
                     db.execute("INSERT OR REPLACE INTO push_devices(client_id,token,environment,mode,cursor) "
                                "VALUES (?,?,?,?,?)", (client_id, *values, revision))
+            if payload is not None and not remove:
+                db.execute("UPDATE push_devices SET presentation=? WHERE client_id=?",
+                           (payload.get("presentation", "alerts"), client_id))
             row = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
         if not row:
             return {"registered": False}
         return {"registered": True, "environment": row["environment"], "mode": row["mode"],
-                "lastResult": row["last_result"], "lastAPNsID": row["last_apns_id"]}
+                "presentation": row["presentation"], "lastResult": row["last_result"], "lastAPNsID": row["last_apns_id"]}
 
     def live_activity(self, credential: str, payload: dict) -> dict | None:
         if (not isinstance(payload, dict) or not isinstance(payload.get("activityID"), str)

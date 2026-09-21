@@ -23,8 +23,8 @@ permission. Its existing wire value is `alert`; no registration migration is nee
 | Activity | Notification presentation |
 | --- | --- |
 | Working | Passive; no screen wake or sound, but an entry in the notification list |
-| Needs input | Attention alert with default sound, subject to system settings |
-| Finished | Attention alert with default sound, subject to system settings |
+| Needs input | Passive in Quiet; attention alert in Alerts, subject to iOS settings |
+| Finished | Passive in Quiet; attention alert in Alerts, subject to iOS settings |
 | Idle | Passive; authoritative sync clears the last activity |
 
 Every notification-mode payload includes `content-available: 1` and uses APNs

@@ -42,6 +42,50 @@ class PushWorkerTests(unittest.TestCase):
             db.execute("UPDATE events SET at=? WHERE seq=?", (at, revision))
         return revision
 
+    def test_presentation_preference_survives_restart_without_skipping_pending_event(self):
+        revision = self.emit("finished")
+        result = self.store.push_device(self.client["credential"], {
+            "deviceToken": self.device_token, "environment": "development", "mode": "alert", "presentation": "quiet"})
+        self.assertEqual(result["presentation"], "quiet")
+        Worker(Store(self.store.path), self.sender, self.log).step(100)
+        self.assertEqual(self.sender.calls[0][1]["companion"]["revision"], revision)
+        self.assertNotIn("sound", self.sender.calls[0][1]["aps"])
+        self.assertIn("alert", self.sender.calls[0][1]["aps"])
+        self.assertEqual(self.sender.calls[0][1]["aps"]["interruption-level"], "passive")
+
+    def test_presentation_registration_rejects_unknown_values(self):
+        for presentation in ("silent", 0, None, False, [], {}):
+            with self.assertRaises(ValueError):
+                self.store.push_device(self.client["credential"], {
+                    "deviceToken": self.device_token, "environment": "development", "mode": "alert", "presentation": presentation})
+
+    def test_presentation_controls_attention_without_removing_watch_events(self):
+        for presentation in ("quiet", "alerts"):
+            for state in ("working", "idle", "needs_input", "finished"):
+                with self.subTest(presentation=presentation, state=state):
+                    payload, headers = notification("source", "generation", {"seq": 1, "at": 100, "state": state}, "alert", 100, presentation=presentation)
+                    passive = presentation == "quiet" or state in ("working", "idle")
+                    self.assertIn("alert", payload["aps"])
+                    self.assertEqual(headers["apns-push-type"], "alert")
+                    self.assertEqual(payload["aps"].get("interruption-level", "active"), "passive" if passive else "active")
+                    self.assertEqual("sound" in payload["aps"], not passive)
+
+    def test_notification_copy_uses_event_context_without_private_labels(self):
+        event = {"seq": 1, "at": 100, "state": "finished", "label": "secret prompt",
+                 "payload": json.dumps({"sourceName": "Omarchy", "sessions": [
+                     {"provider": "codex", "state": "finished", "id": "secret/path"}]})}
+        payload, _ = notification("source", "generation", event, "alert", 100)
+        self.assertEqual(payload["aps"]["alert"], {"title": "Codex finished its turn", "body": "Omarchy"})
+        self.assertNotIn("secret", json.dumps(payload))
+        event["state"] = "needs_input"
+        event["payload"] = json.dumps({"sourceName": "Omarchy", "sessions": [
+            {"provider": "codex", "state": "needs_input"},
+            {"provider": "claude", "state": "needs_input"},
+            {"provider": "codex", "state": "working"}]})
+        payload, _ = notification("source", "generation", event, "alert", 100)
+        self.assertEqual(payload["aps"]["alert"]["title"], "2 sessions need input")
+        self.assertEqual(payload["aps"]["alert"]["body"], "Omarchy · 1 working")
+
     def test_registration_is_scoped_and_revocation_removes_destination(self):
         other = self.pair()
         self.assertEqual(self.store.push_device(other["credential"]), {"registered": False})
@@ -83,7 +127,7 @@ class PushWorkerTests(unittest.TestCase):
         self.emit("working")
         self.worker.step(100)
         self.assertEqual(len(self.sender.calls), 1)
-        self.assertEqual(self.sender.calls[0][1]["aps"]["alert"]["title"], "Agent working")
+        self.assertEqual(self.sender.calls[0][1]["aps"]["alert"]["title"], "Agent is working")
         self.emit("needs_input")
         newest = self.emit("finished")
         self.worker.step(110)
@@ -110,7 +154,7 @@ class PushWorkerTests(unittest.TestCase):
         self.assertEqual(payload["aps"]["interruption-level"], "passive")
         self.assertNotIn("sound", payload["aps"])
         self.assertEqual(payload["aps"]["content-available"], 1)
-        self.assertEqual(payload["aps"]["alert"]["title"], "Agent working")
+        self.assertEqual(payload["aps"]["alert"]["title"], "Agent is working")
         self.assertEqual(headers["apns-push-type"], "alert")
         self.assertEqual(headers["apns-priority"], "10")
         self.assertEqual(json.loads(self.log.read_text().splitlines()[0])["presentation"], "passive")
@@ -127,7 +171,7 @@ class PushWorkerTests(unittest.TestCase):
         self.assertEqual(payload["aps"]["alert"]["title"], "Agent needs input")
         self.emit("finished", 120)
         worker.step(120)
-        self.assertEqual(self.sender.calls[-1][1]["aps"]["alert"]["title"], "Agent finished")
+        self.assertEqual(self.sender.calls[-1][1]["aps"]["alert"]["title"], "Agent finished its turn")
         self.emit("idle", 130)
         worker.step(130)
         self.assertEqual(len(self.sender.calls), 4)
