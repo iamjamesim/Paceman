@@ -92,8 +92,8 @@ complication is a budgeted glance, not the primary live-status contract.
 Keep watch controls in their established location. A conditional actionable notice
 under watch status says Background updates need notifications and opens the one
 missing recovery step. Do not repeat permanent warnings in the preferences.
-The separate iPhone notifications section edits the shared Quiet/Alerts preference
-and links to iOS notification settings. Pairing asks only for the next
+The separate iPhone notifications section edits the shared Quiet/Alerts preference.
+Link to iOS notification settings only when permission needs recovery. Pairing asks only for the next
 missing step. Never reset an existing permission or presentation choice.
 
 Provisional setup is a candidate for first-time watch users, not an immediate

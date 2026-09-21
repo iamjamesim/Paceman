@@ -199,8 +199,6 @@ struct NotificationPresentationControl: View {
                  ? "Updates appear in Notification Center without banners or sound."
                  : "Alerts when an agent needs input or finishes a turn. Progress stays quiet.")
                 .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
-            Button("Notification settings") { push.openSettings() }
-                .font(.footnote).frame(minHeight: 44).allowsHitTesting(!preview)
         }.tint(theme.tint)
     }
 }
