@@ -225,7 +225,7 @@ class OmarchyTests(unittest.TestCase):
                 self.assertFalse(json.loads(client.recv(4096))['ok'])
         self.assertEqual(self.store.snapshot()['revision'], revision)
 
-    def test_paired_http_and_sse_receive_socket_events_and_recover(self):
+    def test_paired_snapshots_receive_socket_events_and_revoke(self):
         with Server(('127.0.0.1', 0), self.store, self.source) as server:
             thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=.01), daemon=True)
             thread.start()
@@ -236,17 +236,18 @@ class OmarchyTests(unittest.TestCase):
                 conn.request('POST', '/v1/pair', json.dumps({'invitation': invitation['invitation']}))
                 pair = json.loads(conn.getresponse().read())
                 headers = {'Authorization': 'Bearer ' + pair['credential']}
-                conn.request('GET', '/v1/events', headers=headers)
-                stream = conn.getresponse()
-                initial = json.loads(stream.readline().removeprefix(b'data: '))
-                stream.readline()
+                conn.request('GET', '/v1/snapshot', headers=headers)
+                initial = json.loads(conn.getresponse().read())
                 self.assertEqual(initial['mode'], 'omarchy')
                 expected = self.event('needs-input')
-                received = json.loads(stream.readline().removeprefix(b'data: '))
+                conn.request('GET', '/v1/snapshot', headers=headers)
+                received = json.loads(conn.getresponse().read())
                 self.assertEqual(received['eventID'], expected['eventID'])
-                stream.readline()
                 self.store.revoke(pair['clientID'])
-                self.assertEqual(stream.readline(), b'')
+                conn.request('GET', '/v1/snapshot', headers=headers)
+                response = conn.getresponse()
+                self.assertEqual(response.status, 401)
+                response.read()
                 conn.close()
             finally:
                 server.shutdown()

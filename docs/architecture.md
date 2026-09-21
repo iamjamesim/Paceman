@@ -31,7 +31,7 @@ retain the activity event ID and are excluded from APNs activity notifications.
 `service/push.py` is an optional process beside that source. It sends a minimal
 APNs hint; the phone fetches current data from its previously paired endpoint.
 The hint never provides a fetch URL or credentials. Apple decides whether to grant
-background runtime. SSE is useful in the foreground, not a suspension bypass.
+background runtime. Watch requests use Core Bluetooth; see the notification delivery contract.
 
 ## Desktop package
 

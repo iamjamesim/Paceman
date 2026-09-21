@@ -367,7 +367,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        if self.path not in ("/v1/snapshot", "/v1/events", "/v1/push"):
+        if self.path not in ("/v1/snapshot", "/v1/push"):
             self.reply(404, {"error": "not_found"})
             return
         prefix, _, token = self.headers.get("Authorization", "").partition(" ")
@@ -384,26 +384,6 @@ class Handler(BaseHTTPRequestHandler):
             value = self.server.store.push_device(token)
             self.reply(200 if value else 401, value or {"error": "unauthorized"})
             return
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        last_revision, last_sent = None, 0.0
-        try:
-            while self.server.store.authorized(token):
-                value = self.server.store.snapshot()
-                if value["revision"] != last_revision or time.monotonic() - last_sent >= 15:
-                    self.wfile.write(b"data: " + json.dumps(value, separators=(",", ":")).encode() + b"\n\n")
-                    self.wfile.flush()
-                    self.server.store.client_fetched(token)
-                    if self.server.desktop_status is not None:
-                        self.server.desktop_status.phone_fetched()
-                    last_revision, last_sent = value["revision"], time.monotonic()
-                time.sleep(0.25)
-        except (BrokenPipeError, ConnectionResetError, TimeoutError):
-            pass
-
     def do_POST(self):
         if self.path == "/v1/client":
             prefix, _, token = self.headers.get("Authorization", "").partition(" ")

@@ -97,10 +97,8 @@ real task, then a blocking input request, resume it, and finish the turn.
 | Turn is interrupted | session stays open with idle state | Idle/other session |
 | Session/process ends | session removed; remaining sessions determine state | Idle/other session |
 
-The app polls in the foreground; developer streaming uses the same snapshot
-contract. Compare the event identity in the phone's diagnostics with the source's
-local `python3 -m service.hub events` output. Record `snapshot_received` or
-`stream_snapshot_received`, `ble_write_started`, and `ble_write_accepted`
+The app fetches snapshots in the foreground and in response to watch requests. Compare the event identity in the phone's diagnostics with the source's
+local `python3 -m service.hub events` output. Record `snapshot_received`, `ble_write_started`, and `ble_write_accepted`
 separately from what is visibly rendered on the watch. A receipt alone does not
 prove rendering.
 

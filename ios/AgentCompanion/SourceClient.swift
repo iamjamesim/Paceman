@@ -63,16 +63,13 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
 
 final class SourceClient {
     private let session: URLSession
-    private let streamSession: URLSession
     init(configuration: URLSessionConfiguration = .ephemeral) {
         configuration.timeoutIntervalForRequest = 5
         configuration.timeoutIntervalForResource = 12
         configuration.waitsForConnectivity = false
         configuration.httpCookieStorage = nil
         session = URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
-        let streamConfiguration = configuration.copy() as! URLSessionConfiguration
-        streamConfiguration.timeoutIntervalForResource = 60 * 60 * 4
-        streamSession = URLSession(configuration: streamConfiguration, delegate: NoRedirect(), delegateQueue: nil)
+
     }
 
     func pair(_ invitation: Invitation, device: ClientDevice, previous: PairedSource? = nil) async throws -> PairedSource {
@@ -127,16 +124,6 @@ final class SourceClient {
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         let data = try await response(request)
         return try decodeSnapshot(data, source: source)
-    }
-
-    func events(_ source: PairedSource) async throws -> URLSession.AsyncBytes {
-        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/events"))
-        request.timeoutInterval = 60 * 60 * 4
-        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
-        let (bytes, response) = try await streamSession.bytes(for: request)
-        guard let http = response as? HTTPURLResponse else { throw HubError.message("Invalid server response") }
-        guard http.statusCode == 200 else { throw HubError.http(http.statusCode) }
-        return bytes
     }
 
     func decodeSnapshot(_ data: Data, source: PairedSource) throws -> Snapshot {

@@ -14,7 +14,7 @@ credentials remain explicitly unidentified.
 Installation IDs are claims, not credentials. To re-pair an existing installation,
 include its current `Authorization: Bearer CREDENTIAL` and a fresh invitation.
 The source rotates the credential in place, keeps the client ID and pairing date,
-clears its old push registration and contact time, and closes old event streams.
+clears its old push registration and contact time.
 The phone must register push again. A claimed installation already owned by a
 different credential returns 409 without consuming the invitation. Matching device
 names never cause a merge. A revoked installation can pair afresh with a new code.
@@ -34,7 +34,7 @@ The iPhone treats 401 here as already removed. Network failures and other HTTP
 errors preserve the local pairing for retry. Desktop removal uses a local command,
 `pacemanctl remove-access --client-id UUID`, and works while sharing is off.
 
-Last successful snapshot/stream delivery is persisted per credential. Private local
+Last successful snapshot delivery is persisted per credential. Private local
 status exposes only client ID, reported name/platform, pairing time and contact
 time. Neither installation IDs, credential hashes nor secrets enter the panel's
 status or remote activity snapshots. Pre-upgrade contact is unknown.
@@ -74,12 +74,6 @@ The source's `observedAt` establishes service liveness. Omarchy sources with
 Codex process locally. Finished and Idle sessions can remain open. PID/start-time/
 boot metadata is never exported. Clients can ignore this optional marker.
 See [routing semantics and recovery limits](omarchy-routing.md).
-
-`GET /v1/events`: same authorization, `text/event-stream`. Each `data:` line
-contains a full snapshot. Emit immediately, on revision change, and every 15
-seconds to establish source liveness. Event scheduling runs independently in
-the server loop. Revoked clients are disconnected. An SSE stream is an
-experimental transport, not an iOS background execution mechanism.
 
 Watch encoding matches the existing Omarchy v0.6.1 protocol: 36-byte time/owner
 profile and 14-byte activity snapshot. Integers are little endian. The phone

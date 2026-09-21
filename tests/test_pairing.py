@@ -126,18 +126,16 @@ class PairingTests(unittest.TestCase):
         fresh = self.pair(self.device, own['credential'])
         self.assertNotEqual(fresh['clientID'], own['clientID'])
 
-    def test_rotating_or_revoking_a_client_closes_existing_stream(self):
+    def test_rotating_or_revoking_a_client_rejects_old_snapshot_access(self):
         first = self.pair(self.device)
         for rotate in (True, False):
-            connection = http.client.HTTPConnection(*self.server.server_address, timeout=3)
-            connection.request('GET', '/v1/events', headers={'Authorization': 'Bearer ' + first['credential']})
-            response = connection.getresponse()
-            self.assertEqual(response.status, 200)
-            response.readline(); response.readline()
-            if rotate: first = self.pair(self.device, first['credential'])
-            else: self.assertEqual(self.request('DELETE', '/v1/client', token=first['credential'])[0], 200)
-            self.assertEqual(response.readline(), b'')
-            connection.close()
+            old_token = first['credential']
+            self.assertEqual(self.request('GET', '/v1/snapshot', token=old_token)[0], 200)
+            if rotate:
+                first = self.pair(self.device, old_token)
+            else:
+                self.assertEqual(self.request('DELETE', '/v1/client', token=old_token)[0], 200)
+            self.assertEqual(self.request('GET', '/v1/snapshot', token=old_token)[0], 401)
 
     def test_concurrent_first_pairing_does_not_create_duplicate_installations(self):
         invitations = [self.store.invite('https://test.example')['invitation'] for _ in range(2)]

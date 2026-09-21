@@ -15,7 +15,7 @@ tests and live Omarchy companion events with desktop appearance metadata.
 | Directory | Responsibility |
 | --- | --- |
 | `ios/` | SwiftUI iPhone app, WidgetKit extension, source pairing and Bluetooth relay |
-| `service/` | Private Python source, snapshots, event stream, pairing and optional APNs sender |
+| `service/` | Private Python source, snapshots, pairing and optional APNs sender |
 | `firmware/esp32-watch/` | ESP32 watch firmware, simulator, fonts and build tools |
 | `tests/` | Source API, persistence and APNs tests |
 | `scripts/` | Local checks, source pairing and iOS asset/project generation |

@@ -13,7 +13,7 @@ pairing/removal acceptance below remains pending. See [validation](validation.md
   Two apps with the same name remain separate connections.
 - Scanning a fresh code for the same computer sends the existing credential as
   proof. The source rotates it in place, preserving the connection and pairing
-  date. Old credentials and streams stop working; push registers anew.
+  date. Old credentials stop working; push registers anew.
 - Opening the updated iPhone app identifies its existing credential without
   re-pairing. Other older credentials stay **Unidentified connection**. We cannot
   infer which abandoned credentials belonged to the same physical phone.
@@ -75,7 +75,7 @@ See the [protocol](protocol.md) for request shapes and privacy boundaries.
    independent contact times; removing one must preserve the other.
 5. Expand the phone row on the desktop. Cancel removal once, then confirm removal
    of the test connection. Verify its next phone fetch shows **Access removed**,
-   its stream closes, and its watch pairing remains intact. Reconnect by QR.
+   and its watch pairing remains intact. Reconnect by QR.
 6. Use **Remove computer** on the phone. Verify its desktop row and push
    destination disappear and the app returns to setup. Pair again.
 7. Make the computer unreachable, attempt phone removal, and verify pairing is

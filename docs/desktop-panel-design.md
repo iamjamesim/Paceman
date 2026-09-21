@@ -130,7 +130,7 @@ proof of the current credential replaces that installation’s access in place.
 ## Evidence limits
 
 Contact expires after 30 seconds; the source heartbeat expires after 20 seconds.
-Contact is a successful authenticated snapshot response or stream write for
+Contact is a successful authenticated snapshot response for
 that particular credential; diagnostic clients cannot refresh another row. Do not infer an always-connected phone,
 working APNs or Bluetooth status. No watch/weather placeholder row appears until
 there is useful device-reported information to display.

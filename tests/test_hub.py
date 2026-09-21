@@ -116,22 +116,9 @@ class HTTPTests(unittest.TestCase):
         for body in [[], None, {"invitation": 123}, {"invitation": "x"}]:
             self.assertEqual(self.request("POST", "/v1/pair", body)[0], 400)
 
-    def test_stream_initial_change_and_revocation(self):
+    def test_retired_stream_endpoint_is_not_served(self):
         pair = self.paired()
-        client = http.client.HTTPConnection(*self.server.server_address, timeout=3)
-        client.request("GET", "/v1/events", headers={"Authorization": "Bearer " + pair["credential"]})
-        response = client.getresponse()
-        self.assertEqual(response.status, 200)
-        first = json.loads(response.readline().decode().removeprefix("data: "))
-        response.readline()
-        self.store.emit("needs_input")
-        next_value = json.loads(response.readline().decode().removeprefix("data: "))
-        response.readline()
-        self.assertGreater(next_value["revision"], first["revision"])
-        self.assertEqual(next_value["state"], "needs_input")
-        self.store.revoke(pair["clientID"])
-        self.assertEqual(response.readline(), b"")
-        client.close()
+        self.assertEqual(self.request("GET", "/v1/events", token=pair["credential"])[0], 404)
 
     def test_schedule_fires_without_snapshot_requests(self):
         with self.store.connect() as db:

@@ -86,12 +86,10 @@ No public inbound port or hosted relay is required for this personal setup.
 
 ## Physical validation
 
-1. Verify a foreground source fetch and watch update work. Open **Settings →
-   Developer tools → Push delivery**, choose **Notifications** and wait for
-   **Registered on desktop**. The old label was **Alert + wake request**. If push
-   is off, enable background updates first, then select Notifications.
-2. For the initial isolation run, stop the Live Activity and turn **Run stream
-   experiment** off. Leave **Forward activity** on. Disconnect the debugger.
+1. Verify a foreground source fetch and watch update work. Enable notifications
+   in **Settings → Notifications**. Developer Tools shows registration status.
+2. For the initial isolation run, stop the Live Activity. Leave **Watch updates**
+   on in Watch details. Disconnect the debugger.
    Use firmware 0.6.2 or later and the matching phone app. Accept notification
    sharing for the watch, or enable **Share System Notifications** in Settings →
    Bluetooth. The transport lab shows authorization. Notifications must be enabled

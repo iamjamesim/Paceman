@@ -16,10 +16,8 @@ final class CompanionModel: ObservableObject {
     @Published var hasError = false
     @Published var accessRevoked = false
     @Published var identityNotice: String?
-    @Published var streaming = false
     private let client = SourceClient()
     private var polling: Task<Void, Never>?
-    private var streamTask: Task<Void, Never>?
     private var sourceEpoch = UUID()
     private var foreground = false
     private var watchRefreshPending = false
@@ -66,8 +64,6 @@ final class CompanionModel: ObservableObject {
             if let source, source.sourceID != invitation.sourceID || source.endpoint != origin {
                 throw HubError.message("Remove the current computer before connecting a different one.")
             }
-            // Stop old-stream callbacks before rotating its credential.
-            setStreaming(false)
             let paired = try await client.pair(invitation, device: ClientDevice.current(), previous: source)
             try Vault.save(paired, key: "paired-source")
             sourceEpoch = UUID()
@@ -94,7 +90,6 @@ final class CompanionModel: ObservableObject {
             await monitoring.stop()
             PushCoordinator.shared.clearRemovedSource()
             try Vault.remove(key: "paired-source")
-            setStreaming(false)
             sourceEpoch = UUID()
             ComputerPreferences.remove(source.sourceID)
             self.source = nil
@@ -151,39 +146,10 @@ final class CompanionModel: ObservableObject {
             polling = Task { [weak self] in
                 while !Task.isCancelled {
                     self?.weather.refreshIfNeeded()
-                    if self?.streaming != true && self?.accessRevoked != true { await self?.refresh() }
+                    if self?.accessRevoked != true { await self?.refresh() }
                     do { try await Task.sleep(nanoseconds: 5_000_000_000) }
                     catch { break }
                 }
-            }
-        }
-    }
-
-    func setStreaming(_ enabled: Bool) {
-        streamTask?.cancel()
-        streamTask = nil
-        streaming = enabled && source != nil
-        guard streaming, let source else { return }
-        let epoch = sourceEpoch
-        Diagnostics.shared.record("stream_started")
-        streamTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.identifyIfNeeded(source)
-                let bytes = try await self.client.events(source)
-                for try await line in bytes.lines {
-                    guard !Task.isCancelled, epoch == self.sourceEpoch else { return }
-                    guard line.hasPrefix("data: ") else { continue }
-                    let value = try self.client.decodeSnapshot(Data(line.dropFirst(6).utf8), source: source)
-                    try self.accept(value, stage: "stream_snapshot_received")
-                }
-                if !Task.isCancelled { throw HubError.message("Event stream closed") }
-            } catch {
-                guard !Task.isCancelled, epoch == self.sourceEpoch else { return }
-                self.sourceFailed(error)
-                self.streaming = false
-                self.watch.invalidatePending()
-                Diagnostics.shared.record("stream_failed")
             }
         }
     }

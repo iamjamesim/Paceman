@@ -106,8 +106,8 @@ events, multi-session behavior, and recovery limitations.
   after its turn ends. Process exit removes it even if its cleanup hook is missed.
 
 The source publishes a five-second heartbeat that expires after 20 seconds.
-“Receiving updates” means a successful authenticated snapshot response or stream
-write for that connection within 30 seconds. It does not acknowledge watch delivery.
+“Receiving updates” means a successful authenticated snapshot response
+for that connection within 30 seconds. It does not acknowledge watch delivery.
 Names/platforms are app-reported metadata, and names may be generic or duplicated.
 Pairing identifies app installations, not physical hardware.
 

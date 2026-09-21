@@ -31,8 +31,6 @@ struct TransportDiagnostics: View {
                     Text(source.endpoint.absoluteString).font(.caption.monospaced()).textSelection(.enabled)
                     if let notice = model.identityNotice { Text(notice).font(.caption) }
                     Button("Refresh now") { Task { await model.refresh() } }.disabled(model.busy)
-                    Toggle("Run stream experiment", isOn: Binding(
-                        get: { model.streaming }, set: { model.setStreaming($0) }))
                     Button("Remove source", role: .destructive) { Task { await model.removeSource() } }.disabled(model.busy || push.busy)
                 } else {
                     Button("Scan pairing QR") { showScanner = true }
@@ -57,13 +55,12 @@ struct TransportDiagnostics: View {
                     Button("Disable push") { Task { await push.disable() } }.disabled(push.busy)
                 } else {
                     Button("Enable notifications") {
-                        model.setStreaming(false)
                         Task { await push.enableNotifications() }
                     }.disabled(model.source == nil || push.busy)
                 }
                 Text("Notifications trigger watch synchronization through ANCS. Quiet and Alerts control phone presentation.")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("Keep streaming off during the locked-phone test. APNs acceptance, app wake, fetch, and watch write are separate log entries.")
+                Text("APNs acceptance, app wake, fetch, and watch write are separate log entries.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Watch") {
@@ -85,7 +82,7 @@ struct TransportDiagnostics: View {
             }
             Section("Test log") {
                 ShareLink("Export timing log", item: Diagnostics.shared.url)
-                Text("Foreground refresh every 5 seconds, or live events with the stream experiment enabled. Watch acknowledgement events also trigger a fetch. Lock the phone to measure which delivery paths continue; background streaming is not assumed.")
+                Text("Foreground refresh runs every 5 seconds. Watch events also trigger a fetch.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
