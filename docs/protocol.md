@@ -111,15 +111,13 @@ methods require the same paired `Authorization: Bearer …` credential as snapsh
 reads. The server derives ownership from that credential; callers cannot select
 another client ID. These are private Tailscale endpoints, not a public relay API.
 
-- `POST`: `{ "deviceToken": "lowercase hex", "environment": "development" | "production", "mode": "alert", "presentation": "quiet" | "alerts" }`.
-  `presentation` is optional and defaults to `quiet`. Changing it preserves
-  the delivery cursor and pending work; it applies only to attention notifications.
+- `POST`: `{ "deviceToken": "lowercase hex", "environment": "development" | "production", "mode": "alert" }`.
   Validated payloads upsert that client's destination. Re-registering an unchanged
   token preserves pending work and retry state. A changed token or environment starts
   after the current event, avoiding historical alert replay.
   The wire field `mode` remains fixed at `alert`; background-only registrations are rejected.
 - `GET`: returns `registered`, and when present `environment`, `mode`,
-  `presentation`, `lastResult`, `lastAPNsID`. POST returns the same registration status. Neither response returns a destination token.
+  `lastResult`, `lastAPNsID`. POST returns the same registration status. Neither response returns a destination token.
 - `DELETE`: removes only this client's push destination. Revoking the client also
   removes its destination. Requests with invalid/revoked credentials return 401.
 
@@ -128,12 +126,13 @@ The direct sender adds a `companion` hint alongside `aps`, with `schema: 1`,
 the hint against its pairing, then fetches `/v1/snapshot` from its stored source.
 The push does not control the fetch URL, credentials, or resulting watch state.
 In `alert` mode, working and idle updates use passive notification presentation;
-needs-input and finished updates use attention alerts. All include a background
-refresh request. Passive entries remain visible in the notification list.
-`background` mode stays silent and separately throttled. No watch polling is used.
+needs-input and finished request active presentation and sound. These are alert-type pushes and omit
+`content-available`; ANCS, rather than a background callback, initiates custom-watch
+synchronization. Passive entries remain visible in the notification list. The
+retired `background` mode is rejected. No watch polling is used.
 See [direct push delivery](direct-push-test.md) for validation and limitations.
 
-## Optional phone presentation metadata
+## Optional phone snapshot metadata
 
 The iPhone can display `sessions` entries containing `id`, `provider`, and `state`,
 with optional `name` and `project` strings. Synthetic mode emits a fixture session;

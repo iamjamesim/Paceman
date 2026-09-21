@@ -81,13 +81,11 @@ def notification_copy(event: dict) -> dict:
     return {"title": titles[event["state"]], "body": body}
 
 
-def notification(source_id: str, generation: str, event: dict, now: float, presentation: str = "quiet") -> tuple[dict, dict]:
+def notification(source_id: str, generation: str, event: dict, now: float) -> tuple[dict, dict]:
     """Push contains a hint only. The paired HTTPS source remains authoritative."""
-    if presentation not in ("quiet", "alerts"):
-        raise ValueError("Unknown notification presentation")
     if event["state"] not in ("working", "idle", "needs_input", "finished"):
         raise ValueError("Unknown activity state")
-    passive = presentation == "quiet" or event["state"] in ("working", "idle")
+    passive = event["state"] in ("working", "idle")
     aps = {"alert": notification_copy(event), "thread-id": source_id}
     if passive:
         aps["interruption-level"] = "passive"
@@ -196,7 +194,7 @@ class Worker:
                 current = db.execute("SELECT * FROM push_devices WHERE client_id=?", (device["client_id"],)).fetchone()
             if current is None or dict(current) != device:
                 continue
-            payload, headers = notification(source_id, generation, event, now, presentation=device["presentation"])
+            payload, headers = notification(source_id, generation, event, now)
             result = self.sender.send(device, payload, headers, now)
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             retry = result.status in (0, 429, 500, 503) or result.reason == "ExpiredProviderToken"

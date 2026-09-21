@@ -26,6 +26,20 @@ struct CompanionButton: View {
     }
 }
 
+struct CompanionSecondaryButton: View {
+    let title: String
+    let theme: CompanionTheme
+    var action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(.body.weight(.semibold))
+                .frame(maxWidth: .infinity).padding(.vertical, 18)
+                .foregroundStyle(theme.ink)
+                .background(theme.ink.opacity(0.07), in: RoundedRectangle(cornerRadius: 19))
+        }.buttonStyle(.plain)
+    }
+}
+
 struct CompanionRule: View {
     let theme: CompanionTheme
     var body: some View { Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5) }

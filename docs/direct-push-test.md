@@ -17,14 +17,14 @@ Desktop → ActivityKit APNs → Live Activity display
 
 ## Delivery policy
 
-Notification mode is an explicit phone preference that requires notification
-permission. Its existing wire value is `alert`; no registration migration is needed.
+Notification delivery requires notification permission. Presentation follows the
+activity state; iOS Settings remains the user's presentation control.
 
 | Activity | Notification presentation |
 | --- | --- |
 | Working | Passive; no screen wake or sound, but an entry in the notification list |
-| Needs input | Passive in Quiet; attention alert in Alerts, subject to iOS settings |
-| Finished | Passive in Quiet; attention alert in Alerts, subject to iOS settings |
+| Needs input | Active attention request with sound, subject to iOS Settings |
+| Finished | Active attention request with sound, subject to iOS Settings |
 | Idle | Passive; authoritative sync clears the last activity |
 
 Notification-mode payloads omit `content-available` and use APNs push type `alert`.

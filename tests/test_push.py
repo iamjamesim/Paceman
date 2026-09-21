@@ -34,7 +34,7 @@ class PushWorkerTests(unittest.TestCase):
 
     def register(self, mode="alert"):
         return self.store.push_device(self.client["credential"], {
-            "deviceToken": self.device_token, "environment": "development", "mode": mode, "presentation": "alerts"})
+            "deviceToken": self.device_token, "environment": "development", "mode": mode})
 
     def emit(self, state, at=100):
         revision = self.store.emit(state)
@@ -42,47 +42,16 @@ class PushWorkerTests(unittest.TestCase):
             db.execute("UPDATE events SET at=? WHERE seq=?", (at, revision))
         return revision
 
-    def test_missing_preference_defaults_to_quiet(self):
-        result = self.store.push_device(self.client["credential"], {
-            "deviceToken": self.device_token, "environment": "development", "mode": "alert"})
-        self.assertEqual(result["presentation"], "quiet")
-        self.emit("finished")
-        self.worker.step(100)
-        aps = self.sender.calls[0][1]["aps"]
-        self.assertEqual(aps["interruption-level"], "passive")
-        self.assertNotIn("sound", aps)
-        payload, _ = notification("source", "generation", {"seq": 1, "at": 100, "state": "finished"}, 100)
-        self.assertEqual(payload["aps"]["interruption-level"], "passive")
-        self.assertNotIn("sound", payload["aps"])
-
-    def test_presentation_preference_survives_restart_without_skipping_pending_event(self):
-        revision = self.emit("finished")
-        result = self.store.push_device(self.client["credential"], {
-            "deviceToken": self.device_token, "environment": "development", "mode": "alert", "presentation": "quiet"})
-        self.assertEqual(result["presentation"], "quiet")
-        Worker(Store(self.store.path), self.sender, self.log).step(100)
-        self.assertEqual(self.sender.calls[0][1]["companion"]["revision"], revision)
-        self.assertNotIn("sound", self.sender.calls[0][1]["aps"])
-        self.assertIn("alert", self.sender.calls[0][1]["aps"])
-        self.assertEqual(self.sender.calls[0][1]["aps"]["interruption-level"], "passive")
-
-    def test_presentation_registration_rejects_unknown_values(self):
-        for presentation in ("silent", 0, None, False, [], {}):
-            with self.assertRaises(ValueError):
-                self.store.push_device(self.client["credential"], {
-                    "deviceToken": self.device_token, "environment": "development", "mode": "alert", "presentation": presentation})
-
-    def test_presentation_controls_attention_without_removing_watch_events(self):
-        for presentation in ("quiet", "alerts"):
-            for state in ("working", "idle", "needs_input", "finished"):
-                with self.subTest(presentation=presentation, state=state):
-                    payload, headers = notification("source", "generation", {"seq": 1, "at": 100, "state": state}, 100, presentation=presentation)
-                    passive = presentation == "quiet" or state in ("working", "idle")
-                    self.assertIn("alert", payload["aps"])
-                    self.assertNotIn("content-available", payload["aps"])
-                    self.assertEqual(headers["apns-push-type"], "alert")
-                    self.assertEqual(payload["aps"].get("interruption-level", "active"), "passive" if passive else "active")
-                    self.assertEqual("sound" in payload["aps"], not passive)
+    def test_activity_state_sets_attention_without_removing_watch_events(self):
+        for state in ("working", "idle", "needs_input", "finished"):
+            with self.subTest(state=state):
+                payload, headers = notification("source", "generation", {"seq": 1, "at": 100, "state": state}, 100)
+                passive = state in ("working", "idle")
+                self.assertIn("alert", payload["aps"])
+                self.assertNotIn("content-available", payload["aps"])
+                self.assertEqual(headers["apns-push-type"], "alert")
+                self.assertEqual(payload["aps"].get("interruption-level", "active"), "passive" if passive else "active")
+                self.assertEqual("sound" in payload["aps"], not passive)
 
     def test_notification_copy_uses_event_context_without_private_labels(self):
         event = {"seq": 1, "at": 100, "state": "finished", "label": "secret prompt",

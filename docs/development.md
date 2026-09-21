@@ -76,7 +76,7 @@ signing settings; review the resulting diff. Regenerate the icon with
 `swift scripts/make-app-icon.swift` only when its design changes.
 
 DEBUG visual fixtures use `--design-preview`, optionally `--neutral` and
-`--screen=setup|activity|offline|watch-setup|watch-confirm|watch-complete|settings`.
+`--screen=setup|activity|offline|watch-setup|watch-confirm|watch-complete|watch-notifications|watch-troubleshooting|settings`.
 Fixtures disable real networking/Bluetooth; release builds ignore these arguments.
 
 ## Watch

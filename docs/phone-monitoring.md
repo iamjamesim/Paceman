@@ -1,8 +1,7 @@
 # Phone monitoring and delivery contract
 
 Status: accepted direction, implementation in slices. Phone monitoring does not
-require a watch. Calm monitoring is the default; interruption is
-an explicit preference. This supersedes the roadmap's alerts-first ordering.
+require a watch. Progress is passive; attention states request normal iOS alerts.
 
 ## Surface responsibilities
 
@@ -10,7 +9,7 @@ an explicit preference. This supersedes the roadmap's alerts-first ordering.
 | --- | --- | --- |
 | App | Inspect current sessions and manage devices | Full detail, authoritative fetch and explicit freshness |
 | Live Activity / Dynamic Island | Follow a bounded period of work | One workstation summary initially; needs-input precedes working; brief completion; explicit dismissal |
-| Phone alert | Draw attention when requested | Needs-input opt-in; completion separately opt-in; no progress/reconnect sounds |
+| Phone alert | Draw attention to meaningful transitions | Needs-input and completion request normal presentation; no progress/reconnect sounds |
 | Omarchy Watch | Glance and optional wrist alerts | Existing device-scoped preferences; delivery independent of Live Activities |
 
 A completed turn is not a closed session. Do not keep a Live Activity running
@@ -22,10 +21,9 @@ start, end and dismissal policy must be validated before normal UI rollout.
 | Situation | Expected behavior |
 | --- | --- |
 | Live Activities disabled or dismissed | App, alerts and watch remain independent; do not recreate a dismissed activity repeatedly |
-| Notification permission denied | Quiet monitoring remains available; explain only when enabling alerts |
+| Notification permission denied | App and Live Activity remain available; explain that custom-watch forwarding requires notifications |
 | No watch / disconnected watch | Phone monitoring works; retain newest watch state for catch-up, not alert backlog |
 | Watch updates off | Stop that receiver only; phone monitoring continues |
-| Phone alerts off | No notification banner/sound requested; ambient updates continue |
 | Everything optional off | Opening the app still fetches current state |
 | OS settings change later | Recheck capabilities; keep user intent distinct from current permission; do not nag |
 | Source unavailable | Preserve last observation as historical; expire freshness on every surface |
@@ -61,9 +59,10 @@ The callback-only custom-watch route failed a locked-phone run: it fetched only
 after a notification tap. Its replacement integrates ANCS: iOS delivers the
 notification to the watch, which emits a BLE request for authoritative state.
 Core Bluetooth wakes the app to serve that request using the paired source.
-There is no accessory polling. Physical acceptance testing is still required. With notification permission and notification mode,
-working/idle transitions use passive notifications, while needs-input and finished
-use attention notifications. Passive entries remain in the notification list.
+There is no accessory polling. Physical acceptance testing is still required. With
+notifications enabled, working/idle transitions use passive notifications, while
+needs-input and finished request active presentation and sound. Passive entries
+remain in the notification list.
 This alpha tradeoff does not establish guaranteed app execution or fully hidden
 status delivery. The preference matrix above describes product intent; notification-free
 continuous custom-watch delivery is not implemented. Notification sharing and

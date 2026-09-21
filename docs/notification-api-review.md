@@ -1,7 +1,7 @@
 # Monitoring delivery and attention: API review
 
 September 21, 2026. Design recommendation, not a claim of hardware acceptance.
-Quiet / Alerts and conditional recovery are implemented locally. Provisional
+State-based notification presentation and conditional recovery are implemented locally. Provisional
 authorization, Live Activity alert routing and the hardware matrix below remain
 unimplemented or unverified as indicated.
 
@@ -57,11 +57,16 @@ Retries reuse identity; distinct transitions retain distinct notification entrie
 Reject older snapshots. Coalesce state snapshots without replaying old attention
 alerts after reconnection. Scope alert deduplication by source/session/transition.
 
-Phone preference: Quiet (default) or Alerts. Quiet makes all ordinary notification events
-passive. Alerts keeps Working/Idle passive and allows Needs input/Finished to
-interrupt. Sound and banner preferences belong to iOS settings. Keep watch Alert sound as a
-per-watch preference. Do not automatically mute the phone because a watch happens
-to be connected: connection does not prove the person received an alert.
+Working/Idle are passive. Needs input/Finished request active presentation and
+sound. Lock Screen, banners, sound and Mac mirroring remain authoritative in iOS
+Settings. Keep watch Alert sound as a per-watch preference. Do not automatically
+mute the phone because a watch happens to be connected: connection does not prove
+the person received an alert.
+
+Watch setup recommends Notification Center on and Lock Screen, Banners, Sounds and
+Show on Mac off, with a deep link to Paceman's notification settings. This makes
+watch transport reliable and phone presentation quiet without duplicating iOS
+controls inside Paceman. Recovery links appear when a delivery requirement is off.
 
 Live Activities remain independently optional. For phone-only monitoring, update
 the Live Activity for progress and use its alert mechanism for attention when
@@ -92,13 +97,13 @@ complication is a budgeted glance, not the primary live-status contract.
 Keep watch controls in their established location. A conditional actionable notice
 under watch status says Background updates need notifications and opens the one
 missing recovery step. Do not repeat permanent warnings in the preferences.
-The separate iPhone notifications section edits the shared Quiet/Alerts preference.
-Link to iOS notification settings only when permission needs recovery. Pairing asks only for the next
-missing step. Never reset an existing permission or presentation choice.
+The separate Notifications section shows delivery recovery and the recommended
+iPhone system settings. Pairing asks only for the next missing requirement, then
+shows the same recommendation and deep link. Never reset existing permission.
 
 Provisional setup is a candidate for first-time watch users, not an immediate
 replacement for existing authorization. Test before selecting it. An explicit
-request for phone alerts can request full authorization or lead to Settings based
+request for notifications can request full authorization or lead to Settings based
 on actual authorization status. Notification permission denied must not disable
 an independently allowed Live Activity.
 

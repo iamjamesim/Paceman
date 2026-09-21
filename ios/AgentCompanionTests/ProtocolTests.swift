@@ -152,24 +152,32 @@ final class ProtocolTests: XCTestCase {
 
     func testNotificationDeliveryRecoveryStates() {
         func state(_ auth: UNAuthorizationStatus?, _ center: UNNotificationSetting? = .enabled,
-                   enabled: Bool = true, source: Bool = true,
-                   busy: Bool = false, registered: Bool = true) -> NotificationDeliveryStep {
-            .resolve(authorization: auth, center: center, enabled: enabled,
-                     source: source, busy: busy, registered: registered)
+                   enabled: Bool = true) -> NotificationDeliveryStep {
+            .resolve(authorization: auth, center: center, enabled: enabled)
         }
         XCTAssertEqual(state(nil), .checking)
         XCTAssertEqual(state(.notDetermined), .permission)
-        XCTAssertEqual(state(.denied, source: false, busy: true), .denied)
+        XCTAssertEqual(state(.denied), .denied)
         XCTAssertEqual(state(.authorized, .disabled), .notificationCenter)
         XCTAssertEqual(state(.authorized, enabled: false), .enable)
-        XCTAssertEqual(state(.authorized, source: false), .computer)
-        XCTAssertEqual(state(.authorized, busy: true), .registering)
-        XCTAssertEqual(state(.authorized, registered: false), .retry)
         XCTAssertEqual(state(.authorized), .ready)
         XCTAssertEqual(state(.provisional), .ready)
         // Re-enabling permission recovers the saved preference; no second opt-in.
         XCTAssertEqual(state(.denied), .denied)
         XCTAssertEqual(state(.authorized), .ready)
+    }
+
+    func testPushRegistrationReceiptMatchesDurableDestination() {
+        let source = PairedSource(endpoint: URL(string: "https://example.test")!,
+                                  sourceID: "source", clientID: "client", credential: "secret")
+        let receipt = PushRegistrationReceipt(sourceID: "source", clientID: "client",
+                                              token: "token", environment: "development")
+        XCTAssertTrue(receipt.matches(source: source, token: "token", environment: "development"))
+        XCTAssertFalse(receipt.matches(source: source, token: "new-token", environment: "development"))
+        XCTAssertFalse(receipt.matches(source: source, token: "token", environment: "production"))
+        let other = PairedSource(endpoint: source.endpoint, sourceID: "source",
+                                 clientID: "other-client", credential: "secret")
+        XCTAssertFalse(receipt.matches(source: other, token: "token", environment: "development"))
     }
 
     func testWatchNotificationRequestContract() {
@@ -422,22 +430,21 @@ final class ProtocolTests: XCTestCase {
 
     func testPushRegistrationRequiresServerConfirmation() async throws {
         let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "source", clientID: "client", credential: "secret")
-        for (confirmed, effective) in [(true, "quiet"), (true, "alerts"), (true, ""), (false, "quiet")] {
-            let accepted = confirmed && effective == "quiet"
+        for confirmed in [true, false] {
             let client = stubClient { request in
                 XCTAssertEqual(request.url?.path, "/v1/push")
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
                 let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
                 XCTAssertEqual(body["mode"] as? String, "alert")
-                XCTAssertEqual(body["presentation"] as? String, "quiet")
-                return (200, try JSONSerialization.data(withJSONObject: ["registered": confirmed, "presentation": effective]))
+                XCTAssertNil(body["presentation"])
+                return (200, try JSONSerialization.data(withJSONObject: ["registered": confirmed]))
             }
             do {
                 try await client.registerPush(source, token: String(repeating: "ab", count: 32),
-                                              environment: "development", presentation: "quiet")
-                XCTAssertTrue(accepted, "Mismatched registration must fail")
+                                              environment: "development")
+                XCTAssertTrue(confirmed, "Unconfirmed registration must fail")
             } catch {
-                XCTAssertFalse(accepted, "Matching registration must succeed")
+                XCTAssertFalse(confirmed, "Confirmed registration must succeed")
             }
         }
     }

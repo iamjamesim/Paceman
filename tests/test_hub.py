@@ -102,27 +102,26 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         return client
 
-    def test_notification_preference_round_trip_controls_worker_payload(self):
+    def test_notification_registration_survives_worker_restart(self):
         from service.push import Worker
         from tests.test_push import FakeSender
         pair = self.paired()
         sender = FakeSender()
         now = time.time()
-        for offset, presentation in enumerate(("alerts", "quiet", "alerts", "quiet")):
+        for offset in range(4):
             status, ack = self.request("POST", "/v1/push", {
                 "deviceToken": "ab" * 32, "environment": "development",
-                "mode": "alert", "presentation": presentation}, pair["credential"])
+                "mode": "alert"}, pair["credential"])
             self.assertEqual(status, 200)
             self.assertTrue(ack["registered"])
-            self.assertEqual(ack["presentation"], presentation)
-            self.assertEqual(self.request("GET", "/v1/push", token=pair["credential"])[1]["presentation"], presentation)
+            self.assertTrue(self.request("GET", "/v1/push", token=pair["credential"])[1]["registered"])
             self.store.emit("finished")
             # Reload the database as a separately running/restarted worker would.
             Worker(Store(self.store.path), sender, Path(self.temp.name) / "push.jsonl").step(now + offset * 11)
             self.assertEqual(len(sender.calls), offset + 1)
             aps = sender.calls[-1][1]["aps"]
-            self.assertEqual(aps.get("interruption-level", "active"), "passive" if presentation == "quiet" else "active")
-            self.assertEqual("sound" in aps, presentation == "alerts")
+            self.assertEqual(aps.get("interruption-level", "active"), "active")
+            self.assertIn("sound", aps)
             self.assertNotIn("content-available", aps)
 
     def test_pair_snapshot_revocation_and_no_control_endpoint(self):

@@ -89,8 +89,6 @@ class Store:
             db.execute("BEGIN IMMEDIATE")
             if "last_seen" not in {row[1] for row in db.execute("PRAGMA table_info(clients)")}:
                 db.execute("ALTER TABLE clients ADD COLUMN last_seen REAL NOT NULL DEFAULT 0")
-            if "presentation" not in {row[1] for row in db.execute("PRAGMA table_info(push_devices)")}:
-                db.execute("ALTER TABLE push_devices ADD COLUMN presentation TEXT NOT NULL DEFAULT 'quiet'")
             # Silent-only registrations did not opt into notifications. Retire them
             # without changing consent; normal notification registrations stay intact.
             db.execute("DELETE FROM push_devices WHERE mode='background'")
@@ -184,7 +182,7 @@ class Store:
 
     @staticmethod
     def client_list(db):
-        # Only non-secret presentation metadata crosses the local command boundary.
+        # Only non-secret device metadata crosses the local command boundary.
         modern = "last_seen" in {row[1] for row in db.execute("PRAGMA table_info(clients)")}
         query = ("SELECT c.id,c.created,c.last_seen,d.name,d.platform FROM clients c "
                  "LEFT JOIN client_devices d ON d.client_id=c.id ORDER BY c.created,c.id") if modern else (
@@ -226,8 +224,7 @@ class Store:
                     or not re.fullmatch(r"[0-9a-f]{32,512}", payload["deviceToken"])
                     or len(payload["deviceToken"]) % 2
                     or payload.get("environment") not in ("development", "production")
-                    or payload.get("mode") != "alert"
-                    or payload.get("presentation", "quiet") not in ("quiet", "alerts")):
+                    or payload.get("mode") != "alert"):
                 raise ValueError("Invalid push registration")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -244,14 +241,11 @@ class Store:
                     revision = db.execute("SELECT MAX(seq) FROM events").fetchone()[0]
                     db.execute("INSERT OR REPLACE INTO push_devices(client_id,token,environment,mode,cursor) "
                                "VALUES (?,?,?,?,?)", (client_id, *values, revision))
-            if payload is not None and not remove:
-                db.execute("UPDATE push_devices SET presentation=? WHERE client_id=?",
-                           (payload.get("presentation", "quiet"), client_id))
             row = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
         if not row:
             return {"registered": False}
         return {"registered": True, "environment": row["environment"], "mode": row["mode"],
-                "presentation": row["presentation"], "lastResult": row["last_result"], "lastAPNsID": row["last_apns_id"]}
+                "lastResult": row["last_result"], "lastAPNsID": row["last_apns_id"]}
 
     def live_activity(self, credential: str, payload: dict) -> dict | None:
         if (not isinstance(payload, dict) or not isinstance(payload.get("activityID"), str)

@@ -1,13 +1,13 @@
 # Desktop notification delivery handoff
 
-## Notification setup and presentation preference
+## Notification setup and presentation
 
-The phone exposes Settings → Notifications and watch setup/recovery guidance.
-The source stores optional `presentation` per push destination (`quiet` or
-`alerts`, default `quiet`) and acknowledges its effective value.
-Quiet makes all states passive without sound. Alerts keeps Working/Idle passive
-and permits Needs input/Finished to interrupt, subject to iOS settings. Both modes
-retain Notification Center entries for ANCS. Deploy the matching source before testing this preference on the phone.
+The phone shows the recommended iPhone system configuration in Settings →
+Notifications and after watch pairing. Working/Idle use passive notification
+presentation. Needs input/Finished request active presentation and sound. iOS
+Settings remains authoritative for Lock Screen, banners, sound and Mac mirroring.
+All states retain Notification Center entries for ANCS. Deploy the matching source
+before testing the updated phone build.
 
 Notification copy uses the event's source name, known provider, and session states.
 It does not include prompts, paths, task names, or arbitrary event labels. Finished
@@ -18,9 +18,10 @@ computer and other-state counts without repeating the title.
 
 Update both `service/hub.py` and `service/push.py` through the existing desktop
 installation flow and restart the existing source service and APNs worker. The
-Store initialization adds a `presentation` column with a Quiet default when absent. Keep the existing database, pairing, APNs key/config and worker arguments.
-No new key or re-pairing is needed. Reopening phone notification settings syncs its
-saved preference. Nothing is automatically pushed or deployed by this handoff.
+Keep the existing database, pairing, APNs key/config and worker arguments. An old
+unused `presentation` column may remain in an existing SQLite database and is safe
+to ignore. No new key or re-pairing is needed. Nothing is automatically pushed or
+deployed by this handoff.
 
 Notification payloads omit `content-available`. Background-only delivery and its
 developer picker have been removed. This is committed behavior, not a local test override. If a
@@ -34,19 +35,18 @@ in the phone app to opt in. Update and restart both source service and worker.
 
 ## Acceptance
 
-- Quiet: all states appear as passive entries without phone sound; watch alerts
-  remain controlled by the watch preference.
-- Alerts: Needs input/Finished request active presentation and sound, subject to
-  iOS settings. Working/Idle remain passive.
+- Working/Idle use passive presentation without phone sound.
+- Needs input/Finished request active presentation and sound, subject to iOS settings.
+- Watch alerts remain controlled by the per-watch preference.
 - Distinct events remain separate entries grouped by source; retries preserve
-  event identity. Changing presentation must not skip a pending activity.
+  event identity.
 - Denied-before-pairing and revoked-after-setup lead to Settings. Returning
   rechecks notification authorization and Notification Center availability.
 - Sharing off leads to Settings → Bluetooth → Omarchy Watch instructions;
   disconnected watches do not report sharing as denied from cached state.
 
 Seven successive custom-watch background updates passed the prior distinct-event
-run. Unattended reconnect/extended idle and the new presentation/permission round trips
+run. Unattended reconnect/extended idle and the permission round trips
 still require physical acceptance. See [bluetooth-lifecycle.md](bluetooth-lifecycle.md).
 
 Keep keys, destination tokens and raw device logs out of the repository.

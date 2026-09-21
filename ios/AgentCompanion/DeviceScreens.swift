@@ -113,6 +113,7 @@ struct WatchDetail: View {
     var previewPhase = WatchSetupPhase.idle
     var previewComplete = false
     var previewState = "connected"
+    let continueSetup: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.dismiss) private var dismiss
     @State private var remove = false
@@ -136,12 +137,7 @@ struct WatchDetail: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
                 if justPaired || (preview && previewComplete) {
-                    NotificationDeliveryControls(model: model, theme: theme, preview: preview, forWatch: true)
-                    if push.deliveryStep == .ready && model.watch.notificationSharingStatus == true {
-                        CompanionButton(title: "Done", theme: theme) { dismiss() }
-                    } else {
-                        Button("Finish later") { dismiss() }.frame(maxWidth: .infinity, minHeight: 44)
-                    }
+                    pairingComplete
                 } else if paired {
                     watchManagement
                 } else {
@@ -149,7 +145,15 @@ struct WatchDetail: View {
                 }
             }.padding(.horizontal, 26).padding(.bottom, 30)
         }.safeAreaInset(edge: .bottom) {
-            if !paired { pairingActions.padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12).background(theme.canvas) }
+            if !paired {
+                pairingActions
+                    .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
+                    .background(theme.canvas)
+            } else if justPaired || (preview && previewComplete) {
+                pairingCompletionActions
+                    .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
+                    .background(theme.canvas)
+            }
         }.foregroundStyle(theme.ink).background(theme.canvas)
             .navigationTitle(paired ? "Watch" : "Connect watch").navigationBarTitleDisplayMode(.inline)
             .confirmationDialog("Remove Omarchy Watch?", isPresented: $remove, titleVisibility: .visible) {
@@ -230,6 +234,25 @@ struct WatchDetail: View {
         }
     }
     private var updatesEnabled: Bool { preview ? previewState != "off" : model.watch.updatesEnabled }
+    private var pairingComplete: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title2).foregroundStyle(theme.tint).accessibilityHidden(true)
+                Text("Watch connected").font(.title2.weight(.semibold))
+            }
+            Text("Next, set up notifications so your watch can receive updates while your iPhone is locked.")
+                .font(.body).lineSpacing(3).foregroundStyle(theme.ink.opacity(0.65))
+        }
+    }
+    private var pairingCompletionActions: some View {
+        VStack(spacing: 8) {
+            CompanionButton(title: "Continue", theme: theme) { continueSetup() }
+                .allowsHitTesting(!preview)
+            Button("Finish later") { dismiss() }
+                .frame(maxWidth: .infinity, minHeight: 44).allowsHitTesting(!preview)
+        }
+    }
     private var watchManagement: some View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(spacing: 20) {
@@ -244,7 +267,7 @@ struct WatchDetail: View {
             }.multilineTextAlignment(.center).frame(maxWidth: .infinity)
                 .padding(.top, 8).padding(.bottom, 12)
             if !preview && updatesEnabled {
-                if push.deliveryStep != .ready && push.deliveryStep != .checking && push.deliveryStep != .registering {
+                if push.deliveryStep != .ready && push.deliveryStep != .checking {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Background updates need notifications").font(.subheadline.weight(.semibold))
                         NavigationLink("Set up notifications", value: FeedDestination.notifications)
@@ -315,15 +338,82 @@ struct WatchDetail: View {
                 }
             }.allowsHitTesting(!preview)
             CompanionRule(theme: theme)
-            NotificationPresentationControl(theme: theme, preview: preview)
-                .padding(.top, 8)
-            CompanionRule(theme: theme)
-            WatchNotificationHelp(theme: theme)
+            NavigationLink(value: FeedDestination.watchTroubleshooting) {
+                HStack {
+                    Text("Troubleshoot updates")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.ink.opacity(0.4))
+                }.frame(minHeight: 44)
+            }.allowsHitTesting(!preview)
             CompanionRule(theme: theme)
             DeviceRemovalButton(title: removing ? "Removing…" : "Remove watch", theme: theme) { remove = true }
                 .disabled(removing).allowsHitTesting(!preview)
             if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.ink.opacity(0.65)) }
         }.padding(.top, 12)
+    }
+}
+
+struct WatchUpdateTroubleshooting: View {
+    @ObservedObject var model: CompanionModel
+    @ObservedObject private var push = PushCoordinator.shared
+    let theme: CompanionTheme
+    var preview = false
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Check these settings").font(.title2.weight(.semibold))
+                    Text("Keep notifications and Bluetooth on.")
+                        .font(.body).lineSpacing(3).foregroundStyle(theme.ink.opacity(0.65))
+                }
+                CompanionRule(theme: theme)
+                if let notificationProblem {
+                    NavigationLink(value: FeedDestination.notifications) {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("iPhone notifications")
+                                Text(notificationProblem).font(.footnote).foregroundStyle(theme.ink.opacity(0.6))
+                            }
+                            Spacer(minLength: 12)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.ink.opacity(0.4))
+                        }
+                        .frame(minHeight: 52)
+                    }.allowsHitTesting(!preview)
+                    CompanionRule(theme: theme)
+                }
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Notification sharing")
+                    Text(sharingGuidance).font(.footnote).lineSpacing(2).foregroundStyle(theme.ink.opacity(0.6))
+                }
+                CompanionRule(theme: theme)
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Connections")
+                    Text("Keep Bluetooth and Tailscale connected, and make sure your computer is awake and online.")
+                        .font(.footnote).lineSpacing(2).foregroundStyle(theme.ink.opacity(0.6))
+                }
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Focus and Scheduled Summary can delay updates.")
+                    Text("Don’t swipe Paceman away from the app switcher.")
+                }.font(.footnote).lineSpacing(2).foregroundStyle(theme.ink.opacity(0.5))
+                    .padding(.top, 2)
+            }.padding(.horizontal, 26).padding(.vertical, 28)
+        }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
+            .navigationTitle("Watch updates").navigationBarTitleDisplayMode(.inline)
+            .task { if !preview { await push.sync() } }
+    }
+    private var notificationProblem: String? {
+        let step = NotificationDeliveryStep.displayed(preview: preview, current: push.deliveryStep)
+        switch step {
+        case .permission, .enable, .denied: return "Notifications are off"
+        case .notificationCenter: return "Notification Center is off"
+        case .checking, .ready: return nil
+        }
+    }
+    private var sharingGuidance: String {
+        if !model.watch.supportsNotificationSync && model.watch.ready {
+            return "Update your watch firmware to receive notifications while the phone is locked."
+        }
+        return "In Settings → Bluetooth → Omarchy Watch, make sure Share System Notifications is on."
     }
 }
 

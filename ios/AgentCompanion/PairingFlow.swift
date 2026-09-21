@@ -69,26 +69,57 @@ struct NotificationSetup: View {
     @ObservedObject var model: CompanionModel
     let theme: CompanionTheme
     var preview = false
-    let done: () -> Void
+    var done: (() -> Void)? = nil
     @Environment(\.scenePhase) private var phase
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                NotificationDeliveryControls(model: model, theme: theme, preview: preview)
-                CompanionRule(theme: theme)
-                NotificationPresentationControl(theme: theme, preview: preview)
-                if model.watch.paired {
-                    if push.deliveryStep == .ready && model.watch.updatesEnabled { WatchSharingGuidance(watch: model.watch, theme: theme) }
-                    CompanionRule(theme: theme)
-                    WatchNotificationHelp(theme: theme)
+                if deliveryStep == .ready {
+                    if model.watch.paired && model.watch.updatesEnabled && watchNeedsGuidance {
+                        WatchSharingGuidance(watch: model.watch, theme: theme)
+                        CompanionRule(theme: theme)
+                    }
+                    RecommendedNotificationSettings(theme: theme, preview: preview)
+                } else {
+                    NotificationDeliveryControls(model: model, theme: theme, preview: preview, forWatch: done != nil)
                 }
             }.padding(26)
         }.foregroundStyle(theme.ink).background(theme.canvas)
             .navigationTitle("Notifications").navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom) {
+                if let done {
+                    completionActions(done)
+                        .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
+                        .background(theme.canvas)
+                }
+            }
             .task { if !preview { await PushCoordinator.shared.sync() } }
             .onChange(of: phase) { _, value in
                 if value == .active && !preview { Task { await PushCoordinator.shared.sync() } }
             }
+    }
+    private var deliveryStep: NotificationDeliveryStep {
+        .displayed(preview: preview, current: push.deliveryStep)
+    }
+    private var watchNeedsGuidance: Bool {
+        if preview { return false }
+        return !model.watch.ready || !model.watch.supportsNotificationSync || model.watch.notificationSharingStatus == false
+    }
+    @ViewBuilder private func completionActions(_ done: @escaping () -> Void) -> some View {
+        if deliveryStep == .ready && !watchNeedsGuidance {
+            VStack(spacing: 8) {
+                CompanionSecondaryButton(title: "Open iPhone Settings", theme: theme) {
+                    push.openSettings()
+                }
+                    .allowsHitTesting(!preview)
+                CompanionButton(title: "Done", theme: theme, action: done)
+                    .allowsHitTesting(!preview)
+            }
+        } else {
+            Button("Finish later", action: done)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .allowsHitTesting(!preview)
+        }
     }
 }
 
@@ -99,14 +130,7 @@ struct NotificationDeliveryControls: View {
     var preview = false
     var forWatch = false
     private var step: NotificationDeliveryStep {
-        #if DEBUG
-        if preview {
-            let value = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--notification-state=") })
-                .map { String($0.dropFirst("--notification-state=".count)) } ?? "permission"
-            return NotificationDeliveryStep(rawValue: value) ?? .permission
-        }
-        #endif
-        return push.deliveryStep
+        .displayed(preview: preview, current: push.deliveryStep)
     }
     private var title: String {
         switch step {
@@ -114,39 +138,29 @@ struct NotificationDeliveryControls: View {
         case .permission, .enable: return forWatch ? "Keep your watch updated" : "Enable notifications"
         case .denied: return "Notifications are off"
         case .notificationCenter: return "Enable Notification Center"
-        case .computer: return "Connect a computer"
-        case .registering: return "Setting up notifications…"
-        case .retry: return "Finish notification setup"
-        case .ready:
-            guard forWatch else { return "Notifications enabled" }
-            if !model.watch.ready { return "Reconnect your watch" }
-            if !model.watch.supportsNotificationSync { return "Update your watch" }
-            return model.watch.notificationSharingStatus == true ? "Watch connected" : "Check notification sharing"
+        case .ready: return "Notifications enabled"
         }
     }
     private var detail: String {
         switch step {
         case .permission, .enable:
-            return forWatch ? "Notifications keep your watch updated while your phone is locked." : "Follow agent activity without opening Paceman. Progress updates are quiet."
+            return forWatch ? "Paceman notifications carry agent updates to your watch while your phone is locked." : "Follow agent activity without opening Paceman. Progress updates are quiet."
         case .denied:
             return forWatch || model.watch.paired
                 ? "Allow Paceman notifications in Settings to update your watch while your phone is locked."
                 : "Allow Paceman notifications in Settings."
         case .notificationCenter: return "Turn on Notification Center in Settings."
-        case .computer: return "Connect a computer to receive agent activity."
-        case .retry: return "Make sure your computer is online."
-        case .ready:
-            guard forWatch else { return "" }
-            if !model.watch.ready { return "Keep your watch nearby with Bluetooth on." }
-            if !model.watch.supportsNotificationSync { return "Install the latest firmware for background updates." }
-            return model.watch.notificationSharingStatus == true ? "" : "In Settings → Bluetooth → Omarchy Watch, enable Share System Notifications."
-        case .checking, .registering: return ""
+        case .ready: return ""
+        case .checking: return ""
         }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.headline)
-            if !detail.isEmpty { Text(detail).font(.subheadline).foregroundStyle(theme.ink.opacity(0.65)) }
+            if !detail.isEmpty {
+                Text(detail).font(.subheadline)
+                    .foregroundStyle(theme.ink.opacity(0.65))
+            }
             switch step {
             case .permission, .enable:
                 action(step == .permission ? "Allow notifications" : "Enable notifications") {
@@ -154,10 +168,6 @@ struct NotificationDeliveryControls: View {
                 }
             case .denied, .notificationCenter:
                 action("Open Settings") { push.openSettingsForNotifications() }
-            case .retry:
-                action("Try again") { Task { await push.sync() } }
-            case .computer:
-                NavigationLink("Connect computer", value: FeedDestination.pairing).frame(minHeight: 44)
             default: EmptyView()
             }
         }.tint(theme.tint)
@@ -171,35 +181,85 @@ struct NotificationDeliveryControls: View {
     }
 }
 
-struct NotificationPresentationControl: View {
+struct RecommendedNotificationSettings: View {
     @ObservedObject private var push = PushCoordinator.shared
     @Environment(\.dynamicTypeSize) private var typeSize
     let theme: CompanionTheme
     var preview = false
-    private var selection: String {
-        if preview { return ProcessInfo.processInfo.arguments.contains("--notification-presentation=alerts") ? "alerts" : "quiet" }
-        return push.presentation
-    }
-    private var picker: some View {
-        Picker("iPhone notifications", selection: Binding(get: { selection }, set: { value in
-            Task { await push.setPresentation(value) }
-        })) {
-            Text("Quiet").tag("quiet")
-            Text("Alerts").tag("alerts")
-        }.pickerStyle(.menu).labelsHidden().tint(theme.tint).allowsHitTesting(!preview)
-    }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if typeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) { Text("iPhone notifications"); picker }
-            } else {
-                HStack { Text("iPhone notifications"); Spacer(); picker }
+        VStack(alignment: .leading, spacing: 34) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Recommended iPhone settings")
+                    .font(.title2.weight(.semibold))
+                Text(guidance)
+                    .font(.subheadline).lineSpacing(2).foregroundStyle(theme.ink.opacity(0.65))
+                    .tint(theme.tint).allowsHitTesting(!preview)
             }
-            Text(selection == "quiet"
-                 ? "Updates appear in Notification Center without banners or sound."
-                 : "Alerts when an agent needs input or finishes a turn. Progress stays quiet.")
-                .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+            if typeSize.isAccessibilitySize {
+                VStack(spacing: 12) {
+                    recommendationRow("Lock Screen", enabled: false)
+                    recommendationRow("Notification Center", enabled: true)
+                    recommendationRow("Banners", enabled: false)
+                    recommendationRow("Sounds", enabled: false)
+                    recommendationRow("Show on Mac", enabled: false)
+                }
+            } else {
+                VStack(spacing: 28) {
+                    HStack(alignment: .top, spacing: 6) {
+                        notificationOption(.lockScreen, title: "Lock Screen", selected: false)
+                        notificationOption(.notificationCenter, title: "Notification Center", selected: true)
+                        notificationOption(.banner, title: "Banners", selected: false)
+                    }
+                    VStack(spacing: 16) {
+                        recommendationRow("Sounds", enabled: false)
+                        recommendationRow("Show on Mac", enabled: false)
+                    }
+                }
+            }
         }.tint(theme.tint)
+    }
+    private var guidance: AttributedString {
+        var text = AttributedString("In ")
+        var settings = AttributedString("iPhone Settings")
+        settings.link = URL(string: UIApplication.openNotificationSettingsURLString)
+        text += settings
+        text += AttributedString(", keep Notification Center on so updates can reach your watch. Turn off the other options to keep them out of the way on your iPhone.")
+        return text
+    }
+    private enum Placement { case lockScreen, notificationCenter, banner }
+    private func notificationOption(_ placement: Placement, title: String, selected: Bool) -> some View {
+        VStack(spacing: 7) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(selected ? theme.tint : theme.ink.opacity(0.35), lineWidth: 1.5)
+                    .frame(width: 30, height: 49)
+                switch placement {
+                case .lockScreen:
+                    RoundedRectangle(cornerRadius: 2).fill(theme.ink.opacity(0.35)).frame(width: 20, height: 7).offset(y: 16)
+                case .notificationCenter:
+                    VStack(spacing: 3) {
+                        ForEach(0..<3) { _ in RoundedRectangle(cornerRadius: 1.5).fill(theme.tint).frame(width: 20, height: 6) }
+                    }
+                case .banner:
+                    RoundedRectangle(cornerRadius: 2).fill(theme.ink.opacity(0.35)).frame(width: 20, height: 7).offset(y: -15)
+                }
+            }.frame(height: 50)
+            Text(title).font(.caption).multilineTextAlignment(.center).foregroundStyle(theme.ink.opacity(selected ? 1 : 0.65))
+                .frame(maxWidth: .infinity, minHeight: 28, alignment: .top)
+            recommendationValue(enabled: selected, font: .caption)
+        }.frame(maxWidth: .infinity)
+    }
+    private func recommendationRow(_ title: String, enabled: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+            Spacer(minLength: 12)
+            recommendationValue(enabled: enabled, font: .subheadline)
+        }.font(.subheadline)
+    }
+    private func recommendationValue(enabled: Bool, font: Font) -> some View {
+        Label(enabled ? "On" : "Off", systemImage: enabled ? "checkmark.circle.fill" : "xmark.circle.fill")
+            .font(font.weight(.semibold))
+            .foregroundStyle(enabled ? Color.green : Color.red)
     }
 }
 
@@ -220,19 +280,5 @@ struct WatchSharingGuidance: View {
             Text("Reconnect your watch to check notification sharing.")
                 .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
         }
-    }
-}
-
-struct WatchNotificationHelp: View {
-    let theme: CompanionTheme
-    var body: some View {
-        DisclosureGroup("Not getting updates?") {
-            VStack(alignment: .leading, spacing: 12) {
-                NavigationLink("Check notification setup", value: FeedDestination.notifications)
-                Text("Allow Paceman in Notification Center and enable Share System Notifications under Settings → Bluetooth → Omarchy Watch.")
-                Text("Keep Watch updates, Bluetooth, and Tailscale on. Focus and Scheduled Summary can delay notifications.")
-                Text("Open Paceman once if you swiped it away. Your computer must be online.")
-            }.font(.footnote).foregroundStyle(theme.ink.opacity(0.65)).padding(.top, 12)
-        }.font(.subheadline).tint(theme.tint)
     }
 }

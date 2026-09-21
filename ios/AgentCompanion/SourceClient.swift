@@ -136,17 +136,17 @@ final class SourceClient {
         return value
     }
 
-    func registerPush(_ source: PairedSource, token: String, environment: String, presentation: String) async throws {
+    func registerPush(_ source: PairedSource, token: String, environment: String) async throws {
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/push"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token, "environment": environment, "mode": "alert", "presentation": presentation])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token, "environment": environment, "mode": "alert"])
         let data = try await response(request)
-        struct Registration: Decodable { let registered: Bool; let presentation: String }
+        struct Registration: Decodable { let registered: Bool }
         let registration = try JSONDecoder().decode(Registration.self, from: data)
-        guard registration.registered, registration.presentation == presentation else {
-            throw HubError.message("The computer did not confirm the notification preference")
+        guard registration.registered else {
+            throw HubError.message("The computer did not confirm notification delivery")
         }
     }
 

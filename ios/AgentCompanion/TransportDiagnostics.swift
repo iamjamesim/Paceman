@@ -32,7 +32,7 @@ struct TransportDiagnostics: View {
             }
             Section("Push delivery") {
                 Text(push.status)
-                Text("Notifications trigger watch synchronization through ANCS. Quiet and Alerts control phone presentation.")
+                Text("Notifications trigger watch synchronization through ANCS. Progress is passive; attention states request immediate presentation.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("APNs acceptance, app wake, fetch, and watch write are separate log entries.")
                     .font(.caption).foregroundStyle(.secondary)
