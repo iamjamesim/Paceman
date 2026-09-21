@@ -33,6 +33,7 @@ final class ProtocolTests: XCTestCase {
         var mixed = state
         mixed.working = 1
         XCTAssertEqual(mixed.title, "Working")
+        XCTAssertEqual(mixed.presentationTitle(stale: true), "Last: Working")
     }
 
     @MainActor func testPlaceSearchRequiresTwoTrimmedCharacters() {
@@ -493,8 +494,23 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: true, failed: true, hasSnapshot: true, fresh: true), .revoked)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: true, hasSnapshot: true, fresh: true), .reconnecting)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: false, fresh: false), .connecting)
-        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: true, fresh: false), .updating)
+        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: true, fresh: false), .checking)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: true, fresh: true), .current)
+    }
+
+    func testWatchDeliveryHistoryIsDurableScopedAndValidated() {
+        let suite = "watch-delivery-history-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let sent = now.addingTimeInterval(-3600)
+        WatchDeliveryHistory.save(sent, for: "first", defaults: defaults)
+        XCTAssertEqual(WatchDeliveryHistory.load("first", defaults: defaults, now: now), sent)
+        XCTAssertNil(WatchDeliveryHistory.load("second", defaults: defaults, now: now))
+        defaults.set(now.addingTimeInterval(120).timeIntervalSince1970, forKey: "watch-last-delivered.future")
+        XCTAssertNil(WatchDeliveryHistory.load("future", defaults: defaults, now: now))
+        WatchDeliveryHistory.remove("first", defaults: defaults)
+        XCTAssertNil(WatchDeliveryHistory.load("first", defaults: defaults, now: now))
     }
 
     func testComputerNamesMigrateOnceAndStayScopedToSource() {

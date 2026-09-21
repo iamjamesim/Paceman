@@ -106,6 +106,24 @@ struct WatchPreferences: Codable, Equatable {
     static func remove(_ id: String, defaults: UserDefaults = .standard) { defaults.removeObject(forKey: key(id)) }
 }
 
+/// Delivery history is presentation metadata, scoped to the authenticated watch.
+enum WatchDeliveryHistory {
+    private static func key(_ id: String) -> String { "watch-last-delivered." + id }
+    static func load(_ id: String, defaults: UserDefaults = .standard, now: Date = Date()) -> Date? {
+        guard defaults.object(forKey: key(id)) != nil else { return nil }
+        let value = Date(timeIntervalSince1970: defaults.double(forKey: key(id)))
+        guard value.timeIntervalSince1970 >= 1_704_067_200,
+              value <= now.addingTimeInterval(60) else { return nil }
+        return value
+    }
+    static func save(_ value: Date, for id: String, defaults: UserDefaults = .standard) {
+        defaults.set(value.timeIntervalSince1970, forKey: key(id))
+    }
+    static func remove(_ id: String, defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: key(id))
+    }
+}
+
 enum WatchConnectionPresentation: String {
     case connected = "Connected", connecting = "Connecting…", reconnecting = "Reconnecting…"
     case off = "Updates off", disconnected = "Not connected"
@@ -225,6 +243,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             soundEnabled = preferences.sound
             brightness = preferences.brightness
             timeFormat = preferences.timeFormat
+            lastDelivered = WatchDeliveryHistory.load(receipt.watchID)
         }
         if enabled { startBluetooth() }
         setupSession.activate(on: .main) { [weak self] event in
@@ -345,6 +364,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         guard let receipt = pairingReceipt, receipt.bluetoothID == identifier else { return }
         setEnabled(false, userInitiated: false)
         WatchPreferences.remove(receipt.watchID)
+        WatchDeliveryHistory.remove(receipt.watchID)
         WeatherPreferences.remove(receipt.watchID)
         weather = nil
         pairingReceipt = nil
@@ -741,7 +761,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                     pairingReceipt = receipt
                     let preferences = WatchPreferences.load(receipt.watchID)
                     soundEnabled = preferences.sound
-                    lastDelivered = nil
+                    lastDelivered = WatchDeliveryHistory.load(receipt.watchID)
                 }
                 paired = true
             }
@@ -850,6 +870,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         } else if characteristic.uuid == activityUUID {
             writePending = false
             lastDelivered = Date()
+            if let deviceID, let lastDelivered { WatchDeliveryHistory.save(lastDelivered, for: deviceID) }
             if let sentEvent {
                 UserDefaults.standard.set(sentEvent, forKey: "delivered-event")
                 UserDefaults.standard.set(Int(sentRevision), forKey: "delivered-revision")

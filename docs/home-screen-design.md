@@ -13,6 +13,14 @@ with the state label stacked below. A single session needs no count headline.
 Historical robots are still and muted. No received activity is not historical activity.
 Background transport registration and alert permission are not home-screen setup steps.
 
+Connection and content answer different questions. `Connecting…`, `Checking…`,
+and `Reconnecting…` describe the computer link. A receipt time says when this
+phone last heard from it. Fresh activity is presented normally; expired activity
+may remain below the divider only as muted `Last known activity`. A stale source
+state never drives the decorative watch preview. The watch card independently
+describes the phone-to-watch link and retains its last successful delivery time
+across app launches.
+
 ## Review checkpoint: 2026-09-18
 
 The user-provided connected/needs-input, connected/empty, and disconnected/empty
@@ -73,8 +81,8 @@ passes 30 tests, including state precedence and failure/off/recovery distinction
 
 Match watch detail's centered illustration, name, connection status, and receipt
 time. Home and detail share ComputerConnectionState and ComputerReceiptLabel.
-A stale snapshot while requests succeed says Updating; a failed request says
-Reconnecting; revoked access takes precedence. Display name and Remove computer
+A stale snapshot while the app checks for current data says Checking; a failed
+request says Reconnecting; revoked access takes precedence. Display name and Remove computer
 are the only routine actions. Recovery guidance appears while reconnecting; QR
 pairing appears only after access removal. Endpoint and identity diagnostics stay
 in developer tools. Removal failure preserves pairing and reports failure.
@@ -99,3 +107,24 @@ were not rerun for these drawing and button-style changes.
 Watch detail now includes Remove watch below preferences, sharing DeviceRemovalButton
 with computer detail. Both require confirmation; removal errors preserve pairing.
 See pairing-and-removal.md for the watch ownership distinction and validation limits.
+
+## Daily-use state contract
+
+The normal screen does not turn temporary absence into setup work:
+
+| Situation | Computer card | Activity area | Watch card |
+| --- | --- | --- | --- |
+| First connection, no snapshot | `Connecting…` | No activity received yet | Independent watch state |
+| Current snapshot | Receipt time only | Current activity | Independent watch state |
+| Cached snapshot while checking | `Checking…` plus last receipt | Muted last-known activity | Independent watch state |
+| Request failed | `Reconnecting…` plus last receipt | Muted last-known activity | Independent watch state |
+| Access revoked | `Access removed` and Reconnect | No cached activity | Independent watch state |
+
+Automatic recovery has no Retry action on the home screen. Computer detail says
+only that reconnection happens when the computer is awake and online. Pairing UI
+returns only for explicit removal or confirmed revocation.
+
+Validation on 2026-09-21 covered current single-session, stale/checking computer
+detail, reconnecting with historical activity, disconnected watch, and first-contact
+layout at an accessibility text size. The iOS suite passed 53 tests and both
+simulator and signed-device builds succeeded.

@@ -1,6 +1,6 @@
 # Data ownership and persistence
 
-Current alpha implementation, reviewed 2026-09-19. These are local stores, not
+Current alpha implementation, reviewed 2026-09-21. These are local stores, not
 cloud-synced preferences. The app currently connects one computer and one watch.
 
 ## iPhone
@@ -14,14 +14,15 @@ cloud-synced preferences. The app currently connects one computer and one watch.
   AfterFirstUnlockThisDeviceOnly; they are not synced through iCloud Keychain.
 - **Connection bookkeeping:** UserDefaults also holds the pairing receipt,
   negotiated watch capabilities, BLE restoration identifier, delivered event and
-  revision, and the monotonically increasing watch revision. The latter delivery
-  keys are still global to the current single-watch connection. They must become
+  revision, the watch-scoped last successful delivery time, and the monotonically
+  increasing watch revision. Event and revision delivery keys are still global to
+  the current single-watch connection. They must become
   receiver-scoped before simultaneous multi-watch support.
 - **Source state:** one source-scoped last-known snapshot is stored in protected
   Application Support. It restores the palette and allowance after phone or source
   restart. Activity in that snapshot still obeys its short freshness lease and is
   never presented or forwarded as current after expiry. Pending BLE writes and the
-  last-sent UI timestamp remain in memory; there is no durable outbound queue.
+  outbound queue remain in memory; there is no durable delivery queue.
   Reconnect reconciles the latest profile; accepted-profile fingerprints suppress
   unchanged writes. Sound and activity flags travel separately from the profile.
 - **Diagnostics:** a local protected JSONL file holds fixed transport-stage labels,
@@ -60,7 +61,7 @@ retention never invents fresh quota.
 
 | Event | Activity | Theme and allowance | Recovery trigger |
 | --- | --- | --- | --- |
-| Desktop or network unavailable | Expires after its lease | Retain last known values | Foreground fetch, APNs event, or watch request |
+| Desktop or network unavailable | Phone marks its snapshot historical; watch keeps its last event in RAM | Retain last known values | Foreground fetch, APNs event, or watch request |
 | Phone process restarts | Restore only as historical/stale | Restore protected cache | App lifecycle and Bluetooth restoration |
 | Watch disconnects while powered | Keep current activity in RAM | Keep its NVS profile | Core Bluetooth reconnect and profile reconciliation |
 | Watch loses power | Start without stale activity | Restore its NVS profile when RTC is trustworthy | Core Bluetooth reconnect and current snapshot fetch |
@@ -71,6 +72,25 @@ retention never invents fresh quota.
 Recovery is event-driven through the platform lifecycle callbacks above. Timers may
 refresh data while execution is available; they do not define correctness and do
 not erase last-known profile data.
+
+Freshness is field-specific rather than a reason to erase the whole snapshot:
+
+- Pairing, device identity, names, user preferences and theme remain until an
+  explicit removal, replacement or confirmed revocation.
+- The phone's agent snapshot has a short source lease. After it expires, the home
+  screen labels non-empty rows as last known and stops animating them.
+- On the watch, working/attention/completion are event states replaced by the next
+  event. Attention and completion can also be cleared by the wearer. They are not
+  written to flash, so a watch reboot starts without an old agent state.
+- Allowance remains useful as history until its recorded reset, then becomes
+  unavailable. Weather current conditions expire after three hours and daily
+  values at the forecast location's midnight.
+- A Live Activity that passes its freshness date describes its state as last
+  reported. It never substitutes a generic waiting state for known activity.
+
+Reachability is also independent at each hop. A computer can be reconnecting while
+the watch remains connected to the phone; a watch can be away while the phone keeps
+receiving computer activity. UI must not infer one link's state from the other.
 
 Old untracked session records are pruned after 24 hours. The events table currently
 has no retention limit. Add bounded retention that preserves push cursors and the

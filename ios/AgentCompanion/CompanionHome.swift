@@ -60,6 +60,7 @@ struct CompanionHome: View {
             .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
     private var historical: Bool { offline || stale }
+    private var connection: ComputerConnectionState { presentation.computerState(model: model) }
     private var agentContent: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button { open(.computer) } label: {
@@ -77,7 +78,7 @@ struct CompanionHome: View {
 
             if model.accessRevoked {
                 HStack { connectionLabel; Spacer(); recoveryAction }.padding(.top, 3)
-            } else if historical {
+            } else if connection != .current {
                 connectionLabel.padding(.top, 8)
             }
             if presentation.preview ? presentation.previewScreen != "waiting" && presentation.previewScreen != "offline-empty" : model.lastContact != nil {
@@ -90,7 +91,7 @@ struct CompanionHome: View {
                 Text("Reconnect to receive activity from this computer.")
                     .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65)).padding(.top, 18)
             } else {
-                if historical, case .sessions = content {
+                if historical, content.hasActivity {
                     Text("Last known activity").font(.caption).foregroundStyle(theme.ink.opacity(0.55))
                         .padding(.top, 16)
                 }
@@ -106,7 +107,7 @@ struct CompanionHome: View {
                         AgentFeedRow(session: row.session, theme: theme, animate: !historical, detailOverride: row.detail)
                     }
                 case .waiting:
-                    emptyActivity(historical ? "Waiting for the computer" : "Waiting for activity", detail: historical ? nil : "Your agents will appear here when the computer responds.")
+                    emptyActivity("No activity received yet", detail: nil)
                 case .empty:
                     emptyActivity("No active sessions", detail: historical ? nil : "Activity appears when an agent starts.")
                 case .summary(let state):
@@ -145,7 +146,7 @@ struct CompanionHome: View {
     private var watchRow: some View {
         Button { open(.watch) } label: {
             HStack(spacing: 20) {
-                WatchIllustration(theme: theme, paired: hasWatch, timeFormat: model.watch.timeFormat, state: presentation.preview ? .working : model.snapshot?.state ?? .idle).frame(width: hasWatch ? 45 : 55, height: hasWatch ? 68 : 83)
+                WatchIllustration(theme: theme, paired: hasWatch, timeFormat: model.watch.timeFormat, state: presentation.preview ? .working : model.currentActivityState).frame(width: hasWatch ? 45 : 55, height: hasWatch ? 68 : 83)
                 VStack(alignment: .leading, spacing: 7) {
                     Text(hasWatch ? "Omarchy Watch" : "Connect your watch")
                         .font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold)).multilineTextAlignment(.leading)

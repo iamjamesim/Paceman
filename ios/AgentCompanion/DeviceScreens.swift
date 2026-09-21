@@ -37,7 +37,7 @@ struct ComputerDetail: View {
                         }.disabled(removing || presentation.preview)
                     }
                 } else if connection == .reconnecting {
-                    Text("Check that your computer is awake, sharing is on, and Tailscale is connected.")
+                    Text("It will reconnect when this computer is awake and online.")
                         .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
                 }
                 CompanionRule(theme: theme)
@@ -132,7 +132,7 @@ struct WatchDetail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 if !paired || justPaired || previewComplete {
-                    WatchIllustration(theme: theme, paired: paired, timeFormat: model.watch.timeFormat, state: preview ? .working : model.snapshot?.state ?? .idle).frame(width: 90, height: 133)
+                    WatchIllustration(theme: theme, paired: paired, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
                 if justPaired || (preview && previewComplete) {
@@ -234,7 +234,7 @@ struct WatchDetail: View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(spacing: 20) {
                 if !typeSize.isAccessibilitySize {
-                    WatchIllustration(theme: theme, paired: true, timeFormat: model.watch.timeFormat, state: preview ? .working : model.snapshot?.state ?? .idle).frame(width: 90, height: 133).accessibilityHidden(true)
+                    WatchIllustration(theme: theme, paired: true, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133).accessibilityHidden(true)
                 }
                 VStack(spacing: 9) {
                     Text("Omarchy Watch")

@@ -49,12 +49,12 @@ On a Mac with Xcode, also run `bash scripts/check-on-mac.sh` and run the
 
 ## Current limits
 
-Live Omarchy routing is implemented; physical end-to-end validation is pending.
-The phone forwards basic clock/ownership
-and activity packets; live watch theme, weather, allowance and source-freshness
-forwarding are not implemented. One locked-phone APNs-triggered fetch worked;
-continuous background delivery and full physical-watch rendering are not proven.
-iOS controls background execution and notification delivery.
+The alpha connects one Omarchy source and one custom watch. The phone forwards
+activity, theme, weather, allowance and watch preferences. Background agent
+transitions use user-visible APNs alert transport and the watch receives those
+events through iOS notification sharing, so notification permission and sharing
+must remain enabled. iOS controls notification delivery and background execution.
+Long-duration disruption and upgrade testing is still in progress.
 
 Keep runtime state and credentials in ignored `.runtime/`. Never distribute an
 APNs private key in the app or repository. Direct APNs is a personal prototype

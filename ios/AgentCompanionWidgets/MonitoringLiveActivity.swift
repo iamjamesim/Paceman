@@ -9,7 +9,7 @@ struct MonitoringLiveActivity: Widget {
                 MonitoringRobot(state: context.state.state, stale: context.isStale).frame(width: 28, height: 28)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(context.attributes.sourceName).font(.caption).foregroundStyle(.secondary)
-                    Text(context.isStale ? "Waiting for update" : context.state.title).font(.headline)
+                    Text(context.state.presentationTitle(stale: context.isStale)).font(.headline)
                 }
                 Spacer(minLength: 0)
             }.foregroundStyle(.white).padding(16)
@@ -25,13 +25,13 @@ struct MonitoringLiveActivity: Widget {
                     Text(context.attributes.sourceName).font(.caption).lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Text(context.isStale ? "Waiting for update" : context.state.title).font(.headline)
+                    Text(context.state.presentationTitle(stale: context.isStale)).font(.headline)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } compactLeading: {
                 MonitoringRobot(state: context.state.state, stale: context.isStale).frame(width: 18, height: 18)
             } compactTrailing: {
-                if context.isStale { Image(systemName: "clock").accessibilityLabel("Waiting for update") }
+                if context.isStale { Image(systemName: "clock").accessibilityLabel("Last reported activity") }
                 else if context.state.needsInput > 0 { Text("\(context.state.needsInput)!").accessibilityLabel(context.state.title) }
                 else { Text("\(context.state.working + context.state.finished)").accessibilityLabel(context.state.title) }
             } minimal: {

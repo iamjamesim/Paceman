@@ -68,6 +68,9 @@ final class CompanionModel: ObservableObject {
         return ProcessInfo.processInfo.systemUptime - fetchedUptime < snapshot.freshFor
     }
 
+    /// Decorative watch previews may reflect current activity, never cached activity.
+    var currentActivityState: ActivityState { fresh ? snapshot?.state ?? .idle : .idle }
+
     @discardableResult
     func pair(text: String) async -> Bool {
         guard !busy else { return false }

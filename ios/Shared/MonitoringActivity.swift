@@ -19,6 +19,7 @@ struct MonitoringActivity: ActivityAttributes {
             if finished > 0 { return finished == 1 ? "Finished" : "\(finished) finished" }
             return "No active sessions"
         }
+        func presentationTitle(stale: Bool) -> String { stale ? "Last: \(title)" : title }
     }
     var sourceID: String
     var sourceName: String

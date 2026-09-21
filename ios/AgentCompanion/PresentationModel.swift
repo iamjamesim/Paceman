@@ -95,7 +95,7 @@ enum AgentFeedContent: Equatable {
     }
     var headline: String {
         switch self {
-        case .waiting: return "Waiting for update"
+        case .waiting: return "No activity received yet"
         case .empty: return "No active agents"
         case .summary(let state): return state.title
         case .sessions(let sessions):
@@ -112,6 +112,12 @@ enum AgentFeedContent: Equatable {
         let activeStates = [ActivityState.needsInput, .working, .finished].filter { (counts[$0] ?? 0) > 0 }
         let labels = activeStates.dropFirst().map { Self.countLabel(counts[$0]!, state: $0) }
         return labels.isEmpty ? nil : labels.joined(separator: " · ")
+    }
+    var hasActivity: Bool {
+        switch self {
+        case .summary, .sessions: return true
+        case .waiting, .empty: return false
+        }
     }
     fileprivate static func countLabel(_ count: Int, state: ActivityState) -> String {
         switch state {
@@ -180,12 +186,12 @@ enum ComputerPreferences {
 
 enum ComputerConnectionState: String {
     case current = "Up to date", connecting = "Connecting…", reconnecting = "Reconnecting…"
-    case updating = "Updating…", revoked = "Access removed"
+    case checking = "Checking…", revoked = "Access removed"
     static func resolve(revoked: Bool, failed: Bool, hasSnapshot: Bool, fresh: Bool) -> Self {
         if revoked { return .revoked }
         if failed { return .reconnecting }
         if !hasSnapshot { return .connecting }
-        return fresh ? .current : .updating
+        return fresh ? .current : .checking
     }
 }
 
@@ -195,7 +201,7 @@ extension PresentationModel {
             if previewScreen == "computer-revoked" { return .revoked }
             if previewOffline { return .reconnecting }
             if ["computer-waiting", "waiting"].contains(previewScreen) { return .connecting }
-            if previewScreen == "computer-stale" { return .updating }
+            if previewScreen == "computer-stale" { return .checking }
             return .current
         }
         return .resolve(revoked: model.accessRevoked, failed: model.hasError, hasSnapshot: model.snapshot != nil, fresh: model.fresh)
