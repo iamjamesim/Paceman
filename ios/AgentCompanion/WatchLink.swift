@@ -140,7 +140,6 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private let notificationUUID = CBUUID(string: "7f510005-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private var notificationSync: CBCharacteristic?
     private var notificationSequence: UInt32?
-    @Published private(set) var notificationSharingAuthorized = false
     @Published private(set) var notificationSharingObservation: Bool?
     var notificationSharingStatus: Bool? { ready ? notificationSharingObservation : nil }
     var supportsNotificationSync: Bool { capabilities & (1 << 9) != 0 }
@@ -495,20 +494,6 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         connect(identifier)
     }
 
-    func retryConnection() {
-        guard enabled, paired, central?.state == .poweredOn, !ready else { return }
-        handshakeTimeout?.cancel()
-        preparing = false
-        status = "Restarting the Bluetooth connection…"
-        Diagnostics.shared.record("ble_retry_requested")
-        if let peripheral, peripheral.state != .disconnected {
-            cancelForRecovery(peripheral)
-            // didDisconnect / didFailToConnect resumes after cancellation.
-        } else { reconnectIfNeeded() }
-    }
-
-    var canRetryConnection: Bool { enabled && paired && central?.state == .poweredOn && !ready }
-
     private func recoverConnection(_ message: String) {
         guard paired else { fail(message); return }
         ready = false
@@ -814,7 +799,6 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     private func observeNotificationSharing(_ peripheral: CBPeripheral, changed: Bool = false) {
-        notificationSharingAuthorized = peripheral.ancsAuthorized
         // A sampled false value has conflicted with Settings on an existing bond.
         // Only a live authorization callback establishes a negative observation.
         notificationSharingObservation = WatchNotificationSharing.resolve(
@@ -824,7 +808,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     func centralManager(_ central: CBCentralManager, didUpdateANCSAuthorizationFor peripheral: CBPeripheral) {
         guard self.peripheral?.identifier == peripheral.identifier else { return }
         observeNotificationSharing(peripheral, changed: true)
-        Diagnostics.shared.record(notificationSharingAuthorized ? "watch_notification_sharing_allowed" : "watch_notification_sharing_unavailable")
+        Diagnostics.shared.record(peripheral.ancsAuthorized ? "watch_notification_sharing_allowed" : "watch_notification_sharing_unavailable")
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {

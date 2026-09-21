@@ -52,8 +52,6 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     @Published private(set) var notificationCenterSetting: UNNotificationSetting?
 
     @Published private(set) var presentation = UserDefaults.standard.string(forKey: "phone-notification-presentation") ?? "quiet"
-    @Published private(set) var presentationApplied = false
-    @Published private(set) var presentationSupported: Bool?
     var deliveryStep: NotificationDeliveryStep {
         .resolve(authorization: authorization, center: notificationCenterSetting, enabled: enabled,
                  source: model?.source != nil, busy: busy || awaitingToken, registered: registered)
@@ -61,7 +59,6 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     func setPresentation(_ value: String) async {
         guard ["quiet", "alerts"].contains(value) else { return }
         presentation = value
-        presentationApplied = false
         UserDefaults.standard.set(value, forKey: "phone-notification-presentation")
         await sync()
     }
@@ -172,11 +169,8 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             status = "APNs environment is missing from this build"; return
         }
         do {
-            let requestedPresentation = presentation
-            let applied = try await client.registerPush(source, token: token, environment: environment, presentation: requestedPresentation)
+            try await client.registerPush(source, token: token, environment: environment, presentation: presentation)
             guard enabled, model?.source?.credential == source.credential, model?.accessRevoked != true else { return }
-            presentationSupported = applied != nil
-            presentationApplied = applied == true && requestedPresentation == presentation
             registered = true
             awaitingToken = false
             status = "Registered on desktop · \(environment)"
@@ -186,27 +180,6 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             awaitingToken = false
             status = "Could not register on your computer. Check the connection and try again."
             Diagnostics.shared.record("push_registration_failed")
-        }
-    }
-
-    @discardableResult
-    func disable() async -> Bool {
-        guard !busy else { return false }
-        busy = true
-        defer { busy = false }
-        do {
-            if let source = model?.source { try await client.removePush(source) }
-            registered = false
-            awaitingToken = false
-            enabled = false
-            syncPending = false
-            UserDefaults.standard.set(false, forKey: "push-enabled")
-            UIApplication.shared.unregisterForRemoteNotifications()
-            status = "Push is off"
-            return true
-        } catch {
-            status = "Could not remove the desktop push destination. Retry when connected."
-            return false
         }
     }
 

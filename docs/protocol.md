@@ -119,8 +119,7 @@ another client ID. These are private Tailscale endpoints, not a public relay API
   after the current event, avoiding historical alert replay.
   The wire field `mode` remains fixed at `alert`; background-only registrations are rejected.
 - `GET`: returns `registered`, and when present `environment`, `mode`,
-  `presentation`, `lastResult`, `lastAPNsID`. POST also returns the effective presentation value
-  so the phone can detect older servers that do not support the preference. Never returns a destination token.
+  `presentation`, `lastResult`, `lastAPNsID`. POST returns the same registration status. Neither response returns a destination token.
 - `DELETE`: removes only this client's push destination. Revoking the client also
   removes its destination. Requests with invalid/revoked credentials return 401.
 

@@ -69,7 +69,6 @@ final class SourceClient {
         configuration.waitsForConnectivity = false
         configuration.httpCookieStorage = nil
         session = URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
-
     }
 
     func pair(_ invitation: Invitation, device: ClientDevice, previous: PairedSource? = nil) async throws -> PairedSource {
@@ -137,23 +136,17 @@ final class SourceClient {
         return value
     }
 
-    func registerPush(_ source: PairedSource, token: String, environment: String, presentation: String) async throws -> Bool? {
+    func registerPush(_ source: PairedSource, token: String, environment: String, presentation: String) async throws {
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/push"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token, "environment": environment, "mode": "alert", "presentation": presentation])
         let data = try await response(request)
-        let result = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        guard let effective = result?["presentation"] as? String else { return nil }
-        return effective == presentation
-    }
-
-    func removePush(_ source: PairedSource) async throws {
-        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/push"))
-        request.httpMethod = "DELETE"
-        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
-        _ = try await response(request)
+        struct Registration: Decodable { let registered: Bool }
+        guard try JSONDecoder().decode(Registration.self, from: data).registered else {
+            throw HubError.message("The computer did not confirm notification registration")
+        }
     }
 
     func registerLiveActivity(_ source: PairedSource, id: String, token: String, environment: String) async throws {

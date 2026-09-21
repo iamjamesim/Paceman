@@ -3,9 +3,6 @@ import SwiftUI
 struct TransportDiagnostics: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject private var push = PushCoordinator.shared
-    @State private var invitation = ""
-    @State private var showScanner = false
-    @State private var confirmWatch = false
 
     var body: some View {
         Form {
@@ -31,33 +28,10 @@ struct TransportDiagnostics: View {
                     Text(source.endpoint.absoluteString).font(.caption.monospaced()).textSelection(.enabled)
                     if let notice = model.identityNotice { Text(notice).font(.caption) }
                     Button("Refresh now") { Task { await model.refresh() } }.disabled(model.busy)
-                    Button("Remove source", role: .destructive) { Task { await model.removeSource() } }.disabled(model.busy || push.busy)
-                } else {
-                    Button("Scan pairing QR") { showScanner = true }
-                    TextEditor(text: $invitation).frame(minHeight: 80)
-                        .autocorrectionDisabled().textInputAutocapitalization(.never)
-                        .accessibilityLabel("Paste pairing invitation JSON")
-                    if let parsed = try? JSONDecoder().decode(Invitation.self, from: Data(invitation.utf8)) {
-                        Text("Connect to \(parsed.endpoint)").font(.caption)
-                    }
-                    Button("Pair source") {
-                        Task {
-                            await model.pair(text: invitation)
-                            if model.source != nil { invitation = ""; await model.refresh() }
-                        }
-                    }.disabled(invitation.isEmpty || model.busy)
                 }
             }
             Section("Push delivery") {
                 Text(push.status)
-                if push.enabled {
-                    Button("Retry registration") { Task { await push.sync() } }.disabled(push.busy || model.source == nil)
-                    Button("Disable push") { Task { await push.disable() } }.disabled(push.busy)
-                } else {
-                    Button("Enable notifications") {
-                        Task { await push.enableNotifications() }
-                    }.disabled(model.source == nil || push.busy)
-                }
                 Text("Notifications trigger watch synchronization through ANCS. Quiet and Alerts control phone presentation.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("APNs acceptance, app wake, fetch, and watch write are separate log entries.")
@@ -66,18 +40,14 @@ struct TransportDiagnostics: View {
             Section("Watch") {
                 Text(model.watch.status)
                 if model.watch.supportsNotificationSync {
-                    LabeledContent("Notification sharing", value: model.watch.notificationSharingAuthorized ? "Allowed" : "Not allowed")
-                    if !model.watch.notificationSharingAuthorized {
-                        Text("Allow Share System Notifications for this watch in Settings → Bluetooth to receive activity while Paceman is in the background.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
+                    LabeledContent("Notification sharing", value: model.watch.notificationSharingStatus.map {
+                        $0 ? "Allowed" : "Not allowed"
+                    } ?? "Unknown")
                 }
-                Button("Add watch") { confirmWatch = true }.disabled(!model.watch.pickerReady)
-                Toggle("Forward activity", isOn: Binding(get: { model.watch.enabled }, set: { model.watch.setEnabled($0) }))
                 if let date = model.watch.lastDelivered {
                     Text("Last BLE write accepted \(date.formatted(date: .omitted, time: .standard))").font(.caption)
                 }
-                Text("This probe uses the existing watch protocol. The watch cannot yet mark an upstream snapshot stale itself. Confirm the display during tests; a BLE write acknowledgement is not display confirmation.")
+                Text("A BLE write acknowledgement confirms receipt, not rendering on the watch.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Test log") {
@@ -87,19 +57,6 @@ struct TransportDiagnostics: View {
             }
         }
         .navigationTitle("Transport lab")
-        .sheet(isPresented: $showScanner) {
-            NavigationStack {
-                QRScanner { text in invitation = text; showScanner = false }
-                    .navigationTitle("Scan invitation")
-                    .toolbar { Button("Cancel") { showScanner = false } }
-            }
-        }
-        .alert("Use an unowned test watch", isPresented: $confirmWatch) {
-            Button("Continue") { model.watch.addWatch() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This probe claims an unowned watch for this phone and writes a minimal clock profile. It refuses a watch owned by your desktop. Do not reset your daily watch without arranging migration.")
-        }
     }
 }
 

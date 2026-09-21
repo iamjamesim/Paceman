@@ -421,6 +421,27 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
+    func testPushRegistrationRequiresServerConfirmation() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "source", clientID: "client", credential: "secret")
+        for confirmed in [true, false] {
+            let client = stubClient { request in
+                XCTAssertEqual(request.url?.path, "/v1/push")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
+                let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
+                XCTAssertEqual(body["mode"] as? String, "alert")
+                XCTAssertEqual(body["presentation"] as? String, "quiet")
+                return (200, try JSONSerialization.data(withJSONObject: ["registered": confirmed]))
+            }
+            do {
+                try await client.registerPush(source, token: String(repeating: "ab", count: 32),
+                                              environment: "development", presentation: "quiet")
+                XCTAssertTrue(confirmed, "Unconfirmed registration must fail")
+            } catch {
+                XCTAssertFalse(confirmed, "Confirmed registration must succeed")
+            }
+        }
+    }
+
     func testIdentificationAuthenticatesExistingPairing() async throws {
         let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "source", clientID: "client", credential: "secret")
         let device = ClientDevice(installationID: UUID().uuidString, name: "Phone", platform: "ios")
