@@ -2,8 +2,8 @@
 
 **Take your agents with you.**
 
-Personal gear for working with agents: connect your workspaces to watches,
-widgets, and small displays that feel like yours. Easy pairing, shared visual
+Personal gear for working with agents: connect your workspaces to watches
+and small displays that feel like yours. Easy pairing, shared visual
 character, and calm awareness come first; lightweight interactions are secondary.
 
 Paceman is a private prototype codename. The current implementation connects a
@@ -14,7 +14,7 @@ tests and live Omarchy companion events with desktop appearance metadata.
 
 | Directory | Responsibility |
 | --- | --- |
-| `ios/` | SwiftUI iPhone app, WidgetKit extension, source pairing and Bluetooth relay |
+| `ios/` | SwiftUI iPhone app, Live Activity extension, source pairing and Bluetooth relay |
 | `service/` | Private Python source, snapshots, pairing and optional APNs sender |
 | `firmware/esp32-watch/` | ESP32 watch firmware, simulator, fonts and build tools |
 | `tests/` | Source API, persistence and APNs tests |
@@ -54,7 +54,7 @@ The phone forwards basic clock/ownership
 and activity packets; live watch theme, weather, allowance and source-freshness
 forwarding are not implemented. One locked-phone APNs-triggered fetch worked;
 continuous background delivery and full physical-watch rendering are not proven.
-WidgetKit and iOS control background update timing.
+iOS controls background execution and notification delivery.
 
 Keep runtime state and credentials in ignored `.runtime/`. Never distribute an
 APNs private key in the app or repository. Direct APNs is a personal prototype

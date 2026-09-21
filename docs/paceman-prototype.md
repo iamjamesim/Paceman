@@ -6,7 +6,7 @@ consistent state and character across surfaces. It is not primarily an approval 
 
 ## Finish line
 
-One real Omarchy workspace, an iPhone with widgets, and a phone-paired ESP32 watch.
+One real Omarchy workspace, an iPhone, and a phone-paired ESP32 watch.
 Pairing should be effortless, status legible, and workspace appearance recognizable.
 Lightweight acknowledgements remain subordinate to the glanceable experience.
 
@@ -14,7 +14,7 @@ Acceptance checks:
 - Pair the real workspace without manually copying credentials.
 - Show genuine working, needs-input and finished transitions on phone and watch.
 - Preserve the distinction between a Bluetooth write and observed screen rendering.
-- Show the same workspace palette on phone/widget/watch with neutral fallbacks.
+- Show the same workspace palette on phone/watch with neutral fallbacks.
 - Recover after source or Bluetooth disconnection; expose stale data honestly.
 - Exercise extended phone locking without a debugger; record delivery gaps.
 - Keep watch ownership and settings across ordinary firmware upgrades.
@@ -28,7 +28,7 @@ a phone, show delivery status and recover the source service. Its bar panel uses
 Omarchy's native styling and stays small. It does not own the watch's Bluetooth
 connection.
 
-The phone is the primary Paceman app and device manager: activity feed, widgets,
+The phone is the primary Paceman app and device manager: activity feed,
 connected computer, watch pairing/reconnection, pause/resume and watch settings.
 Brightness and alert sound belong on its Watch screen. Workspace appearance
 originates at the desktop and should pass through the phone to the watch without

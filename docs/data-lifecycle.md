@@ -32,15 +32,6 @@ preferences and pairing receipt but retains ownership credentials to allow this
 phone to pair again; it is not a firmware factory reset. Removing a computer
 revokes its client access and clears local pairing/activity state.
 
-## Widget
-
-The app writes one compact activity.json file atomically into its App Group. It
-contains display state, source name, palette and freshness deadlines, not pairing
-credentials or the full session list. File protection allows access after the
-first device unlock. The widget reads this cache and checks freshness; it does not
-open a source connection. Timeline reload requests are not proof of an immediate
-visible widget update.
-
 ## Omarchy source and panel
 
 The source's private hub.sqlite3 stores source identity, hashed pairing tokens and

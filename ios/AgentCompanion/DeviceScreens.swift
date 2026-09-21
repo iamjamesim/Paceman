@@ -60,7 +60,7 @@ struct ComputerDetail: View {
             .navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
             .alert("Display name", isPresented: $rename) {
                 TextField("Name", text: $name)
-                Button("Save") { presentation.setDisplayName(name, source: model.source); model.publishWidget() }
+                Button("Save") { presentation.setDisplayName(name, source: model.source) }
                 Button("Cancel", role: .cancel) {}
             } message: { Text("Shown in Paceman. Doesn’t rename your computer.") }
             .confirmationDialog("Remove \(presentation.displayName(source: model.source))?", isPresented: $remove, titleVisibility: .visible) {

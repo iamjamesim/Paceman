@@ -4,13 +4,13 @@ Paceman connects agent workspaces to personal gear. Work remains in the source
 agent environment; the hub presents current state and relays it to accessories.
 
 ```text
-Omarchy companion events + desktop palette (or synthetic test source)
-            │
-            ▼
-Private source service ── HTTPS snapshot / foreground SSE ──► iPhone ── BLE ──► watch
-            │                                                  │
-            └── optional APNs hint ──► bounded fetch attempt ────┘
-                                                               └── App Group snapshot ──► widgets
+Omarchy events + desktop palette (or synthetic test source)
+    │
+    ▼
+Private source service ── HTTPS snapshot ──► iPhone ── BLE ──► watch
+    │                                                        ▲
+    ├── APNs notification ──► iOS Notification Center ── ANCS ─┘
+    └── ActivityKit push ──► Live Activity / Dynamic Island
 ```
 
 ## Source service
@@ -45,17 +45,17 @@ binds sessions to the Codex ancestor of the kernel-identified hook sender, then
 reconciles PID/start-time/boot identities on startup and about once a second.
 Activity and liveness are separate; a living process can remain Finished or Idle. See [desktop setup](desktop.md).
 
-## iPhone and widgets
+## iPhone and Live Activities
 
 `CompanionModel` coordinates state, fetching and delivery. `SourceClient` handles
 the authenticated API. `WatchLink` handles accessory selection, ownership, BLE
 packets and restoration. `CompanionHome` and `PresentationModel` present current
-sessions and connection state; `ios/Shared/` defines shared widget storage.
+sessions and connection state; `ios/Shared/` defines theme and Live Activity types.
 
 The app has one feed. Workspace setup becomes a status card; watch setup becomes
-a connection row. Settings contains widgets and developer tools. A valid source
-palette is followed automatically. Widgets read shared snapshots and show their
-age; WidgetKit schedules refreshes.
+a connection row. Settings contains notifications and developer tools. A valid
+source palette is followed automatically. The WidgetKit extension hosts Live
+Activities only; there are no Home Screen or Lock Screen status widgets.
 
 ## Watch device package
 

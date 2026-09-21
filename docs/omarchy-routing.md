@@ -2,7 +2,7 @@
 
 The live path is the existing Codex companion → local Paceman event receiver →
 private HTTPS snapshot/SSE → iPhone → phone-owned watch. Paceman also reads the
-resolved Omarchy palette for the phone and widget. It does not own Bluetooth,
+resolved Omarchy palette for the phone. It does not own Bluetooth,
 install agent hooks, read conversations, or forward themes to the watch yet.
 
 ## Prepare the phone
@@ -104,9 +104,8 @@ prove rendering.
 
 Repeat with two sessions: input wins over working, and working wins over finished.
 Resolve/end one session and check that the other remains visible. Change the
-Omarchy theme normally and check phone/widget palette continuity; appearance
-changes must not trigger a new activity alert. Widget refresh timing remains
-controlled by iOS. Watch theme forwarding is still a separate milestone.
+Omarchy theme normally and check phone palette continuity; appearance
+changes must not trigger a new activity alert. Watch theme forwarding is still a separate milestone.
 
 Disconnect/reconnect the source and Bluetooth without re-pairing. Snapshots expire
 on the phone after 30 seconds without source contact. The legacy watch packet

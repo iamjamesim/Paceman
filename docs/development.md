@@ -51,7 +51,7 @@ Emit synthetic transitions from another terminal:
 For locked-phone tests, configure [direct APNs](direct-push-test.md). Leaving SSE
 connected in the foreground does not establish background reliability.
 
-## iPhone and widgets (Mac)
+## iPhone and Live Activities (Mac)
 
 Use full Xcode with support for the connected device OS. Open
 `ios/AgentCompanion.xcodeproj`, select the `AgentCompanion` scheme, and choose an
@@ -68,8 +68,7 @@ xcodebuild -project ios/AgentCompanion.xcodeproj -scheme AgentCompanion \
 Replace SIMULATOR-UDID with an installed simulator. Device signing needs an
 eligible Apple Developer team for APNs. Existing signing identifiers belong to
 the current prototype; changing them can require fresh provisioning and pairing.
-The app and widget must share the same App Group. No private signing keys are
-checked in. A new developer should configure their own provisioning before device use.
+No private signing keys are checked in. A new developer should configure their own provisioning before device use.
 
 After adding/removing Swift files, regenerate with
 `python3 scripts/make-xcode-project.py`. The generator preserves existing per-target
@@ -77,7 +76,7 @@ signing settings; review the resulting diff. Regenerate the icon with
 `swift scripts/make-app-icon.swift` only when its design changes.
 
 DEBUG visual fixtures use `--design-preview`, optionally `--neutral` and
-`--screen=setup|activity|offline|watch-setup|watch-confirm|watch-complete|settings|widgets`.
+`--screen=setup|activity|offline|watch-setup|watch-confirm|watch-complete|settings`.
 Fixtures disable real networking/Bluetooth; release builds ignore these arguments.
 
 ## Watch

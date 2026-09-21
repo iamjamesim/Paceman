@@ -69,17 +69,17 @@ second source while testing the phone.
 3. Extend phone-to-watch profile forwarding for desktop appearance and freshness.
 4. Verify transitions, theme continuity, disconnect/reconnect and prolonged phone
    locking on physical devices; distinguish BLE acceptance from visible rendering.
-5. Polish one watch face and one phone widget before adding platforms or actions.
+5. Polish one watch face and the phone Live Activity before adding platforms or actions.
 
 ## Development environments
 
-Mac: Xcode, phone app/widgets, signing and attached-watch flashing.
+Mac: Xcode, phone app/Live Activities, signing and attached-watch flashing.
 Omarchy: real agent events, desktop appearance, source service and integration tests.
 Both use this repository; credentials and device-specific runtime state stay local.
 
 ## Compatibility
 
-- Preserve existing bundle IDs, App Group, Keychain identity, BLE UUIDs and packet
+- Preserve existing bundle IDs, Keychain identity, BLE UUIDs and packet
   versions unless a deliberate migration is part of the task.
 - The development watch is now phone-paired. Ordinary firmware updates preserve
   NVS; do not erase flash or attempt desktop ownership recovery as a routine step.

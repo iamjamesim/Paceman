@@ -36,7 +36,7 @@ struct AgentCompanionApp: App {
     }
 }
 
-enum FeedDestination: Hashable { case computer, watch, pairing, notifications, settings, widgets, weather, diagnostics }
+enum FeedDestination: Hashable { case computer, watch, pairing, notifications, settings, weather, diagnostics }
 
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
@@ -55,7 +55,6 @@ struct CompanionRoot: View {
                     case .settings: CompanionSettings(model: model, presentation: presentation, theme: theme)
                     case .diagnostics: TransportDiagnostics(model: model)
                     case .weather: WeatherSettings(weather: model.weather, theme: theme)
-                    case .widgets: WidgetGuide(model: model, presentation: presentation, theme: theme)
                     }
                 }
         }
@@ -74,7 +73,6 @@ struct CompanionRoot: View {
                 #endif
                 path = [.watch]
             case "settings": path = [.settings]
-            case "widgets": path = [.settings, .widgets]
             case "pairing", "reconnect": path = [.pairing]
             case "notifications": path = [.notifications]
             case "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off", "watch", "watch-setup", "watch-paired", "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error", "watch-complete": path = [.watch]

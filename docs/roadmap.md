@@ -26,12 +26,12 @@ block watch restoration on solving the final push-service architecture.
    watch events. None guarantees a fixed refresh cadence.
 3. Fix daily-use lifecycle gaps: reconnects, stale agent activity, settings recovery,
    remove/re-pair, and acknowledgments. Test the actual routes we use during alpha.
-4. Build ambient phone monitoring: quiet Live Activities / Dynamic Island, widgets,
+4. Build ambient phone monitoring: quiet Live Activities / Dynamic Island,
    then optional attention alerts. Use independent delivery destinations, shared
    state/freshness semantics, and validate phone/watch divergence with the phone
    locked. See [phone monitoring contract](phone-monitoring.md) for the preference
    matrix, APNs ownership and implementation sequence. First slice is a manual
-   Developer Tools Live Activity probe; product UI and widget push support follow.
+   Developer Tools Live Activity probe; product UI follows.
 
 Alpha is feature complete when the full watch face, its settings, and basic agent
 attention work on this setup, with known background-delivery limitations recorded.

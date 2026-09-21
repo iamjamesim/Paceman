@@ -97,7 +97,6 @@ final class CompanionModel: ObservableObject {
             lastContact = nil
             fetchedUptime = nil
             watch.invalidatePending()
-            publishWidget()
             status = "Computer removed. This phone no longer has access."
             hasError = false
             accessRevoked = false
@@ -132,7 +131,6 @@ final class CompanionModel: ObservableObject {
             PushCoordinator.shared.clearRemovedSource()
         }
         watch.invalidatePending()
-        publishWidget()
     }
 
     func setForeground(_ value: Bool) {
@@ -161,7 +159,6 @@ final class CompanionModel: ObservableObject {
         guard value.observedAt <= Date().timeIntervalSince1970 + 60 else {
             throw HubError.message("Source clock is ahead; synchronize device clocks before testing")
         }
-        let changed = snapshot?.identity != value.identity || snapshot?.appearance != value.appearance || hasError
         snapshot = value
         lastContact = Date()
         fetchedUptime = ProcessInfo.processInfo.systemUptime - age
@@ -170,7 +167,6 @@ final class CompanionModel: ObservableObject {
         status = age < value.freshFor
             ? (value.mode == "synthetic" ? "Connected · synthetic test source" : "Connected · Omarchy")
             : "Catching up · buffered snapshot is stale"
-        publishWidget(reload: changed)
         Diagnostics.shared.record(stage, event: value.identity, state: value.state)
         if age < value.freshFor { watch.forward(value) }
         if let source { monitoring.restore(source: source) }
@@ -238,17 +234,4 @@ final class CompanionModel: ObservableObject {
         UIApplication.shared.endBackgroundTask(watchBackgroundTask)
         watchBackgroundTask = .invalid
     }
-    var widgetState: CompanionWidgetState {
-        let p = PresentationModel()
-        return CompanionWidgetState(paired: source != nil, sourceName: p.displayName(source: source),
-            state: snapshot?.state.rawValue ?? "unknown", updatedAt: snapshot.map { Date(timeIntervalSince1970: $0.observedAt) },
-            freshUntil: hasError ? nil : snapshot.map { Date(timeIntervalSince1970: $0.observedAt + $0.freshFor) },
-            theme: p.theme(source: snapshot?.appearance), synthetic: snapshot?.mode == "synthetic",
-            sessionCount: snapshot?.sessions?.count ?? 0)
-    }
-    func publishWidget(reload: Bool = true) {
-        guard !designPreview else { return }
-        if !CompanionSharedStore.save(widgetState, reload: reload) { Diagnostics.shared.record("widget_cache_unavailable") }
-    }
-
 }

@@ -9,7 +9,6 @@ an explicit preference. This supersedes the roadmap's alerts-first ordering.
 | Surface | Purpose | Presentation |
 | --- | --- | --- |
 | App | Inspect current sessions and manage devices | Full detail, authoritative fetch and explicit freshness |
-| Widget | Persistent glanceable overview | Quiet summary; stale state is visible; never imply continuous delivery |
 | Live Activity / Dynamic Island | Follow a bounded period of work | One workstation summary initially; needs-input precedes working; brief completion; explicit dismissal |
 | Phone alert | Draw attention when requested | Needs-input opt-in; completion separately opt-in; no progress/reconnect sounds |
 | Omarchy Watch | Glance and optional wrist alerts | Existing device-scoped preferences; delivery independent of Live Activities |
@@ -22,8 +21,7 @@ start, end and dismissal policy must be validated before normal UI rollout.
 
 | Situation | Expected behavior |
 | --- | --- |
-| Live Activities disabled or dismissed | App, widgets, alerts and watch remain independent; do not recreate a dismissed activity repeatedly |
-| No widget installed | No degradation to any other destination; no setup warning |
+| Live Activities disabled or dismissed | App, alerts and watch remain independent; do not recreate a dismissed activity repeatedly |
 | Notification permission denied | Quiet monitoring remains available; explain only when enabling alerts |
 | No watch / disconnected watch | Phone monitoring works; retain newest watch state for catch-up, not alert backlog |
 | Watch updates off | Stop that receiver only; phone monitoring continues |
@@ -33,7 +31,7 @@ start, end and dismissal policy must be validated before normal UI rollout.
 | Source unavailable | Preserve last observation as historical; expire freshness on every surface |
 | Phone force-quit / no network | No promise of app execution or accessory forwarding; reconcile on return |
 
-Widget presence, Live Activity existence and Bluetooth connection are not evidence
+Live Activity existence and Bluetooth connection are not evidence
 that a person saw an event. Do not silently suppress opted-in alerts based on them.
 One attention event must not cause both a Live Activity alert and an ordinary
 phone notification. Foreground haptics and system notification sounds are distinct;
@@ -49,7 +47,7 @@ No prompts, transcripts, paths or account credentials in APNs display payloads.
 A Live Activity needs display state in the push; a fetch-only hint cannot update it.
 
 Destinations are independent: app background token, per-activity update token,
-future push-to-start token, and supported widget push tokens are not interchangeable.
+and future push-to-start tokens are not interchangeable.
 Pairing credentials authorize registration and removal. Receiver removal/revocation
 must remove associated destinations. Token rotation resets destination state.
 
@@ -58,8 +56,7 @@ acceptance is not proof of display or execution. On recovery send newest state;
 never replay obsolete attention events. Use expiry and bounded retry/coalescing.
 Live Activity freshness is explicit and can expire without an app callback.
 
-Existing background pushes remain opportunistic and separately throttled. A Live
-Activity update does not imply the app ran or updated its widget cache/watch.
+A Live Activity update does not imply the app ran or updated the watch.
 The callback-only custom-watch route failed a locked-phone run: it fetched only
 after a notification tap. Its replacement integrates ANCS: iOS delivers the
 notification to the watch, which emits a BLE request for authoritative state.
@@ -97,15 +94,14 @@ APNs-to-BLE path before treating the earlier sequence below as complete.
 
 1. Quiet, manually started Live Activity in Developer Tools; independent token
    registration and direct APNs updates. Prove locked-phone updates before product UI.
-2. Refine Island/Lock Screen/widget states together: working, needs-input, finished,
+2. Refine Island/Lock Screen states together: working, needs-input, finished,
    idle, stale, multiple sessions; choose bounded activity lifetime/start/dismissal.
-3. Add widget push updates where supported; keep timeline/cache fallback on older OS.
-4. Add optional phone attention and one-event/one-alert behavior.
-5. Measure watch catch-up alongside each phone surface; revisit system refresh policy.
-6. Minimal relay before distributing our signed app to outside users.
+3. Add optional phone attention and one-event/one-alert behavior.
+4. Measure watch catch-up alongside each phone surface; revisit system refresh policy.
+5. Minimal relay before distributing our signed app to outside users.
 
 Test each surface alone, all together, Live Activities denied, notifications denied,
-no widget, watch off/disconnected, source restart, token rotation, dismissal, removal,
+watch off/disconnected, source restart, token rotation, dismissal, removal,
 phone lock/force-quit/relaunch, network loss, duplicate/out-of-order events and expiry.
 
 ## Apple references
