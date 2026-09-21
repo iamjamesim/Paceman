@@ -135,20 +135,18 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
-    func testStalledCancellationRebuildsOnlyAnEnabledPairedConnection() {
-        for state in [CBPeripheralState.connecting, .disconnecting] {
-            XCTAssertTrue(WatchConnectionStep.shouldRebuildAfterCancellation(enabled: true,
-                paired: true, poweredOn: true, ready: false, state: state))
-            for flags in [(false, true, true, false), (true, false, true, false),
-                          (true, true, false, false), (true, true, true, true)] {
-                XCTAssertFalse(WatchConnectionStep.shouldRebuildAfterCancellation(enabled: flags.0,
-                    paired: flags.1, poweredOn: flags.2, ready: flags.3, state: state))
-            }
+    func testWatchIsReadyOnlyAfterItsRequiredChannelsAreSubscribed() {
+        func ready(_ validated: Bool = true, _ activity: Bool = true,
+                   syncRequired: Bool = true, sync: Bool = true) -> Bool {
+            WatchChannelReadiness.resolve(activityValidated: validated,
+                activitySubscribed: activity, notificationSyncRequired: syncRequired,
+                notificationSyncSubscribed: sync)
         }
-        for state in [CBPeripheralState.connected, .disconnected] {
-            XCTAssertFalse(WatchConnectionStep.shouldRebuildAfterCancellation(enabled: true,
-                paired: true, poweredOn: true, ready: false, state: state))
-        }
+        XCTAssertTrue(ready())
+        XCTAssertTrue(ready(syncRequired: false, sync: false))
+        XCTAssertFalse(ready(false))
+        XCTAssertFalse(ready(true, false))
+        XCTAssertFalse(ready(sync: false))
     }
 
     func testNotificationDeliveryRecoveryStates() {

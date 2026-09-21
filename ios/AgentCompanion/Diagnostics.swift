@@ -10,7 +10,8 @@ final class Diagnostics {
     }
     func record(_ stage: String, event: String? = nil, state: ActivityState? = nil,
                 revision: UInt32? = nil, sequence: UInt32? = nil, contentAvailable: Bool? = nil) {
-        // Fixed labels, state enums and counters only; never payload text, credentials, URLs or errors.
+        // Fixed labels, state enums and counters only; never payload text,
+        // credentials, URLs, or localized error descriptions.
         var entry: [String: Any] = ["at": Date().timeIntervalSince1970,
                                   "uptime": ProcessInfo.processInfo.systemUptime, "stage": stage]
         if let event { entry["event"] = event }
@@ -18,6 +19,21 @@ final class Diagnostics {
         if let revision { entry["watchRevision"] = revision }
         if let sequence { entry["notificationSequence"] = sequence }
         if let contentAvailable { entry["contentAvailable"] = contentAvailable }
+        append(entry)
+    }
+
+    func recordBluetoothError(_ stage: String, error: Error?) {
+        let nsError = error as NSError?
+        append([
+            "at": Date().timeIntervalSince1970,
+            "uptime": ProcessInfo.processInfo.systemUptime,
+            "stage": stage,
+            "errorDomain": nsError?.domain ?? "unknown",
+            "errorCode": nsError?.code ?? 0,
+        ])
+    }
+
+    private func append(_ entry: [String: Any]) {
         guard var data = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]) else { return }
         data.append(10)
         queue.sync {

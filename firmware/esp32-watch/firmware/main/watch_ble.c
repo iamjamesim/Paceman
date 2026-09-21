@@ -615,7 +615,10 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         if (event->enc_change.status == 0) {
             watch_ancs_connected(event->enc_change.conn_handle);
             activity_conn_handle = event->enc_change.conn_handle;
-            queue_connection_update(true);
+            /* Encryption establishes the shared BLE/ANCS link. The watch is not
+             * ready for Paceman updates until the app subscribes to the activity
+             * channel during its authenticated handshake. */
+            queue_connection_update(false);
             if (watch_owned && event->enc_change.conn_handle != idle_params_conn_handle) {
                 request_idle_connection_parameters(event->enc_change.conn_handle);
             }
@@ -627,6 +630,12 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_SUBSCRIBE:
+        if (event->subscribe.attr_handle == activity_attr_handle) {
+            bool ready = event->subscribe.cur_notify != 0;
+            ESP_LOGI(TAG, "Activity subscription notify=%u reason=%u",
+                     event->subscribe.cur_notify, event->subscribe.reason);
+            queue_connection_update(ready);
+        }
         if (event->subscribe.attr_handle == sync_attr_handle) {
             ESP_LOGI(TAG, "Notification sync subscription notify=%u reason=%u",
                      event->subscribe.cur_notify, event->subscribe.reason);
