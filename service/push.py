@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -74,9 +75,13 @@ def notification(source_id: str, generation: str, event: dict, mode: str, now: f
             aps["sound"] = "default"
     payload = {"aps": aps, "companion": {"schema": 1, "sourceID": source_id,
                "generation": generation, "eventID": str(event["seq"]), "revision": event["seq"]}}
+    # Retain distinct activity events in Notification Center. Retries reuse the
+    # same identity; thread-id groups events without replacing earlier entries.
+    identity = json.dumps([source_id, generation, str(event["seq"])], separators=(",", ":"))
+    collapse_id = hashlib.sha256(identity.encode()).hexdigest() if mode == "alert" else source_id
     headers = {"apns-push-type": mode, "apns-priority": "10" if mode == "alert" else "5",
                "apns-expiration": str(int(min(now + 300, event["at"] + 300))),
-               "apns-collapse-id": source_id, "apns-id": str(uuid.uuid4())}
+               "apns-collapse-id": collapse_id, "apns-id": str(uuid.uuid4())}
     return payload, headers
 
 

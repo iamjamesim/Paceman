@@ -1,34 +1,50 @@
 # Desktop notification delivery handoff
 
-Use the existing trusted Omarchy source and APNs worker. This update adds passive
-working/idle notifications to the same delivery path already used for attention
-alerts. There is no watch polling, new service, new key, database migration or
-experimental command-line flag.
+## Notification identity
 
-1. Update the checkout to the shared revision and deploy the updated `service/`
-   package to the path used by the running worker. The source and worker must use
-   the existing source database. Do not start a second source or replace pairing.
-2. Restart the existing APNs worker with its existing config and data-directory
-   arguments. Inspect its actual executable/working directory; updating the
-   checkout alone does not reload an already-running Python process.
-3. Verify the installed sender uses Paceman in the notification body. Keep the
-   retained private APNs config/key in place; do not print or commit their contents.
-4. The phone remains registered in `alert` mode. In the current iPhone UI this is
-   **Settings → Developer tools → Push delivery → Notifications**. Older installed
-   builds label it **Alert + wake request**. No re-pairing is needed.
-5. With the phone locked, trigger Working → Needs input → Working → Finished →
-   Idle, holding each state for at least 15 seconds. Observe the watch without
-   tapping it or opening the phone. Working/Idle should be passive notification-list
-   entries; Needs input/Finished retain their normal alert presentation.
-6. Match the source's event identity and `presentation` field to the phone callback,
-   fetch and BLE-write records. Repeat after longer idle periods and on cellular.
-   A received notification alone does not prove a watch update.
+Visible notifications now use an APNs collapse ID derived from source,
+generation and event sequence. Different activity events remain separate entries
+in Notification Center; retries of the same event reuse its identity. The
+source's `thread-id` groups these entries together. Working/Idle remain passive;
+Needs input/Finished retain their existing alert behavior.
 
-The first visible Finished baseline succeeded with the phone backgrounded for
-approximately four minutes. Sustained and passive delivery remain to be verified.
-For the initial isolation run, leave foreground streaming and the Live Activity
-stopped. Then re-enable the Live Activity and compare both surfaces. The Live
-Activity is display-only delivery; it does not itself forward to the BLE watch.
+Background-only delivery and Live Activities are unchanged. The worker still
+coalesces unsent intermediate states and expires old events, so the notification
+list is a recent activity trail rather than a complete history.
+
+The change also avoids depending on replacement notifications generating ANCS
+modifications for the custom watch. End-to-end watch delivery remains unverified;
+the automated tests verify notification identity, retry and grouping behavior.
+
+## Deployment
+
+1. Apply the shared commit to the Omarchy checkout and deploy `service/push.py`
+   to the path used by the existing APNs worker. Inspect its executable and
+   working directory; updating the checkout alone does not reload the worker.
+2. Preserve any local notification-only isolation change to `content-available`
+   so this comparison changes only notification identity.
+3. Restart the existing worker with its existing config, key and data-directory
+   arguments. Keep private files in place. No new service, database migration,
+   key, phone registration or firmware installation is needed for this change.
+4. The phone should remain registered in **Notifications** mode under
+   **Settings → Developer tools → Push delivery**.
+
+## Validation
+
+With the phone locked and Focus off, run two Working → Finished cycles, holding
+each state for at least 15 seconds. Keep notification and watch diagnostics
+recording throughout; do not tap notifications or open the app during the run.
+
+- Distinct events should appear as separate notifications in the same group.
+- Working should remain passive; Finished should retain its alert behavior.
+- Each watch update must have a matching ANCS receipt, phone fetch/BLE write and
+  firmware-applied state. APNs acceptance or phone presentation alone is not proof
+  of watch delivery.
+- A retry of the same event must retain the same collapse ID.
+
+Repeat after longer idle periods and with the Live Activity enabled before
+claiming reliable delivery. Keep keys, destination tokens and raw device logs out
+of the repository.
 
 [Delivery policy and validation](direct-push-test.md) ·
 [Phone monitoring design](phone-monitoring.md)

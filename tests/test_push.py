@@ -136,6 +136,36 @@ class PushWorkerTests(unittest.TestCase):
         self.assertEqual(aps["interruption-level"], "passive")
         self.assertNotIn("sound", aps)
 
+    def test_repeated_working_finished_cycles_have_distinct_notification_identities(self):
+        for at, state in ((100, "working"), (120, "finished"), (140, "working"), (160, "finished")):
+            self.emit(state, at)
+            self.worker.step(at)
+        identities = [call[2]["apns-collapse-id"] for call in self.sender.calls]
+        self.assertEqual(len(identities), 4)
+        self.assertEqual(len(set(identities)), 4)
+        self.assertTrue(all(len(value.encode()) <= 64 for value in identities))
+        self.assertEqual(len({call[1]["aps"]["thread-id"] for call in self.sender.calls}), 1)
+
+    def test_retry_after_restart_reuses_notification_identity(self):
+        self.emit("finished", 100)
+        self.sender.result = Result(503, "ServiceUnavailable", "retry-id")
+        self.worker.step(100)
+        self.sender.result = Result(200, "Accepted", "accepted-id")
+        Worker(Store(self.store.path), self.sender, self.log).step(111)
+        self.assertEqual(len(self.sender.calls), 2)
+        self.assertEqual(self.sender.calls[0][2]["apns-collapse-id"], self.sender.calls[1][2]["apns-collapse-id"])
+
+    def test_notification_identity_is_scoped_to_source_and_generation(self):
+        event = {"seq": 1, "state": "finished", "at": 100}
+        identities = {
+            notification(source, generation, event, "alert", 100)[1]["apns-collapse-id"]
+            for source, generation in (("source-a", "generation-a"), ("source-b", "generation-a"),
+                                       ("source-a", "generation-b"))
+        }
+        self.assertEqual(len(identities), 3)
+        background = notification("source-a", "generation-a", event, "background", 100)[1]
+        self.assertEqual(background["apns-collapse-id"], "source-a")
+
     def test_notification_policy_preserves_silent_registration_and_limit(self):
         self.register("background")
         worker = Worker(self.store, self.sender, self.log)
