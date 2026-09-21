@@ -1,50 +1,46 @@
 # Desktop notification delivery handoff
 
-## Notification identity
+## Notification setup and presentation preference
 
-Visible notifications now use an APNs collapse ID derived from source,
-generation and event sequence. Different activity events remain separate entries
-in Notification Center; retries of the same event reuse its identity. The
-source's `thread-id` groups these entries together. Working/Idle remain passive;
-Needs input/Finished retain their existing alert behavior.
+The phone exposes Settings → Notifications and watch setup/recovery guidance.
+The source stores optional `presentation` per push destination (`quiet` or
+`alerts`, default `alerts` for older clients) and acknowledges its effective value.
+Quiet makes all states passive without sound. Alerts keeps Working/Idle passive
+and permits Needs input/Finished to interrupt, subject to iOS settings. Both modes
+retain Notification Center entries for ANCS. Deploy the matching source before testing this preference on the phone.
 
-Background-only delivery and Live Activities are unchanged. The worker still
-coalesces unsent intermediate states and expires old events, so the notification
-list is a recent activity trail rather than a complete history.
-
-The change also avoids depending on replacement notifications generating ANCS
-modifications for the custom watch. End-to-end watch delivery remains unverified;
-the automated tests verify notification identity, retry and grouping behavior.
+Notification copy uses the event's source name, known provider, and session states.
+It does not include prompts, paths, task names, or arbitrary event labels. Finished
+means a turn finished. Multi-session titles use counts and the body supplies the
+computer and other-state counts without repeating the title.
 
 ## Deployment
 
-1. Apply the shared commit to the Omarchy checkout and deploy `service/push.py`
-   to the path used by the existing APNs worker. Inspect its executable and
-   working directory; updating the checkout alone does not reload the worker.
-2. Preserve any local notification-only isolation change to `content-available`
-   so this comparison changes only notification identity.
-3. Restart the existing worker with its existing config, key and data-directory
-   arguments. Keep private files in place. No new service, database migration,
-   key, phone registration or firmware installation is needed for this change.
-4. The phone should remain registered in **Notifications** mode under
-   **Settings → Developer tools → Push delivery**.
+Update both `service/hub.py` and `service/push.py` through the existing desktop
+installation flow and restart the existing source service and APNs worker. The
+Store initialization adds a `presentation` column with a default preserving existing
+behavior. Keep the existing database, pairing, APNs key/config and worker arguments.
+No new key or re-pairing is needed. Reopening phone notification settings syncs its
+saved preference. Nothing is automatically pushed or deployed by this handoff.
 
-## Validation
+Preserve the remote content-available isolation choice for the ANCS test; changing
+notification text/presentation does not require changing the wake experiment.
 
-With the phone locked and Focus off, run two Working → Finished cycles, holding
-each state for at least 15 seconds. Keep notification and watch diagnostics
-recording throughout; do not tap notifications or open the app during the run.
+## Acceptance
 
-- Distinct events should appear as separate notifications in the same group.
-- Working should remain passive; Finished should retain its alert behavior.
-- Each watch update must have a matching ANCS receipt, phone fetch/BLE write and
-  firmware-applied state. APNs acceptance or phone presentation alone is not proof
-  of watch delivery.
-- A retry of the same event must retain the same collapse ID.
+- Quiet: all states appear as passive entries without phone sound; watch alerts
+  remain controlled by the watch preference.
+- Alerts: Needs input/Finished request active presentation and sound, subject to
+  iOS settings. Working/Idle remain passive.
+- Distinct events remain separate entries grouped by source; retries preserve
+  event identity. Changing presentation must not skip a pending activity.
+- Denied-before-pairing and revoked-after-setup lead to Settings. Returning
+  rechecks notification authorization and Notification Center availability.
+- Sharing off leads to Settings → Bluetooth → Omarchy Watch instructions;
+  disconnected watches do not report sharing as denied from cached state.
 
-Repeat after longer idle periods and with the Live Activity enabled before
-claiming reliable delivery. Keep keys, destination tokens and raw device logs out
-of the repository.
+Seven successive custom-watch background updates passed the prior distinct-event
+run. Unattended reconnect/extended idle and the new presentation/permission round trips
+still require physical acceptance. See [bluetooth-lifecycle.md](bluetooth-lifecycle.md).
 
-[Delivery policy and validation](direct-push-test.md) ·
-[Phone monitoring design](phone-monitoring.md)
+Keep keys, destination tokens and raw device logs out of the repository.

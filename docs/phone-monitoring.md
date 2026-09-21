@@ -1,7 +1,7 @@
 # Phone monitoring and delivery contract
 
-Status: accepted direction, implementation in slices. First audience can use an
-ordinary iPhone without a watch. Calm monitoring is the default; interruption is
+Status: accepted direction, implementation in slices. Phone monitoring does not
+require a watch. Calm monitoring is the default; interruption is
 an explicit preference. This supersedes the roadmap's alerts-first ordering.
 
 ## Surface responsibilities
