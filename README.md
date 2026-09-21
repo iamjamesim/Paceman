@@ -31,6 +31,7 @@ protocol are retained; see its [provenance](firmware/esp32-watch/UPSTREAM.md).
 - [Next milestones](docs/roadmap.md): phone identity, delivery status, background setup and adapter packaging.
 - [Setup](docs/development.md): source, private networking, iPhone and watch.
 - [Omarchy routing test](docs/omarchy-routing.md): connect existing desktop events to the phone.
+- [System lifecycle map](docs/system-lifecycle.md): state ownership, freshness and recovery.
 - [Architecture](docs/architecture.md): component boundaries and data flow.
 - [Protocol](docs/protocol.md): source API and phone-to-watch contract.
 - [Validation](docs/validation.md): verified behavior and remaining device tests.
