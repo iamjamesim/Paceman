@@ -53,23 +53,15 @@ struct TransportDiagnostics: View {
             Section("Push delivery") {
                 Text(push.status)
                 if push.enabled {
-                    Picker("Delivery", selection: Binding(get: { push.mode }, set: { mode in
-                        Task { await push.changeMode(mode) }
-                    })) {
-                        Text("Notifications").tag("alert")
-                        Text("Background only").tag("background")
-                    }.disabled(push.busy)
                     Button("Retry registration") { Task { await push.sync() } }.disabled(push.busy || model.source == nil)
                     Button("Disable push") { Task { await push.disable() } }.disabled(push.busy)
                 } else {
-                    Button("Enable background updates") {
+                    Button("Enable notifications") {
                         model.setStreaming(false)
-                        Task { await push.enable() }
+                        Task { await push.enableNotifications() }
                     }.disabled(model.source == nil || push.busy)
                 }
-                Text(push.mode == "background"
-                    ? "Background updates are best effort and limited by the sender to three attempts per hour. No notification is shown."
-                    : "Needs input and Finished can alert you. Working and Idle appear quietly in the notification list. With notification sharing enabled, the watch requests the latest activity when a Paceman notification arrives.")
+                Text("Notifications trigger watch synchronization through ANCS. Quiet and Alerts control phone presentation.")
                     .font(.caption).foregroundStyle(.secondary)
                 Text("Keep streaming off during the locked-phone test. APNs acceptance, app wake, fetch, and watch write are separate log entries.")
                     .font(.caption).foregroundStyle(.secondary)

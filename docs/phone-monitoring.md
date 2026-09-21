@@ -68,8 +68,7 @@ There is no accessory polling. Physical acceptance testing is still required. Wi
 working/idle transitions use passive notifications, while needs-input and finished
 use attention notifications. Passive entries remain in the notification list.
 This alpha tradeoff does not establish guaranteed app execution or fully hidden
-status delivery. Background-only mode remains available without alert permission, but cannot drive
-ANCS. The preference matrix above describes product intent; notification-free
+status delivery. The preference matrix above describes product intent; notification-free
 continuous custom-watch delivery is not implemented. Notification sharing and
 Notification Center delivery are requirements for this path. See
 `docs/direct-push-test.md` for setup, limitations and acceptance criteria.

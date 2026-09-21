@@ -63,7 +63,7 @@ class PushWorkerTests(unittest.TestCase):
         for presentation in ("quiet", "alerts"):
             for state in ("working", "idle", "needs_input", "finished"):
                 with self.subTest(presentation=presentation, state=state):
-                    payload, headers = notification("source", "generation", {"seq": 1, "at": 100, "state": state}, "alert", 100, presentation=presentation)
+                    payload, headers = notification("source", "generation", {"seq": 1, "at": 100, "state": state}, 100, presentation=presentation)
                     passive = presentation == "quiet" or state in ("working", "idle")
                     self.assertIn("alert", payload["aps"])
                     self.assertNotIn("content-available", payload["aps"])
@@ -75,7 +75,7 @@ class PushWorkerTests(unittest.TestCase):
         event = {"seq": 1, "at": 100, "state": "finished", "label": "secret prompt",
                  "payload": json.dumps({"sourceName": "Omarchy", "sessions": [
                      {"provider": "codex", "state": "finished", "id": "secret/path"}]})}
-        payload, _ = notification("source", "generation", event, "alert", 100)
+        payload, _ = notification("source", "generation", event, 100)
         self.assertEqual(payload["aps"]["alert"], {"title": "Codex finished its turn", "body": "Omarchy"})
         self.assertNotIn("secret", json.dumps(payload))
         event["state"] = "needs_input"
@@ -83,7 +83,7 @@ class PushWorkerTests(unittest.TestCase):
             {"provider": "codex", "state": "needs_input"},
             {"provider": "claude", "state": "needs_input"},
             {"provider": "codex", "state": "working"}]})
-        payload, _ = notification("source", "generation", event, "alert", 100)
+        payload, _ = notification("source", "generation", event, 100)
         self.assertEqual(payload["aps"]["alert"]["title"], "2 sessions need input")
         self.assertEqual(payload["aps"]["alert"]["body"], "Omarchy · 1 working")
 
@@ -203,25 +203,28 @@ class PushWorkerTests(unittest.TestCase):
     def test_notification_identity_is_scoped_to_source_and_generation(self):
         event = {"seq": 1, "state": "finished", "at": 100}
         identities = {
-            notification(source, generation, event, "alert", 100)[1]["apns-collapse-id"]
+            notification(source, generation, event, 100)[1]["apns-collapse-id"]
             for source, generation in (("source-a", "generation-a"), ("source-b", "generation-a"),
                                        ("source-a", "generation-b"))
         }
         self.assertEqual(len(identities), 3)
-        background = notification("source-a", "generation-a", event, "background", 100)[1]
-        self.assertEqual(background["apns-collapse-id"], "source-a")
 
-    def test_notification_policy_preserves_silent_registration_and_limit(self):
-        self.register("background")
-        worker = Worker(self.store, self.sender, self.log)
+    def test_retired_background_registration_requires_notification_opt_in(self):
+        with self.assertRaises(ValueError):
+            self.register("background")
+        # Simulate a database left by the old silent-only transport.
+        with self.store.connect() as db:
+            db.execute("UPDATE push_devices SET mode='background'")
+        migrated = Store(self.store.path)
+        self.assertEqual(migrated.push_device(self.client["credential"]), {"registered": False})
         self.emit("working", 100)
-        worker.step(100)
-        _, payload, headers, _ = self.sender.calls[0]
-        self.assertEqual(payload["aps"], {"content-available": 1})
-        self.assertEqual(headers["apns-push-type"], "background")
-        self.emit("working", 110)
-        worker.step(110)
+        Worker(migrated, self.sender, self.log).step(100)
+        self.assertFalse(self.sender.calls)
+        self.register()
+        self.emit("finished", 110)
+        Worker(migrated, self.sender, self.log).step(110)
         self.assertEqual(len(self.sender.calls), 1)
+        self.assertEqual(self.sender.calls[0][2]["apns-push-type"], "alert")
 
     def test_expired_progress_is_dropped(self):
         self.emit("working", 100)
@@ -238,21 +241,6 @@ class PushWorkerTests(unittest.TestCase):
         self.sender.result = Result(410, "Unregistered", "invalid-id")
         self.worker.step(100)
         self.assertEqual(self.store.push_device(self.client["credential"]), {"registered": False})
-
-    def test_background_only_has_no_alert_and_limits_attempt_frequency(self):
-        self.register("background")
-        self.emit("working", 100)
-        self.worker.step(100)
-        _, payload, headers, _ = self.sender.calls[0]
-        self.assertEqual(payload["aps"], {"content-available": 1})
-        self.assertEqual(headers["apns-push-type"], "background")
-        self.assertEqual(headers["apns-priority"], "5")
-        self.emit("finished", 1000)
-        self.worker.step(1200)
-        self.assertEqual(len(self.sender.calls), 1)
-        self.emit("needs_input", 1301)
-        self.worker.step(1301)
-        self.assertEqual(len(self.sender.calls), 2)
 
     def test_destination_token_rotation_preserves_new_destination_on_old_failure(self):
         self.emit("needs_input")
@@ -289,7 +277,7 @@ class APNsProtocolTests(unittest.TestCase):
             return self.httpx.Response(200)
         sender = APNs(self.config, self.httpx.Client(transport=self.httpx.MockTransport(handle)))
         self.addCleanup(sender.close)
-        payload, headers = notification("source", "generation", {"seq": 1, "state": "finished", "at": 100}, "alert", 100)
+        payload, headers = notification("source", "generation", {"seq": 1, "state": "finished", "at": 100}, 100)
         device = {"token": "ab" * 32, "environment": "development"}
         self.assertEqual(sender.send(device, payload, headers, 100).status, 200)
         request = calls[0]

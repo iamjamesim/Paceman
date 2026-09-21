@@ -33,11 +33,9 @@ Passive entries additionally set `interruption-level: passive`
 and omit sound. The foreground app handles passive updates without presenting a
 banner, sound or list entry. This does not suppress their background presentation.
 
-Background-only mode remains available without alert permission. It sends no
-visible notification and retains the sender's 1201-second minimum between attempts.
-Notification mode uses a 10-second minimum. Both modes coalesce pending activity
-to the newest event, discard events older than five minutes, and retry transient
-failures with backoff. Appearance-only changes do not generate activity alerts.
+Notification delivery uses a 10-second minimum between attempts. It coalesces
+pending activity to the newest event, discards events older than five minutes,
+and retries transient failures with backoff. Appearance-only changes do not generate activity alerts.
 A process crash can duplicate a send; this is not an exactly-once protocol.
 
 APNs acceptance, notification presentation, app execution and watch rendering are

@@ -24,7 +24,7 @@ class MonitoringTests(unittest.TestCase):
         return self.store.live_activity(self.credential, self.payload)
 
     def test_registration_is_independent_and_removal_is_scoped(self):
-        self.store.push_device(self.credential, {'deviceToken': 'cd'*32, 'environment': 'development', 'mode': 'background'})
+        self.store.push_device(self.credential, {'deviceToken': 'cd'*32, 'environment': 'development', 'mode': 'alert'})
         self.register()
         self.store.live_activity(self.credential, {'activityID': 'older-activity', 'action': 'remove'})
         self.worker.step()

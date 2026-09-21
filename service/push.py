@@ -81,31 +81,25 @@ def notification_copy(event: dict) -> dict:
     return {"title": titles[event["state"]], "body": body}
 
 
-def notification(source_id: str, generation: str, event: dict, mode: str, now: float, presentation: str = "alerts") -> tuple[dict, dict]:
+def notification(source_id: str, generation: str, event: dict, now: float, presentation: str = "alerts") -> tuple[dict, dict]:
     """Push contains a hint only. The paired HTTPS source remains authoritative."""
-    if mode not in ("alert", "background"):
-        raise ValueError("Unknown push mode")
-    # Notification delivery reaches the accessory through ANCS. Background-only
-    # delivery remains a separate, opportunistic mode.
-    aps = {"content-available": 1} if mode == "background" else {}
-    if mode == "alert":
-        if presentation not in ("quiet", "alerts"):
-            raise ValueError("Unknown notification presentation")
-        passive = presentation == "quiet" or event["state"] in ("working", "idle")
-        if event["state"] not in ("working", "idle", "needs_input", "finished"):
-            raise ValueError("Unknown activity state")
-        aps.update({"alert": notification_copy(event), "thread-id": source_id})
-        if passive:
-            aps["interruption-level"] = "passive"
-        else:
-            aps["sound"] = "default"
+    if presentation not in ("quiet", "alerts"):
+        raise ValueError("Unknown notification presentation")
+    if event["state"] not in ("working", "idle", "needs_input", "finished"):
+        raise ValueError("Unknown activity state")
+    passive = presentation == "quiet" or event["state"] in ("working", "idle")
+    aps = {"alert": notification_copy(event), "thread-id": source_id}
+    if passive:
+        aps["interruption-level"] = "passive"
+    else:
+        aps["sound"] = "default"
     payload = {"aps": aps, "companion": {"schema": 1, "sourceID": source_id,
                "generation": generation, "eventID": str(event["seq"]), "revision": event["seq"]}}
     # Retain distinct activity events in Notification Center. Retries reuse the
     # same identity; thread-id groups events without replacing earlier entries.
     identity = json.dumps([source_id, generation, str(event["seq"])], separators=(",", ":"))
-    collapse_id = hashlib.sha256(identity.encode()).hexdigest() if mode == "alert" else source_id
-    headers = {"apns-push-type": mode, "apns-priority": "10" if mode == "alert" else "5",
+    collapse_id = hashlib.sha256(identity.encode()).hexdigest()
+    headers = {"apns-push-type": "alert", "apns-priority": "10",
                "apns-expiration": str(int(min(now + 300, event["at"] + 300))),
                "apns-collapse-id": collapse_id, "apns-id": str(uuid.uuid4())}
     return payload, headers
@@ -202,12 +196,11 @@ class Worker:
                 current = db.execute("SELECT * FROM push_devices WHERE client_id=?", (device["client_id"],)).fetchone()
             if current is None or dict(current) != device:
                 continue
-            payload, headers = notification(source_id, generation, event, device["mode"], now, presentation=device["presentation"])
+            payload, headers = notification(source_id, generation, event, now, presentation=device["presentation"])
             result = self.sender.send(device, payload, headers, now)
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             retry = result.status in (0, 429, 500, 503) or result.reason == "ExpiredProviderToken"
-            # Background-only delivery is deliberately capped at <= 3 attempts/hour.
-            minimum = 1201 if device["mode"] == "background" else 10
+            minimum = 10
             delay = max(minimum, min(300, 10 * 2 ** min(device["attempts"], 5))) if retry else minimum
             if result.reason == "EnvironmentMismatch":
                 retry, delay = True, max(minimum, 300)
@@ -224,8 +217,7 @@ class Worker:
                                 device["client_id"], device["token"], device["mode"]))
             self.log({"at": now, "event": f"{source_id}/{generation}/{event['seq']}",
                       "clientID": device["client_id"], "mode": device["mode"],
-                      "presentation": ("none" if device["mode"] == "background" else
-                                       payload["aps"].get("interruption-level", "active")),
+                      "presentation": payload["aps"].get("interruption-level", "active"),
                       "stage": "apns_accepted" if result.status == 200 else "apns_failed",
                       "status": result.status, "reason": result.reason, "apnsID": result.apns_id})
 

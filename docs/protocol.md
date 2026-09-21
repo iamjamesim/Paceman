@@ -117,12 +117,13 @@ methods require the same paired `Authorization: Bearer …` credential as snapsh
 reads. The server derives ownership from that credential; callers cannot select
 another client ID. These are private Tailscale endpoints, not a public relay API.
 
-- `POST`: `{ "deviceToken": "lowercase hex", "environment": "development" | "production", "mode": "alert" | "background", "presentation": "quiet" | "alerts" }`.
+- `POST`: `{ "deviceToken": "lowercase hex", "environment": "development" | "production", "mode": "alert", "presentation": "quiet" | "alerts" }`.
   `presentation` is optional and defaults to `alerts` for older clients. Changing it preserves
   the delivery cursor and pending work; it applies only to attention notifications.
   Validated payloads upsert that client's destination. Re-registering an unchanged
-  token preserves pending work and retry state. A changed token or mode starts
+  token preserves pending work and retry state. A changed token or environment starts
   after the current event, avoiding historical alert replay.
+  The wire field `mode` remains fixed at `alert`; background-only registrations are rejected.
 - `GET`: returns `registered`, and when present `environment`, `mode`,
   `presentation`, `lastResult`, `lastAPNsID`. POST also returns the effective presentation value
   so the phone can detect older servers that do not support the preference. Never returns a destination token.

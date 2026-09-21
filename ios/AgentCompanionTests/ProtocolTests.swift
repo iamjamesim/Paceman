@@ -153,9 +153,9 @@ final class ProtocolTests: XCTestCase {
 
     func testNotificationDeliveryRecoveryStates() {
         func state(_ auth: UNAuthorizationStatus?, _ center: UNNotificationSetting? = .enabled,
-                   enabled: Bool = true, mode: String = "alert", source: Bool = true,
+                   enabled: Bool = true, source: Bool = true,
                    busy: Bool = false, registered: Bool = true) -> NotificationDeliveryStep {
-            .resolve(authorization: auth, center: center, enabled: enabled, mode: mode,
+            .resolve(authorization: auth, center: center, enabled: enabled,
                      source: source, busy: busy, registered: registered)
         }
         XCTAssertEqual(state(nil), .checking)
@@ -163,13 +163,12 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(state(.denied, source: false, busy: true), .denied)
         XCTAssertEqual(state(.authorized, .disabled), .notificationCenter)
         XCTAssertEqual(state(.authorized, enabled: false), .enable)
-        XCTAssertEqual(state(.authorized, mode: "background"), .enable)
         XCTAssertEqual(state(.authorized, source: false), .computer)
         XCTAssertEqual(state(.authorized, busy: true), .registering)
         XCTAssertEqual(state(.authorized, registered: false), .retry)
         XCTAssertEqual(state(.authorized), .ready)
         XCTAssertEqual(state(.provisional), .ready)
-        // Re-enabling permission recovers the same saved mode; no second opt-in.
+        // Re-enabling permission recovers the saved preference; no second opt-in.
         XCTAssertEqual(state(.denied), .denied)
         XCTAssertEqual(state(.authorized), .ready)
     }
@@ -223,15 +222,6 @@ final class ProtocolTests: XCTestCase {
         let expired = Invitation(schema: 1, endpoint: "https://host.example", sourceID: UUID().uuidString,
                                 invitation: String(repeating: "x", count: 43), expiresAt: 100)
         XCTAssertThrowsError(try expired.validatedURL(now: Date(timeIntervalSince1970: 100)))
-    }
-
-    func testSilentPushSetupDoesNotRequireAlertAuthorization() {
-        for authorization: UNAuthorizationStatus in [.notDetermined, .denied, .authorized] {
-            XCTAssertEqual(NotificationSetupStep.resolve(authorization: authorization, enabled: true,
-                registered: true, busy: false, awaitingToken: false, attempted: true, mode: "background"), .ready)
-            XCTAssertEqual(NotificationSetupStep.resolve(authorization: authorization, enabled: true,
-                registered: false, busy: false, awaitingToken: false, attempted: true, mode: "background"), .needsRegistration)
-        }
     }
 
     func testPushHintRequiresPairedSourceAndMatchingEventRevision() {
@@ -328,24 +318,6 @@ final class ProtocolTests: XCTestCase {
             guard case .sessions(let ordered) = AgentFeedContent.resolve(snapshot) else { return XCTFail("Missing sessions") }
             XCTAssertEqual(ordered.map(\.id), ["input", "working-a", "working-b", "done"])
         }
-    }
-
-    func testNotificationPermissionRevocationOverridesExistingRegistration() {
-        XCTAssertEqual(NotificationSetupStep.resolve(authorization: .denied, enabled: true,
-            registered: true, busy: false, awaitingToken: false, attempted: true), .blocked)
-        XCTAssertEqual(NotificationSetupStep.resolve(authorization: .notDetermined, enabled: false,
-            registered: false, busy: false, awaitingToken: false, attempted: false), .needsPermission)
-    }
-
-    func testPendingRegistrationDoesNotLookLikeBrokenSetup() {
-        XCTAssertFalse(NotificationSetupStep.resolve(authorization: nil, enabled: true,
-            registered: false, busy: false, awaitingToken: false, attempted: false).needsAttention)
-        XCTAssertEqual(NotificationSetupStep.resolve(authorization: .authorized, enabled: true,
-            registered: false, busy: false, awaitingToken: true, attempted: false), .registering)
-        XCTAssertEqual(NotificationSetupStep.resolve(authorization: .authorized, enabled: true,
-            registered: false, busy: false, awaitingToken: false, attempted: true), .needsRegistration)
-        XCTAssertEqual(NotificationSetupStep.resolve(authorization: .authorized, enabled: true,
-            registered: true, busy: false, awaitingToken: false, attempted: true), .ready)
     }
 
     func testStatusPanelPrioritizesInputAndExcludesIdleFromActiveCounts() {

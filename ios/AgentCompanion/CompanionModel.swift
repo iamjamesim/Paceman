@@ -80,7 +80,7 @@ final class CompanionModel: ObservableObject {
             identityNotice = nil
             status = "Paired. Waiting for first snapshot."
             Diagnostics.shared.record("source_paired")
-            Task { await PushCoordinator.shared.enable() }
+            Task { await PushCoordinator.shared.sync() }
             return true
         } catch { status = error.localizedDescription; hasError = true; return false }
     }

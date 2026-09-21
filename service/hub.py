@@ -91,6 +91,9 @@ class Store:
                 db.execute("ALTER TABLE clients ADD COLUMN last_seen REAL NOT NULL DEFAULT 0")
             if "presentation" not in {row[1] for row in db.execute("PRAGMA table_info(push_devices)")}:
                 db.execute("ALTER TABLE push_devices ADD COLUMN presentation TEXT NOT NULL DEFAULT 'alerts'")
+            # Silent-only registrations did not opt into notifications. Retire them
+            # without changing consent; normal notification registrations stay intact.
+            db.execute("DELETE FROM push_devices WHERE mode='background'")
             columns = {row[1] for row in db.execute("PRAGMA table_info(events)")}
             if "payload" not in columns:
                 db.execute("ALTER TABLE events ADD COLUMN payload TEXT")
@@ -223,7 +226,7 @@ class Store:
                     or not re.fullmatch(r"[0-9a-f]{32,512}", payload["deviceToken"])
                     or len(payload["deviceToken"]) % 2
                     or payload.get("environment") not in ("development", "production")
-                    or payload.get("mode") not in ("alert", "background")
+                    or payload.get("mode") != "alert"
                     or payload.get("presentation", "alerts") not in ("quiet", "alerts")):
                 raise ValueError("Invalid push registration")
         with self.connect() as db:
