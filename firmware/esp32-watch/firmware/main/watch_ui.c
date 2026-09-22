@@ -9,6 +9,7 @@
 #include "bsp/display.h"
 #include "bsp/touch.h"
 #include "driver/gpio.h"
+#include "esp_lcd_touch.h"
 #include "esp_lvgl_port.h"
 #include "esp_sleep.h"
 #include "lvgl.h"
@@ -41,6 +42,7 @@ enum {
     WEATHER_MAX_AGE_SECONDS = 6 * 60 * 60,
     DISPLAY_BUFFER_HEIGHT = 100,
     DISPLAY_IDLE_TASK_SLEEP_MS = 10000,
+    TOUCH_READ_FAILURE_LIMIT = 3,
 };
 
 static watch_face_layout_t face_layout;
@@ -83,6 +85,8 @@ static bool weather_night;
 static char weather_location[24] = "SAN FRANCISCO";
 static lv_indev_t *display_input;
 static esp_lcd_panel_handle_t display_panel;
+static esp_lcd_touch_handle_t display_touch;
+static uint8_t touch_read_failures;
 
 static void arm_display_timeout(uint32_t timeout_ms);
 
@@ -100,6 +104,36 @@ static void round_display_area(lv_area_t *area)
     area->y1 &= ~1;
     area->x2 |= 1;
     area->y2 |= 1;
+}
+
+static void read_touch(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    esp_lcd_touch_point_data_t point = {0};
+    uint8_t count = 0;
+    const esp_err_t read_err = esp_lcd_touch_read_data(display_touch);
+    const esp_err_t get_err = esp_lcd_touch_get_data(display_touch, &point, &count, 1);
+    if (read_err != ESP_OK || get_err != ESP_OK) {
+        if (touch_read_failures < TOUCH_READ_FAILURE_LIMIT) touch_read_failures++;
+        if (touch_read_failures < TOUCH_READ_FAILURE_LIMIT) {
+            // One missed sample must not end a press as a false click.
+            data->state = lv_indev_get_state(indev);
+        } else {
+            // Repeated failures must not leave the input pressed indefinitely.
+            // Cancel the gesture so this synthetic release cannot click a glyph.
+            if (lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED)
+                lv_indev_wait_release(indev);
+            data->state = LV_INDEV_STATE_RELEASED;
+        }
+        return;
+    }
+    touch_read_failures = 0;
+    if (count != 0) {
+        data->point.x = point.x;
+        data->point.y = point.y;
+        data->state = LV_INDEV_STATE_PRESSED;
+    } else {
+        data->state = LV_INDEV_STATE_RELEASED;
+    }
 }
 
 static lv_display_t *start_display(const lvgl_port_cfg_t *port_cfg)
@@ -152,6 +186,13 @@ static lv_display_t *start_display(const lvgl_port_cfg_t *port_cfg)
         .handle = touch,
     };
     display_input = lvgl_port_add_touch(&touch_cfg);
+    if (display_input) {
+        display_touch = touch;
+        lv_indev_set_read_cb(display_input, read_touch);
+        // Short taps can finish before the interrupt-driven LVGL task reads
+        // the controller. Keep the interrupt for wake, and sample while awake.
+        lv_indev_set_mode(display_input, LV_INDEV_MODE_TIMER);
+    }
     return display_input == NULL ? NULL : display;
 }
 

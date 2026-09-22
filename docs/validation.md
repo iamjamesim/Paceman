@@ -283,3 +283,24 @@ Real APNs acceptance, locked-phone update delivery and comparative watch latency
 remain unverified until the updated source/worker is deployed on the workstation.
 Widget push, remote start, final ambient UI and optional alert policy are not part
 of this first probe. APNs credentials and test screenshots remain local and ignored.
+
+## Watch face touch — 2026-09-22
+
+The original interrupt-driven input path missed three controlled brief battery
+taps after a center wake tap; a held battery press reached the handler. The
+firmware now samples touch while the display is awake, retains the touch
+interrupt for wake, and cancels an in-progress gesture after three consecutive
+touch read failures rather than rebooting or leaving it pressed. The ESP-IDF
+build passed, and the app-only flash verified its written hash without erasing
+bonding data.
+
+On the final flashed image, the user confirmed battery percentage appeared
+after brief taps following a full sleep/wake while plugged in. After unplugging,
+five separate brief taps, each made after the previous percentage had cleared,
+all showed the percentage. Battery and agent taps both worked on the earlier
+image that still had foreground target moves; the agent was not visible for a
+final-image dismissal check.
+One touch I2C read error was observed near the 15-second display-sleep boundary
+on the final image; the watch recovered without rebooting. Its lower-level
+cause remains undetermined. Extended tap endurance, repeated sleep/wake cycles,
+and battery-life impact of awake-only sampling remain unmeasured.
