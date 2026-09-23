@@ -192,22 +192,9 @@ class PushWorkerTests(unittest.TestCase):
         }
         self.assertEqual(len(identities), 3)
 
-    def test_retired_background_registration_requires_notification_opt_in(self):
+    def test_background_registration_is_rejected(self):
         with self.assertRaises(ValueError):
             self.register("background")
-        # Simulate a database left by the old silent-only transport.
-        with self.store.connect() as db:
-            db.execute("UPDATE push_devices SET mode='background'")
-        migrated = Store(self.store.path)
-        self.assertEqual(migrated.push_device(self.client["credential"]), {"registered": False})
-        self.emit("working", 100)
-        Worker(migrated, self.sender, self.log).step(100)
-        self.assertFalse(self.sender.calls)
-        self.register()
-        self.emit("finished", 110)
-        Worker(migrated, self.sender, self.log).step(110)
-        self.assertEqual(len(self.sender.calls), 1)
-        self.assertEqual(self.sender.calls[0][2]["apns-push-type"], "alert")
 
     def test_expired_progress_is_dropped(self):
         self.emit("working", 100)

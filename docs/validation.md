@@ -1,11 +1,27 @@
 # Validation
 
 This record separates implementation checks from physical-device evidence.
-It describes the private prototype as of 2026-09-18, not a reliability guarantee.
+Dated entries below also describe earlier private builds, not just the current
+checkout. They are not a reliability guarantee.
 
-## 2026-09-23 multiple-computer and pairing cleanup
+## 2026-09-23 pre-release data cleanup
 
-The current checkout requires identity in every pairing request and retires
+The current checkout creates the source SQLite columns directly and does not
+import an old checkout database or purge background-only push registrations.
+A database with unidentified clients fails startup and requires a fresh
+development database. Normal current-version pairing, credential rotation,
+removal, and installed-database persistence remain.
+Fresh alpha acceptance should start with clean development state; rerunning the
+installer alone preserves its installed database.
+
+Checks: 116 Python tests passed (20 platform/optional skips), including source
+and installer contracts. The 16 Node panel cases passed through that suite.
+The iPhone code is unchanged in this pass. No physical device or installed
+source was reset or updated with this follow-up yet.
+
+## Earlier 2026-09-23 multiple-computer and pairing cleanup
+
+That checkout required identity in every pairing request and retired
 unidentified credentials and their push/Live Activity destinations on source
 upgrade. Old phones need to scan a new code. The iPhone now stores ordered
 pairings and per-source snapshots, contact times, errors and revocation in one

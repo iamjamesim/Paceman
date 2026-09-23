@@ -69,11 +69,12 @@ class Store:
                 CREATE TABLE IF NOT EXISTS metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS invitations(hash TEXT PRIMARY KEY, expires REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS clients(id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL,
-                    created REAL NOT NULL);
+                    created REAL NOT NULL, last_seen REAL NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS client_devices(client_id TEXT PRIMARY KEY,
                     installation_id TEXT UNIQUE NOT NULL, name TEXT NOT NULL, platform TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
-                    at REAL NOT NULL, state TEXT NOT NULL, label TEXT NOT NULL);
+                    at REAL NOT NULL, state TEXT NOT NULL, label TEXT NOT NULL,
+                    payload TEXT, kind TEXT NOT NULL DEFAULT 'activity');
                 CREATE TABLE IF NOT EXISTS schedule(id INTEGER PRIMARY KEY, due REAL NOT NULL,
                     state TEXT NOT NULL, fired INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS live_activities(
@@ -87,26 +88,9 @@ class Store:
                     attempts INTEGER NOT NULL DEFAULT 0, last_result TEXT, last_apns_id TEXT);
             """)
             db.execute("BEGIN IMMEDIATE")
-            if "last_seen" not in {row[1] for row in db.execute("PRAGMA table_info(clients)")}:
-                db.execute("ALTER TABLE clients ADD COLUMN last_seen REAL NOT NULL DEFAULT 0")
-            # Pairings created before device identity was required cannot name an
-            # installation or prove a claim to one. Retire them and their push
-            # destinations on upgrade; the phone can pair again with a new code.
-            db.execute("DELETE FROM push_devices WHERE client_id IN "
-                       "(SELECT c.id FROM clients c LEFT JOIN client_devices d ON d.client_id=c.id "
-                       "WHERE d.client_id IS NULL)")
-            db.execute("DELETE FROM live_activities WHERE client_id IN "
-                       "(SELECT c.id FROM clients c LEFT JOIN client_devices d ON d.client_id=c.id "
-                       "WHERE d.client_id IS NULL)")
-            db.execute("DELETE FROM clients WHERE id NOT IN (SELECT client_id FROM client_devices)")
-            # Silent-only registrations did not opt into notifications. Retire them
-            # without changing consent; normal notification registrations stay intact.
-            db.execute("DELETE FROM push_devices WHERE mode='background'")
-            columns = {row[1] for row in db.execute("PRAGMA table_info(events)")}
-            if "payload" not in columns:
-                db.execute("ALTER TABLE events ADD COLUMN payload TEXT")
-            if "kind" not in columns:
-                db.execute("ALTER TABLE events ADD COLUMN kind TEXT NOT NULL DEFAULT 'activity'")
+            if db.execute("SELECT 1 FROM clients c LEFT JOIN client_devices d ON d.client_id=c.id "
+                          "WHERE d.client_id IS NULL LIMIT 1").fetchone():
+                raise ValueError("Unidentified client data is unsupported; start with a fresh Paceman database")
             for key, value in [("source_id", str(uuid.uuid4())), ("generation", str(uuid.uuid4()))]:
                 db.execute("INSERT OR IGNORE INTO metadata VALUES (?, ?)", (key, value))
             if db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0:

@@ -75,10 +75,8 @@ bash scripts/pair-phone.sh https://YOUR-MACHINE.YOUR-TAILNET.ts.net:8443
 
 Scan the generated invitation in Connect computer while the source is running.
 Invitations expire after five minutes. Reusing the same database preserves source
-identity and existing phone credentials across source restarts. A new checkout's
-empty `.runtime/` means a new source identity and requires pairing. To migrate
-an older source database, stop that source and use SQLite backup into the new
-runtime directory before first startup; never copy a database while it is active.
+identity and existing phone credentials across source restarts. A fresh data
+directory creates a new source identity and requires pairing.
 Synthetic `emit` and `schedule` are disabled once a database becomes an Omarchy
 source. Use a separate data directory for synthetic tests.
 
@@ -132,8 +130,8 @@ rechecks persisted identities and preserves surviving sessions; PID reuse and a
 new boot cannot revive old records. Switching conversations within one CLI
 replaces its current session rather than counting the process twice.
 
-Legacy records without ownership are removed from the current summary on upgrade.
-An existing session registers on its next state-changing hook. A newly opened
+Unowned session records do not enter the current summary. An existing session
+registers on its next state-changing hook. A newly opened
 CLI that has not emitted any activity is not discovered by scanning processes.
 The snapshot marks verified lists with `sessionLiveness: "process"`; only opaque
 session IDs and activity states leave the machine, never process identities.
@@ -178,7 +176,8 @@ Use the standard per-user installer from the repository root:
 bash scripts/install-desktop.sh
 ```
 
-It installs the source and bar panel, migrates an existing checkout database on
-first install, and enables the user service. Re-run it to update installed code;
+It installs the source and bar panel without importing a checkout database and
+enables the user service.
+Re-run it to update installed code without resetting the installed database;
 editing a checkout does not change the installed app. See [desktop setup](desktop.md)
 for pairing, status, troubleshooting, removal and data locations.

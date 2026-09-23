@@ -1,10 +1,8 @@
-"""Identified pairing, upgrade and removal through the public HTTP contract."""
+"""Identified pairing and removal through the public HTTP contract."""
 import concurrent.futures
-from contextlib import closing
 import http.client
 import json
 from pathlib import Path
-import sqlite3
 import tempfile
 import threading
 import time
@@ -88,13 +86,20 @@ class PairingTests(unittest.TestCase):
         self.assertEqual(rows[probe['clientID']]['name'], self.device['name'])
         self.assertEqual(Store(self.store.path).clients(), self.store.clients())
 
-    def test_pairing_requires_valid_identity_and_no_identification_upgrade_endpoint(self):
+    def test_pairing_requires_valid_identity_and_has_no_identification_endpoint(self):
         for device in (None, [], {}, {**self.device, 'installationID': 4}, {**self.device, 'name': 'x\nspoof'},
                        {**self.device, 'name': 'x' * 81}, {**self.device, 'platform': 'unknown'}):
             invitation = self.store.invite('https://test.example')
             self.assertEqual(self.request('POST', '/v1/pair', {'invitation': invitation['invitation'], 'device': device})[0], 400)
         self.assertEqual(self.request('POST', '/v1/client', {'device': self.device})[0], 404)
         self.assertEqual(self.store.clients(), [])
+
+    def test_source_rejects_unidentified_client_data(self):
+        with self.store.connect() as db:
+            db.execute("INSERT INTO clients(id,hash,created) VALUES (?,?,?)",
+                       (str(uuid.uuid4()), digest("unidentified"), 1))
+        with self.assertRaisesRegex(ValueError, "Unidentified client data is unsupported"):
+            Store(self.store.path)
 
     def test_self_removal_only_revokes_caller_and_clears_push_and_identity(self):
         own, other = self.pair(self.device), self.pair()
@@ -139,18 +144,3 @@ class PairingTests(unittest.TestCase):
             self.assertNotIn(secret, public)
         self.assertEqual(json.loads(self.status.path.read_text())['clients'][0]['name'], self.device['name'])
         self.assertNotIn('clients', self.store.snapshot())
-
-    def test_migration_retires_unidentified_credentials_and_destinations(self):
-        path = self.root / 'legacy.sqlite3'
-        credential, client_id = 'old-secret', str(uuid.uuid4())
-        with closing(sqlite3.connect(path)) as db:
-            db.execute('CREATE TABLE clients(id TEXT PRIMARY KEY,hash TEXT UNIQUE NOT NULL,created REAL NOT NULL)')
-            db.execute('INSERT INTO clients VALUES (?,?,?)', (client_id, digest(credential), 10))
-            db.execute('CREATE TABLE push_devices(client_id TEXT PRIMARY KEY,token TEXT NOT NULL,environment TEXT NOT NULL,mode TEXT NOT NULL,cursor INTEGER NOT NULL,next_attempt REAL NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,last_result TEXT,last_apns_id TEXT)')
-            db.execute("INSERT INTO push_devices(client_id,token,environment,mode,cursor) VALUES (?,'ab','development','alert',0)", (client_id,))
-            db.commit()
-        upgraded = Store(path)
-        self.assertFalse(upgraded.authorized(credential))
-        self.assertEqual(upgraded.clients(), [])
-        with upgraded.connect() as db:
-            self.assertEqual(db.execute('SELECT COUNT(*) FROM push_devices').fetchone()[0], 0)

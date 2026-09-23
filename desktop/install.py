@@ -1,12 +1,10 @@
 """Per-user Omarchy installation. Runtime data and agent hooks are preserved."""
 import argparse
-from contextlib import closing
 import json
 import os
 from pathlib import Path
 import shutil
 import socket
-import sqlite3
 import stat
 import subprocess
 import sys
@@ -51,24 +49,6 @@ def write(path, data, mode=0o644):
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
-
-
-def migrate_database(source, target):
-    """Only called after stopping the source; never replace an installed identity."""
-    if target.exists() or not source.exists():
-        return False
-    directory(target.parent)
-    fd, temporary = tempfile.mkstemp(dir=target.parent)
-    os.close(fd)
-    try:
-        with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as old, closing(sqlite3.connect(temporary)) as new:
-            old.backup(new)
-            if new.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                raise ValueError("Source database failed its integrity check")
-        os.replace(temporary, target)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-    return True
 
 
 def unit_escape(path):
@@ -128,12 +108,10 @@ def main():
         run("/usr/bin/systemctl", "--user", "disable", "--now", "omarchy-watch.service", check=False)
         if (config / "omarchy/plugins/io.github.iamjamesim.omarchy-watch").exists():
             run("/usr/bin/omarchy", "plugin", "disable", "io.github.iamjamesim.omarchy-watch")
-        # A manually launched source must be stopped by its owner before migrating.
+        # A manually launched source must be stopped by its owner before installation.
         with socket.socket() as probe:
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             probe.bind(("127.0.0.1", 8765))
-        if migrate_database(ROOT / ".runtime/hub.sqlite3", state / "hub.sqlite3"):
-            print("Migrated the checkout's source identity and phone pairings; original database retained.")
         for package in ("service", "desktop"):
             for source in (ROOT / package).glob("*.py"):
                 if source.name != "install.py":

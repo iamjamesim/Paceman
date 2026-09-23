@@ -8,9 +8,9 @@ production server. Limit tailnet access to the devices participating in the test
 "installationID": "UUID", "name": "Alex’s iPhone", "platform": "ios" } }`.
 Returns schema, sourceID, clientID, credential, and `clientManagement: 1`.
 Invalid/expired/used invitations return 401; invalid bodies 400; excessive attempts
-429. Invitation expiry is five minutes. `device` is required. Existing
-credentials without device identity are retired on source upgrade, along with
-their push destinations; those phones need a new pairing code.
+429. Invitation expiry is five minutes. `device` is required. Pre-identity
+development pairings are outside this contract; start those tests with fresh
+source data and a new pairing code.
 
 Installation IDs are claims, not credentials. To re-pair an existing installation,
 include its current `Authorization: Bearer CREDENTIAL` and a fresh invitation.
@@ -35,9 +35,9 @@ errors preserve the local pairing for retry. Desktop removal uses a local comman
 Last successful snapshot delivery is persisted per credential. Private local
 status exposes only client ID, reported name/platform, pairing time and contact
 time. Neither installation IDs, credential hashes nor secrets enter the panel's
-status or remote activity snapshots. Pre-upgrade contact is unknown.
+status or remote activity snapshots.
 
-See [pairing and removal](pairing-and-removal.md) for migration and Mac acceptance.
+See [pairing and removal](pairing-and-removal.md) for physical acceptance.
 
 `GET /v1/snapshot`: `Authorization: Bearer CREDENTIAL`. Returns:
 

@@ -13,7 +13,7 @@ management support from the source. See [validation](validation.md) for test his
   proof. The source rotates it in place, preserving the connection and pairing
   date. Old credentials stop working; push registers anew.
 - Pairing sends the installation identity in the initial request. Saved phone
-  connections are kept together so removing one can promote another safely.
+  connections remain in display order when another connection is removed.
 - Each desktop row has its own persisted last-contact time. A diagnostic client
   or second phone cannot make another connection look current.
 - Desktop: expand a connection, choose **Remove access…**, and confirm. This also
@@ -30,16 +30,18 @@ Access removal cannot recall an already received snapshot or an in-flight Apple
 notification. Subsequent authenticated fetches fail, and removed push destinations
 are no longer scheduled. This change does not add watch freshness/lease support.
 
-## Upgrade and recovery
+## Setup and recovery
 
-Install the desktop first with `bash scripts/install-desktop.sh`, then build and
-install the updated iPhone app. The phone migrates its previously saved primary
-and additional computer records into one Keychain item. If an earlier interrupted
-removal left only additional computers saved, the first one appears first.
-New pairings require `clientManagement: 1` in the source response.
-The source now requires installation identity at pairing. On upgrade it retires
-unidentified credentials and their push destinations. An affected phone shows
-**Access removed** on its next request and needs a new QR pairing code.
+For alpha acceptance, start Omarchy from fresh source data and pair the current
+iPhone app with a new QR code. `bash scripts/install-desktop.sh` installs the
+code but preserves the installed database; rerunning it is not a data reset.
+The installer no longer imports a checkout database. New pairings
+require `clientManagement: 1` in the source response and an installation
+identity in the request.
+An old database containing unidentified clients fails source startup with a
+clear reset instruction rather than silently keeping those credentials active.
+Clear old phone connections explicitly during a development reset; reinstalling
+the app alone is not the reset procedure.
 
 An installation ID is not a secret or an authorization token. A matching claim
 without the current credential cannot replace a pairing. The source returns 409
@@ -48,8 +50,7 @@ remove that connection on the desktop and scan a fresh code. This also recovers
 an interrupted re-pair where the source rotated access but the phone did not
 receive or securely save the replacement credential.
 
-The source never infers ownership from a matching device name. There is no
-automatic merge or bulk revocation on upgrade.
+The source never infers ownership from a matching device name.
 
 The local CLI equivalent is:
 
@@ -65,10 +66,10 @@ See the [protocol](protocol.md) for request shapes and privacy boundaries.
 ## Mac and physical-device acceptance
 
 1. Run `bash scripts/check-on-mac.sh`, then run the `AgentCompanion` scheme's tests
-   on an installed iPhone simulator. Check pairing identity, connection storage
-   migration, and removal failures.
-2. Install on the already-paired iPhone. Open the app; verify both saved computers
-   remain visible and activity still reaches the phone.
+   on an installed iPhone simulator. Check pairing identity, connection storage,
+   and removal failures.
+2. Pair the current iPhone app with Omarchy and Mac. Verify both cards appear,
+   activity reaches the correct card, and neither connection changes the other.
 3. On the phone home screen, tap **Connect another computer** and scan a new QR
    from a computer that is already paired. The flow should say **Reconnect
    computer**. Verify one card remains in the same position, one desktop client

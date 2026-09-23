@@ -43,33 +43,33 @@ The Omarchy machine uses the installed desktop package as the persistent user se
 `paceman-source.service`; the old Omarchy Watch desktop daemon and bar widget
 have been uninstalled. The separate Omarchy Watch for Codex event-hook plugin
 remains installed because Paceman receives its events. The existing
-private HTTPS route is reused. The prior Linux source database was migrated with
-SQLite backup, preserving its source identity and paired client credential.
+private HTTPS route is reused. The previous Linux source database was migrated
+with SQLite backup, preserving its source identity and paired client credential.
 The source starts at login and restarts on failure. Run
 `bash scripts/install-desktop.sh` to install/update the app and status panel.
 Code lives in `~/.local/lib/paceman`; active data is in `~/.local/state/paceman`.
-The checkout database is retained as a pre-install copy. See docs/desktop.md for
+The current installer no longer imports an old checkout database. See docs/desktop.md for
 setup and docs/roadmap.md for the next product milestones. The panel has inline
 phone details, a workspace QR overlay, a persistent sharing switch and a compact
 multi-session activity summary. The receiver now tracks Codex process ownership
 through kernel peer credentials; quiet/finished open sessions survive restart,
 and exited owners leave the summary. Existing hooks are unchanged. Identified pairing, per-client contact and access
 removal from either side are implemented. The current checkout requires identity
-for pairing and retires old unidentified credentials on source upgrade; affected
-phones must pair again. The 2026-09-23 checkout changes are not installed on the
-Omarchy source or physical iPhone. A simulator run passed all 56 iOS tests and
-the local Python suite passed 117 tests; physical acceptance is still needed.
-Complete
+for pairing and starts fresh without pre-release source database migrations.
+The user reports that the prior committed build was updated on both
+computers; Mac source, hook delivery and iPhone notification display were
+verified. This cleanup is not installed on physical machines yet. The custom
+watch is currently in a separate unresolved state. Multi-computer physical
+acceptance is still needed. Complete
 the physical acceptance in docs/pairing-and-removal.md before a device release.
 Check it with `systemctl --user status paceman-source.service`. Do not start a
 second source while testing the phone.
 
-1. Complete physical pairing/removal acceptance: verify an older unidentified
-   credential loses access on source upgrade and reconnects with a fresh code;
+1. Complete physical pairing/removal acceptance from fresh development state:
    test same-installation reconnection, independent connections and removal failures.
 2. Verify live Omarchy transitions on the updated phone over private HTTPS.
-   The in-place update preserved working fetches; full live-event and visible
-   watch routing still need acceptance. See docs/omarchy-routing.md.
+   Full live-event and visible watch routing still need acceptance. See
+   docs/omarchy-routing.md.
 3. Extend phone-to-watch profile forwarding for desktop appearance and freshness.
 4. Verify transitions, theme continuity, disconnect/reconnect and prolonged phone
    locking on physical devices; distinguish BLE acceptance from visible rendering.

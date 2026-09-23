@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -172,18 +171,6 @@ class DesktopInstallTests(unittest.TestCase):
         # macOS exposes /var as a symlink, which the installer rightly refuses.
         self.root = Path(self.temp.name).resolve()
 
-    def test_sqlite_migration_preserves_pairings_and_never_overwrites_installed_database(self):
-        source = Store(self.root / "checkout/hub.sqlite3")
-        client = source.redeem(source.invite("https://test.example")["invitation"], device=device())
-        target = self.root / "state/hub.sqlite3"
-        self.assertTrue(install.migrate_database(source.path, target))
-        installed = Store(target)
-        self.assertEqual(source.metadata("source_id"), installed.metadata("source_id"))
-        self.assertTrue(installed.authorized(client["credential"]))
-        installed.revoke(client["clientID"])
-        self.assertFalse(install.migrate_database(source.path, target))
-        self.assertFalse(installed.authorized(client["credential"]))
-
     def test_installer_rejects_symlink_destinations(self):
         target = self.root / "target"
         target.mkdir()
@@ -198,8 +185,7 @@ class DesktopInstallTests(unittest.TestCase):
         for directory in ("desktop", "service", "systemd"):
             shutil.copytree(install.ROOT / directory, source / directory,
                             ignore=shutil.ignore_patterns("__pycache__"))
-        old = Store(source / ".runtime/hub.sqlite3")
-        old_id = old.metadata("source_id")
+        Store(source / ".runtime/hub.sqlite3")
         home = self.root / "home"
         calls = []
         def fake_run(*args, **kwargs):
@@ -210,10 +196,14 @@ class DesktopInstallTests(unittest.TestCase):
              patch.object(install, "run", side_effect=fake_run), \
              patch.dict(os.environ, {"XDG_STATE_HOME": str(home / ".local/state"), "XDG_CONFIG_HOME": str(home / ".config")}), \
              patch.object(install.socket, "socket"):
-            for _ in range(2):
-                with patch("sys.argv", ["install.py", "install"]):
-                    install.main()
-            self.assertEqual(Store(home / ".local/state/paceman/hub.sqlite3").metadata("source_id"), old_id)
+            with patch("sys.argv", ["install.py", "install"]):
+                install.main()
+            self.assertFalse((home / ".local/state/paceman/hub.sqlite3").exists())
+            installed = Store(home / ".local/state/paceman/hub.sqlite3")
+            client = installed.redeem(installed.invite("https://test.example")["invitation"], device=device())
+            with patch("sys.argv", ["install.py", "install"]):
+                install.main()
+            self.assertTrue(Store(installed.path).authorized(client["credential"]))
             unit = (home / ".config/systemd/user/paceman-source.service").read_text()
             self.assertNotIn(str(source), unit)
             self.assertNotIn("@APP@", unit)
@@ -226,7 +216,7 @@ class DesktopInstallTests(unittest.TestCase):
             self.assertIn(("/usr/bin/systemctl", "--user", "disable", "--now", "paceman-source.service"), calls)
             with patch("sys.argv", ["install.py", "uninstall"]):
                 install.main()
-            self.assertTrue((home / ".local/state/paceman/hub.sqlite3").exists())
+            self.assertTrue(Store(installed.path).authorized(client["credential"]))
             self.assertFalse((home / ".local/bin/pacemanctl").exists())
             self.assertFalse((home / ".local/lib/paceman").exists())
 

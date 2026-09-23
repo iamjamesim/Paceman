@@ -32,12 +32,12 @@ source started manually in a terminal first. It disables the old
 `omarchy-watch.service` and its bar widget if present: both sources use the same
 agent event socket. It does not delete the old application's pairing data.
 
-On first installation, an existing checkout database at `.runtime/hub.sqlite3`
-is migrated using SQLite backup to `~/.local/state/paceman/hub.sqlite3`. Source
-identity, phone credentials and push registrations are preserved. The original
-database is retained, and upgrades never replace the installed database. If
-`XDG_STATE_HOME` or `XDG_CONFIG_HOME` is set, the corresponding user directory is
-used. APNs configuration/key files are not migrated or provisioned automatically.
+The installer does not import an older checkout database. A fresh install creates
+a new source identity and needs a new phone pairing. Rerunning the installer
+preserves an existing installed database and sharing choice; it does not reset
+development data. If `XDG_STATE_HOME` or `XDG_CONFIG_HOME` is set, the
+corresponding user directory is used. APNs configuration/key files are not
+provisioned automatically.
 
 ## Connect a phone
 
@@ -70,7 +70,8 @@ generating an invitation; it refuses ambiguous or publicly exposed routes.
 `pacemanctl pair` creates the same private invitation without opening a viewer.
 Invitation files contain a pairing secret and should not be shared publicly.
 
-An already paired phone needs no new invitation after installation or upgrades.
+An already paired phone needs no new invitation after a restart or reinstall
+using the same source database.
 Open its app with Tailscale connected. Pair the watch from the phone, not from
 the desktop Bluetooth panel.
 
@@ -111,12 +112,11 @@ for that connection within 30 seconds. It does not acknowledge watch delivery.
 Names/platforms are app-reported metadata, and names may be generic or duplicated.
 Pairing identifies app installations, not physical hardware.
 
-Pairings require the app's installation identity. On upgrade, older credentials
-without identity and their notification destinations are removed. A phone using
-one of those credentials must scan a new pairing code. Paceman does not guess
-which installation an older credential belonged to. Contact times persist across
-source restarts; records with no observed fetch show “No contact yet.”
-See [pairing and removal](pairing-and-removal.md) for upgrade and recovery details.
+Pairings require the app's installation identity. Pre-identity private builds
+are outside the supported setup path; begin acceptance with fresh development
+state and scan a new pairing code. Contact times persist across source restarts;
+records with no observed fetch show “No contact yet.” See
+[pairing and removal](pairing-and-removal.md) for recovery details.
 
 The iPhone’s **Remove computer** now revokes its access on the computer before
 forgetting the local pairing. If the computer is unreachable, reconnect and retry.
