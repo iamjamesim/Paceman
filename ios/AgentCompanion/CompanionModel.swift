@@ -8,27 +8,22 @@ final class CompanionModel: ObservableObject {
     let monitoring = MonitoringCoordinator()
     let weather: PhoneWeather
     let designPreview: Bool
-    @Published var source: PairedSource?
-    @Published var snapshot: Snapshot?
-    @Published var additionalSources: [PairedSource] = []
-    @Published var additionalSnapshots: [String: Snapshot] = [:]
-    @Published var additionalLastContact: [String: Date] = [:]
-    @Published var additionalErrors: [String: String] = [:]
-    @Published var additionalRevoked: Set<String> = []
+    @Published var pairedSources: [PairedSource] = []
+    @Published var snapshots: [String: Snapshot] = [:]
+    @Published var lastContacts: [String: Date] = [:]
+    @Published var errors: [String: String] = [:]
+    @Published var revokedSources: Set<String> = []
     @Published var status = "Connect a work source"
     @Published var busy = false
-    @Published var lastContact: Date?
-    @Published var hasError = false
-    @Published var accessRevoked = false
     private let client = SourceClient()
     private let pairedStore = PairedSourcesStore()
     private var polling: Task<Void, Never>?
     private var sourceEpoch = UUID()
     private var foreground = false
     private var watchRefreshPending = false
+    private var watchRefreshScheduled = false
     private var watchBackgroundTask = UIBackgroundTaskIdentifier.invalid
-    private var fetchedUptime: TimeInterval?
-    private var additionalFetchedUptime: [String: TimeInterval] = [:]
+    private var fetchedUptimes: [String: TimeInterval] = [:]
     private var changeObserver: AnyCancellable?
     private var weatherObserver: AnyCancellable?
 
@@ -36,55 +31,54 @@ final class CompanionModel: ObservableObject {
         designPreview = preview
         watch = WatchLink(preview: preview)
         weather = PhoneWeather()
-        let storedSources = preview ? [] : pairedStore.load()
-        source = storedSources.first
-        additionalSources = Array(storedSources.dropFirst())
-        #if DEBUG
-        if preview, let screen = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--screen=multi-") }) {
-            let id = "11111111-2222-4333-8444-555555555555"
-            let paired = PairedSource(endpoint: URL(string: "https://macbook.example.ts.net")!,
-                                      sourceID: id, clientID: id, credential: "preview")
-            additionalSources = [paired]
-            let stale = screen == "--screen=multi-stale"
-            let empty = screen == "--screen=multi-empty"
-            let long = screen == "--screen=multi-long"
-            let observed = Date().timeIntervalSince1970 - (stale ? 300 : 0)
-            additionalSnapshots[id] = Snapshot(schema: 1, sourceID: id, generation: id, revision: 1,
-                sourceName: "MacBook Pro", mode: "macos", observedAt: observed,
-                changedAt: observed, freshFor: 30, state: empty ? .idle : stale ? .finished : .working,
-                eventID: "1", appearance: nil, allowance: nil,
-                sessions: empty ? [] : [AgentSession(id: "mac-task", provider: "codex",
-                    state: stale ? .finished : .working,
-                    name: long ? "Investigate multi-machine source recovery after a long disconnect" : "Build Mac client")])
-            additionalLastContact[id] = Date(timeIntervalSince1970: observed)
-            additionalFetchedUptime[id] = ProcessInfo.processInfo.systemUptime - (stale ? 300 : 0)
-            if stale { additionalErrors[id] = "Connection unavailable" }
-        }
-        #endif
-        for paired in additionalSources where !preview {
-            if let cached = SourceSnapshotCache.load(sourceID: paired.sourceID,
-                                                      from: SourceSnapshotCache.url(for: paired.sourceID)) {
-                additionalSnapshots[paired.sourceID] = cached.0
-                additionalLastContact[paired.sourceID] = cached.1
-                let age = max(0, Date().timeIntervalSince1970 - cached.0.observedAt)
-                additionalFetchedUptime[paired.sourceID] = ProcessInfo.processInfo.systemUptime - age
+        if preview {
+            #if DEBUG
+            let args = ProcessInfo.processInfo.arguments
+            let screen = args.first(where: { $0.hasPrefix("--screen=") }) ?? ""
+            if !["--screen=setup", "--screen=pairing", "--screen=watch-only"].contains(screen) {
+                let id = "aaaaaaaa-2222-4333-8444-555555555555"
+                pairedSources = [PairedSource(endpoint: URL(string: "https://omarchy.example.ts.net")!,
+                    sourceID: id, clientID: id, credential: "preview")]
             }
-        }
-        if let source {
-            if let cached = SourceSnapshotCache.load(sourceID: source.sourceID)
-                ?? SourceSnapshotCache.load(sourceID: source.sourceID,
-                    from: SourceSnapshotCache.url(for: source.sourceID)) {
-                snapshot = cached.0
-                lastContact = cached.1
-                let age = max(0, Date().timeIntervalSince1970 - cached.0.observedAt)
-                fetchedUptime = ProcessInfo.processInfo.systemUptime - age
-                status = "Paired; restoring last known status"
-            } else {
-                status = "Paired; waiting for fresh status"
-                // An existing watch already has a durable profile. Do not
-                // replace it with fallback values while this phone is still
-                // learning the paired source after an upgrade or reinstall.
-                if watch.preferenceID != nil { watch.awaitSourceProfile() }
+            if screen.hasPrefix("--screen=multi-") {
+                let id = "11111111-2222-4333-8444-555555555555"
+                pairedSources.append(PairedSource(endpoint: URL(string: "https://macbook.example.ts.net")!,
+                    sourceID: id, clientID: id, credential: "preview"))
+                let stale = screen == "--screen=multi-stale"
+                let empty = screen == "--screen=multi-empty"
+                let long = screen == "--screen=multi-long"
+                let observed = Date().timeIntervalSince1970 - (stale ? 300 : 0)
+                snapshots[id] = Snapshot(schema: 1, sourceID: id, generation: id, revision: 1,
+                    sourceName: "MacBook Pro", mode: "macos", observedAt: observed,
+                    changedAt: observed, freshFor: 30, state: empty ? .idle : stale ? .finished : .working,
+                    eventID: "1", appearance: nil, allowance: nil,
+                    sessions: empty ? [] : [AgentSession(id: "mac-task", provider: "codex",
+                        state: stale ? .finished : .working,
+                        name: long ? "Investigate multi-machine source recovery after a long disconnect" : "Build Mac client")])
+                lastContacts[id] = Date(timeIntervalSince1970: observed)
+                fetchedUptimes[id] = ProcessInfo.processInfo.systemUptime - (stale ? 300 : 0)
+                if stale { errors[id] = "Connection unavailable" }
+            }
+            #endif
+        } else {
+            pairedSources = pairedStore.load()
+            for (index, paired) in pairedSources.enumerated() {
+                let cacheURL = SourceSnapshotCache.url(for: paired.sourceID)
+                let cached = SourceSnapshotCache.load(sourceID: paired.sourceID, from: cacheURL)
+                    ?? (index == 0 ? SourceSnapshotCache.load(sourceID: paired.sourceID) : nil)
+                if let cached {
+                    snapshots[paired.sourceID] = cached.0
+                    lastContacts[paired.sourceID] = cached.1
+                    let age = max(0, Date().timeIntervalSince1970 - cached.0.observedAt)
+                    fetchedUptimes[paired.sourceID] = ProcessInfo.processInfo.systemUptime - age
+                    if index == 0 {
+                        try? SourceSnapshotCache.save(cached.0, receivedAt: cached.1, to: cacheURL)
+                    }
+                }
+            }
+            if let first = pairedSources.first {
+                status = snapshots[first.sourceID] == nil ? "Paired; waiting for fresh status" : "Paired; restoring last known status"
+                if snapshots.isEmpty, watch.preferenceID != nil { watch.awaitSourceProfile() }
             }
         }
         watch.onWatchEvent = { [weak self] in
@@ -104,39 +98,38 @@ final class CompanionModel: ObservableObject {
         if !preview { Diagnostics.shared.record("app_launched") }
     }
 
-    var fresh: Bool {
-        guard !hasError, let snapshot, let fetchedUptime else { return false }
-        return ProcessInfo.processInfo.systemUptime - fetchedUptime < snapshot.freshFor
+    func isRevoked(_ sourceID: String) -> Bool { revokedSources.contains(sourceID) }
+
+    func isFresh(_ sourceID: String) -> Bool {
+        guard !revokedSources.contains(sourceID), errors[sourceID] == nil,
+              let value = snapshots[sourceID], let uptime = fetchedUptimes[sourceID] else { return false }
+        return ProcessInfo.processInfo.systemUptime - uptime < value.freshFor
+    }
+
+    func connectionState(_ sourceID: String) -> ComputerConnectionState {
+        .resolve(revoked: isRevoked(sourceID), failed: errors[sourceID] != nil,
+                 hasSnapshot: snapshots[sourceID] != nil, fresh: isFresh(sourceID))
     }
 
     /// Decorative watch previews may reflect current activity, never cached activity.
     var currentActivityState: ActivityState { watchAggregate?.state ?? .idle }
     var preferredAppearance: CompanionTheme? {
-        if let theme = snapshot?.appearance, theme.valid { return theme }
-        return additionalSources.compactMap { additionalSnapshots[$0.sourceID]?.appearance }
-            .first { $0.valid }
-    }
-
-    var pairedSources: [PairedSource] { (source.map { [$0] } ?? []) + additionalSources }
-
-    func isRevoked(_ sourceID: String) -> Bool {
-        source?.sourceID == sourceID ? accessRevoked : additionalRevoked.contains(sourceID)
-    }
-
-    func additionalFresh(_ sourceID: String) -> Bool {
-        guard !additionalRevoked.contains(sourceID), additionalErrors[sourceID] == nil,
-              let value = additionalSnapshots[sourceID], let uptime = additionalFetchedUptime[sourceID] else { return false }
-        return ProcessInfo.processInfo.systemUptime - uptime < value.freshFor
+        return pairedSources.compactMap { paired -> CompanionTheme? in
+            guard let theme = snapshots[paired.sourceID]?.appearance, theme.valid else { return nil }
+            return theme
+        }.first
     }
 
     private var watchAggregate: Snapshot? {
         guard !pairedSources.isEmpty else { return nil }
-        let current = ([snapshot].compactMap { fresh ? $0 : nil } + additionalSources.compactMap {
-            additionalFresh($0.sourceID) ? additionalSnapshots[$0.sourceID] : nil
-        })
-        let profiles = [snapshot].compactMap { $0 } + additionalSources.compactMap { additionalSnapshots[$0.sourceID] }
-        let profile = profiles.first { $0.appearance?.valid == true || $0.allowance != nil } ?? profiles.first
-        return WatchAggregate.make(current: current, profile: profile, now: Date().timeIntervalSince1970)
+        let current = pairedSources.compactMap { paired -> Snapshot? in
+            isFresh(paired.sourceID) ? snapshots[paired.sourceID] : nil
+        }
+        let profiles = pairedSources.compactMap { snapshots[$0.sourceID] }
+        let appearance = profiles.compactMap { $0.appearance }.first { $0.valid }
+        let allowance = profiles.compactMap { $0.allowance }.first { $0.valid }
+        return WatchAggregate.make(current: current, appearance: appearance,
+                                   allowance: allowance, now: Date().timeIntervalSince1970)
     }
 
     private func forwardWatchAggregate() {
@@ -148,7 +141,7 @@ final class CompanionModel: ObservableObject {
     func pair(text: String) async -> Bool {
         guard !busy else { return false }
         busy = true
-        defer { busy = false }
+        defer { busy = false; schedulePendingWatchRefresh() }
         do {
             let invitation = try JSONDecoder().decode(Invitation.self, from: Data(text.utf8))
             let origin = try invitation.validatedURL()
@@ -157,123 +150,79 @@ final class CompanionModel: ObservableObject {
                 throw HubError.message("This computer's address changed. Remove its old connection before pairing again.")
             }
             let paired = try await client.pair(invitation, device: ClientDevice.current(), previous: existing)
-            if source == nil || source?.sourceID == paired.sourceID {
-                try pairedStore.save([paired] + additionalSources)
-                sourceEpoch = UUID()
-                source = paired
-                SourceSnapshotCache.remove()
-                snapshot = nil
-                lastContact = nil
-                fetchedUptime = nil
-                hasError = false
-                accessRevoked = false
-            } else {
-                var values = additionalSources.filter { $0.sourceID != paired.sourceID }
-                values.append(paired)
-                try pairedStore.save([source].compactMap { $0 } + values)
-                sourceEpoch = UUID()
-                additionalSources = values
-                SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: paired.sourceID))
-                additionalSnapshots.removeValue(forKey: paired.sourceID)
-                additionalLastContact.removeValue(forKey: paired.sourceID)
-                additionalFetchedUptime.removeValue(forKey: paired.sourceID)
-                additionalErrors.removeValue(forKey: paired.sourceID)
-                additionalRevoked.remove(paired.sourceID)
-            }
+            let values = PairedSourceOrder.updating(paired, in: pairedSources)
+            try pairedStore.save(values)
+            sourceEpoch = UUID()
+            pairedSources = values
+            clearSnapshot(paired.sourceID)
+            errors.removeValue(forKey: paired.sourceID)
+            revokedSources.remove(paired.sourceID)
+            forwardWatchAggregate()
             status = "Paired. Waiting for first snapshot."
             Diagnostics.shared.record("source_paired")
             Task { await PushCoordinator.shared.sync() }
             return true
-        } catch { status = error.localizedDescription; hasError = true; return false }
+        } catch { status = error.localizedDescription; return false }
     }
 
-    func removeSource() async {
-        guard !busy, !PushCoordinator.shared.busy, let source else { return }
-        busy = true
-        defer { busy = false }
-        var removedOnComputer = false
-        do {
-            try await client.remove(source)
-            removedOnComputer = true
-            let remaining = additionalSources
-            try pairedStore.save(remaining)
-            sourceEpoch = UUID()
-            await monitoring.stop()
-            PushCoordinator.shared.clearRemovedSource(sourceID: source.sourceID)
-            ComputerPreferences.remove(source.sourceID)
-            SourceSnapshotCache.remove()
-            self.source = nil
-            snapshot = nil
-            lastContact = nil
-            fetchedUptime = nil
-            if let next = remaining.first {
-                additionalSources = Array(remaining.dropFirst())
-                self.source = next
-                snapshot = additionalSnapshots.removeValue(forKey: next.sourceID)
-                lastContact = additionalLastContact.removeValue(forKey: next.sourceID)
-                fetchedUptime = additionalFetchedUptime.removeValue(forKey: next.sourceID)
-                if let snapshot, let lastContact {
-                    try? SourceSnapshotCache.save(snapshot, receivedAt: lastContact)
-                }
-            }
-            forwardWatchAggregate()
-            status = "Computer removed."
-            hasError = false
-            accessRevoked = false
-        } catch {
-            if removedOnComputer {
-                accessRevoked = true
-                status = "Access was removed on this computer, but the phone couldn't save the change. Try removing it again."
-            } else {
-                status = "Couldn't remove access: \(error.localizedDescription) Reconnect and try again; the pairing has been kept."
-            }
-        }
+    private func clearSnapshot(_ sourceID: String) {
+        snapshots.removeValue(forKey: sourceID)
+        lastContacts.removeValue(forKey: sourceID)
+        fetchedUptimes.removeValue(forKey: sourceID)
+        SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: sourceID))
+        if pairedSources.first?.sourceID == sourceID { SourceSnapshotCache.remove() }
     }
 
-    func removeAdditionalSource(_ paired: PairedSource) async -> Bool {
-        guard !busy, additionalSources.contains(where: { $0.sourceID == paired.sourceID }) else { return false }
+    @discardableResult
+    func remove(_ paired: PairedSource) async -> Bool {
+        guard !busy, !PushCoordinator.shared.busy,
+              pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) else { return false }
         busy = true
-        defer { busy = false }
+        defer { busy = false; schedulePendingWatchRefresh() }
         var removedOnComputer = false
         do {
             try await client.remove(paired)
             removedOnComputer = true
-            let values = additionalSources.filter { $0.sourceID != paired.sourceID }
-            try pairedStore.save([source].compactMap { $0 } + values)
+            let remaining = PairedSourceOrder.removing(paired.sourceID, from: pairedSources)
+            try pairedStore.save(remaining)
             sourceEpoch = UUID()
-            additionalSources = values
-            additionalSnapshots.removeValue(forKey: paired.sourceID)
-            additionalLastContact.removeValue(forKey: paired.sourceID)
-            additionalFetchedUptime.removeValue(forKey: paired.sourceID)
-            additionalErrors.removeValue(forKey: paired.sourceID)
-            additionalRevoked.remove(paired.sourceID)
+            if monitoring.activeSourceID == paired.sourceID { await monitoring.stop() }
+            clearSnapshot(paired.sourceID)
+            errors.removeValue(forKey: paired.sourceID)
+            revokedSources.remove(paired.sourceID)
             ComputerPreferences.remove(paired.sourceID)
-            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: paired.sourceID))
+            pairedSources = remaining
             PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
             forwardWatchAggregate()
+            status = "Computer removed."
             return true
         } catch {
-            additionalErrors[paired.sourceID] = removedOnComputer
+            errors[paired.sourceID] = removedOnComputer
                 ? "Access was removed on this computer, but the phone couldn't save the change. Try removing it again."
-                : error.localizedDescription
-            if removedOnComputer { additionalRevoked.insert(paired.sourceID) }
+                : "Couldn't remove access: \(error.localizedDescription) Reconnect and try again; the pairing has been kept."
+            if removedOnComputer {
+                revokedSources.insert(paired.sourceID)
+                clearSnapshot(paired.sourceID)
+                if monitoring.activeSourceID == paired.sourceID { await monitoring.stop() }
+                PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
+            }
+            forwardWatchAggregate()
+            status = errors[paired.sourceID] ?? "Couldn't remove access"
             return false
         }
     }
 
-    private func sourceFailed(_ error: Error) {
-        hasError = true
-        accessRevoked = (error as? HubError)?.isUnauthorized == true
-        status = accessRevoked ? "Access removed on this computer. Scan a new pairing code to reconnect."
+    private func sourceFailed(_ error: Error, sourceID: String) {
+        let revoked = (error as? HubError)?.isUnauthorized == true
+        errors[sourceID] = revoked ? "Access removed on this computer. Scan a new pairing code to reconnect."
             : "Source unavailable: \(error.localizedDescription)"
-        if accessRevoked {
-            snapshot = nil
-            lastContact = nil
-            fetchedUptime = nil
-            SourceSnapshotCache.remove()
-            PushCoordinator.shared.clearRemovedSource(sourceID: source?.sourceID ?? "")
-            forwardWatchAggregate()
+        status = errors[sourceID] ?? "Source unavailable"
+        if revoked {
+            revokedSources.insert(sourceID)
+            clearSnapshot(sourceID)
+            PushCoordinator.shared.clearRemovedSource(sourceID: sourceID)
         }
+        forwardWatchAggregate()
     }
 
     func setForeground(_ value: Bool) {
@@ -302,77 +251,69 @@ final class CompanionModel: ObservableObject {
                 self?.endWatchBackgroundTask()
             }
         }
-        defer { if fromWatch && !watchRefreshPending { endWatchBackgroundTask() } }
-        if fromWatch && busy {
-            watchRefreshPending = true
-            return .noData
-        }
+        defer { if fromWatch && !watchRefreshPending && !watchRefreshScheduled { endWatchBackgroundTask() } }
+        if fromWatch && busy { watchRefreshPending = true; return .noData }
         var changed = false
         var failed = false
-        if source != nil && !accessRevoked {
-            let result = await refresh()
+        for paired in pairedSources where !isRevoked(paired.sourceID) {
+            let result = await refreshOne(paired)
             changed = changed || result == .newData
             failed = failed || result == .failed
         }
-        for paired in additionalSources where !additionalRevoked.contains(paired.sourceID) {
-            let result = await refreshAdditional(paired)
-            changed = changed || result == .newData
-            failed = failed || result == .failed
-        }
-        if fromWatch, let identity = watchAggregate?.identity {
-            _ = await watch.waitForDelivery(of: identity)
-        }
+        if fromWatch, let identity = watchAggregate?.identity { _ = await watch.waitForDelivery(of: identity) }
         return changed ? .newData : failed ? .failed : .noData
     }
 
     @discardableResult
     func refresh(sourceID: String, fromPush: Bool = false) async -> UIBackgroundFetchResult {
         if fromPush {
-            // Two computers can notify at once. Give an in-flight source fetch a
-            // bounded chance to finish so the second hint is not discarded.
+            // Two computers can notify at once. Wait for the current fetch so
+            // the second hint has a chance to fetch its own source.
             let deadline = ProcessInfo.processInfo.systemUptime + 12
             while busy && ProcessInfo.processInfo.systemUptime < deadline {
                 do { try await Task.sleep(for: .milliseconds(100)) }
                 catch { return .noData }
             }
         }
-        if source?.sourceID == sourceID { return await refresh(fromPush: fromPush) }
-        guard let paired = additionalSources.first(where: { $0.sourceID == sourceID }) else { return .noData }
-        return await refreshAdditional(paired, fromPush: fromPush)
+        guard let paired = pairedSources.first(where: { $0.sourceID == sourceID }), !isRevoked(sourceID) else { return .noData }
+        return await refreshOne(paired, fromPush: fromPush)
     }
 
-    private func refreshAdditional(_ paired: PairedSource, fromPush: Bool = false) async -> UIBackgroundFetchResult {
+    private func refreshOne(_ paired: PairedSource, fromPush: Bool = false) async -> UIBackgroundFetchResult {
         guard !busy else { return .noData }
         let epoch = sourceEpoch
-        let previousIdentity = additionalSnapshots[paired.sourceID]?.identity
+        let sourceID = paired.sourceID
+        let previousIdentity = snapshots[sourceID]?.identity
         busy = true
         defer {
             busy = false
-            if watchRefreshPending && epoch == sourceEpoch {
-                watchRefreshPending = false
-                Task { @MainActor [weak self] in await self?.refreshAll(fromWatch: true) }
-            }
+            schedulePendingWatchRefresh()
         }
+        Diagnostics.shared.record(fromPush ? "push_triggered_fetch" : "foreground_fetch")
         do {
             let value = try await client.snapshot(paired)
             guard epoch == sourceEpoch, !Task.isCancelled else { return .noData }
-            if let old = additionalSnapshots[paired.sourceID], old.generation == value.generation,
+            if let old = snapshots[sourceID], old.generation == value.generation,
                value.revision < old.revision { throw HubError.message("Source returned an older snapshot") }
             guard value.observedAt <= Date().timeIntervalSince1970 + 60 else {
                 throw HubError.message("Source clock is ahead")
             }
             let age = max(0, Date().timeIntervalSince1970 - value.observedAt)
-            additionalSnapshots[paired.sourceID] = value
+            snapshots[sourceID] = value
             let receivedAt = Date()
-            additionalLastContact[paired.sourceID] = receivedAt
-            additionalFetchedUptime[paired.sourceID] = ProcessInfo.processInfo.systemUptime - age
-            additionalErrors.removeValue(forKey: paired.sourceID)
-            additionalRevoked.remove(paired.sourceID)
-            try? SourceSnapshotCache.save(value, receivedAt: receivedAt,
-                                          to: SourceSnapshotCache.url(for: paired.sourceID))
+            lastContacts[sourceID] = receivedAt
+            fetchedUptimes[sourceID] = ProcessInfo.processInfo.systemUptime - age
+            errors.removeValue(forKey: sourceID)
+            revokedSources.remove(sourceID)
+            status = age < value.freshFor
+                ? (value.mode == "synthetic" ? "Connected · synthetic test source" : "Connected · \(value.sourceName)")
+                : "Catching up · buffered snapshot is stale"
+            do { try SourceSnapshotCache.save(value, receivedAt: receivedAt, to: SourceSnapshotCache.url(for: sourceID)) }
+            catch { Diagnostics.shared.record("source_cache_write_failed") }
             forwardWatchAggregate()
-            Diagnostics.shared.record(fromPush ? "push_snapshot_received" : "snapshot_received",
-                                      event: value.identity, state: value.state)
+            monitoring.restore(source: paired)
+            Task { await monitoring.registerIfNeeded() }
+            Diagnostics.shared.record("snapshot_received", event: value.identity, state: value.state)
             PushCoordinator.shared.recoverRegistrationIfNeeded()
             if fromPush, let identity = watchAggregate?.identity {
                 _ = await watch.waitForDelivery(of: identity)
@@ -380,104 +321,26 @@ final class CompanionModel: ObservableObject {
             return value.identity == previousIdentity ? .noData : .newData
         } catch {
             guard epoch == sourceEpoch, !Task.isCancelled else { return .noData }
-            additionalErrors[paired.sourceID] = error.localizedDescription
-            if (error as? HubError)?.isUnauthorized == true {
-                additionalRevoked.insert(paired.sourceID)
-                additionalSnapshots.removeValue(forKey: paired.sourceID)
-                additionalLastContact.removeValue(forKey: paired.sourceID)
-                additionalFetchedUptime.removeValue(forKey: paired.sourceID)
-                SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: paired.sourceID))
-                PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
-            }
-            forwardWatchAggregate()
-            return .failed
-        }
-    }
-
-    private func accept(_ value: Snapshot, stage: String) throws {
-        if let previous = snapshot, previous.generation == value.generation,
-           value.revision < previous.revision { throw HubError.message("Source returned an older snapshot") }
-        let age = max(0, Date().timeIntervalSince1970 - value.observedAt)
-        guard value.observedAt <= Date().timeIntervalSince1970 + 60 else {
-            throw HubError.message("Source clock is ahead; synchronize device clocks before testing")
-        }
-        snapshot = value
-        let receivedAt = Date()
-        lastContact = receivedAt
-        fetchedUptime = ProcessInfo.processInfo.systemUptime - age
-        hasError = false
-        accessRevoked = false
-        status = age < value.freshFor
-            ? (value.mode == "synthetic" ? "Connected · synthetic test source" : "Connected · \(value.sourceName)")
-            : "Catching up · buffered snapshot is stale"
-        Diagnostics.shared.record(stage, event: value.identity, state: value.state)
-        do { try SourceSnapshotCache.save(value, receivedAt: receivedAt) }
-        catch { Diagnostics.shared.record("source_cache_write_failed") }
-        // The watch link applies profile fields immediately and independently
-        // refuses activity whose lease has expired.
-        forwardWatchAggregate()
-        if let source { monitoring.restore(source: source) }
-        Task { await monitoring.registerIfNeeded() }
-        PushCoordinator.shared.recoverRegistrationIfNeeded()
-    }
-
-    @discardableResult
-    func refresh(fromWatch: Bool = false, fromPush: Bool = false) async -> UIBackgroundFetchResult {
-        weather.refreshIfNeeded()
-        // Hold the accessory response window even when a foreground/APNs fetch
-        // is already in flight. Its queued follow-up shares this bounded task.
-        if fromWatch && !foreground && watchBackgroundTask == .invalid {
-            watchBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Watch status response") { [weak self] in
-                Diagnostics.shared.record("watch_fetch_time_expired")
-                self?.endWatchBackgroundTask()
-            }
-        }
-        guard !busy, let source else {
-            // A notification can arrive while an older fetch/write is in flight.
-            // Coalesce a follow-up rather than losing that accessory request.
-            if fromWatch && source != nil { watchRefreshPending = true }
-            else if fromWatch { endWatchBackgroundTask() }
-            if fromPush { Diagnostics.shared.record("push_fetch_skipped_busy_or_unpaired") }
-            return .noData
-        }
-        let previousIdentity = snapshot?.identity
-        let epoch = sourceEpoch
-        busy = true
-        defer {
-            busy = false
-            if watchRefreshPending && epoch == sourceEpoch {
-                watchRefreshPending = false
-                Task { @MainActor [weak self] in await self?.refreshAll(fromWatch: true) }
-            } else {
-                watchRefreshPending = false
-                if fromWatch { endWatchBackgroundTask() }
-            }
-        }
-        Diagnostics.shared.record(fromPush ? "push_triggered_fetch" : fromWatch ? "watch_triggered_fetch" : "foreground_fetch")
-        do {
-            let value = try await client.snapshot(source)
-            guard epoch == sourceEpoch, !Task.isCancelled else { return .noData }
-            try accept(value, stage: "snapshot_received")
-            if fromPush || fromWatch {
-                let prefix = fromPush ? "push" : "watch"
-                Diagnostics.shared.record("\(prefix)_fetch_completed", event: value.identity)
-                // Allow the already-queued BLE write a short window before returning our fetch completion.
-                let delivered = await watch.waitForDelivery(of: watchAggregate?.identity ?? value.identity)
-                Diagnostics.shared.record(delivered ? "\(prefix)_ble_accepted" : "\(prefix)_ble_unconfirmed", event: value.identity)
-            }
-            return value.identity == previousIdentity ? .noData : .newData
-        } catch {
-            guard epoch == sourceEpoch else { return .noData }
-            // Cancelled foreground polling is not evidence that the source is offline.
-            if Task.isCancelled { return .noData }
-            sourceFailed(error)
+            sourceFailed(error, sourceID: sourceID)
             Diagnostics.shared.record("source_fetch_failed")
             return .failed
         }
     }
+
     private func endWatchBackgroundTask() {
         guard watchBackgroundTask != .invalid else { return }
         UIApplication.shared.endBackgroundTask(watchBackgroundTask)
         watchBackgroundTask = .invalid
+    }
+
+    private func schedulePendingWatchRefresh() {
+        guard watchRefreshPending, !watchRefreshScheduled else { return }
+        watchRefreshScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.watchRefreshScheduled = false
+            self.watchRefreshPending = false
+            await self.refreshAll(fromWatch: true)
+        }
     }
 }

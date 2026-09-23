@@ -111,10 +111,11 @@ for that connection within 30 seconds. It does not acknowledge watch delivery.
 Names/platforms are app-reported metadata, and names may be generic or duplicated.
 Pairing identifies app installations, not physical hardware.
 
-Existing credentials remain **Unidentified connection** until the updated iPhone
-app identifies the credential it owns. Earlier unused credentials remain separate;
-Paceman does not guess which ones belong together. Contact times persist across
-source restarts; older records with no observed fetch show “No contact yet.”
+Pairings require the app's installation identity. On upgrade, older credentials
+without identity and their notification destinations are removed. A phone using
+one of those credentials must scan a new pairing code. Paceman does not guess
+which installation an older credential belonged to. Contact times persist across
+source restarts; records with no observed fetch show “No contact yet.”
 See [pairing and removal](pairing-and-removal.md) for upgrade and recovery details.
 
 The iPhone’s **Remove computer** now revokes its access on the computer before

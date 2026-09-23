@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from desktop import install
 from desktop.control import private_endpoint, read_status, set_sharing, pair_phone, remove_access
+from tests.identity import device
 from service.hub import Server, Store
 from service.status import DesktopStatus
 
@@ -30,7 +31,7 @@ class DesktopStatusTests(unittest.TestCase):
 
     def test_status_has_no_credentials_and_expires_after_crash(self):
         invitation = self.store.invite("https://test.example")
-        client = self.store.redeem(invitation["invitation"])
+        client = self.store.redeem(invitation["invitation"], device=device())
         self.status.publish(force=True)
         value = read_status(self.path)
         self.assertTrue(value["running"])
@@ -38,7 +39,7 @@ class DesktopStatusTests(unittest.TestCase):
         self.assertEqual(value["pairedPhones"], 1)
         self.assertNotIn(client["credential"], self.path.read_text())
         self.assertEqual(value["clients"][0]["id"], client["clientID"])
-        self.assertIsNone(value["clients"][0]["name"])
+        self.assertEqual(value["clients"][0]["name"], "Test iPhone")
         self.assertNotIn('"hash"', self.path.read_text())
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
         self.assertFalse(read_status(self.path, now=value["updatedAt"] + 20)["running"])
@@ -62,7 +63,7 @@ class DesktopStatusTests(unittest.TestCase):
             self.assertEqual(fetch(), 401)
             self.assertEqual(self.status.phone_seen, 0)
             invitation = self.store.invite("https://test.example")
-            client = self.store.redeem(invitation["invitation"])
+            client = self.store.redeem(invitation["invitation"], device=device())
             self.assertEqual(fetch(client["credential"]), 200)
             deadline = time.monotonic() + 2
             while not self.status.phone_seen and time.monotonic() < deadline:
@@ -82,7 +83,7 @@ class DesktopStatusTests(unittest.TestCase):
             self.assertFalse(read_status(self.path)["running"])
 
     def test_remove_access_works_while_paused_and_preserves_other_clients(self):
-        first, second = [self.store.redeem(self.store.invite('https://test.example')['invitation']) for _ in range(2)]
+        first, second = [self.store.redeem(self.store.invite('https://test.example')['invitation'], device=device()) for _ in range(2)]
         self.store.push_device(first['credential'], {'deviceToken': 'ab' * 32, 'environment': 'development', 'mode': 'alert'})
         (self.root / 'sharing-paused').write_text('{}')
         with patch('desktop.control.state_directory', return_value=self.root), patch('desktop.control.status_path', return_value=self.root / 'absent'):
@@ -133,7 +134,7 @@ class DesktopStatusTests(unittest.TestCase):
     def test_paused_status_survives_missing_runtime_file(self):
         marker = self.root / "sharing-paused"
         marker.write_text('{"paused":true}')
-        client = self.store.redeem(self.store.invite("https://test.example")["invitation"])
+        client = self.store.redeem(self.store.invite("https://test.example")["invitation"], device=device())
         with patch("desktop.control.state_directory", return_value=self.root), \
              patch("desktop.control.status_path", return_value=self.root / "missing.json"):
             value = read_status()
@@ -173,7 +174,7 @@ class DesktopInstallTests(unittest.TestCase):
 
     def test_sqlite_migration_preserves_pairings_and_never_overwrites_installed_database(self):
         source = Store(self.root / "checkout/hub.sqlite3")
-        client = source.redeem(source.invite("https://test.example")["invitation"])
+        client = source.redeem(source.invite("https://test.example")["invitation"], device=device())
         target = self.root / "state/hub.sqlite3"
         self.assertTrue(install.migrate_database(source.path, target))
         installed = Store(target)

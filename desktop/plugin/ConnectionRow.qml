@@ -115,7 +115,7 @@ ColumnLayout {
     }
     Text {
       Layout.fillWidth: true
-      visible: !root.connection.recent || !root.connection.identified
+      visible: !root.connection.recent
       text: root.connection.guidance
       color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.body
       wrapMode: Text.WordWrap

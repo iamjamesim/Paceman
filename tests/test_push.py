@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from tests.identity import device
 from service.hub import Store
 from service.push import APNs, Config, Result, Worker, notification
 
@@ -30,7 +31,7 @@ class PushWorkerTests(unittest.TestCase):
         self.worker = Worker(self.store, self.sender, self.log)
 
     def pair(self):
-        return self.store.redeem(self.store.invite("https://source.example")["invitation"])
+        return self.store.redeem(self.store.invite("https://source.example")["invitation"], device=device())
 
     def register(self, mode="alert"):
         return self.store.push_device(self.client["credential"], {

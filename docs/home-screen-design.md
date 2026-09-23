@@ -13,6 +13,23 @@ with the state label stacked below. A single session needs no count headline.
 Historical robots are still and muted. No received activity is not historical activity.
 Background transport registration and alert permission are not home-screen setup steps.
 
+## Multiple-computer behavior: 2026-09-23
+
+Computers are peers. Each has the same full-width tappable card header, spacing,
+connection state, activity rows, history treatment, and rename/removal detail.
+Pairing order stays stable; repairing one keeps its position, and removing one
+leaves the others' credentials, caches and state intact. Activity does not reorder
+cards while the user is reading or tapping. If two display names match, show
+their source hosts under those names to distinguish them.
+
+Each computer fetches and caches independently. The watch combines only fresh
+activity by urgency across all sources. Appearance and allowance each use the
+first paired source with a valid value as a stable default, whether or not that
+computer is currently active; removing it selects the next valid value. The manual Live
+Activity probe asks which computer to follow and has no implicit primary source.
+The old primary/additional storage keys migrate into one ordered list. The first
+entry is only the default position for legacy single-computer navigation.
+
 ## Two-computer alpha pass: 2026-09-22
 
 Keep the current card hierarchy while adding another independently paired

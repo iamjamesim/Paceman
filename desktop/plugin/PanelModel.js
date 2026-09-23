@@ -39,8 +39,10 @@ function activitySummary(state, available) {
 function present(state, now) {
   var age = now - Number(state.updatedAt || 0)
   var running = state.running === true && age >= 0 && age < 20
-  var clients = Array.isArray(state.clients) ? state.clients : (Number(state.pairedPhones || 0) > 0
-    ? [{id: "legacy", name: null, lastContactAt: state.lastPhoneFetchAt, removable: false}] : [])
+  var clients = Array.isArray(state.clients) ? state.clients.filter(function(client) {
+    return client && typeof client.id === "string" && typeof client.name === "string" && !!client.name
+      && typeof client.platform === "string"
+  }) : []
   var paired = clients.length > 0
   var sharing = state.sharingEnabled !== false
   var activity = activitySummary(state, running && sharing)
@@ -48,16 +50,14 @@ function present(state, now) {
     var contact = Number(client.lastContactAt || 0)
     var age = now - contact
     var recent = running && sharing && contact > 0 && age >= 0 && age < 30
-    var identified = !!client.name && !!client.platform
     var phone = client.platform === "ios" || client.platform === "android"
-    return {id: client.id, title: identified ? client.name : "Unidentified connection",
-      identified: identified, phone: phone, recent: recent,
+    return {id: client.id, title: client.name,
+      phone: phone, recent: recent,
       lastContactAt: contact, pairedAt: Number(client.pairedAt || 0),
       canRemove: client.removable !== false && !!client.id,
       status: !sharing ? "Sharing is off" : !running ? "Desktop unavailable"
         : recent ? "Receiving updates" : "Waiting for contact",
-      guidance: !identified ? "Open the updated Paceman app to identify this connection. Earlier pairings cannot be matched to a phone automatically."
-        : !sharing ? "Turn sharing on to send updates from this computer."
+      guidance: !sharing ? "Turn sharing on to send updates from this computer."
         : !running ? "Restart Paceman to resume sharing."
         : "Check Tailscale on both devices, then open Paceman" + (phone ? " on your phone." : " on this device.")}
   })

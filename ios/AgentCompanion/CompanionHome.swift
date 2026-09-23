@@ -5,18 +5,10 @@ struct CompanionHome: View {
     @ObservedObject var presentation: PresentationModel
     let theme: CompanionTheme
     let open: (FeedDestination) -> Void
-    var paired: Bool { presentation.preview ? presentation.previewHasComputer : model.source != nil }
+    var paired: Bool { presentation.preview ? presentation.previewHasComputer : !model.pairedSources.isEmpty }
     var hasWatch: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.paired }
     var watchReady: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.ready }
-    var offline: Bool { presentation.preview ? presentation.previewOffline : model.hasError }
-    var stale: Bool { presentation.preview ? presentation.previewOffline : model.snapshot != nil && !model.fresh }
-    var content: AgentFeedContent {
-        if presentation.preview {
-            if ["waiting", "offline-empty"].contains(presentation.previewScreen) { return .waiting }
-            return presentation.previewSessions.isEmpty ? .empty : .sessions(presentation.previewSessions)
-        }
-        return AgentFeedContent.resolve(model.snapshot)
-    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -32,16 +24,15 @@ struct CompanionHome: View {
                 }.padding(.bottom, 34)
 
                 if paired {
-                    agentContent
-                    ForEach(model.additionalSources, id: \.sourceID) { paired in
-                        additionalComputer(paired).padding(.top, 12)
+                    ForEach(model.pairedSources, id: \.sourceID) { paired in
+                        computerCard(paired)
+                            .padding(.top, paired.sourceID == model.pairedSources.first?.sourceID ? 0 : 12)
                     }
                     if !presentation.preview {
                         Button { open(.pairing) } label: { Label("Connect another computer", systemImage: "plus") }
                             .font(.subheadline).padding(.top, 18)
                     }
-                }
-                else { agentSetup }
+                } else { agentSetup }
 
                 watchRow.padding(.top, 22)
                 if presentation.preview {
@@ -53,6 +44,7 @@ struct CompanionHome: View {
         .foregroundStyle(theme.ink).background(CompanionCanvas(theme: theme))
         .navigationTitle("Paceman").toolbar(.hidden, for: .navigationBar)
     }
+
     private var agentSetup: some View {
         VStack(alignment: .leading, spacing: 21) {
             HStack {
@@ -68,41 +60,59 @@ struct CompanionHome: View {
         }.padding(23).background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
             .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
-    private var historical: Bool { offline || stale }
-    private var connection: ComputerConnectionState { presentation.computerState(model: model) }
-    private var agentContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button { open(.computer) } label: {
+
+    private func computerCard(_ paired: PairedSource) -> some View {
+        let id = paired.sourceID
+        let firstPreview = presentation.preview && id == model.pairedSources.first?.sourceID
+        let value = model.snapshots[id]
+        let state = presentation.computerState(model: model, sourceID: id)
+        let historical = state == .reconnecting || state == .checking
+        let content: AgentFeedContent = firstPreview
+            ? (["waiting", "offline-empty"].contains(presentation.previewScreen) ? .waiting
+                : presentation.previewSessions.isEmpty ? .empty : .sessions(presentation.previewSessions))
+            : AgentFeedContent.resolve(value)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button { open(.otherComputer(id)) } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "laptopcomputer")
                         .font(.system(size: 18, weight: .regular))
                         .frame(width: 24).foregroundStyle(theme.ink.opacity(0.65)).accessibilityHidden(true)
-                    Text(presentation.displayName(source: model.source))
-                        .font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold))
-                        .multilineTextAlignment(.leading)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(presentation.displayName(source: paired))
+                            .font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold))
+                            .multilineTextAlignment(.leading)
+                        if model.pairedSources.filter({ presentation.displayName(source: $0) == presentation.displayName(source: paired) }).count > 1,
+                           let host = paired.endpoint.host {
+                            Text(host).font(.caption2).foregroundStyle(theme.ink.opacity(0.55))
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).opacity(0.45)
-                }.frame(minHeight: 32).contentShape(Rectangle())
+                }.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityHint("Manage this computer's connection")
-
-            if model.accessRevoked {
-                HStack { connectionLabel; Spacer(); recoveryAction }.padding(.top, 3)
-            } else if connection != .current {
-                connectionLabel.padding(.top, 8)
+            if state != .current {
+                HStack {
+                    Text(state.rawValue).font(.caption).foregroundStyle(theme.ink.opacity(0.7))
+                    if state == .revoked {
+                        Spacer()
+                        Button("Reconnect") { open(.otherComputer(id)) }
+                            .buttonStyle(.plain).font(.caption.weight(.semibold)).frame(minHeight: 44)
+                    }
+                }.padding(.top, 3)
             }
-            if presentation.preview ? presentation.previewScreen != "waiting" && presentation.previewScreen != "offline-empty" : model.lastContact != nil {
-                updateLabel.padding(.top, 5)
+            if firstPreview || model.lastContacts[id] != nil {
+                ComputerReceiptLabel(model: model, presentation: presentation, sourceID: id)
+                    .font(.caption2).foregroundStyle(theme.ink.opacity(0.5)).padding(.top, 5)
             }
             Color.clear.frame(height: 16)
-
             CompanionRule(theme: theme)
-            if model.accessRevoked {
+            if state == .revoked {
                 Text("Reconnect to receive activity from this computer.")
                     .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65)).padding(.top, 18)
             } else {
-                if historical, content.hasActivity {
-                    Text("Last known activity").font(.caption).foregroundStyle(theme.ink.opacity(0.55))
-                        .padding(.top, 16)
+                if historical && content.hasActivity {
+                    Text("Last known activity").font(.caption).foregroundStyle(theme.ink.opacity(0.55)).padding(.top, 16)
                 }
                 switch content {
                 case .sessions(let sessions):
@@ -119,11 +129,12 @@ struct CompanionHome: View {
                     emptyActivity("No activity received yet", detail: nil)
                 case .empty:
                     emptyActivity("No active sessions", detail: historical ? nil : "Activity appears when an agent starts.")
-                case .summary(let state):
-                    AgentFeedRow(session: AgentSession(id: "aggregate", provider: "", state: state, name: "Agent activity"), theme: theme, animate: !historical)
+                case .summary(let activity):
+                    AgentFeedRow(session: AgentSession(id: "aggregate", provider: "", state: activity, name: "Agent activity"),
+                                 theme: theme, animate: !historical)
                 }
             }
-            if !presentation.preview && model.snapshot?.mode == "synthetic" {
+            if !presentation.preview && value?.mode == "synthetic" {
                 Text("Test source").font(.caption2).foregroundStyle(theme.ink.opacity(0.5))
             }
         }
@@ -131,72 +142,12 @@ struct CompanionHome: View {
         .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
         .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
+
     private func emptyActivity(_ title: String, detail: String?) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.subheadline.weight(.medium))
             if let detail { Text(detail).font(.caption).foregroundStyle(theme.ink.opacity(0.55)) }
         }.padding(.vertical, 20)
-    }
-    private func additionalComputer(_ paired: PairedSource) -> some View {
-        let value = model.additionalSnapshots[paired.sourceID]
-        let current = model.additionalFresh(paired.sourceID)
-        let revoked = model.additionalRevoked.contains(paired.sourceID)
-        let content = AgentFeedContent.resolve(value)
-        return VStack(alignment: .leading, spacing: 0) {
-            Button { open(.otherComputer(paired.sourceID)) } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "laptopcomputer").frame(width: 24).accessibilityHidden(true)
-                    Text(presentation.displayName(source: paired)).font(.subheadline.weight(.semibold))
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).opacity(0.45)
-                }.frame(minHeight: 32)
-            }.buttonStyle(.plain)
-            if revoked { Text("Access removed").font(.caption).foregroundStyle(theme.ink.opacity(0.65)) }
-            else if model.additionalErrors[paired.sourceID] != nil { Text("Reconnecting…").font(.caption).foregroundStyle(theme.ink.opacity(0.65)) }
-            else if !current { Text(value == nil ? "Connecting…" : "Checking…").font(.caption).foregroundStyle(theme.ink.opacity(0.65)) }
-            if let contact = model.additionalLastContact[paired.sourceID] {
-                ReceiptTimeLabel(prefix: "Last received", date: contact)
-                    .font(.caption2).foregroundStyle(theme.ink.opacity(0.5))
-            }
-            Color.clear.frame(height: 16)
-            CompanionRule(theme: theme)
-            if revoked {
-                Text("Reconnect to receive activity from this computer.")
-                    .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65)).padding(.vertical, 18)
-            } else {
-                if !current && content.hasActivity {
-                    Text("Last known activity").font(.caption).foregroundStyle(theme.ink.opacity(0.55)).padding(.top, 16)
-                }
-                switch content {
-                case .sessions(let sessions):
-                    ForEach(AgentDisplayRow.rows(sessions)) { row in
-                        AgentFeedRow(session: row.session, theme: theme, animate: current, detailOverride: row.detail)
-                    }
-                case .summary(let state):
-                    AgentFeedRow(session: AgentSession(id: "aggregate", provider: "", state: state, name: "Agent activity"),
-                                 theme: theme, animate: current)
-                case .waiting: emptyActivity("No activity received yet", detail: nil)
-                case .empty: emptyActivity("No active sessions", detail: current ? "Activity appears when an agent starts." : nil)
-                }
-            }
-        }.padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 6)
-            .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
-            .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
-    }
-    private var connectionLabel: some View {
-        Text(presentation.computerState(model: model).rawValue)
-            .font(.caption).foregroundStyle(theme.ink.opacity(0.7))
-    }
-    private var recoveryAction: some View {
-        Button(model.accessRevoked ? "Reconnect" : "Retry") {
-            if model.accessRevoked { open(.computer) }
-            else if !presentation.preview { Task { await model.refresh() } }
-        }.buttonStyle(.plain).font(.caption.weight(.semibold)).frame(minHeight: 44)
-            .disabled(!model.accessRevoked && model.busy)
-    }
-    private var updateLabel: some View {
-        ComputerReceiptLabel(model: model, presentation: presentation)
-            .font(.caption2).foregroundStyle(theme.ink.opacity(0.5))
     }
     private var watchRow: some View {
         Button { open(.watch) } label: {

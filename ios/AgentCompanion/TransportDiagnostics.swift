@@ -9,24 +9,23 @@ struct TransportDiagnostics: View {
             Section {
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(model.snapshot?.state.title ?? "No status yet").font(.largeTitle.bold())
-                        Text(model.fresh ? "Fresh" : "Last known / not connected")
-                            .foregroundStyle(model.fresh ? Color.green : Color.secondary)
-                        if let date = model.lastContact { Text("Last contact \(date.formatted(date: .omitted, time: .standard))").font(.caption) }
+                        Text(model.currentActivityState.title).font(.largeTitle.bold())
+                        Text("\(model.pairedSources.count) connected computer\(model.pairedSources.count == 1 ? "" : "s")")
+                            .foregroundStyle(Color.secondary)
                     }.padding(.vertical, 8)
                 }
-                Text(model.snapshot?.mode == "synthetic" ? "Synthetic test source. Finished means a turn ended." : "Finished means a turn ended, not that the agent session closed.").font(.caption).foregroundStyle(.secondary)
+                Text("Finished means a turn ended, not that the agent session closed.").font(.caption).foregroundStyle(.secondary)
             }
             MonitoringProbe(model: model, monitoring: model.monitoring)
             Section("Weather") {
                 Text(model.weather.diagnostic).font(.caption.monospaced()).textSelection(.enabled)
                 Button("Retry weather request") { model.weather.retryForDiagnostics() }
             }
-            Section("Work source") {
-                Text(model.status)
-                if let source = model.source {
+            Section("Work sources") {
+                ForEach(model.pairedSources, id: \.sourceID) { source in
                     Text(source.endpoint.absoluteString).font(.caption.monospaced()).textSelection(.enabled)
-                    Button("Refresh now") { Task { await model.refresh() } }.disabled(model.busy)
+                    Text(model.connectionState(source.sourceID).rawValue).font(.caption)
+                    Button("Refresh now") { Task { await model.refresh(sourceID: source.sourceID) } }.disabled(model.busy)
                 }
             }
             Section("Push delivery") {
@@ -68,11 +67,13 @@ private struct MonitoringProbe: View {
             if monitoring.active {
                 Button("Stop Live Activity") { Task { await monitoring.stop() } }
             } else {
-                Button("Start Live Activity") {
-                    if let source = model.source, let snapshot = model.snapshot {
-                        monitoring.start(source: source, snapshot: snapshot)
-                    }
-                }.disabled(model.source == nil || !model.fresh)
+                ForEach(model.pairedSources, id: \.sourceID) { source in
+                    Button("Start Live Activity · \(source.endpoint.host ?? "Computer")") {
+                        if let snapshot = model.snapshots[source.sourceID] {
+                            monitoring.start(source: source, snapshot: snapshot)
+                        }
+                    }.disabled(!model.isFresh(source.sourceID))
+                }
             }
             Text("Quiet, one-hour desktop push test. Updates do not imply the app or watch received them.")
                 .font(.caption).foregroundStyle(.secondary)

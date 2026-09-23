@@ -49,7 +49,7 @@ struct CompanionRoot: View {
                 .navigationDestination(for: FeedDestination.self) { destination in
                     switch destination {
                     case .computer: ComputerDetail(model: model, presentation: presentation, theme: theme)
-                    case .otherComputer(let id): OtherComputerDetail(model: model, presentation: presentation, theme: theme, sourceID: id)
+                    case .otherComputer(let id): ComputerDetail(model: model, presentation: presentation, theme: theme, sourceID: id)
                     case .watch: WatchDetail(model: model, theme: theme, preview: presentation.preview, previewConnected: presentation.previewHasWatch, previewPhase: presentation.previewWatchPhase, previewComplete: presentation.previewScreen == "watch-complete", previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen) ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") { path.append(.watchNotifications) }
                     case .pairing: PairingFlow(model: model, theme: theme, preview: presentation.preview)
                     case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview)
@@ -85,14 +85,14 @@ struct CompanionRoot: View {
             default: break
             }
         }
-        .onChange(of: model.source?.sourceID) { old, new in
+        .onChange(of: model.pairedSources.first?.sourceID) { old, new in
             guard !presentation.preview else { return }
             if old == nil && new != nil { path = [] }
             else if new == nil { path = [] }
         }
         .onOpenURL { url in
             guard url.scheme == "agentcompanion" else { return }
-            path = model.source == nil && url.host == "connect" ? [.pairing] : []
+            path = model.pairedSources.isEmpty && url.host == "connect" ? [.pairing] : []
         }
     }
 }

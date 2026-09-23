@@ -35,8 +35,11 @@ are no longer scheduled. This change does not add watch freshness/lease support.
 Install the desktop first with `bash scripts/install-desktop.sh`, then build and
 install the updated iPhone app. The phone migrates its previously saved primary
 and additional computer records into one Keychain item. If an earlier interrupted
-removal left only additional computers saved, the first one becomes primary.
+removal left only additional computers saved, the first one appears first.
 New pairings require `clientManagement: 1` in the source response.
+The source now requires installation identity at pairing. On upgrade it retires
+unidentified credentials and their push destinations. An affected phone shows
+**Access removed** on its next request and needs a new QR pairing code.
 
 An installation ID is not a secret or an authorization token. A matching claim
 without the current credential cannot replace a pairing. The source returns 409
@@ -66,8 +69,10 @@ See the [protocol](protocol.md) for request shapes and privacy boundaries.
    migration, and removal failures.
 2. Install on the already-paired iPhone. Open the app; verify both saved computers
    remain visible and activity still reaches the phone.
-3. In Computer details, use **Reconnect with QR code** and scan a new desktop QR.
-   Verify one row remains for that installation and push setup re-registers.
+3. On the phone home screen, tap **Connect another computer** and scan a new QR
+   from a computer that is already paired. The flow should say **Reconnect
+   computer**. Verify one card remains in the same position, one desktop client
+   row remains for that installation, and push setup re-registers.
 4. Pair a second app installation, including a duplicate reported name. Verify
    independent contact times; removing one must preserve the other.
 5. Expand the phone row on the desktop. Cancel removal once, then confirm removal

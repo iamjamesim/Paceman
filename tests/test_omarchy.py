@@ -11,6 +11,7 @@ import time
 import unittest
 from unittest.mock import Mock
 
+from tests.identity import device
 from service.hub import Server, Store
 from service.omarchy import OmarchySource, appearance
 from service.push import Worker
@@ -174,7 +175,7 @@ class OmarchyTests(unittest.TestCase):
         self.assertIsNone(appearance(self.root / 'omarchy'))
 
     def test_appearance_cannot_hide_or_repeat_pending_push(self):
-        pair = self.store.redeem(self.store.invite('https://test.example')['invitation'])
+        pair = self.store.redeem(self.store.invite('https://test.example')['invitation'], device=device())
         self.store.push_device(pair['credential'], dict(deviceToken='ab'*32, environment='development', mode='alert'))
         event = self.event('needs-input')
         self.write_theme('#88FFAA')
@@ -189,7 +190,7 @@ class OmarchyTests(unittest.TestCase):
         self.assertEqual(len(sender.calls), 1)
 
     def test_restart_retains_pairing_and_live_states_but_clears_unverified_records(self):
-        pair = self.store.redeem(self.store.invite('https://test.example')['invitation'])
+        pair = self.store.redeem(self.store.invite('https://test.example')['invitation'], device=device())
         self.event('completed')
         self.event('working', session='two')
         with self.store.connect() as db:
@@ -250,7 +251,7 @@ class OmarchyTests(unittest.TestCase):
                 invitation = self.store.invite('https://test.example')
                 conn = http.client.HTTPConnection(*server.server_address, timeout=2)
                 self.addCleanup(conn.close)
-                conn.request('POST', '/v1/pair', json.dumps({'invitation': invitation['invitation']}))
+                conn.request('POST', '/v1/pair', json.dumps({'invitation': invitation['invitation'], 'device': device()}))
                 pair = json.loads(conn.getresponse().read())
                 headers = {'Authorization': 'Bearer ' + pair['credential']}
                 conn.request('GET', '/v1/snapshot', headers=headers)

@@ -4,6 +4,7 @@ import tempfile
 import time
 import unittest
 
+from tests.identity import device
 from service.hub import Store
 from service.push import Worker, live_notification
 from tests.test_push import FakeSender
@@ -14,7 +15,7 @@ class MonitoringTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.store = Store(Path(self.tmp.name) / 'hub.sqlite3')
-        self.client = self.store.redeem(self.store.invite('https://source.example')['invitation'])
+        self.client = self.store.redeem(self.store.invite('https://source.example')['invitation'], device=device())
         self.credential = self.client['credential']
         self.sender = FakeSender()
         self.worker = Worker(self.store, self.sender, Path(self.tmp.name) / 'push.jsonl')

@@ -190,8 +190,9 @@ hooks in the Codex runtime for Codex and ChatGPT Work; they do not establish
 ordinary Chat coverage. Hook scripts also need to exist where the work runs.
 
 The Mac source does not currently supply an Omarchy palette or Codex allowance.
-The watch profile still takes those durable values from the phone's primary
-source when present. The menu bar shows observed hook sessions; Linux's
+The watch profile takes each durable field from the first paired source with a
+valid value, keeping the appearance stable as computers become active or idle.
+The menu bar shows observed hook sessions; Linux's
 process-verified counts have a stronger liveness guarantee.
 
 ## Validation before daily use

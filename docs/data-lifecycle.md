@@ -35,8 +35,8 @@ phone to pair again; it is not a firmware factory reset. Removing a computer
 revokes its client access and clears local pairing, activity and cached profile
 state. A network failure never clears the cache. Confirmed credential revocation
 does, because the phone no longer owns that source relationship. Removing one
-computer leaves the others paired; removing the primary promotes another paired
-computer without changing that computer's credential.
+computer leaves the others paired. The next item in the saved display order
+appears first without changing its credential, cache, or connection state.
 
 ## Omarchy source and panel
 

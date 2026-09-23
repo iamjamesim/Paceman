@@ -30,6 +30,7 @@ final class MonitoringCoordinator: ObservableObject {
     private var tokenTask: Task<Void, Never>?
     private var stateTask: Task<Void, Never>?
     private var source: PairedSource?
+    var activeSourceID: String? { active ? source?.sourceID : nil }
     private var token: Data?
     private var registeredToken: Data?
     private var lastAttempt: Date?

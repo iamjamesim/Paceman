@@ -7,6 +7,7 @@ import threading
 import time
 import unittest
 
+from tests.identity import device
 from service.hub import Server, Store, endpoint
 
 
@@ -19,17 +20,17 @@ class StoreTests(unittest.TestCase):
     def test_single_use_even_when_redeemed_concurrently(self):
         invitation = self.store.invite("https://test.example", now=10)
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            results = list(pool.map(lambda _: self.store.redeem(invitation["invitation"], now=11), range(8)))
+            results = list(pool.map(lambda _: self.store.redeem(invitation["invitation"], now=11, device=device()), range(8)))
         self.assertEqual(sum(result is not None for result in results), 1)
 
     def test_expiry_boundary_and_unknown_invitation(self):
         invitation = self.store.invite("https://test.example", now=10)
-        self.assertIsNone(self.store.redeem(invitation["invitation"], now=310))
-        self.assertIsNone(self.store.redeem("unknown"))
+        self.assertIsNone(self.store.redeem(invitation["invitation"], now=310, device=device()))
+        self.assertIsNone(self.store.redeem("unknown", device=device()))
 
     def test_revoke_and_private_storage(self):
         invitation = self.store.invite("https://test.example")
-        client = self.store.redeem(invitation["invitation"])
+        client = self.store.redeem(invitation["invitation"], device=device())
         self.assertTrue(self.store.authorized(client["credential"]))
         self.assertFalse(self.store.authorized(""))
         self.assertEqual(self.store.path.stat().st_mode & 0o777, 0o600)
@@ -98,7 +99,7 @@ class HTTPTests(unittest.TestCase):
 
     def paired(self):
         invitation = self.store.invite("https://test.example")
-        status, client = self.request("POST", "/v1/pair", {"invitation": invitation["invitation"]})
+        status, client = self.request("POST", "/v1/pair", {"invitation": invitation["invitation"], "device": device()})
         self.assertEqual(status, 200)
         return client
 

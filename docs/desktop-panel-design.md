@@ -39,7 +39,7 @@ troubleshooting buttons. Normal content width is 380 logical style units.
    stops the service; On restores both. A service condition also prevents an
    accidental manual start from overriding the saved Off choice.
 2. **Phone contact.** A phone icon, understandable connection text and last-contact
-   time. Names and platforms come from the paired app; unidentified credentials get a neutral connection row. A recent authenticated fetch supports
+   time. Names and platforms come from the paired app. A recent authenticated fetch supports
    “Receiving updates”; it does not support a watch-delivered claim.
 3. **What this computer contributes.** One compact adapter/activity summary:
    Codex working, needs input, finished or no active work. It remains useful
@@ -123,10 +123,9 @@ the panel. Removal is available while sharing is off. Long connection lists scro
 within the panel, including keyboard focus following the selected control.
 
 Every credential has its own contact time. Named app installations get a phone
-icon only when their reported platform supports that description. Unknown records
-remain **Unidentified connection**, with a pairing date and update guidance. They
-are never merged by name or inferred to be physical phones. The section reads
-**CONNECTIONS** when it contains unidentified/non-phone clients. Re-pairing with
+icon only when their reported platform supports that description. Pairing requires
+installation metadata; names are never merged or inferred to be physical phones.
+The section reads **CONNECTIONS** when it contains non-phone clients. Re-pairing with
 proof of the current credential replaces that installation’s access in place.
 
 ## Evidence limits

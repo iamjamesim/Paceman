@@ -1,4 +1,4 @@
-"""Pairing ownership, legacy upgrade and removal through the public HTTP contract."""
+"""Identified pairing, upgrade and removal through the public HTTP contract."""
 import concurrent.futures
 from contextlib import closing
 import http.client
@@ -44,8 +44,8 @@ class PairingTests(unittest.TestCase):
 
     def pair(self, device=None, previous=None):
         invitation = self.store.invite('https://test.example')
-        body = {'invitation': invitation['invitation']}
-        if device is not None: body['device'] = device
+        body = {'invitation': invitation['invitation'], 'device': device or {
+            **self.device, 'installationID': str(uuid.uuid4())}}
         status, paired = self.request('POST', '/v1/pair', body, previous)
         self.assertEqual(status, 200, paired)
         return paired
@@ -85,31 +85,16 @@ class PairingTests(unittest.TestCase):
         rows = {row['id']: row for row in self.store.clients()}
         self.assertEqual(rows[first['clientID']]['lastContactAt'], 0)
         self.assertGreater(rows[second['clientID']]['lastContactAt'], 0)
-        self.assertIsNone(rows[probe['clientID']]['name'])
+        self.assertEqual(rows[probe['clientID']]['name'], self.device['name'])
         self.assertEqual(Store(self.store.path).clients(), self.store.clients())
 
-    def test_existing_client_identifies_itself_without_repairing_or_merging_unknown_clients(self):
-        own, old = self.pair(), self.pair()
-        self.assertEqual(self.request('POST', '/v1/client', {'device': self.device}, own['credential'])[0], 200)
-        self.assertEqual(self.request('POST', '/v1/client', {'device': self.device}, own['credential'])[0], 200)
-        self.assertTrue(self.store.authorized(own['credential']))
-        rows = self.store.clients()
-        self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[0]['name'], self.device['name'])
-        self.assertIsNone(rows[1]['name'])
-        self.assertTrue(self.store.authorized(old['credential']))
-        self.assertEqual(self.request('POST', '/v1/client', {'device': self.device}, old['credential'])[0], 409)
-
-    def test_identification_requires_own_credential_and_valid_metadata(self):
-        pair = self.pair()
-        self.assertEqual(self.request('POST', '/v1/client', {'device': self.device})[0], 401)
+    def test_pairing_requires_valid_identity_and_no_identification_upgrade_endpoint(self):
         for device in (None, [], {}, {**self.device, 'installationID': 4}, {**self.device, 'name': 'x\nspoof'},
                        {**self.device, 'name': 'x' * 81}, {**self.device, 'platform': 'unknown'}):
-            self.assertEqual(self.request('POST', '/v1/client', {'device': device}, pair['credential'])[0], 400)
-        self.assertIsNone(self.store.clients()[0]['name'])
-        self.assertEqual(self.request('POST', '/v1/client', {'device': self.device}, pair['credential'])[0], 200)
-        changed = {**self.device, 'installationID': str(uuid.uuid4())}
-        self.assertEqual(self.request('POST', '/v1/client', {'device': changed}, pair['credential'])[0], 409)
+            invitation = self.store.invite('https://test.example')
+            self.assertEqual(self.request('POST', '/v1/pair', {'invitation': invitation['invitation'], 'device': device})[0], 400)
+        self.assertEqual(self.request('POST', '/v1/client', {'device': self.device})[0], 404)
+        self.assertEqual(self.store.clients(), [])
 
     def test_self_removal_only_revokes_caller_and_clears_push_and_identity(self):
         own, other = self.pair(self.device), self.pair()
@@ -122,7 +107,7 @@ class PairingTests(unittest.TestCase):
         self.assertTrue(self.store.authorized(other['credential']))
         self.assertTrue(self.store.push_device(other['credential'])['registered'])
         with self.store.connect() as db:
-            self.assertEqual(db.execute('SELECT COUNT(*) FROM client_devices').fetchone()[0], 0)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM client_devices').fetchone()[0], 1)
             self.assertEqual(db.execute('SELECT COUNT(*) FROM push_devices').fetchone()[0], 1)
         fresh = self.pair(self.device, own['credential'])
         self.assertNotEqual(fresh['clientID'], own['clientID'])
@@ -155,14 +140,17 @@ class PairingTests(unittest.TestCase):
         self.assertEqual(json.loads(self.status.path.read_text())['clients'][0]['name'], self.device['name'])
         self.assertNotIn('clients', self.store.snapshot())
 
-    def test_migration_keeps_legacy_credentials_unidentified(self):
+    def test_migration_retires_unidentified_credentials_and_destinations(self):
         path = self.root / 'legacy.sqlite3'
         credential, client_id = 'old-secret', str(uuid.uuid4())
         with closing(sqlite3.connect(path)) as db:
             db.execute('CREATE TABLE clients(id TEXT PRIMARY KEY,hash TEXT UNIQUE NOT NULL,created REAL NOT NULL)')
             db.execute('INSERT INTO clients VALUES (?,?,?)', (client_id, digest(credential), 10))
-            self.assertIsNone(Store.client_list(db)[0]['name'])
+            db.execute('CREATE TABLE push_devices(client_id TEXT PRIMARY KEY,token TEXT NOT NULL,environment TEXT NOT NULL,mode TEXT NOT NULL,cursor INTEGER NOT NULL,next_attempt REAL NOT NULL DEFAULT 0,attempts INTEGER NOT NULL DEFAULT 0,last_result TEXT,last_apns_id TEXT)')
+            db.execute("INSERT INTO push_devices(client_id,token,environment,mode,cursor) VALUES (?,'ab','development','alert',0)", (client_id,))
             db.commit()
         upgraded = Store(path)
-        self.assertTrue(upgraded.authorized(credential))
-        self.assertEqual(upgraded.clients(), [dict(id=client_id, pairedAt=10, lastContactAt=0, name=None, platform=None)])
+        self.assertFalse(upgraded.authorized(credential))
+        self.assertEqual(upgraded.clients(), [])
+        with upgraded.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM push_devices').fetchone()[0], 0)

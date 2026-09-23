@@ -8,8 +8,9 @@ production server. Limit tailnet access to the devices participating in the test
 "installationID": "UUID", "name": "Alex’s iPhone", "platform": "ios" } }`.
 Returns schema, sourceID, clientID, credential, and `clientManagement: 1`.
 Invalid/expired/used invitations return 401; invalid bodies 400; excessive attempts
-429. Invitation expiry is five minutes. Older clients may omit `device`; their
-credentials remain explicitly unidentified.
+429. Invitation expiry is five minutes. `device` is required. Existing
+credentials without device identity are retired on source upgrade, along with
+their push destinations; those phones need a new pairing code.
 
 Installation IDs are claims, not credentials. To re-pair an existing installation,
 include its current `Authorization: Bearer CREDENTIAL` and a fresh invitation.
@@ -19,10 +20,7 @@ The phone must register push again. A claimed installation already owned by a
 different credential returns 409 without consuming the invitation. Matching device
 names never cause a merge. A revoked installation can pair afresh with a new code.
 
-`POST /v1/client`: authenticated JSON `{ "device": { ... } }` identifies the caller's
-existing credential or updates its reported name. Returns `clientManagement: 1`.
-It cannot adopt another credential's installation ID or change an established ID;
-conflicts return 409. Names are plain text, 1–80 characters with control characters
+Names are plain text, 1–80 characters with control characters
 excluded; supported platforms are `ios`, `android`, `macos`, `linux`, `diagnostic`.
 The iPhone stores its installation UUID in its device-local Keychain. Reported names
 may be generic or duplicated; this is app identity, not hardware attestation.

@@ -87,6 +87,19 @@ struct PairedSourcesStore {
     }
 }
 
+enum PairedSourceOrder {
+    static func updating(_ paired: PairedSource, in sources: [PairedSource]) -> [PairedSource] {
+        var result = sources
+        if let index = result.firstIndex(where: { $0.sourceID == paired.sourceID }) { result[index] = paired }
+        else { result.append(paired) }
+        return result
+    }
+
+    static func removing(_ sourceID: String, from sources: [PairedSource]) -> [PairedSource] {
+        sources.filter { $0.sourceID != sourceID }
+    }
+}
+
 final class NoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse,

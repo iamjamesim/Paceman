@@ -16,11 +16,11 @@ final class ProtocolTests: XCTestCase {
         }
         let working = source("mac", .working, 100)
         let attention = source("linux", .needsInput, 90)
-        let combined = WatchAggregate.make(current: [working, attention], profile: nil, now: 110)
+        let combined = WatchAggregate.make(current: [working, attention], appearance: nil, allowance: nil, now: 110)
         XCTAssertEqual(combined.state, .needsInput)
         XCTAssertEqual(combined.eventID, attention.identity)
-        XCTAssertEqual(WatchAggregate.make(current: [working], profile: nil, now: 110).state, .working)
-        let unavailable = WatchAggregate.make(current: [], profile: attention, now: 150)
+        XCTAssertEqual(WatchAggregate.make(current: [working], appearance: nil, allowance: nil, now: 110).state, .working)
+        let unavailable = WatchAggregate.make(current: [], appearance: nil, allowance: nil, now: 150)
         XCTAssertEqual(unavailable.state, .idle)
         XCTAssertEqual(unavailable.changedAt, 0)
     }
@@ -414,6 +414,24 @@ final class ProtocolTests: XCTestCase {
         }
         XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "mode": "unknown"]), source: source))
         XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["mode": "omarchy"]), source: source))
+    }
+
+    func testEveryComputerKeepsItsPositionWhenRepairedOrAnotherIsRemoved() {
+        func paired(_ id: String, _ credential: String) -> PairedSource {
+            PairedSource(endpoint: URL(string: "https://\(id).example")!,
+                         sourceID: id, clientID: id, credential: credential)
+        }
+        let first = paired("first", "first-credential")
+        let second = paired("second", "second-credential")
+        let third = paired("third", "third-credential")
+        let order = [first, second, third]
+        let repairedSecond = PairedSourceOrder.updating(paired("second", "rotated"), in: order)
+        XCTAssertEqual(repairedSecond.map(\.sourceID), ["first", "second", "third"])
+        XCTAssertEqual(repairedSecond[1].credential, "rotated")
+        XCTAssertEqual(PairedSourceOrder.removing("first", from: repairedSecond).map(\.sourceID), ["second", "third"])
+        XCTAssertEqual(PairedSourceOrder.removing("second", from: order).map(\.sourceID), ["first", "third"])
+        XCTAssertEqual(PairedSourceOrder.updating(paired("fourth", "new"), in: order).map(\.sourceID),
+                       ["first", "second", "third", "fourth"])
     }
 
     func testConnectionStoreMigratesAndPromotesWithoutOrphaningAnotherComputer() throws {

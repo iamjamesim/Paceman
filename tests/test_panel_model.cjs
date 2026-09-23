@@ -106,18 +106,16 @@ test('interrupted but still-open sessions contribute an idle state', () => {
 test('connection names and contact are scoped to each installation', () => {
   const value = present({}, {clients: [
     {id: 'a', name: 'Alex’s iPhone', platform: 'ios', lastContactAt: now - 2},
-    {id: 'b', name: 'Alex’s iPhone', platform: 'ios', lastContactAt: now - 500},
-    {id: 'c', name: null, platform: null, lastContactAt: now - 1}
+    {id: 'b', name: 'Alex’s iPhone', platform: 'ios', lastContactAt: now - 500}
   ]})
   assert.equal(value.connections[0].recent, true)
   assert.equal(value.connections[1].recent, false)
-  assert.equal(value.connections[2].title, 'Unidentified connection')
-  assert.equal(value.connections[2].phone, false)
-  assert.equal(value.connectionHeading, 'CONNECTIONS')
+  assert.equal(value.connections[0].title, 'Alex’s iPhone')
+  assert.equal(value.connectionHeading, 'PHONES')
 })
 
-test('removing the last credential shows pairing despite stale legacy counts', () => {
-  const value = present({}, {clients: [], pairedPhones: 2})
+test('an old status row without identity does not appear as a phantom connection', () => {
+  const value = present({}, {clients: [{id: 'old', name: null, platform: null}], pairedPhones: 2})
   assert.equal(value.paired, false)
   assert.equal(value.connections.length, 0)
 })

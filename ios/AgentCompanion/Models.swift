@@ -35,7 +35,8 @@ struct Snapshot: Codable {
 }
 
 enum WatchAggregate {
-    static func make(current: [Snapshot], profile: Snapshot?, now: Double) -> Snapshot {
+    static func make(current: [Snapshot], appearance: CompanionTheme?,
+                     allowance: CodexAllowance?, now: Double) -> Snapshot {
         let priority: [ActivityState: Int] = [.needsInput: 0, .working: 1, .finished: 2, .idle: 3]
         let selected = current.sorted {
             let a = priority[$0.state] ?? 3, b = priority[$1.state] ?? 3
@@ -46,7 +47,7 @@ enum WatchAggregate {
                         changedAt: selected?.changedAt ?? 0, freshFor: 30,
                         state: selected?.state ?? .idle,
                         eventID: selected?.identity ?? "no-current-source",
-                        appearance: profile?.appearance, allowance: profile?.allowance, sessions: nil)
+                        appearance: appearance, allowance: allowance, sessions: nil)
     }
 }
 

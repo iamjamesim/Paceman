@@ -54,14 +54,18 @@ phone details, a workspace QR overlay, a persistent sharing switch and a compact
 multi-session activity summary. The receiver now tracks Codex process ownership
 through kernel peer credentials; quiet/finished open sessions survive restart,
 and exited owners leave the summary. Existing hooks are unchanged. Identified pairing, per-client contact and access
-removal from either side are implemented. Legacy credentials stay unidentified
-until the updated app registers them. Mac builds and all 21 iOS tests passed;
-the updated app is installed on the iPhone and fetching successfully. Complete
+removal from either side are implemented. The current checkout requires identity
+for pairing and retires old unidentified credentials on source upgrade; affected
+phones must pair again. The 2026-09-23 checkout changes are not installed on the
+Omarchy source or physical iPhone. A simulator run passed all 56 iOS tests and
+the local Python suite passed 117 tests; physical acceptance is still needed.
+Complete
 the physical acceptance in docs/pairing-and-removal.md before a device release.
 Check it with `systemctl --user status paceman-source.service`. Do not start a
 second source while testing the phone.
 
-1. Complete physical pairing/removal acceptance: legacy identification is verified;
+1. Complete physical pairing/removal acceptance: verify an older unidentified
+   credential loses access on source upgrade and reconnects with a fresh code;
    test same-installation reconnection, independent connections and removal failures.
 2. Verify live Omarchy transitions on the updated phone over private HTTPS.
    The in-place update preserved working fetches; full live-event and visible

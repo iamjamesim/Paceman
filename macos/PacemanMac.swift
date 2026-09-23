@@ -4,8 +4,8 @@ import ServiceManagement
 
 private struct Connection: Decodable, Identifiable {
     let id: String
-    let name: String?
-    let platform: String?
+    let name: String
+    let platform: String
     let pairedAt: Double
     let lastContactAt: Double
 }
@@ -263,7 +263,7 @@ private struct Panel: View {
     }
 
     private var connectionHeading: String {
-        model.status.clients?.contains { $0.platform != "ios" || $0.name == nil } == true
+        model.status.clients?.contains { $0.platform != "ios" } == true
             ? "CONNECTIONS" : "PHONE"
     }
 
@@ -344,7 +344,7 @@ private struct Panel: View {
                         HStack(spacing: 9) {
                             Image(systemName: connection.platform == "ios" ? "iphone" : "personalhotspot")
                                 .frame(width: 20)
-                            Text(connection.name ?? "Unidentified connection").lineLimit(2)
+                            Text(connection.name).lineLimit(2)
                             Spacer()
                             Image(systemName: model.expanded == connection.id ? "chevron.up" : "chevron.down")
                                 .font(.caption).foregroundStyle(.secondary)

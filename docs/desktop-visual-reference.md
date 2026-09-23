@@ -80,8 +80,8 @@ and meaning of controls are the shared contract.
 ## Current limits
 
 Names and platforms are reported by the app; installation identity does not
-prove physical hardware identity. Older credentials stay **Unidentified connection**
-until their app supplies metadata. Recent contact proves a fetch for that
+prove physical hardware identity. Pairing requires app identity; older
+unidentified credentials are retired on upgrade. Recent contact proves a fetch for that
 credential, not watch delivery. Session counts describe verified Codex processes
 that have emitted a hook, not window visibility or real-time tool progress.
 Detached sessions stay listed.

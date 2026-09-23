@@ -199,14 +199,16 @@ enum ComputerConnectionState: String {
 }
 
 extension PresentationModel {
-    func computerState(model: CompanionModel) -> ComputerConnectionState {
-        if preview {
+    func computerState(model: CompanionModel, sourceID: String? = nil) -> ComputerConnectionState {
+        let id = sourceID ?? model.pairedSources.first?.sourceID
+        if preview && id == model.pairedSources.first?.sourceID {
             if previewScreen == "computer-revoked" { return .revoked }
             if previewOffline { return .reconnecting }
             if ["computer-waiting", "waiting"].contains(previewScreen) { return .connecting }
             if previewScreen == "computer-stale" { return .checking }
             return .current
         }
-        return .resolve(revoked: model.accessRevoked, failed: model.hasError, hasSnapshot: model.snapshot != nil, fresh: model.fresh)
+        guard let id else { return .connecting }
+        return model.connectionState(id)
     }
 }

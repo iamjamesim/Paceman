@@ -3,6 +3,26 @@
 This record separates implementation checks from physical-device evidence.
 It describes the private prototype as of 2026-09-18, not a reliability guarantee.
 
+## 2026-09-23 multiple-computer and pairing cleanup
+
+The current checkout requires identity in every pairing request and retires
+unidentified credentials and their push/Live Activity destinations on source
+upgrade. Old phones need to scan a new code. The iPhone now stores ordered
+pairings and per-source snapshots, contact times, errors and revocation in one
+collection. One card and one detail view serve every computer. Pairing order is
+stable; repairing or removing another computer does not move the remaining cards
+or transfer their state.
+
+Local checks: 117 Python tests passed (20 skipped by platform or optional
+integration), 16 Node panel-model tests passed, and 56 iPhone simulator tests
+passed with ad hoc simulator signing. The iPhone simulator build succeeded.
+Simulator previews were visually reviewed for two connected computers, an empty
+second computer, stale/disconnected second computer, long text, revoked access,
+and first-run setup. The two-computer long-text layout was also inspected at
+accessibility extra-extra-large size; it remained scrollable. The common header
+uses a full-width content shape, but physical tap acceptance has not been run.
+No updated source or phone app was installed on physical devices in this pass.
+
 ## Automated checks
 
 - 79 Python desktop/service/push/Omarchy tests passed on Linux: API authorization, invitation expiry and
