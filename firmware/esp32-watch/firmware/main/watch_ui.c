@@ -9,9 +9,14 @@
 #include "bsp/display.h"
 #include "bsp/touch.h"
 #include "driver/gpio.h"
+#include "esp_lcd_panel_io.h"
 #include "esp_lcd_touch.h"
 #include "esp_lvgl_port.h"
+#include "esp_log.h"
 #include "esp_sleep.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "lvgl.h"
 #include "watch_ble.h"
 #include "watch_face_layout.h"
@@ -42,6 +47,7 @@ enum {
     WEATHER_MAX_AGE_SECONDS = 6 * 60 * 60,
     DISPLAY_BUFFER_HEIGHT = 100,
     DISPLAY_IDLE_TASK_SLEEP_MS = 10000,
+    DISPLAY_FLUSH_TIMEOUT_MS = 2000,
     TOUCH_READ_FAILURE_LIMIT = 3,
 };
 
@@ -86,6 +92,7 @@ static char weather_location[24] = "SAN FRANCISCO";
 static lv_indev_t *display_input;
 static esp_lcd_panel_handle_t display_panel;
 static esp_lcd_touch_handle_t display_touch;
+static SemaphoreHandle_t display_flush_done;
 static uint8_t touch_read_failures;
 
 static void arm_display_timeout(uint32_t timeout_ms);
@@ -104,6 +111,30 @@ static void round_display_area(lv_area_t *area)
     area->y1 &= ~1;
     area->x2 |= 1;
     area->y2 |= 1;
+}
+
+static bool display_flush_complete(esp_lcd_panel_io_handle_t io,
+                                   esp_lcd_panel_io_event_data_t *event,
+                                   void *context)
+{
+    (void)io;
+    (void)event;
+    (void)context;
+    BaseType_t should_yield = pdFALSE;
+    xSemaphoreGiveFromISR(display_flush_done, &should_yield);
+    return should_yield == pdTRUE;
+}
+
+static void wait_for_display_flush(lv_display_t *display)
+{
+    (void)display;
+    if (xSemaphoreTake(display_flush_done, pdMS_TO_TICKS(DISPLAY_FLUSH_TIMEOUT_MS)) == pdTRUE) {
+        return;
+    }
+    // LVGL must not reuse the draw buffer until the SPI transfer completes.
+    // A missed completion used to spin forever inside LVGL with the UI lock held.
+    ESP_LOGE("watch_ui", "Display flush timed out; restarting to recover the UI");
+    esp_restart();
 }
 
 static void read_touch(lv_indev_t *indev, lv_indev_data_t *data)
@@ -174,6 +205,23 @@ static lv_display_t *start_display(const lvgl_port_cfg_t *port_cfg)
     };
     lv_display_t *display = lvgl_port_add_disp(&display_cfg);
     if (display == NULL) {
+        return NULL;
+    }
+
+    display_flush_done = xSemaphoreCreateBinary();
+    if (display_flush_done == NULL) {
+        return NULL;
+    }
+    const esp_lcd_panel_io_callbacks_t io_callbacks = {
+        .on_color_trans_done = display_flush_complete,
+    };
+    bsp_display_lock(0);
+    lv_display_set_flush_wait_cb(display, wait_for_display_flush);
+    esp_err_t callback_err = esp_lcd_panel_io_register_event_callbacks(
+        io, &io_callbacks, display
+    );
+    bsp_display_unlock();
+    if (callback_err != ESP_OK) {
         return NULL;
     }
 

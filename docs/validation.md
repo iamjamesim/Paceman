@@ -340,3 +340,24 @@ One touch I2C read error was observed near the 15-second display-sleep boundary
 on the final image; the watch recovered without rebooting. Its lower-level
 cause remains undetermined. Extended tap endurance, repeated sleep/wake cycles,
 and battery-life impact of awake-only sampling remain unmeasured.
+
+## Watch display freeze — 2026-09-23
+
+The physical watch showed 09:34 in a photo taken at 10:35, stayed lit, and
+ignored taps while the phone still reported a Bluetooth connection. A live USB
+serial capture before resetting it showed repeated `IDLE1` watchdog reports
+with `taskLVGL` running on CPU 1. Decoding the backtrace against the installed
+build led to LVGL's `wait_for_flushing` loop, which waits indefinitely for a
+display SPI completion. Activity packets continued to reach the BLE task, but
+the full UI queue rejected them. This establishes a stalled display flush as
+the immediate cause of the frozen clock and touch response; the missing
+completion's underlying trigger remains unknown. The earlier touch polling
+change is not established as the trigger.
+
+The firmware now waits on the panel's transfer-completion callback with a
+two-second bound. If completion is lost, it logs the timeout and restarts
+instead of leaving the screen and input permanently frozen. The ESP-IDF build
+passed, and an app-only USB flash verified its written hash while preserving
+the NVS pairing partition. After the flash, the user confirmed the clock,
+battery/weather/allowance taps, and 15-second screen sleep looked good.
+Long-running recurrence remains unmeasured.
