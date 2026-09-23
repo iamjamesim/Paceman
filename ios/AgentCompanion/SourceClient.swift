@@ -53,6 +53,40 @@ enum Vault {
     }
 }
 
+/// Store the complete ordered connection list in one Keychain item. A single
+/// update can promote the next computer without leaving it orphaned.
+struct PairedSourcesStore {
+    let key: String
+    let oldPrimaryKey: String
+    let oldAdditionalKey: String
+
+    init(key: String = "paired-sources", oldPrimaryKey: String = "paired-source",
+         oldAdditionalKey: String = "additional-sources") {
+        self.key = key
+        self.oldPrimaryKey = oldPrimaryKey
+        self.oldAdditionalKey = oldAdditionalKey
+    }
+
+    func load() -> [PairedSource] {
+        if let saved = Vault.load([PairedSource].self, key: key) { return saved }
+        let oldPrimary = Vault.load(PairedSource.self, key: oldPrimaryKey)
+        let oldAdditional = Vault.load([PairedSource].self, key: oldAdditionalKey) ?? []
+        var seen = Set<String>()
+        let recovered = ([oldPrimary].compactMap { $0 } + oldAdditional).filter {
+            seen.insert($0.sourceID).inserted
+        }
+        if !recovered.isEmpty { try? save(recovered) }
+        return recovered
+    }
+
+    func save(_ sources: [PairedSource]) throws {
+        try Vault.save(sources, key: key)
+        // The old keys are no longer read once the complete list is saved.
+        try? Vault.remove(key: oldPrimaryKey)
+        try? Vault.remove(key: oldAdditionalKey)
+    }
+}
+
 final class NoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse,
@@ -85,22 +119,11 @@ final class SourceClient {
         struct Redemption: Decodable { let schema: Int; let sourceID: String; let clientID: String; let credential: String; let clientManagement: Int? }
         let result = try JSONDecoder().decode(Redemption.self, from: data)
         guard result.schema == 1, result.sourceID == invitation.sourceID,
-              !result.credential.isEmpty else { throw HubError.message("Source identity mismatch") }
+              !result.credential.isEmpty, result.clientManagement == 1 else {
+            throw HubError.message("Unsupported pairing response. Update Paceman on this computer.")
+        }
         return PairedSource(endpoint: origin, sourceID: result.sourceID,
-                            clientID: result.clientID, credential: result.credential,
-                            installationRegistered: result.clientManagement == 1)
-    }
-
-    func identify(_ source: PairedSource, device: ClientDevice) async throws {
-        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/client"))
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(["device": device])
-        struct Identification: Decodable { let clientManagement: Int }
-        let data = try await response(request)
-        let result = try JSONDecoder().decode(Identification.self, from: data)
-        guard result.clientManagement == 1 else { throw HubError.message("Unsupported connection management response") }
+                            clientID: result.clientID, credential: result.credential)
     }
 
     func remove(_ source: PairedSource) async throws {
@@ -129,7 +152,7 @@ final class SourceClient {
         guard data.count <= 65536 else { throw HubError.message("Status response too large") }
         let value = try JSONDecoder().decode(Snapshot.self, from: data)
         guard value.schema == 1, value.sourceID == source.sourceID,
-              ["synthetic", "omarchy"].contains(value.mode), value.freshFor > 0, value.freshFor <= 60,
+              ["synthetic", "omarchy", "macos"].contains(value.mode), value.freshFor > 0, value.freshFor <= 60,
               value.observedAt.isFinite, value.changedAt.isFinite else {
             throw HubError.message("Unsupported or mismatched status response")
         }

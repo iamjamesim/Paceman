@@ -1,5 +1,6 @@
 """Pairing ownership, legacy upgrade and removal through the public HTTP contract."""
 import concurrent.futures
+from contextlib import closing
 import http.client
 import json
 from pathlib import Path
@@ -157,10 +158,11 @@ class PairingTests(unittest.TestCase):
     def test_migration_keeps_legacy_credentials_unidentified(self):
         path = self.root / 'legacy.sqlite3'
         credential, client_id = 'old-secret', str(uuid.uuid4())
-        with sqlite3.connect(path) as db:
+        with closing(sqlite3.connect(path)) as db:
             db.execute('CREATE TABLE clients(id TEXT PRIMARY KEY,hash TEXT UNIQUE NOT NULL,created REAL NOT NULL)')
             db.execute('INSERT INTO clients VALUES (?,?,?)', (client_id, digest(credential), 10))
             self.assertIsNone(Store.client_list(db)[0]['name'])
+            db.commit()
         upgraded = Store(path)
         self.assertTrue(upgraded.authorized(credential))
         self.assertEqual(upgraded.clients(), [dict(id=client_id, pairedAt=10, lastContactAt=0, name=None, platform=None)])

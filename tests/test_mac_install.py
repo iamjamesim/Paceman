@@ -1,0 +1,162 @@
+import json
+from pathlib import Path
+import plistlib
+import shlex
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+import macos.install as installer
+from macos.install import PYTHON, install_hooks
+from macos.codex_hook import EVENTS
+from macos.control import missing_hooks
+
+
+class MacInstallTests(unittest.TestCase):
+    def test_runtime_python_is_outside_checkout(self):
+        self.assertFalse(Path(PYTHON).is_relative_to(Path(__file__).resolve().parent.parent))
+
+    def test_hook_install_preserves_existing_rules_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / ".codex/hooks.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo existing"}]}]},
+                                        "customSetting": True}))
+            added = install_hooks(path)
+            first = json.loads(path.read_text())
+            first_mtime = path.stat().st_mtime_ns
+            repeated = install_hooks(path)
+            second = json.loads(path.read_text())
+            self.assertEqual(set(added), set(EVENTS))
+            self.assertEqual(repeated, [])
+            self.assertEqual(path.stat().st_mtime_ns, first_mtime)
+            self.assertEqual(first, second)
+            self.assertTrue(second["customSetting"])
+            self.assertEqual(len(second["hooks"]["Stop"]), 2)
+            self.assertEqual(second["hooks"]["Stop"][0]["hooks"][0]["command"], "echo existing")
+            self.assertEqual(len(second["hooks"]), 7)
+
+    def test_hook_upgrade_replaces_old_interpreter_without_adding_a_second_row(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hooks.json"
+            script = installer.ROOT / "lib/macos/codex_hook.py"
+            old_command = f"/old/python3 {shlex.quote(str(script))}"
+            path.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [
+                {"type": "command", "command": old_command, "timeout": 3}]}]}}))
+            changed = install_hooks(path)
+            stop = json.loads(path.read_text())["hooks"]["Stop"]
+            self.assertIn("Stop", changed)
+            self.assertEqual(len(stop), 1)
+            self.assertEqual(stop[0]["hooks"][0]["command"],
+                             f"{shlex.quote(PYTHON)} {shlex.quote(str(script))}")
+
+    def test_missing_hooks_distinguishes_partial_and_complete_install(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "hooks.json"
+            script = root / "codex_hook.py"
+            script.touch()
+            self.assertEqual(set(missing_hooks(config, script)), set(EVENTS))
+            command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
+            config.write_text(json.dumps({"hooks": {
+                event: [{"hooks": [{"type": "command", "command": command}]}]
+                for event in EVENTS if event != "Stop"
+            }}))
+            self.assertEqual(missing_hooks(config, script), ["Stop"])
+            document = json.loads(config.read_text())
+            document["hooks"]["Stop"] = [{"hooks": [{"type": "command", "command": command}]}]
+            config.write_text(json.dumps(document))
+            self.assertEqual(missing_hooks(config, script), [])
+
+    def test_failed_service_start_restores_previous_install(self):
+        self._exercise_replacement(fail_start=True)
+
+    def test_failed_hook_commit_restores_previous_install(self):
+        self._exercise_replacement(fail_hooks=True)
+
+    def test_successful_service_start_replaces_install(self):
+        self._exercise_replacement()
+
+    def _exercise_replacement(self, fail_start: bool = False, fail_hooks: bool = False):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            root = home / "Library/Application Support/Paceman"
+            app = home / "Applications/Paceman.app"
+            plist = home / "Library/LaunchAgents/dev.paceman.source.plist"
+            push_plist = home / "Library/LaunchAgents/dev.paceman.push.plist"
+            hooks = home / ".codex/hooks.json"
+            repo = Path(temporary) / "repo"
+            staging = root / ".install-test"
+            staged_app = staging / "Paceman.app"
+            for folder in ("service", "desktop", "macos"):
+                (root / "lib" / folder).mkdir(parents=True)
+                (root / "lib" / folder / "version").write_text("old")
+                (repo / folder).mkdir(parents=True)
+                (repo / folder / "version").write_text("new")
+            (repo / "macos/launch_control.py").write_text("#!/usr/bin/python3 -I\nnew")
+            (root / "bin").mkdir()
+            (root / "bin/pacemanctl").write_text("old")
+            (root / "menu-login-configured").write_text("registered\n")
+            app.mkdir(parents=True)
+            (app / "version").write_text("old")
+            staged_app.mkdir(parents=True)
+            (staged_app / "version").write_text("new")
+            plist.parent.mkdir(parents=True)
+            old_plist = plistlib.dumps({"Label": installer.LABEL, "Old": True})
+            plist.write_bytes(old_plist)
+            push_plist.write_bytes(plistlib.dumps({"Label": installer.PUSH_LABEL}))
+            hooks.parent.mkdir(parents=True)
+            hooks.write_text('{"hooks":{},"existing":true}\n')
+            old_hooks = hooks.read_bytes()
+            bootstraps = []
+
+            def command(args, **kwargs):
+                if args[:2] == ["/bin/launchctl", "bootstrap"]:
+                    bootstraps.append(args)
+                    if fail_start and len(bootstraps) == 1:
+                        raise subprocess.CalledProcessError(5, args, "new service failed")
+                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+            original_replace = Path.replace
+
+            def replace_path(path, target):
+                if fail_hooks and path == staging / "hooks.json" and target == hooks:
+                    raise OSError("hook replacement failed")
+                return original_replace(path, target)
+
+            with patch.multiple(installer, ROOT=root, APP=app, PLIST=plist, PUSH_PLIST=push_plist,
+                                REPO=repo, PYTHON=sys.executable), \
+                 patch.object(Path, "home", return_value=home), \
+                 patch.object(Path, "replace", replace_path), \
+                 patch.object(installer.subprocess, "run", side_effect=command), \
+                 patch("builtins.print"):
+                if fail_start:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        installer._finish_install(staged_app)
+                elif fail_hooks:
+                    with self.assertRaises(OSError):
+                        installer._finish_install(staged_app)
+                else:
+                    installer._finish_install(staged_app)
+
+            failed = fail_start or fail_hooks
+            expected = "old" if failed else "new"
+            for folder in ("service", "desktop", "macos"):
+                self.assertEqual((root / "lib" / folder / "version").read_text(), expected)
+            self.assertEqual((app / "version").read_text(), expected)
+            self.assertEqual((root / "bin/pacemanctl").read_text(), "old" if failed else f"#!{sys.executable} -I\nnew")
+            if failed:
+                self.assertEqual(plist.read_bytes(), old_plist)
+                self.assertEqual(hooks.read_bytes(), old_hooks)
+            else:
+                self.assertEqual(plistlib.loads(plist.read_bytes())["ProgramArguments"][0],
+                                 str(app / "Contents/MacOS/PacemanBackground"))
+                self.assertEqual(len(json.loads(hooks.read_text())["hooks"]), 7)
+            self.assertEqual(push_plist.exists(), failed)
+            self.assertEqual(len(bootstraps), 3 if failed else 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -6,9 +6,10 @@ Personal gear for working with agents: connect your workspaces to watches
 and small displays that feel like yours. Easy pairing, shared visual
 character, and calm awareness come first; lightweight interactions are secondary.
 
-Paceman is a private prototype codename. The current implementation connects a
-desktop source to an iPhone and an ESP32 watch. The source supports synthetic
-tests and live Omarchy companion events with desktop appearance metadata.
+Paceman is a private prototype codename. The current implementation connects
+Omarchy and macOS desktop sources to an iPhone and an ESP32 watch. Sources
+support synthetic tests, live Omarchy companion events, and local Mac Codex
+lifecycle hooks.
 
 ## Components
 
@@ -16,6 +17,7 @@ tests and live Omarchy companion events with desktop appearance metadata.
 | --- | --- |
 | `ios/` | SwiftUI iPhone app, Live Activity extension, source pairing and Bluetooth relay |
 | `service/` | Private Python source, snapshots, pairing and optional APNs sender |
+| `macos/` | Native menu-bar client, local Codex hook adapter and agent-led installer |
 | `firmware/esp32-watch/` | ESP32 watch firmware, simulator, fonts and build tools |
 | `tests/` | Source API, persistence and APNs tests |
 | `scripts/` | Local checks, source pairing and iOS asset/project generation |
@@ -27,6 +29,7 @@ protocol are retained; see its [provenance](firmware/esp32-watch/UPSTREAM.md).
 ## Start developing
 
 - [Desktop installation](docs/desktop.md): install/update the login service and Omarchy bar panel.
+- [Mac alpha client](docs/macos.md): install and validate the native menu-bar source.
 - [Desktop visual reference](docs/desktop-visual-reference.md): canonical screenshots and macOS design guidance.
 - [Next milestones](docs/roadmap.md): phone identity, delivery status, background setup and adapter packaging.
 - [Setup](docs/development.md): source, private networking, iPhone and watch.
@@ -50,7 +53,7 @@ On a Mac with Xcode, also run `bash scripts/check-on-mac.sh` and run the
 
 ## Current limits
 
-The alpha connects one Omarchy source and one custom watch. The phone forwards
+The alpha can pair more than one computer and one custom watch. The phone forwards
 activity, theme, weather, allowance and watch preferences. Background agent
 transitions use user-visible APNs alert transport and the watch receives those
 events through iOS notification sharing, so notification permission and sharing

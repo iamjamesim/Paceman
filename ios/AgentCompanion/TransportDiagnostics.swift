@@ -26,7 +26,6 @@ struct TransportDiagnostics: View {
                 Text(model.status)
                 if let source = model.source {
                     Text(source.endpoint.absoluteString).font(.caption.monospaced()).textSelection(.enabled)
-                    if let notice = model.identityNotice { Text(notice).font(.caption) }
                     Button("Refresh now") { Task { await model.refresh() } }.disabled(model.busy)
                 }
             }

@@ -365,6 +365,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         setEnabled(false, userInitiated: false)
         WatchPreferences.remove(receipt.watchID)
         WatchDeliveryHistory.remove(receipt.watchID)
+        UserDefaults.standard.removeObject(forKey: "delivered-event-history")
         WeatherPreferences.remove(receipt.watchID)
         weather = nil
         pairingReceipt = nil
@@ -872,6 +873,11 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             lastDelivered = Date()
             if let deviceID, let lastDelivered { WatchDeliveryHistory.save(lastDelivered, for: deviceID) }
             if let sentEvent {
+                let defaults = UserDefaults.standard
+                var history = defaults.stringArray(forKey: "delivered-event-history") ?? []
+                if let prior = defaults.string(forKey: "delivered-event"), !history.contains(prior) { history.append(prior) }
+                if !history.contains(sentEvent) { history.append(sentEvent) }
+                defaults.set(Array(history.suffix(32)), forKey: "delivered-event-history")
                 UserDefaults.standard.set(sentEvent, forKey: "delivered-event")
                 UserDefaults.standard.set(Int(sentRevision), forKey: "delivered-revision")
                 Diagnostics.shared.record("ble_write_accepted", event: sentEvent, state: sentState, revision: sentRevision)
@@ -923,13 +929,14 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         }
         let defaults = UserDefaults.standard
         let same = defaults.string(forKey: "delivered-event") == snapshot.identity
+        let deliveredBefore = defaults.stringArray(forKey: "delivered-event-history")?.contains(snapshot.identity) == true
         let previous = UInt32(clamping: defaults.integer(forKey: "delivered-revision"))
         if same && previous <= acknowledged { return }
         // Reuse the delivered revision on reconnect; do not re-alert an old event.
         let revision = same ? previous : nextRevision()
         guard revision > 0 else { return }
         let freshEvent = abs(Date().timeIntervalSince1970 - snapshot.changedAt) < 120
-        let alert = !same && freshEvent && (snapshot.state == .needsInput || snapshot.state == .finished)
+        let alert = !same && !deliveredBefore && freshEvent && (snapshot.state == .needsInput || snapshot.state == .finished)
         let state = snapshot.state == .finished && capabilities & (1 << 8) == 0 ? ActivityState.needsInput : snapshot.state
         let packet = WatchWire.activity(state: state, revision: revision, alert: alert,
             sound: soundEnabled && capabilities & (1 << 7) != 0,

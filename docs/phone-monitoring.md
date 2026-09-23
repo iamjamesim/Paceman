@@ -2,6 +2,9 @@
 
 Status: accepted direction, implementation in slices. Phone monitoring does not
 require a watch. Progress is passive; attention states request normal iOS alerts.
+The multi-computer phone pass retains the existing Live Activity on the primary
+computer. Additional computers have independent foreground snapshots and APNs
+registrations; a combined Live Activity is a later product decision.
 
 ## Surface responsibilities
 

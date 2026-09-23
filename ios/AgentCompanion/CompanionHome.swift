@@ -22,7 +22,7 @@ struct CompanionHome: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     HStack(spacing: 9) {
-                        CompanionBrandMark().frame(width: 31, height: 31).foregroundStyle(theme.tint)
+                        PacemanMark().frame(width: 31, height: 31).foregroundStyle(theme.tint)
                         Text("Paceman").font(.system(size: 21, weight: .medium, design: .rounded)).tracking(-0.5)
                     }
                     Spacer()
@@ -31,7 +31,16 @@ struct CompanionHome: View {
                     }.buttonStyle(.plain).accessibilityLabel("Settings")
                 }.padding(.bottom, 34)
 
-                if paired { agentContent }
+                if paired {
+                    agentContent
+                    ForEach(model.additionalSources, id: \.sourceID) { paired in
+                        additionalComputer(paired).padding(.top, 12)
+                    }
+                    if !presentation.preview {
+                        Button { open(.pairing) } label: { Label("Connect another computer", systemImage: "plus") }
+                            .font(.subheadline).padding(.top, 18)
+                    }
+                }
                 else { agentSetup }
 
                 watchRow.padding(.top, 22)
@@ -40,7 +49,7 @@ struct CompanionHome: View {
                 }
             }.padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 34)
         }
-        .refreshable { if !presentation.preview { await model.refresh() } }
+        .refreshable { if !presentation.preview { await model.refreshAll() } }
         .foregroundStyle(theme.ink).background(CompanionCanvas(theme: theme))
         .navigationTitle("Paceman").toolbar(.hidden, for: .navigationBar)
     }
@@ -127,6 +136,52 @@ struct CompanionHome: View {
             Text(title).font(.subheadline.weight(.medium))
             if let detail { Text(detail).font(.caption).foregroundStyle(theme.ink.opacity(0.55)) }
         }.padding(.vertical, 20)
+    }
+    private func additionalComputer(_ paired: PairedSource) -> some View {
+        let value = model.additionalSnapshots[paired.sourceID]
+        let current = model.additionalFresh(paired.sourceID)
+        let revoked = model.additionalRevoked.contains(paired.sourceID)
+        let content = AgentFeedContent.resolve(value)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button { open(.otherComputer(paired.sourceID)) } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "laptopcomputer").frame(width: 24).accessibilityHidden(true)
+                    Text(presentation.displayName(source: paired)).font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).opacity(0.45)
+                }.frame(minHeight: 32)
+            }.buttonStyle(.plain)
+            if revoked { Text("Access removed").font(.caption).foregroundStyle(theme.ink.opacity(0.65)) }
+            else if model.additionalErrors[paired.sourceID] != nil { Text("Reconnecting…").font(.caption).foregroundStyle(theme.ink.opacity(0.65)) }
+            else if !current { Text(value == nil ? "Connecting…" : "Checking…").font(.caption).foregroundStyle(theme.ink.opacity(0.65)) }
+            if let contact = model.additionalLastContact[paired.sourceID] {
+                ReceiptTimeLabel(prefix: "Last received", date: contact)
+                    .font(.caption2).foregroundStyle(theme.ink.opacity(0.5))
+            }
+            Color.clear.frame(height: 16)
+            CompanionRule(theme: theme)
+            if revoked {
+                Text("Reconnect to receive activity from this computer.")
+                    .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65)).padding(.vertical, 18)
+            } else {
+                if !current && content.hasActivity {
+                    Text("Last known activity").font(.caption).foregroundStyle(theme.ink.opacity(0.55)).padding(.top, 16)
+                }
+                switch content {
+                case .sessions(let sessions):
+                    ForEach(AgentDisplayRow.rows(sessions)) { row in
+                        AgentFeedRow(session: row.session, theme: theme, animate: current, detailOverride: row.detail)
+                    }
+                case .summary(let state):
+                    AgentFeedRow(session: AgentSession(id: "aggregate", provider: "", state: state, name: "Agent activity"),
+                                 theme: theme, animate: current)
+                case .waiting: emptyActivity("No activity received yet", detail: nil)
+                case .empty: emptyActivity("No active sessions", detail: current ? "Activity appears when an agent starts." : nil)
+                }
+            }
+        }.padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 6)
+            .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
+            .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
     private var connectionLabel: some View {
         Text(presentation.computerState(model: model).rawValue)

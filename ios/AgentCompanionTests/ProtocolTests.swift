@@ -7,6 +7,24 @@ import MapKit
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    func testWatchAggregateChoosesFreshAttentionAcrossComputers() {
+        func source(_ id: String, _ state: ActivityState, _ changed: Double) -> Snapshot {
+            Snapshot(schema: 1, sourceID: id, generation: "generation", revision: 1,
+                     sourceName: id, mode: "macos", observedAt: changed, changedAt: changed,
+                     freshFor: 30, state: state, eventID: "1", appearance: nil,
+                     allowance: nil, sessions: nil)
+        }
+        let working = source("mac", .working, 100)
+        let attention = source("linux", .needsInput, 90)
+        let combined = WatchAggregate.make(current: [working, attention], profile: nil, now: 110)
+        XCTAssertEqual(combined.state, .needsInput)
+        XCTAssertEqual(combined.eventID, attention.identity)
+        XCTAssertEqual(WatchAggregate.make(current: [working], profile: nil, now: 110).state, .working)
+        let unavailable = WatchAggregate.make(current: [], profile: attention, now: 150)
+        XCTAssertEqual(unavailable.state, .idle)
+        XCTAssertEqual(unavailable.changedAt, 0)
+    }
+
     func testNotificationSharingDoesNotTreatUnconfirmedReadingAsDenial() {
         XCTAssertNil(WatchNotificationSharing.resolve(authorized: false, changed: false))
         XCTAssertEqual(WatchNotificationSharing.resolve(authorized: true, changed: false), true)
@@ -385,12 +403,12 @@ final class ProtocolTests: XCTestCase {
         XCTAssertFalse(receipt.canRestore(authorizedIDs: [bluetoothID], ownedWatchID: "different-watch", hasOwner: true))
     }
 
-    func testSourceClientAcceptsOmarchyAndRejectsUnknownModesOrOtherSources() throws {
+    func testSourceClientAcceptsSupportedModesAndRejectsUnknownModesOrOtherSources() throws {
         let id = UUID().uuidString
         let source = PairedSource(endpoint: URL(string: "https://test.example")!,
                                   sourceID: id, clientID: "test", credential: "test")
         let client = SourceClient()
-        for mode in ["synthetic", "omarchy"] {
+        for mode in ["synthetic", "omarchy", "macos"] {
             let data = try sourceFixture(["sourceID": id, "mode": mode])
             XCTAssertEqual(try client.decodeSnapshot(data, source: source).mode, mode)
         }
@@ -398,11 +416,29 @@ final class ProtocolTests: XCTestCase {
         XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["mode": "omarchy"]), source: source))
     }
 
-    func testLegacyPairingDecodesWithoutInstallationMarker() throws {
-        let data = Data(#"{"endpoint":"https://test.example","sourceID":"old","clientID":"client","credential":"secret"}"#.utf8)
-        let source = try JSONDecoder().decode(PairedSource.self, from: data)
-        XCTAssertNil(source.installationRegistered)
-        XCTAssertEqual(source.credential, "secret")
+    func testConnectionStoreMigratesAndPromotesWithoutOrphaningAnotherComputer() throws {
+        let prefix = "connection-store-test-\(UUID().uuidString)"
+        let store = PairedSourcesStore(key: "\(prefix)-current", oldPrimaryKey: "\(prefix)-primary",
+                                       oldAdditionalKey: "\(prefix)-additional")
+        defer {
+            for key in [store.key, store.oldPrimaryKey, store.oldAdditionalKey] { try? Vault.remove(key: key) }
+        }
+        let first = PairedSource(endpoint: URL(string: "https://first.example")!,
+                                 sourceID: UUID().uuidString, clientID: "first", credential: "first-secret")
+        let second = PairedSource(endpoint: URL(string: "https://second.example")!,
+                                  sourceID: UUID().uuidString, clientID: "second", credential: "second-secret")
+        try Vault.save(first, key: store.oldPrimaryKey)
+        try Vault.save([second], key: store.oldAdditionalKey)
+        XCTAssertEqual(store.load().map(\.sourceID), [first.sourceID, second.sourceID])
+        try store.save([second])
+        XCTAssertEqual(store.load().map(\.sourceID), [second.sourceID])
+        XCTAssertNil(Vault.load(PairedSource.self, key: store.oldPrimaryKey))
+        XCTAssertNil(Vault.load([PairedSource].self, key: store.oldAdditionalKey))
+
+        // Recover the interrupted state produced by the previous two-key layout.
+        try Vault.remove(key: store.key)
+        try Vault.save([second], key: store.oldAdditionalKey)
+        XCTAssertEqual(store.load().map(\.sourceID), [second.sourceID])
     }
 
     func testPairingSendsIdentityAndOnlyUsesCredentialAtTheSameOrigin() async throws {
@@ -423,8 +459,27 @@ final class ProtocolTests: XCTestCase {
                     "credential": "new-secret", "clientManagement": 1]))
             }
             let paired = try await client.pair(invitation, device: device, previous: previous)
-            XCTAssertEqual(paired.installationRegistered, true)
             XCTAssertEqual(paired.credential, "new-secret")
+        }
+    }
+
+    func testPairingRejectsMissingOrUnsupportedClientManagement() async throws {
+        let id = UUID().uuidString
+        let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: id,
+                                    invitation: String(repeating: "x", count: 43), expiresAt: Date().timeIntervalSince1970 + 300)
+        let device = ClientDevice(installationID: UUID().uuidString, name: "Phone", platform: "ios")
+        for version in [nil, 0, 2] as [Int?] {
+            let client = stubClient { _ in
+                var response: [String: Any] = ["schema": 1, "sourceID": id, "clientID": "client", "credential": "secret"]
+                response["clientManagement"] = version
+                return (200, try JSONSerialization.data(withJSONObject: response))
+            }
+            do {
+                _ = try await client.pair(invitation, device: device)
+                XCTFail("Unsupported pairing response must fail")
+            } catch let error as HubError {
+                XCTAssertEqual(error.localizedDescription, "Unsupported pairing response. Update Paceman on this computer.")
+            }
         }
     }
 
@@ -447,20 +502,6 @@ final class ProtocolTests: XCTestCase {
                 XCTAssertFalse(confirmed, "Confirmed registration must succeed")
             }
         }
-    }
-
-    func testIdentificationAuthenticatesExistingPairing() async throws {
-        let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "source", clientID: "client", credential: "secret")
-        let device = ClientDevice(installationID: UUID().uuidString, name: "Phone", platform: "ios")
-        let client = stubClient { request in
-            XCTAssertEqual(request.httpMethod, "POST")
-            XCTAssertEqual(request.url?.path, "/v1/client")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
-            let body = try JSONDecoder().decode([String: ClientDevice].self, from: ClientURLProtocol.body(request))
-            XCTAssertEqual(body["device"], device)
-            return (200, Data(#"{"clientManagement":1}"#.utf8))
-        }
-        try await client.identify(source, device: device)
     }
 
     func testRemovalIsSelfScopedAndAlreadyRevokedIsSuccess() async throws {

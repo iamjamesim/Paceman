@@ -34,6 +34,22 @@ struct Snapshot: Codable {
     var identity: String { "\(sourceID)/\(generation)/\(eventID)" }
 }
 
+enum WatchAggregate {
+    static func make(current: [Snapshot], profile: Snapshot?, now: Double) -> Snapshot {
+        let priority: [ActivityState: Int] = [.needsInput: 0, .working: 1, .finished: 2, .idle: 3]
+        let selected = current.sorted {
+            let a = priority[$0.state] ?? 3, b = priority[$1.state] ?? 3
+            return a == b ? $0.changedAt > $1.changedAt : a < b
+        }.first
+        return Snapshot(schema: 1, sourceID: "aggregate", generation: "phone", revision: 1,
+                        sourceName: "Paceman", mode: "aggregate", observedAt: now,
+                        changedAt: selected?.changedAt ?? 0, freshFor: 30,
+                        state: selected?.state ?? .idle,
+                        eventID: selected?.identity ?? "no-current-source",
+                        appearance: profile?.appearance, allowance: profile?.allowance, sessions: nil)
+    }
+}
+
 private struct StoredSourceSnapshot: Codable {
     let schema: Int
     let sourceID: String
@@ -47,6 +63,10 @@ enum SourceSnapshotCache {
     static var defaultURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("source-snapshot.json")
+    }
+
+    static func url(for sourceID: String) -> URL {
+        defaultURL.deletingLastPathComponent().appendingPathComponent("source-snapshot-\(sourceID).json")
     }
 
     static func load(sourceID: String, from url: URL = defaultURL) -> (Snapshot, Date)? {
@@ -96,7 +116,6 @@ struct PairedSource: Codable {
     let sourceID: String
     let clientID: String
     let credential: String
-    var installationRegistered: Bool? = nil
 }
 
 struct ClientDevice: Codable, Equatable {

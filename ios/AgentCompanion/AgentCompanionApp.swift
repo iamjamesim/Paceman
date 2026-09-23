@@ -36,19 +36,20 @@ struct AgentCompanionApp: App {
     }
 }
 
-enum FeedDestination: Hashable { case computer, watch, pairing, notifications, watchNotifications, watchTroubleshooting, settings, weather, diagnostics }
+enum FeedDestination: Hashable { case computer, otherComputer(String), watch, pairing, notifications, watchNotifications, watchTroubleshooting, settings, weather, diagnostics }
 
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
     @State private var path: [FeedDestination] = []
-    var theme: CompanionTheme { presentation.theme(source: model.snapshot?.appearance) }
+    var theme: CompanionTheme { presentation.theme(source: model.preferredAppearance) }
     var body: some View {
         NavigationStack(path: $path) {
             CompanionHome(model: model, presentation: presentation, theme: theme) { path.append($0) }
                 .navigationDestination(for: FeedDestination.self) { destination in
                     switch destination {
                     case .computer: ComputerDetail(model: model, presentation: presentation, theme: theme)
+                    case .otherComputer(let id): OtherComputerDetail(model: model, presentation: presentation, theme: theme, sourceID: id)
                     case .watch: WatchDetail(model: model, theme: theme, preview: presentation.preview, previewConnected: presentation.previewHasWatch, previewPhase: presentation.previewWatchPhase, previewComplete: presentation.previewScreen == "watch-complete", previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen) ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") { path.append(.watchNotifications) }
                     case .pairing: PairingFlow(model: model, theme: theme, preview: presentation.preview)
                     case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview)

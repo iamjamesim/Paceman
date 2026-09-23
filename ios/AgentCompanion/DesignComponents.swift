@@ -163,29 +163,3 @@ struct DetailRow<Content: View>: View {
         }.padding(.vertical, 12)
     }
 }
-
-/// The app icon's robot geometry, cropped to the artwork for a legible small mark.
-struct CompanionBrandMark: View {
-    var body: some View {
-        GeometryReader { g in
-            let scale = g.size.width / 720
-            let offset = CGPoint(x: -152, y: -167)
-            let transform = CGAffineTransform(translationX: offset.x, y: offset.y)
-            ZStack {
-                Path(roundedRect: CGRect(x: 232, y: 316, width: 560, height: 448), cornerRadius: 154)
-                    .applying(transform).applying(CGAffineTransform(scaleX: scale, y: scale))
-                    .stroke(style: StrokeStyle(lineWidth: 28 * scale))
-                Path { path in
-                    for x in [404.0, 576.0] {
-                        path.addRoundedRect(in: CGRect(x: x, y: 481, width: 44, height: 98), cornerSize: CGSize(width: 22, height: 22))
-                    }
-                    path.addRoundedRect(in: CGRect(x: 498, y: 233, width: 28, height: 83), cornerSize: CGSize(width: 14, height: 14))
-                    path.addEllipse(in: CGRect(x: 479, y: 179, width: 66, height: 66))
-                    for x in [168.0, 824.0] {
-                        path.addRoundedRect(in: CGRect(x: x, y: 483, width: 32, height: 115), cornerSize: CGSize(width: 16, height: 16))
-                    }
-                }.applying(transform).applying(CGAffineTransform(scaleX: scale, y: scale))
-            }.frame(width: g.size.width, height: g.size.height)
-        }.aspectRatio(1, contentMode: .fit).accessibilityHidden(true)
-    }
-}

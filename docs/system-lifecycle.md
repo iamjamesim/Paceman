@@ -10,7 +10,7 @@ carry implementation detail.
 agent event
     │
     ▼
-Omarchy source ── authenticated snapshot ──► iPhone ── profile/activity ──► watch
+Desktop sources ── authenticated snapshots ──► iPhone ── aggregate activity ──► watch
     │                                           │              BLE
     ├── visible APNs notification ──► iOS ── ANCS ───────────────────────► watch
     │                                      │                               │
@@ -29,8 +29,8 @@ path; the authenticated snapshot and BLE packets remain authoritative.
 Do not reduce the system to one `connected` flag. For any screen or recovery path,
 answer these separately:
 
-1. **Relationship:** Are the computer, phone and watch still paired or authorized?
-2. **Reachability:** Which links are usable now: source–phone and phone–watch?
+1. **Relationship:** Which computers, phone and watch are still paired or authorized?
+2. **Reachability:** Which source–phone links and phone–watch link are usable now?
 3. **Freshness:** Which fields are current, historical or expired?
 4. **Presentation:** Which surfaces should show or alert on the state?
 
@@ -75,7 +75,7 @@ state; they are never treated as the relationship itself.
 | Disruption | What the user keeps | Recovery |
 | --- | --- | --- |
 | Computer sleeps or network disappears | Pairing, theme, historical activity and valid cached allowance | Next foreground fetch, APNs event or watch request checks the source |
-| Source restarts | Pairing and its stored snapshot | Source reconciles live processes and resumes from SQLite |
+| Source restarts | Pairing and its stored snapshot | Omarchy reconciles live processes; Mac clears hook-only sessions until a new hook arrives |
 | Phone is suspended or system-terminated | Protected snapshot, credentials, preferences and Bluetooth identity | APNs, Core Bluetooth restoration or foreground lifecycle restores execution |
 | Watch leaves range or loses power | Pairing and accepted profile; a reboot does not show stale activity | Core Bluetooth reconnects; the handshake fetches and reconciles current state |
 | APNs permission or notification sharing is off | Pairing and opportunistic foreground/BLE synchronization | User restores the disabled system permission; reliable background watch events depend on it |

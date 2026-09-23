@@ -1,10 +1,8 @@
 # Identified pairing and removal
 
-The source, Omarchy panel and iPhone code support named app installations and
-removal from either side. Linux protocol/desktop checks have run. Mac simulator
-and signed device builds passed, along with all 21 iOS tests. The update is
-installed on the existing iPhone, with successful foreground fetches; physical
-pairing/removal acceptance below remains pending. See [validation](validation.md).
+The source, desktop panels and iPhone code support named app installations and
+removal from either side. The current iPhone pairing protocol requires connection
+management support from the source. See [validation](validation.md) for test history.
 
 ## User behavior
 
@@ -14,18 +12,17 @@ pairing/removal acceptance below remains pending. See [validation](validation.md
 - Scanning a fresh code for the same computer sends the existing credential as
   proof. The source rotates it in place, preserving the connection and pairing
   date. Old credentials stop working; push registers anew.
-- Opening the updated iPhone app identifies its existing credential without
-  re-pairing. Other older credentials stay **Unidentified connection**. We cannot
-  infer which abandoned credentials belonged to the same physical phone.
+- Pairing sends the installation identity in the initial request. Saved phone
+  connections are kept together so removing one can promote another safely.
 - Each desktop row has its own persisted last-contact time. A diagnostic client
   or second phone cannot make another connection look current.
 - Desktop: expand a connection, choose **Remove access…**, and confirm. This also
   works while sharing is off. Cancel is the initial keyboard selection; Escape
   cancels confirmation before collapsing details. Removal deletes this credential,
   its installation metadata and push destination. Watch pairing is unchanged.
-- iPhone: **Remove computer** revokes its own credential before deleting the local
-  pairing. If already revoked, removal still succeeds. If unreachable or the
-  desktop is too old, the app keeps the pairing and explains how to retry.
+- iPhone: **Remove computer** revokes its own credential before saving the
+  remaining connections. If already revoked, removal still succeeds. If the
+  computer is unreachable or secure storage fails, the app retains a retry path.
 - A desktop-revoked phone shows **Access removed** on its next request, clears
   pending watch activity and local push setup, and offers reconnection by QR.
 
@@ -36,8 +33,10 @@ are no longer scheduled. This change does not add watch freshness/lease support.
 ## Upgrade and recovery
 
 Install the desktop first with `bash scripts/install-desktop.sh`, then build and
-install the updated iPhone app. Existing credentials remain valid through the
-desktop migration. Old apps can keep fetching but remain unidentified.
+install the updated iPhone app. The phone migrates its previously saved primary
+and additional computer records into one Keychain item. If an earlier interrupted
+removal left only additional computers saved, the first one becomes primary.
+New pairings require `clientManagement: 1` in the source response.
 
 An installation ID is not a secret or an authorization token. A matching claim
 without the current credential cannot replace a pairing. The source returns 409
@@ -46,9 +45,8 @@ remove that connection on the desktop and scan a fresh code. This also recovers
 an interrupted re-pair where the source rotated access but the phone did not
 receive or securely save the replacement credential.
 
-When two unidentified records exist, open the updated app first. Its owned record
-will become named; the others remain unidentified until explicitly removed.
-There is no automatic merge or bulk revocation on upgrade.
+The source never infers ownership from a matching device name. There is no
+automatic merge or bulk revocation on upgrade.
 
 The local CLI equivalent is:
 
@@ -64,11 +62,10 @@ See the [protocol](protocol.md) for request shapes and privacy boundaries.
 ## Mac and physical-device acceptance
 
 1. Run `bash scripts/check-on-mac.sh`, then run the `AgentCompanion` scheme's tests
-   on an installed iPhone simulator. Five new protocol tests cover legacy saved
-   pairings, request identity/origin scoping, identification and removal failures.
-2. Install on the already-paired iPhone. Open the app; verify its desktop row
-   becomes named, activity still reaches the phone, and other old credentials
-   remain untouched.
+   on an installed iPhone simulator. Check pairing identity, connection storage
+   migration, and removal failures.
+2. Install on the already-paired iPhone. Open the app; verify both saved computers
+   remain visible and activity still reaches the phone.
 3. In Computer details, use **Reconnect with QR code** and scan a new desktop QR.
    Verify one row remains for that installation and push setup re-registers.
 4. Pair a second app installation, including a duplicate reported name. Verify

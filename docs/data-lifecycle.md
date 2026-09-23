@@ -1,7 +1,7 @@
 # Data ownership and persistence
 
-Current alpha implementation, reviewed 2026-09-21. These are local stores, not
-cloud-synced preferences. The app currently connects one computer and one watch.
+Current alpha implementation, reviewed 2026-09-22. These are local stores, not
+cloud-synced preferences. The app can connect multiple computers and one watch.
 
 ## iPhone
 
@@ -9,7 +9,7 @@ cloud-synced preferences. The app currently connects one computer and one watch.
   authenticated watch hardware ID. Updates, sound, brightness and time format
   survive app restarts. Missing new fields receive defaults without resetting
   existing choices. Computer display names are keyed by source ID.
-- **Secrets and identity:** paired source endpoint/client credential, phone
+- **Secrets and identity:** each paired source endpoint/client credential, phone
   installation ID and watch owner UUID live in Keychain. Entries use
   AfterFirstUnlockThisDeviceOnly; they are not synced through iCloud Keychain.
 - **Connection bookkeeping:** UserDefaults also holds the pairing receipt,
@@ -18,12 +18,12 @@ cloud-synced preferences. The app currently connects one computer and one watch.
   increasing watch revision. Event and revision delivery keys are still global to
   the current single-watch connection. They must become
   receiver-scoped before simultaneous multi-watch support.
-- **Source state:** one source-scoped last-known snapshot is stored in protected
+- **Source state:** each source-scoped last-known snapshot is stored in protected
   Application Support. It restores the palette and allowance after phone or source
   restart. Activity in that snapshot still obeys its short freshness lease and is
   never presented or forwarded as current after expiry. Pending BLE writes and the
   outbound queue remain in memory; there is no durable delivery queue.
-  Reconnect reconciles the latest profile; accepted-profile fingerprints suppress
+  Reconnect reconciles the latest aggregate activity and profile; accepted-profile fingerprints suppress
   unchanged writes. Sound and activity flags travel separately from the profile.
 - **Diagnostics:** a local protected JSONL file holds fixed transport-stage labels,
   timestamps and opaque event IDs. It is truncated after approximately 2 MB.
@@ -34,7 +34,9 @@ preferences and pairing receipt but retains ownership credentials to allow this
 phone to pair again; it is not a firmware factory reset. Removing a computer
 revokes its client access and clears local pairing, activity and cached profile
 state. A network failure never clears the cache. Confirmed credential revocation
-does, because the phone no longer owns that source relationship.
+does, because the phone no longer owns that source relationship. Removing one
+computer leaves the others paired; removing the primary promotes another paired
+computer without changing that computer's credential.
 
 ## Omarchy source and panel
 

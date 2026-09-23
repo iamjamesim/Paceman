@@ -17,7 +17,7 @@ final class PresentationModel: ObservableObject {
         #else
         preview = false; previewScreen = "activity"; neutralPreview = false
         #endif
-        if !preview, let source = Vault.load(PairedSource.self, key: "paired-source") {
+        if !preview, let source = PairedSourcesStore().load().first {
             ComputerPreferences.migrateLegacy(to: source.sourceID)
         }
     }
@@ -57,6 +57,9 @@ final class PresentationModel: ObservableObject {
         return source?.valid == true ? source! : .companion
     }
     func displayName(source: PairedSource?) -> String {
+        if preview, source?.endpoint.host == "macbook.example.ts.net" {
+            return previewScreen == "multi-long" ? "James’s development MacBook Pro" : "MacBook Pro"
+        }
         if preview { return previewScreen == "computer-long" ? "James’s development workstation" : neutralPreview ? "MacBook Pro" : "Omarchy" }
         if let source, let name = ComputerPreferences.name(for: source.sourceID), !name.isEmpty { return name }
         guard let host = source?.endpoint.host else { return "Your computer" }

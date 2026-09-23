@@ -1,0 +1,95 @@
+"""Install the personal APNs worker for an already installed Paceman Mac source."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import plistlib
+import shutil
+import subprocess
+import sys
+import tempfile
+
+from macos.install import LABEL as SOURCE_LABEL, PLIST as SOURCE_PLIST
+from macos.install import PUSH_LABEL as LABEL, PUSH_PLIST as PLIST
+from macos.install import REPO, ROOT, runtime_python
+from service.push import Config
+
+LABEL = "dev.paceman.push"
+PLIST = Path.home() / "Library/LaunchAgents/dev.paceman.push.plist"
+PRIVATE = ROOT / "private"
+KEY = PRIVATE / "apns-key.p8"
+CONFIG = PRIVATE / "apns.json"
+VENV = ROOT / "push-venv"
+
+
+def install(config_path: Path):
+    os.umask(0o077)
+    config_path = config_path.expanduser().resolve()
+    if not (ROOT / "lib/service/push.py").is_file() or not (ROOT / "data/hub.sqlite3").is_file():
+        raise ValueError("Install and pair the Paceman Mac source first")
+    arguments = plistlib.loads(SOURCE_PLIST.read_bytes()).get("ProgramArguments", []) if SOURCE_PLIST.is_file() else []
+    if not arguments or "PacemanBackground" not in arguments[0]:
+        raise ValueError("Update the Mac app with macos/install.py before adding notifications")
+    validated = Config.load(config_path)
+    raw = json.loads(config_path.read_text())
+    source_key = Path(raw["keyPath"]).expanduser()
+    if not source_key.is_absolute():
+        source_key = config_path.parent / source_key
+    source_key = source_key.resolve()
+
+    PRIVATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    PRIVATE.chmod(0o700)
+    if source_key != KEY:
+        shutil.copyfile(source_key, KEY)
+    KEY.chmod(0o600)
+    value = {"teamID": validated.team_id, "keyID": validated.key_id,
+             "topic": validated.topic, "environment": validated.environment,
+             "keyPath": str(KEY)}
+    descriptor, name = tempfile.mkstemp(prefix=".apns-", dir=PRIVATE)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w") as output:
+            json.dump(value, output)
+            output.write("\n")
+        temporary.replace(CONFIG)
+    finally:
+        temporary.unlink(missing_ok=True)
+    CONFIG.chmod(0o600)
+
+    python = VENV / "bin/python3"
+    if not python.is_file():
+        subprocess.run([runtime_python(), "-m", "venv", str(VENV)], check=True)
+    subprocess.run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
+                    "-r", str(REPO / "requirements-push.txt")], check=True)
+    subprocess.run([str(python), "-c",
+                    "from pathlib import Path; from service.push import APNs, Config; "
+                    "APNs(Config.load(Path('private/apns.json'))).close()"],
+                   cwd=ROOT, env={**os.environ, "PYTHONPATH": str(ROOT / "lib")}, check=True)
+
+    if PLIST.is_file():
+        if plistlib.loads(PLIST.read_bytes()).get("Label") != LABEL:
+            raise ValueError(f"Refusing to replace unrelated background item at {PLIST}")
+        subprocess.run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        PLIST.unlink()
+    if not (ROOT / "sharing-paused").exists():
+        subprocess.run(["/bin/launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{SOURCE_LABEL}"],
+                       check=True)
+    print("iPhone notifications enabled in Paceman's single Mac background item.")
+    print("The private key and config are stored in Paceman Application Support.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", required=True, type=Path, help="Existing private APNs JSON config")
+    args = parser.parse_args()
+    try:
+        install(args.config)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        parser.error(f"Push installation failed: {error}")
+
+
+if __name__ == "__main__":
+    main()

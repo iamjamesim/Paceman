@@ -9,7 +9,10 @@ struct PairingFlow: View {
     @State private var invitation = ""
     @State private var parsed: Invitation?
     @State private var error: String?
-    private var reconnecting: Bool { model.source != nil || (preview && ProcessInfo.processInfo.arguments.contains("--screen=reconnect")) }
+    private var reconnecting: Bool {
+        parsed.map { value in model.pairedSources.contains { $0.sourceID == value.sourceID } }
+            ?? (preview && ProcessInfo.processInfo.arguments.contains("--screen=reconnect"))
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
@@ -30,10 +33,9 @@ struct PairingFlow: View {
                             .font(.footnote.monospaced()).textSelection(.enabled)
                         CompanionButton(title: model.busy ? "Connecting…" : reconnecting ? "Reconnect computer" : "Connect computer", theme: theme) {
                             Task {
-                                let reconnecting = model.source != nil
                                 if await model.pair(text: invitation) {
-                                    await model.refresh()
-                                    if reconnecting { dismiss() }
+                                    await model.refreshAll()
+                                    dismiss()
                                 } else { error = model.status }
                             }
                         }.disabled(model.busy || preview)

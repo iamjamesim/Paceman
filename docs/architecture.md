@@ -4,7 +4,7 @@ Paceman connects agent workspaces to personal gear. Work remains in the source
 agent environment; the hub presents current state and relays it to accessories.
 
 ```text
-Omarchy events + desktop palette (or synthetic test source)
+Omarchy events + desktop palette, Mac Codex hooks (or synthetic test source)
     │
     ▼
 Private source service ── HTTPS snapshot ──► iPhone ── BLE ──► watch
@@ -27,6 +27,9 @@ owner. Synthetic mode remains the default for isolated tests. See the
 [routing runbook](omarchy-routing.md) for live event routing and limits.
 Activity and appearance both advance snapshot revisions; appearance-only changes
 retain the activity event ID and are excluded from APNs activity notifications.
+`service/macos.py` receives reduced Codex lifecycle events from a trusted local
+hook script. It shares the source API and credentials but uses hook-derived
+session state rather than Linux process verification.
 
 `service/push.py` is an optional process beside that source. It sends a minimal
 APNs hint; the phone fetches current data from its previously paired endpoint.
@@ -44,6 +47,8 @@ The source runs independently of the shell. On Linux, `service/processes.py`
 binds sessions to the Codex ancestor of the kernel-identified hook sender, then
 reconciles PID/start-time/boot identities on startup and about once a second.
 Activity and liveness are separate; a living process can remain Finished or Idle. See [desktop setup](desktop.md).
+`macos/` supplies an arm64 SwiftUI menu-bar app, a per-user LaunchAgent, and an
+agent-led installer. See [Mac setup](macos.md).
 
 ## iPhone and Live Activities
 
@@ -52,7 +57,7 @@ the authenticated API. `WatchLink` handles accessory selection, ownership, BLE
 packets and restoration. `CompanionHome` and `PresentationModel` present current
 sessions and connection state; `ios/Shared/` defines theme and Live Activity types.
 
-The app has one feed. Workspace setup becomes a status card; watch setup becomes
+The app shows independently paired computer activity cards. Workspace setup becomes a status card; watch setup becomes
 a connection row. Settings contains notifications and developer tools. A valid
 source palette is followed automatically. The WidgetKit extension hosts Live
 Activities only; there are no Home Screen or Lock Screen status widgets.

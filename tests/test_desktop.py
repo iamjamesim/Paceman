@@ -168,7 +168,8 @@ class DesktopInstallTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        # macOS exposes /var as a symlink, which the installer rightly refuses.
+        self.root = Path(self.temp.name).resolve()
 
     def test_sqlite_migration_preserves_pairings_and_never_overwrites_installed_database(self):
         source = Store(self.root / "checkout/hub.sqlite3")

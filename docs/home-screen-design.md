@@ -1,7 +1,7 @@
 # Phone home design
 
 The home screen answers, in order:
-1. Which computer is this?
+1. Which computer or computers are connected?
 2. Is its activity current, or is the app recovering the connection?
 3. What are the agents doing; does anything need input?
 4. Is the watch connected, and when was activity last sent to it?
@@ -12,6 +12,26 @@ outline Paceman brand mark. The smaller filled robots describe agent state only,
 with the state label stacked below. A single session needs no count headline.
 Historical robots are still and muted. No received activity is not historical activity.
 Background transport registration and alert permission are not home-screen setup steps.
+
+## Two-computer alpha pass: 2026-09-22
+
+Keep the current card hierarchy while adding another independently paired
+computer below the first. Each card names its own computer, reports its own
+freshness and activity, and links to its own rename/removal detail. The watch
+card remains one destination below the computers. The watch receives the
+highest-priority fresh state across sources: needs input, working, finished,
+then idle. Source credentials, cached snapshots, push registrations, and
+removal stay separate. No tab bar is introduced until actual multi-machine use
+shows a navigation problem.
+
+The connected/multiple-session, second-computer empty, and second-computer
+stale states were rendered in the iPhone simulator. The connected two-computer
+screen was also inspected at accessibility extra-extra-large text size; it
+remains vertically scrollable. A long computer name and task title were
+inspected at normal text size and wrap within their card. Physical-device
+acceptance is pending. The Mac panel component and pairing sheet were inspected
+with fixture states; the actual menu-bar popover and real Codex/ChatGPT Work hook
+delivery remain separate checks.
 
 Connection and content answer different questions. `Connecting…`, `Checking…`,
 and `Reconnecting…` describe the computer link. A receipt time says when this

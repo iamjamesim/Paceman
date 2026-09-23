@@ -16,9 +16,11 @@ display. A working local agent and successful delivery are separate states.
 
 ## Identity and visual language
 
-Use the companion face already drawn in the iPhone app. Adapt its outline for a
-small monochrome bar icon; retain the antenna and two eyes rather than using an
-unrelated rocket or introducing another symbol. The icon keeps normal weight
+Use the companion face already drawn in the iPhone app. The iPhone and Mac now
+compile the same vector in `ios/Shared/PacemanMark.swift`; Omarchy's
+`desktop/plugin/PacemanMark.qml` uses that vector's cropped app-icon coordinates.
+Keep both eyes identical and mirrored around the face center at every size.
+The icon keeps normal weight
 while the desktop runs and dims when it stops. A sleeping phone is not an urgent
 error, and the icon does not animate on every agent event.
 
@@ -143,3 +145,29 @@ Run `bash scripts/preview-desktop.sh` to review four labeled sample states using
 the same panel component and current Omarchy theme. The installed service and
 its status are unaffected by the preview. Set `PACEMAN_PREVIEW_SESSIONS=1` to
 compare one session, two working sessions, and mixed-state summaries.
+
+The macOS menu-bar client follows the same header, phone-contact, activity,
+pairing, sharing and removal hierarchy. Its counts are hook-observed sessions;
+the Linux process-liveness guarantee above does not apply. The native Mac panel
+component was visually reviewed in a temporary window with empty, recent,
+waiting, stopped, sharing-off and multiple-connection fixtures. The QR sheet was
+also checked after correcting a cropped image. The actual menu-bar popover still
+needs a hands-on check because the UI inspection tool cannot access menu-only apps.
+
+On the Mac, the activity row distinguishes a missing hook configuration from
+hooks installed with no event received and from ordinary idle after a past
+event. Setup guidance stays within that row and appears only while sharing is
+running. It does not infer hook trust from configuration files or repeat setup
+instructions after a source restart that retains prior event evidence. The
+missing, first-event, established idle, active-with-missing-hook, sharing-off,
+and stopped layouts were compared in the full panel, including long phone names
+and an accessibility text-size preview.
+
+The Mac panel now has a quiet **Manage Paceman…** action after Activity. Its
+sheet answers what the one background item does, how the Sharing switch pauses
+both the source and optional notification sender, and what complete uninstall
+removes. The destructive action has a second confirmation and explains that the
+phone retains its computer card until removed there. No service process names or
+per-request diagnostics appear in the main panel. The full first-run, paired,
+multiple/stale connection, and sharing-off layouts were checked with this action;
+the sheet and confirmation were checked at normal and accessibility text sizes.

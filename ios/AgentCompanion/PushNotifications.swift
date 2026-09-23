@@ -165,7 +165,8 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         defer { finishOperation() }
         await refreshAuthorization()
         guard enabled else { return }
-        guard let source = model?.source, model?.accessRevoked != true else { status = "Connect your computer to finish setup"; return }
+        let sources = model?.pairedSources.filter { model?.isRevoked($0.sourceID) != true } ?? []
+        guard !sources.isEmpty else { status = "Connect your computer to finish setup"; return }
         guard let token = Vault.load(String.self, key: "apns-device-token") else {
             status = "Waiting for Apple push registration"
             awaitingToken = true
@@ -178,51 +179,53 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             awaitingToken = false
             status = "APNs environment is missing from this build"; return
         }
-        if let receipt = Vault.load(PushRegistrationReceipt.self, key: "push-registration-receipt"),
-           receipt.matches(source: source, token: token, environment: environment) {
-            registered = true
-            awaitingToken = false
-            status = "Registered on desktop · \(environment)"
-            return
-        }
-        do {
-            try await client.registerPush(source, token: token, environment: environment)
-            guard enabled, model?.source?.credential == source.credential, model?.accessRevoked != true else { return }
-            registered = true
-            awaitingToken = false
-            status = "Registered on desktop · \(environment)"
-            Diagnostics.shared.record("push_destination_registered")
-            do {
-                try Vault.save(PushRegistrationReceipt(sourceID: source.sourceID, clientID: source.clientID,
-                                                        token: token, environment: environment),
-                               key: "push-registration-receipt")
-            } catch {
-                Diagnostics.shared.record("push_registration_receipt_save_failed")
+        var completed = 0
+        for source in sources {
+            let receiptKey = "push-registration-receipt.\(source.sourceID)"
+            let receipt = Vault.load(PushRegistrationReceipt.self, key: receiptKey)
+                ?? Vault.load(PushRegistrationReceipt.self, key: "push-registration-receipt")
+            if receipt?.matches(source: source, token: token, environment: environment) == true {
+                completed += 1
+                continue
             }
-        } catch {
-            registered = false
-            awaitingToken = false
-            status = "Could not register on your computer. Check the connection and try again."
-            Diagnostics.shared.record("push_registration_failed")
+            do {
+                try await client.registerPush(source, token: token, environment: environment)
+                guard enabled, model?.pairedSources.contains(where: { $0.sourceID == source.sourceID && $0.credential == source.credential }) == true else { continue }
+                try Vault.save(PushRegistrationReceipt(sourceID: source.sourceID, clientID: source.clientID,
+                                                        token: token, environment: environment), key: receiptKey)
+                completed += 1
+                Diagnostics.shared.record("push_destination_registered")
+            } catch {
+                Diagnostics.shared.record("push_registration_failed")
+            }
         }
+        registered = completed == sources.count
+        awaitingToken = false
+        status = registered ? "Registered on computers · \(environment)" : "Could not register on every computer. Check their connections."
     }
 
     // Server-side client revocation has already removed the push destination.
     // Clear local setup without issuing another request with an invalid token.
-    func clearRemovedSource() {
+    func clearRemovedSource(sourceID: String) {
         registered = false
         awaitingToken = false
-        enabled = false
         syncPending = false
-        try? Vault.remove(key: "push-registration-receipt")
-        UserDefaults.standard.set(false, forKey: "push-enabled")
-        UIApplication.shared.unregisterForRemoteNotifications()
-        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
-        status = "Push is off"
+        try? Vault.remove(key: "push-registration-receipt.\(sourceID)")
+        if let old = Vault.load(PushRegistrationReceipt.self, key: "push-registration-receipt"), old.sourceID == sourceID {
+            try? Vault.remove(key: "push-registration-receipt")
+        }
+        if (model?.pairedSources.filter({ $0.sourceID != sourceID }).isEmpty ?? true) {
+            enabled = false
+            UserDefaults.standard.set(false, forKey: "push-enabled")
+            UIApplication.shared.unregisterForRemoteNotifications()
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+            status = "Push is off"
+        } else { Task { await sync() } }
     }
 
     func receive(_ userInfo: [AnyHashable: Any], stage: String) async -> UIBackgroundFetchResult {
-        guard enabled, let model, let hint = PushHint.decode(userInfo, for: model.source) else {
+        guard enabled, let model,
+              let hint = model.pairedSources.compactMap({ PushHint.decode(userInfo, for: $0) }).first else {
             Diagnostics.shared.record("push_ignored_unpaired_or_invalid")
             return .noData
         }
@@ -230,13 +233,15 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         Diagnostics.shared.record(stage, event: hint.identity,
                                   contentAvailable: (aps?["content-available"] as? NSNumber)?.intValue == 1)
         // Never use a URL or credential supplied in a push. Fetch only from our stored paired source.
-        return await model.refresh(fromPush: true)
+        return await model.refresh(sourceID: hint.sourceID, fromPush: true)
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
         willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         Task { @MainActor in
-            let valid = self.enabled && PushHint.decode(notification.request.content.userInfo, for: self.model?.source) != nil
+            let valid = self.enabled && (self.model?.pairedSources.contains {
+                PushHint.decode(notification.request.content.userInfo, for: $0) != nil
+            } ?? false)
             // Passive progress updates need no notification when the app is already open.
             let attention = notification.request.content.interruptionLevel != .passive
             let options: UNNotificationPresentationOptions = [.banner, .list, .sound]

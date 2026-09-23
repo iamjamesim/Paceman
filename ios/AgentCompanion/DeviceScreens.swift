@@ -1,5 +1,96 @@
 import SwiftUI
 
+struct OtherComputerDetail: View {
+    @ObservedObject var model: CompanionModel
+    @ObservedObject var presentation: PresentationModel
+    let theme: CompanionTheme
+    let sourceID: String
+    @State private var name = ""
+    @State private var rename = false
+    @State private var remove = false
+    @State private var removing = false
+    @State private var removalError: String?
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var paired: PairedSource? { model.additionalSources.first { $0.sourceID == sourceID } }
+    private var state: ComputerConnectionState {
+        if model.additionalRevoked.contains(sourceID) { return .revoked }
+        if model.additionalErrors[sourceID] != nil { return .reconnecting }
+        if model.additionalSnapshots[sourceID] == nil { return .connecting }
+        return model.additionalFresh(sourceID) ? .current : .checking
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                if !typeSize.isAccessibilitySize {
+                    ComputerIllustration(theme: theme).frame(width: 190).accessibilityHidden(true)
+                }
+                VStack(spacing: 8) {
+                    Text(presentation.displayName(source: paired))
+                        .font(.title2.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                    Text(state.rawValue).font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                    if let contact = model.additionalLastContact[sourceID] {
+                        ReceiptTimeLabel(prefix: "Last received", date: contact)
+                            .font(.caption).foregroundStyle(theme.ink.opacity(0.5))
+                    }
+                }
+                if state == .revoked {
+                    NavigationLink { PairingFlow(model: model, theme: theme) } label: {
+                        Label("Scan QR code", systemImage: "qrcode.viewfinder").frame(minHeight: 44)
+                    }
+                } else if state == .reconnecting {
+                    Text("It will reconnect when this computer is awake and online.")
+                        .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                }
+                CompanionRule(theme: theme)
+                Button {
+                    name = presentation.displayName(source: paired)
+                    rename = true
+                } label: {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 12) { Text("Display name"); Spacer(minLength: 10); nameValue }
+                        VStack(alignment: .leading, spacing: 8) { Text("Display name"); nameValue }
+                    }.font(.subheadline).frame(minHeight: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                CompanionRule(theme: theme)
+                DeviceRemovalButton(title: removing ? "Removing…" : "Remove computer", theme: theme) { remove = true }
+                    .disabled(removing)
+                if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.ink.opacity(0.65)) }
+            }.padding(.horizontal, 26).padding(.top, 20).padding(.bottom, 30)
+        }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
+            .navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
+            .alert("Display name", isPresented: $rename) {
+                TextField("Name", text: $name)
+                Button("Save") { presentation.setDisplayName(name, source: paired) }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("Shown in Paceman. Doesn’t rename your computer.") }
+            .confirmationDialog("Remove \(presentation.displayName(source: paired))?", isPresented: $remove, titleVisibility: .visible) {
+                Button("Remove computer", role: .destructive) {
+                    guard let paired else { return }
+                    removing = true
+                    Task {
+                        defer { removing = false }
+                        while model.busy || PushCoordinator.shared.busy {
+                            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                        }
+                        if await model.removeAdditionalSource(paired) { dismiss() }
+                        else { removalError = "Couldn’t remove access. Reconnect and try again; the pairing is kept." }
+                    }
+                }
+            } message: { Text("Stop receiving activity from this computer and remove this phone’s access. Your agents keep running.") }
+    }
+
+    private var nameValue: some View {
+        HStack(spacing: 8) {
+            Text(presentation.displayName(source: paired)).foregroundStyle(theme.ink.opacity(0.6))
+            Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium))
+                .foregroundStyle(theme.ink.opacity(0.45))
+        }
+    }
+}
+
 struct ComputerDetail: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel

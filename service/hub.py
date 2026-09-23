@@ -287,7 +287,7 @@ class Store:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
-            if mode and mode[0] == "omarchy":
+            if mode and mode[0] in ("omarchy", "macos"):
                 return
             rows = db.execute("SELECT * FROM schedule WHERE fired=0 AND due<=? ORDER BY due,id", (now,)).fetchall()
             for row in rows:
@@ -313,8 +313,8 @@ class Store:
     @staticmethod
     def require_synthetic(db):
         mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
-        if mode and mode[0] == "omarchy":
-            raise ValueError("Synthetic controls are disabled for an Omarchy source; use a separate data directory")
+        if mode and mode[0] in ("omarchy", "macos"):
+            raise ValueError("Synthetic controls are disabled for a live source; use a separate data directory")
 
 
 class Server(ThreadingHTTPServer):
@@ -467,7 +467,7 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("serve")
     run.add_argument("--port", type=int, default=8765)
-    run.add_argument("--source", choices=("synthetic", "omarchy"), default="synthetic")
+    run.add_argument("--source", choices=("synthetic", "omarchy", "macos"), default="synthetic")
     run.add_argument("--status-file", type=Path, help="Private desktop status JSON (optional)")
     run.add_argument("--agent-socket", type=Path,
                      help="Omarchy event socket (default: $XDG_RUNTIME_DIR/omarchy-watch.sock)")
@@ -503,6 +503,13 @@ def main():
                 try:
                     server.adapter = stack.enter_context(OmarchySource(
                         store, socket_path=args.agent_socket, state_dir=args.omarchy_state))
+                except (OSError, ValueError) as error:
+                    parser.error(str(error))
+            elif args.source == "macos":
+                from service.macos import MacSource
+                hook_socket = args.agent_socket or args.data_dir / "hook.sock"
+                try:
+                    server.adapter = stack.enter_context(MacSource(store, socket_path=hook_socket))
                 except (OSError, ValueError) as error:
                     parser.error(str(error))
             else:

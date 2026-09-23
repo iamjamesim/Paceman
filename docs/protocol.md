@@ -65,7 +65,7 @@ or acknowledge attention. `observedAt` is the source's successful snapshot time;
 `changedAt` stays fixed for the same event. Deleting/replacing the database creates
 a new source identity and requires new pairing. Simple process restart does not.
 
-`mode` is `synthetic` or `omarchy`. Live Omarchy snapshots use the same API and
+`mode` is `synthetic`, `omarchy`, or `macos`. Live desktop snapshots use the same API and
 pairing contract. `revision` advances for activity or appearance changes; `eventID`
 and `changedAt` advance only for activity changes. They need not equal the latest
 snapshot revision. Appearance updates therefore cannot replay a watch alert.
@@ -74,6 +74,10 @@ The source's `observedAt` establishes service liveness. Omarchy sources with
 Codex process locally. Finished and Idle sessions can remain open. PID/start-time/
 boot metadata is never exported. Clients can ignore this optional marker.
 See [routing semantics and recovery limits](omarchy-routing.md).
+Mac snapshots use `sessionLiveness: "hook"`; their sessions are observed hook
+states and are cleared on source restart because open-process identity is not
+verified. The phone must keep each source's generation, revision, freshness,
+credential and cache separate.
 
 Watch encoding matches the existing Omarchy v0.6.1 protocol: 36-byte time/owner
 profile and 14-byte activity snapshot. Integers are little endian. The phone
