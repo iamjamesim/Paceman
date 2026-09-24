@@ -37,6 +37,17 @@ struct MonitoringActivity: ActivityAttributes {
             if finished > 0 { return finished == 1 ? "Finished" : "\(finished) finished" }
             return "No active sessions"
         }
+        var headline: String {
+            switch dominantState {
+            case "needs_input": "Needs input"
+            case "working": "Working"
+            case "finished": "Finished"
+            default: "No active sessions"
+            }
+        }
+        var hasMixedStates: Bool {
+            [needsInput, working, finished].filter { $0 > 0 }.count > 1
+        }
         var sessionSummary: String {
             [(needsInput, needsInput == 1 ? "needs input" : "need input"),
              (working, "working"), (finished, "finished")]

@@ -194,6 +194,10 @@ final class SourceClient {
         try await liveActivityRequest(source, payload: ["activityID": id, "action": "remove"])
     }
 
+    func recoverLiveActivity(_ source: PairedSource, id: String) async throws {
+        try await liveActivityRequest(source, payload: ["activityID": id, "action": "recover"])
+    }
+
     func registerLiveActivityStart(_ source: PairedSource, token: String, environment: String) async throws {
         try await liveActivityRequest(source, payload: ["action": "register-start", "deviceToken": token,
                                                         "environment": environment])

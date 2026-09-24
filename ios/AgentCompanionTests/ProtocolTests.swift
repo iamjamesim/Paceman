@@ -53,9 +53,17 @@ final class ProtocolTests: XCTestCase {
         let state = MonitoringActivity.ContentState(generation: "generation", revision: 1,
             state: "finished", working: 0, needsInput: 0, finished: 1, observedAt: 0, freshUntil: 30)
         XCTAssertEqual(state.title, "Finished")
+        XCTAssertEqual(state.headline, "Finished")
+        var same = state
+        same.finished = 2
+        XCTAssertEqual(same.title, "2 finished")
+        XCTAssertEqual(same.headline, "Finished")
+        XCTAssertFalse(same.hasMixedStates)
         var mixed = state
         mixed.working = 1
         XCTAssertEqual(mixed.title, "Working")
+        XCTAssertEqual(mixed.headline, "Working")
+        XCTAssertTrue(mixed.hasMixedStates)
         XCTAssertEqual(mixed.sessionSummary, "1 working · 1 finished")
     }
 
@@ -366,6 +374,11 @@ final class ProtocolTests: XCTestCase {
         XCTAssertTrue(rows.contains { $0.session.displayName == "Claude" })
         XCTAssertEqual(rows.map(\.id), AgentDisplayRow.rows(Array(sessions.reversed())).map(\.id))
         XCTAssertEqual(AgentDisplayRow.rows([]).count, 0)
+        let finished = AgentDisplayRow.rows([
+            AgentSession(id: "6", provider: "codex", state: .finished),
+            AgentSession(id: "7", provider: "codex", state: .finished)])
+        XCTAssertEqual(finished.first?.session.displayName, "Codex · 2 sessions")
+        XCTAssertEqual(finished.first?.detail, "")
     }
 
     func testFeedDistinguishesFirstUpdateFromIdleAndOlderAggregateSources() throws {

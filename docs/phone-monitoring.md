@@ -19,7 +19,12 @@ Pairing registers the phone's ActivityKit push-to-start token with that source.
 The phone also observes ActivityKit token rotation and remotely started
 activities, registers their update tokens, retries registration after a failed
 attempt on the next successful source refresh, and restores existing activities
-after relaunch. Re-pairing clears remembered registrations so the new credential
+after relaunch. After a phone app update, an activity can disappear while the
+source still holds its old update token. The phone remembers the registered
+activity ID, clears that orphaned destination on its next source contact, and
+asks the source to retry remote start for current work. Local ActivityKit starts
+run only while the app is in the foreground; remote start owns background
+recovery. Re-pairing clears remembered registrations so the new credential
 registers them again. An authenticated source can start an activity while the
 app is closed. The required remote-start alert may appear once when the activity
 starts. No in-app switch or Developer Tools step is required. The home status
@@ -37,10 +42,12 @@ Activity uses the phone-selected family's dark glance surface and ink. Its
 prominent robot and active headline use that family's accent, matching the
 custom watch's active focal points. Finished robots soften, finished headlines
 use ink, and stale content is muted. Small session lights retain separate state
-colors. The in-app preview shares the same palette. The header gives the
-computer and session count.
-One session shows how long it has held its current state; multiple sessions
-show their state distribution as lights and counts. The expanded Island uses
+colors. The in-app preview shares the same palette. The header names the
+computer and shows a count only when there is more than one session. The
+headline names the dominant state without repeating the count. A mixed-state
+activity shows its distribution as lights and counts; one-state activity has
+no supporting line while fresh. Stale activity instead shows its last update
+time. The expanded Island uses
 its full-width bottom region for that same hierarchy so ordinary computer
 names do not get confined beside the camera. When content is stale, the compact
 Island shows the robot

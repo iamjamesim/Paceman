@@ -257,7 +257,9 @@ class Store:
         if (not isinstance(payload.get("activityID"), str)
                 or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", payload["activityID"])):
             raise ValueError("Invalid activity ID")
-        remove = payload.get("action") == "remove"
+        remove = action in ("remove", "recover")
+        if action not in (None, "remove", "recover"):
+            raise ValueError("Invalid activity action")
         if not remove and (not isinstance(payload.get("deviceToken"), str)
                 or not re.fullmatch(r"[0-9a-f]{32,512}", payload["deviceToken"])
                 or len(payload["deviceToken"]) % 2
@@ -269,9 +271,14 @@ class Store:
             if not client:
                 return None
             if remove:
-                db.execute("DELETE FROM live_activities WHERE client_id=? AND activity_id=?",
-                           (client[0], payload["activityID"]))
-                db.execute("UPDATE live_activity_starts SET next_attempt=0 WHERE client_id=?", (client[0],))
+                deleted = db.execute("DELETE FROM live_activities WHERE client_id=? AND activity_id=?",
+                                     (client[0], payload["activityID"]))
+                if action == "recover" and deleted.rowcount:
+                    revision = db.execute("SELECT MAX(seq) FROM events").fetchone()[0]
+                    db.execute("UPDATE live_activity_starts SET cursor=?,next_attempt=0,attempts=0 WHERE client_id=?",
+                               (max(0, revision - 1), client[0]))
+                else:
+                    db.execute("UPDATE live_activity_starts SET next_attempt=0 WHERE client_id=?", (client[0],))
             else:
                 old = db.execute("SELECT * FROM live_activities WHERE client_id=?", (client[0],)).fetchone()
                 values = (payload["activityID"], payload["deviceToken"], payload["environment"])

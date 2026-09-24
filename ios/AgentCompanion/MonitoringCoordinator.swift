@@ -1,6 +1,7 @@
 import ActivityKit
 import Combine
 import Foundation
+import UIKit
 
 extension MonitoringActivity.ContentState {
     init(snapshot: Snapshot) {
@@ -45,6 +46,8 @@ final class MonitoringCoordinator: ObservableObject {
     private var lastStartAttempts: [String: Date] = [:]
     private var lastUpdateAttempts: [String: (token: Data, at: Date)] = [:]
     private var updateRegistrationsInFlight: Set<String> = []
+    private var orphanCleanupsInFlight: Set<String> = []
+    private var lastOrphanCleanupAttempts: [String: Date] = [:]
     private var dismissedRevisions: [String: (generation: String, revision: UInt64)] = [:]
 
     var available: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
@@ -75,7 +78,10 @@ final class MonitoringCoordinator: ObservableObject {
         self.sources = Dictionary(uniqueKeysWithValues: sources.map { ($0.sourceID, $0) })
         observeSystem()
         for activity in Activity<MonitoringActivity>.activities { observe(activity) }
-        Task { await registerStartTokens() }
+        Task {
+            await reconcileOrphanedRegistrations()
+            await registerStartTokens()
+        }
         updateStatus()
     }
 
@@ -93,6 +99,7 @@ final class MonitoringCoordinator: ObservableObject {
         self.sources = Dictionary(uniqueKeysWithValues: sources.map { ($0.sourceID, $0) })
         observeSystem()
         for activity in Activity<MonitoringActivity>.activities { observe(activity) }
+        await reconcileOrphanedRegistrations()
         await registerStartTokens()
         for (sourceID, activity) in activities where self.sources[sourceID] == nil {
             await end(activity, sourceID: sourceID)
@@ -125,6 +132,7 @@ final class MonitoringCoordinator: ObservableObject {
         registeredStartTokens.removeValue(forKey: sourceID)
         readySourceIDs.remove(sourceID)
         dismissedRevisions.removeValue(forKey: sourceID)
+        UserDefaults.standard.removeObject(forKey: Self.registrationKey(sourceID))
         updateStatus()
     }
 
@@ -205,7 +213,8 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func start(source: PairedSource, snapshot: Snapshot) {
-        guard available, activities[source.sourceID] == nil else { return }
+        guard available, UIApplication.shared.applicationState == .active,
+              activities[source.sourceID] == nil else { return }
         if let dismissed = dismissedRevisions[source.sourceID],
            dismissed.generation == snapshot.generation,
            snapshot.revision <= dismissed.revision { return }
@@ -270,9 +279,46 @@ final class MonitoringCoordinator: ObservableObject {
             }
             guard activity.pushToken == token else { return }
             registeredUpdateTokens[activity.id] = token
+            UserDefaults.standard.set(activity.id, forKey: Self.registrationKey(sourceID))
             Diagnostics.shared.record("live_activity_update_token_registered")
         } catch {
             Diagnostics.shared.recordError("live_activity_update_token_registration_failed", error: error)
+        }
+    }
+
+    private static func registrationKey(_ sourceID: String) -> String {
+        "registered-live-activity.\(sourceID)"
+    }
+
+    /// ActivityKit can discard an activity during an app update while the Mac
+    /// still holds its old update token. A confirmed registration ID lets the
+    /// phone clear only that orphan, so the source can remote-start a new one.
+    private func reconcileOrphanedRegistrations() async {
+        guard available else { return }
+        let systemIDs = Set(Activity<MonitoringActivity>.activities
+            .filter { $0.activityState == .active || $0.activityState == .stale }
+            .map(\.id))
+        for (sourceID, source) in sources {
+            let key = Self.registrationKey(sourceID)
+            guard let storedID = UserDefaults.standard.string(forKey: key),
+                  !systemIDs.contains(storedID),
+                  activities[sourceID]?.id != storedID,
+                  !orphanCleanupsInFlight.contains(sourceID),
+                  lastOrphanCleanupAttempts[sourceID].map({ Date().timeIntervalSince($0) >= 30 }) != false else {
+                continue
+            }
+            orphanCleanupsInFlight.insert(sourceID)
+            lastOrphanCleanupAttempts[sourceID] = Date()
+            do {
+                try await client.recoverLiveActivity(source, id: storedID)
+                if UserDefaults.standard.string(forKey: key) == storedID {
+                    UserDefaults.standard.removeObject(forKey: key)
+                }
+                Diagnostics.shared.record("live_activity_orphan_registration_cleared")
+            } catch {
+                Diagnostics.shared.recordError("live_activity_orphan_cleanup_failed", error: error)
+            }
+            orphanCleanupsInFlight.remove(sourceID)
         }
     }
 

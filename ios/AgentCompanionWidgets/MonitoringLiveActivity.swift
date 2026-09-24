@@ -81,13 +81,17 @@ private struct MonitoringCard: View {
                 .layoutPriority(1)
                 .foregroundStyle(palette.ink.opacity(0.82))
                 Spacer(minLength: 0)
-                Text("\(state.sessionCount) \(state.sessionCount == 1 ? "session" : "sessions")")
-                    .fixedSize()
-                    .foregroundStyle(palette.muted)
+                if state.sessionCount > 1 {
+                    Text("\(state.sessionCount) sessions")
+                        .fixedSize()
+                        .foregroundStyle(palette.muted)
+                }
             }
             .font(.system(compact ? .caption2 : .caption, design: .rounded, weight: .medium))
             MonitoringStateLine(state: state, stale: stale, compact: compact)
-            MonitoringDetails(state: state, stale: stale, compact: compact)
+            if stale || state.hasMixedStates {
+                MonitoringDetails(state: state, stale: stale, compact: compact)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -105,7 +109,7 @@ private struct MonitoringStateLine: View {
                 .frame(width: compact ? 25 : 31, height: compact ? 25 : 31)
                 .foregroundStyle(stale ? palette.muted : palette.robotColor(for: state.dominantState))
                 .accessibilityHidden(true)
-            Text(stale ? "Last known: \(state.title)" : state.title)
+            Text(stale ? "Last known: \(state.headline)" : state.headline)
                 .font(.system(compact ? .headline : .title2, design: .rounded, weight: .semibold))
                 .foregroundStyle(stale ? palette.muted : palette.headlineColor(for: state.dominantState))
                 .lineLimit(compact ? 1 : 2)
@@ -125,10 +129,10 @@ private struct MonitoringDetails: View {
         Group {
             if stale {
                 HStack(spacing: 4) {
-                    Text("Last update")
+                    Text("Last updated")
                     Text(Date(timeIntervalSince1970: state.observedAt), style: .relative)
                 }
-            } else if state.sessionCount > 1 {
+            } else if state.hasMixedStates {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 5) {
                         if state.sessionCount <= 6 {
@@ -144,11 +148,6 @@ private struct MonitoringDetails: View {
                     Text(state.sessionSummary)
                         .lineLimit(compact ? 1 : 2)
                         .minimumScaleFactor(0.75)
-                }
-            } else if let changedAt = state.changedAt, changedAt > 0 {
-                HStack(spacing: 4) {
-                    Text("In this state for")
-                    Text(Date(timeIntervalSince1970: changedAt), style: .relative)
                 }
             }
         }

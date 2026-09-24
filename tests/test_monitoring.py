@@ -185,6 +185,25 @@ class MonitoringTests(unittest.TestCase):
         self.worker.step(now + 4)
         self.assertEqual(len([call for call in self.sender.calls if call[1]['aps']['event'] == 'start']), 2)
 
+    def test_orphan_recovery_restarts_unchanged_work_only_for_matching_activity(self):
+        now = time.time()
+        self.store.live_activity(self.credential, {
+            'action': 'register-start', 'deviceToken': 'cd' * 32,
+            'environment': 'development'})
+        self.store.emit('working')
+        self.worker.step(now + 1)
+        self.register()
+        self.store.live_activity(self.credential, {'activityID': 'activity-1', 'action': 'remove'})
+        self.worker.step(now + 2)
+        self.assertEqual(len([call for call in self.sender.calls if call[1]['aps']['event'] == 'start']), 1)
+        self.register()
+        self.store.live_activity(self.credential, {'activityID': 'other', 'action': 'recover'})
+        self.worker.step(now + 3)
+        self.assertEqual(len([call for call in self.sender.calls if call[1]['aps']['event'] == 'start']), 1)
+        self.store.live_activity(self.credential, {'activityID': 'activity-1', 'action': 'recover'})
+        self.worker.step(now + 4)
+        self.assertEqual(len([call for call in self.sender.calls if call[1]['aps']['event'] == 'start']), 2)
+
     def test_remote_start_clears_on_revocation_and_does_not_expose_tasks(self):
         snapshot = self.store.snapshot()
         snapshot.update(state='working', sourceName='Omarchy', sessions=[{

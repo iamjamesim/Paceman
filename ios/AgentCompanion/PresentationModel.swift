@@ -166,7 +166,9 @@ struct AgentDisplayRow: Identifiable {
                 let counts = Dictionary(grouping: members, by: \.state).mapValues(\.count)
                 let states = ActivityState.allCases.sorted { AgentFeedContent.priority($0) < AgentFeedContent.priority($1) }
                     .filter { counts[$0] != nil }
-                let detail = states.map { AgentFeedContent.countLabel(counts[$0]!, state: $0) }.joined(separator: " · ")
+                let detail = states.count > 1
+                    ? states.map { AgentFeedContent.countLabel(counts[$0]!, state: $0) }.joined(separator: " · ")
+                    : ""
                 let session = AgentSession(id: "group:" + provider, provider: provider, state: states.first ?? .idle,
                     name: "\(provider.capitalized) · \(members.count) sessions")
                 rows.append(Self(id: session.id, session: session, detail: detail))

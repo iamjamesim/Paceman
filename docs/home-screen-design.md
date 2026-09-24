@@ -10,6 +10,8 @@ Activity belongs below it; the custom watch is a separate destination beside
 Live Activities above the computer cards. Preserve the
 outline Paceman brand mark. The smaller filled robots describe agent state only,
 with the state label stacked below. A single session needs no count headline.
+For a grouped provider row, keep its session count in the name and show the
+state distribution below only when those sessions have different states.
 Historical robots are still and muted. No received activity is not historical activity.
 Background transport registration and alert permission are not home-screen setup steps.
 The Live Activities status describes iPhone availability, not whether an active
