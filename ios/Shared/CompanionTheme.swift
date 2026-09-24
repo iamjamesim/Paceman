@@ -166,6 +166,14 @@ struct MonitoringPalette {
     }
 
     func robotColor(for state: String) -> Color {
-        state == "finished" ? accent.opacity(0.75) : accent
+        switch state {
+        case "finished": accent.opacity(0.75)
+        case "idle": muted
+        default: accent
+        }
+    }
+
+    func headlineColor(for state: String) -> Color {
+        state == "working" || state == "needs_input" ? accent : ink
     }
 }

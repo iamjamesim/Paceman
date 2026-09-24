@@ -117,7 +117,7 @@ private struct LiveActivityIllustration: View {
                     .frame(width: 28, height: 28)
                     .foregroundStyle(palette.robotColor(for: "working"))
                 Text("Working").font(.system(size: 23, weight: .semibold, design: .rounded))
-                    .foregroundStyle(palette.ink)
+                    .foregroundStyle(palette.headlineColor(for: "working"))
             }
         }
         .padding(19)

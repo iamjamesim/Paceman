@@ -116,12 +116,26 @@ legible at glance size. Sakura Mochi's phone surface and vivid pink accent are
 adapted. This is not a byte-for-byte port. Bundled notices are in
 `ios/Resources/ThemeLicenses.txt`.
 
-The colored phone and Live Activity palettes retain status roles distinct from
-the family accent. In Live Activities, the prominent robot uses the family accent
-like the custom watch; small session lights retain their state colors. Stale
-activity is muted, and finished robots use a softer accent. Monochrome carries state through words, robot forms,
-weight, and position, with grayscale intensity only. The phone and Live
-Activity must never require hue recognition. Actual display,
+Color roles across surfaces:
+
+| Role | Phone | Live Activity | Custom watch |
+| --- | --- | --- | --- |
+| Canvas and surface | Family background and panel | Dark glance background; system black in the Island | Dark glance background |
+| Primary ink | Names, titles, normal status, and content | Computer name, finished/idle headline, and ordinary content | Date, weather, allowance text, and supporting status |
+| Secondary ink | Receipt times, supporting labels, and historical rows | Session counts, elapsed time, and supporting labels | Rules and supporting information |
+| Family accent | Brand mark, selected controls, and fresh agent robots | Fresh working/needs-input robot and headline | Clock, active agent robot, and allowance rim |
+| State colors | State is spelled out; needs-input label receives accent emphasis | Small per-state session lights and input count in the compact Island | State is carried by robot form and words; no separate state hues |
+| Inactive or stale | Neutral connection cues and muted last-known activity | Muted stale content; softer finished robot; neutral finished headline and idle robot | Ordinary battery remains ink; low/charging battery receives accent |
+
+The accent identifies the active focal point, not a universal success or error
+signal. A full accent headline is legible against every launch family's dark
+glance background and the Island's black; finished content recedes. Long text
+and metadata stay in ink. Phone small labels use the palette's computed
+secondary ink rather than a fixed ink opacity, so they remain legible on both
+the canvas and card surface. Small session lights retain their separate state
+colors and accompany written counts. Monochrome carries state through words,
+robot forms, weight, and position, with grayscale intensity only. The phone
+and Live Activity must never require hue recognition. Actual display,
 reduced-luminance, increased-contrast, and color-vision checks remain necessary.
 [WCAG text contrast](https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum)
 is a numeric starting point.

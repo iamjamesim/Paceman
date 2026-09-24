@@ -107,7 +107,7 @@ private struct MonitoringStateLine: View {
                 .accessibilityHidden(true)
             Text(stale ? "Last known: \(state.title)" : state.title)
                 .font(.system(compact ? .headline : .title2, design: .rounded, weight: .semibold))
-                .foregroundStyle(stale ? palette.muted : palette.ink)
+                .foregroundStyle(stale ? palette.muted : palette.headlineColor(for: state.dominantState))
                 .lineLimit(compact ? 1 : 2)
                 .minimumScaleFactor(0.75)
             Spacer(minLength: 0)

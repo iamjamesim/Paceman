@@ -63,7 +63,7 @@ struct CompanionHome: View {
             if typeSize.isAccessibilitySize {
                 Text("Computers").font(.headline)
             } else {
-                Eyebrow(text: "Computers")
+                Eyebrow(text: "Computers", theme: theme)
                 Spacer()
             }
             Button { open(.pairing) } label: {
@@ -112,7 +112,7 @@ struct CompanionHome: View {
     private var agentSetup: some View {
         VStack(alignment: .leading, spacing: 21) {
             HStack {
-                Eyebrow(text: "Agents")
+                Eyebrow(text: "Agents", theme: theme)
                 Spacer()
                 Image(systemName: "laptopcomputer").font(.system(size: 18, weight: .medium)).foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
             }
@@ -242,7 +242,7 @@ struct AgentFeedRow: View {
                         .frame(width: 20, height: 20).foregroundStyle(animate ? theme.tint : theme.ink.opacity(0.4))
                 }
             }
-            Text(session.state.title).font(.caption2.weight(.medium)).foregroundStyle(animate && session.state == .needsInput ? theme.tint : theme.ink.opacity(0.6)).fixedSize(horizontal: true, vertical: false)
+            Text(session.state.title).font(.caption2.weight(.medium)).foregroundStyle(animate && session.state == .needsInput ? theme.tint : theme.secondaryInk).fixedSize(horizontal: true, vertical: false)
         }
     }
 }

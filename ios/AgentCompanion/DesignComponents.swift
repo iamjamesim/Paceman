@@ -7,7 +7,8 @@ struct CompanionCanvas: View {
 
 struct Eyebrow: View {
     let text: String
-    var body: some View { Text(text.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(2.0).opacity(0.55) }
+    let theme: CompanionTheme
+    var body: some View { Text(text.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(2.0).foregroundStyle(theme.secondaryInk) }
 }
 
 struct CompanionButton: View {
