@@ -92,6 +92,9 @@ struct CompanionRoot: View {
             if old == nil && new != nil { path = [] }
             else if new == nil { path = [] }
         }
+        .onChange(of: model.pairedSources.map(\.sourceID)) { _, _ in
+            presentation.syncComputerNames(model.pairedSources)
+        }
         .onOpenURL { url in
             guard url.scheme == "agentcompanion" else { return }
             if url.host == "computer", let id = url.pathComponents.dropFirst().first,

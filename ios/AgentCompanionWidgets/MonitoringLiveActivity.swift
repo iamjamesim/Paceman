@@ -13,7 +13,9 @@ struct MonitoringLiveActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.bottom) {
-                    MonitoringCard(name: context.attributes.sourceName,
+                    MonitoringCard(sourceID: context.attributes.sourceID,
+                        name: MonitoringComputerName.displayName(sourceID: context.attributes.sourceID,
+                        fallback: context.attributes.sourceName),
                         state: context.state, stale: context.isStale, compact: true)
                     .padding(.horizontal, 4)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -54,7 +56,9 @@ private struct MonitoringLockScreen: View {
     let context: ActivityViewContext<MonitoringActivity>
 
     var body: some View {
-        MonitoringCard(name: context.attributes.sourceName,
+        MonitoringCard(sourceID: context.attributes.sourceID,
+            name: MonitoringComputerName.displayName(sourceID: context.attributes.sourceID,
+            fallback: context.attributes.sourceName),
             state: context.state, stale: context.isStale, compact: false)
         .padding(.horizontal, 18)
         .padding(.vertical, 15)
@@ -63,11 +67,17 @@ private struct MonitoringLockScreen: View {
 }
 
 private struct MonitoringCard: View {
+    let sourceID: String
     let name: String
     let state: MonitoringActivity.ContentState
     let stale: Bool
     let compact: Bool
     private var palette: MonitoringPalette { ThemePreference.current.activity }
+    private var agentSummary: String? {
+        if state.providers != nil { return state.agentSummary }
+        return MonitoringActivity.ContentState.agentSummary(for: MonitoringProviderCache.codes(
+            sourceID: sourceID, generation: state.generation, revision: state.revision))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 9 : 11) {
@@ -89,8 +99,8 @@ private struct MonitoringCard: View {
             }
             .font(.system(compact ? .caption2 : .caption, design: .rounded, weight: .medium))
             MonitoringStateLine(state: state, stale: stale, compact: compact)
-            if stale || state.hasMixedStates {
-                MonitoringDetails(state: state, stale: stale, compact: compact)
+            if stale || state.hasMixedStates || agentSummary != nil {
+                MonitoringDetails(state: state, agentSummary: agentSummary, stale: stale, compact: compact)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -121,6 +131,7 @@ private struct MonitoringStateLine: View {
 
 private struct MonitoringDetails: View {
     let state: MonitoringActivity.ContentState
+    let agentSummary: String?
     let stale: Bool
     let compact: Bool
     private var palette: MonitoringPalette { ThemePreference.current.activity }
@@ -132,22 +143,22 @@ private struct MonitoringDetails: View {
                     Text("Last updated")
                     Text(Date(timeIntervalSince1970: state.observedAt), style: .relative)
                 }
-            } else if state.hasMixedStates {
+            } else {
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 5) {
-                        if state.sessionCount <= 6 {
-                            ForEach(0..<state.needsInput, id: \.self) { _ in light(palette.input) }
-                            ForEach(0..<state.working, id: \.self) { _ in light(palette.working) }
-                            ForEach(0..<state.finished, id: \.self) { _ in light(palette.finished) }
-                        } else {
-                            if state.needsInput > 0 { light(palette.input) }
-                            if state.working > 0 { light(palette.working) }
-                            if state.finished > 0 { light(palette.finished) }
+                    if state.hasMixedStates {
+                        HStack(spacing: 5) {
+                            if let agent = agentSummary {
+                                Text(agent).foregroundStyle(palette.ink.opacity(0.76))
+                                Spacer(minLength: 8)
+                            }
+                            stateLights.accessibilityHidden(true)
                         }
-                    }.accessibilityHidden(true)
-                    Text(state.sessionSummary)
-                        .lineLimit(compact ? 1 : 2)
-                        .minimumScaleFactor(0.75)
+                        Text(state.sessionSummary)
+                            .lineLimit(compact ? 1 : 2)
+                            .minimumScaleFactor(0.75)
+                    } else if let agent = agentSummary {
+                        Text(agent).foregroundStyle(palette.ink.opacity(0.76))
+                    }
                 }
             }
         }
@@ -157,6 +168,20 @@ private struct MonitoringDetails: View {
 
     private func light(_ color: Color) -> some View {
         Capsule().fill(color).frame(width: compact ? 15 : 18, height: compact ? 6 : 7)
+    }
+
+    private var stateLights: some View {
+        HStack(spacing: 5) {
+            if state.sessionCount <= 6 {
+                ForEach(0..<state.needsInput, id: \.self) { _ in light(palette.input) }
+                ForEach(0..<state.working, id: \.self) { _ in light(palette.working) }
+                ForEach(0..<state.finished, id: \.self) { _ in light(palette.finished) }
+            } else {
+                if state.needsInput > 0 { light(palette.input) }
+                if state.working > 0 { light(palette.working) }
+                if state.finished > 0 { light(palette.finished) }
+            }
+        }
     }
 }
 

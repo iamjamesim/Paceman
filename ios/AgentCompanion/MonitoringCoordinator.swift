@@ -22,6 +22,8 @@ extension MonitoringActivity.ContentState {
         freshUntil = snapshot.observedAt + 300
         changedAt = snapshot.changedAt
         themeID = ThemePreference.current.rawValue
+        providers = Self.providerCodes((snapshot.sessions ?? [])
+            .filter { $0.state != .idle }.map(\.provider))
     }
 }
 
@@ -95,6 +97,14 @@ final class MonitoringCoordinator: ObservableObject {
         }
     }
 
+    func refreshComputerName(_ sourceID: String) async {
+        for activity in Activity<MonitoringActivity>.activities
+        where activity.attributes.sourceID == sourceID &&
+              (activity.activityState == .active || activity.activityState == .stale) {
+            await activity.update(activity.content)
+        }
+    }
+
     func reconcile(sources: [PairedSource], snapshots: [String: Snapshot], fresh: Set<String>) async {
         self.sources = Dictionary(uniqueKeysWithValues: sources.map { ($0.sourceID, $0) })
         observeSystem()
@@ -106,14 +116,16 @@ final class MonitoringCoordinator: ObservableObject {
         }
         for source in sources {
             guard let snapshot = snapshots[source.sourceID], fresh.contains(source.sourceID) else { continue }
+            let state = MonitoringActivity.ContentState(snapshot: snapshot)
+            MonitoringProviderCache.save(state, sourceID: source.sourceID)
             if snapshot.state == .idle {
                 if let activity = activities[source.sourceID] { await end(activity, sourceID: source.sourceID) }
                 continue
             }
             if let activity = activities[source.sourceID] {
                 let current = activity.content.state
-                if current.generation != snapshot.generation || current.revision < snapshot.revision {
-                    let state = MonitoringActivity.ContentState(snapshot: snapshot)
+                if current.generation != snapshot.generation || current.revision < snapshot.revision
+                    || (current.providers == nil && state.providers?.isEmpty == false) {
                     await activity.update(ActivityContent(state: state,
                         staleDate: Date(timeIntervalSince1970: state.freshUntil),
                         relevanceScore: state.relevanceScore))
@@ -133,6 +145,7 @@ final class MonitoringCoordinator: ObservableObject {
         readySourceIDs.remove(sourceID)
         dismissedRevisions.removeValue(forKey: sourceID)
         UserDefaults.standard.removeObject(forKey: Self.registrationKey(sourceID))
+        MonitoringProviderCache.remove(sourceID)
         updateStatus()
     }
 

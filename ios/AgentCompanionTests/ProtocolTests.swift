@@ -40,6 +40,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(state.sessionCount, 6)
         XCTAssertNil(state.changedAt)
         XCTAssertNil(state.themeID)
+        XCTAssertNil(state.agentSummary)
         XCTAssertEqual(state.relevanceScore, (state.observedAt + 240) / 10_000_000)
         XCTAssertEqual(state.revision, 42)
         XCTAssertEqual(state.freshUntil - state.observedAt, 30)
@@ -75,7 +76,8 @@ final class ProtocolTests: XCTestCase {
                      appearance: nil, allowance: nil, sessions: sessions)
         }
         let mac = MonitoringActivity.ContentState(snapshot: snapshot("mac", [
-            AgentSession(id: "m1", provider: "codex", state: .working)]))
+            AgentSession(id: "m1", provider: "codex", state: .working),
+            AgentSession(id: "m2", provider: "claude", state: .idle)]))
         let linux = MonitoringActivity.ContentState(snapshot: snapshot("linux", [
             AgentSession(id: "l1", provider: "codex", state: .needsInput),
             AgentSession(id: "l2", provider: "claude", state: .working)]))
@@ -84,6 +86,10 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(linux.sessionSummary, "1 needs input · 1 working")
         XCTAssertEqual(linux.working, 1)
         XCTAssertEqual(linux.needsInput, 1)
+        XCTAssertEqual(mac.agentSummary, "Codex")
+        XCTAssertEqual(linux.agentSummary, "Codex + Claude")
+        XCTAssertEqual(MonitoringActivity.ContentState.providerCodes(["codex", "claude-code", "private-agent"]),
+                       ["claude", "codex", "other"])
         XCTAssertEqual(mac.freshUntil, 400)
         XCTAssertEqual(linux.freshUntil, 400)
     }
@@ -654,6 +660,44 @@ final class ProtocolTests: XCTestCase {
         ComputerPreferences.remove("first", defaults: defaults)
         XCTAssertNil(ComputerPreferences.name(for: "first", defaults: defaults))
         XCTAssertEqual(ComputerPreferences.name(for: "second", defaults: defaults), "Second")
+    }
+
+    func testLiveActivityComputerNamesUsePhoneDisplayName() {
+        let suite = "live-activity-computer-names-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(MonitoringComputerName.displayName(sourceID: "first",
+            fallback: "Jamess-MacBook-Pro", defaults: defaults), "Jamess MacBook Pro")
+        MonitoringComputerName.save("MacBook Pro", for: "first", defaults: defaults)
+        XCTAssertEqual(MonitoringComputerName.displayName(sourceID: "first",
+            fallback: "Jamess-MacBook-Pro", defaults: defaults), "MacBook Pro")
+        XCTAssertEqual(MonitoringComputerName.displayName(sourceID: "second",
+            fallback: "Omarchy", defaults: defaults), "Omarchy")
+        MonitoringComputerName.remove("first", defaults: defaults)
+        XCTAssertEqual(MonitoringComputerName.displayName(sourceID: "first",
+            fallback: "Jamess-MacBook-Pro", defaults: defaults), "Jamess MacBook Pro")
+    }
+
+    func testOlderSenderProviderFallbackMatchesOnlyItsExactActivityRevision() {
+        let suite = "live-activity-providers-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var state = MonitoringActivity.ContentState(generation: "run-a", revision: 7,
+            state: "working", working: 1, needsInput: 0, finished: 0,
+            observedAt: 100, freshUntil: 400)
+        state.providers = ["codex"]
+        MonitoringProviderCache.save(state, sourceID: "mac", defaults: defaults)
+        XCTAssertEqual(MonitoringProviderCache.codes(sourceID: "mac", generation: "run-a",
+            revision: 7, defaults: defaults), ["codex"])
+        XCTAssertNil(MonitoringProviderCache.codes(sourceID: "mac", generation: "run-a",
+            revision: 8, defaults: defaults))
+        XCTAssertNil(MonitoringProviderCache.codes(sourceID: "mac", generation: "run-b",
+            revision: 7, defaults: defaults))
+        XCTAssertNil(MonitoringProviderCache.codes(sourceID: "other", generation: "run-a",
+            revision: 7, defaults: defaults))
+        MonitoringProviderCache.remove("mac", defaults: defaults)
+        XCTAssertNil(MonitoringProviderCache.codes(sourceID: "mac", generation: "run-a",
+            revision: 7, defaults: defaults))
     }
 
     func testWatchDisplayPreferencesMigrateWithoutResettingExistingChoices() throws {

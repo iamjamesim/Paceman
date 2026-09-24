@@ -18,6 +18,9 @@ struct MonitoringActivity: ActivityAttributes {
         // A local palette change refreshes the visible view without changing
         // the computer-owned activity state. Remote updates may omit this.
         var themeID: String? = nil
+        // Bounded agent identities only; no session names, paths, or prompts.
+        // Optional so activities created by older builds still decode.
+        var providers: [String]? = nil
         var sessionCount: Int { working + needsInput + finished }
         // Keep fresh input prominent, but a newer working activity can overtake
         // an old one once its five-minute freshness lease has expired.
@@ -48,6 +51,25 @@ struct MonitoringActivity: ActivityAttributes {
         var hasMixedStates: Bool {
             [needsInput, working, finished].filter { $0 > 0 }.count > 1
         }
+        var agentSummary: String? {
+            Self.agentSummary(for: providers)
+        }
+        static func agentSummary(for providers: [String]?) -> String? {
+            let names = Set(providers ?? [])
+            if names == ["codex"] { return "Codex" }
+            if names == ["claude"] { return "Claude" }
+            if names == ["codex", "claude"] { return "Codex + Claude" }
+            return names.count > 1 ? "Multiple agents" : nil
+        }
+        static func providerCodes<S: Sequence>(_ raw: S) -> [String] where S.Element == String {
+            Array(Set(raw.map { value in
+                switch value.lowercased() {
+                case "codex": "codex"
+                case "claude", "claude-code": "claude"
+                default: "other"
+                }
+            })).sorted()
+        }
         var sessionSummary: String {
             [(needsInput, needsInput == 1 ? "needs input" : "need input"),
              (working, "working"), (finished, "finished")]
@@ -58,4 +80,59 @@ struct MonitoringActivity: ActivityAttributes {
     }
     var sourceID: String
     var sourceName: String
+}
+
+/// A source running an older sender may omit provider codes from its APNs
+/// updates. Reuse only metadata fetched by the phone for the exact revision.
+enum MonitoringProviderCache {
+    private struct Entry: Codable {
+        let generation: String
+        let revision: UInt64
+        let providers: [String]
+    }
+    private static func key(_ sourceID: String) -> String { "live-activity-providers.\(sourceID)" }
+
+    static func save(_ state: MonitoringActivity.ContentState, sourceID: String,
+                     defaults: UserDefaults = ThemePreference.sharedDefaults) {
+        guard let providers = state.providers, !providers.isEmpty,
+              let data = try? JSONEncoder().encode(Entry(generation: state.generation,
+                  revision: state.revision, providers: providers)) else {
+            remove(sourceID, defaults: defaults)
+            return
+        }
+        defaults.set(data, forKey: key(sourceID))
+    }
+
+    static func codes(sourceID: String, generation: String, revision: UInt64,
+                      defaults: UserDefaults = ThemePreference.sharedDefaults) -> [String]? {
+        guard let data = defaults.data(forKey: key(sourceID)),
+              let entry = try? JSONDecoder().decode(Entry.self, from: data),
+              entry.generation == generation, entry.revision == revision else { return nil }
+        return entry.providers
+    }
+
+    static func remove(_ sourceID: String, defaults: UserDefaults = ThemePreference.sharedDefaults) {
+        defaults.removeObject(forKey: key(sourceID))
+    }
+}
+
+/// The phone owns display names. Its widget reads the same names from the app
+/// group because ActivityKit's remote-start attributes cannot be renamed.
+enum MonitoringComputerName {
+    private static func key(_ sourceID: String) -> String { "live-activity-computer-name.\(sourceID)" }
+
+    static func displayName(sourceID: String, fallback: String,
+                            defaults: UserDefaults = ThemePreference.sharedDefaults) -> String {
+        defaults.string(forKey: key(sourceID)).flatMap { $0.isEmpty ? nil : $0 }
+            ?? fallback.replacingOccurrences(of: "-", with: " ")
+    }
+
+    static func save(_ name: String, for sourceID: String,
+                     defaults: UserDefaults = ThemePreference.sharedDefaults) {
+        defaults.set(String(name.prefix(60)), forKey: key(sourceID))
+    }
+
+    static func remove(_ sourceID: String, defaults: UserDefaults = ThemePreference.sharedDefaults) {
+        defaults.removeObject(forKey: key(sourceID))
+    }
 }

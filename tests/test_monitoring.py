@@ -112,6 +112,19 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(headers['apns-push-type'], 'liveactivity')
         self.assertEqual(headers['apns-priority'], '5')
         self.assertEqual(payload['aps']['content-state']['working'], 1)
+        self.assertEqual(payload['aps']['content-state']['providers'], ['other'])
+
+    def test_live_activity_names_only_known_agent_types(self):
+        snapshot = self.store.snapshot()
+        snapshot['sessions'] = [
+            {'state': 'working', 'provider': 'codex', 'name': 'PRIVATE PROMPT'},
+            {'state': 'finished', 'provider': 'claude-code', 'project': '/private/work'},
+            {'state': 'idle', 'provider': 'private-agent'},
+        ]
+        content = live_notification(snapshot, time.time())[0]['aps']['content-state']
+        self.assertEqual(content['providers'], ['claude', 'codex'])
+        self.assertNotIn('PRIVATE PROMPT', json.dumps(content))
+        self.assertNotIn('/private/work', json.dumps(content))
 
     def test_live_activity_uses_one_display_palette_and_has_state_time(self):
         snapshot = self.store.snapshot()

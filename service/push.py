@@ -117,6 +117,12 @@ def live_notification(snapshot: dict, now: float, ending=False) -> tuple[dict, d
                "state": snapshot["state"], "working": counts["working"], "needsInput": counts["needs_input"],
                "finished": counts["finished"], "observedAt": observed, "freshUntil": fresh_until,
                "changedAt": snapshot["changedAt"]}
+    active_sessions = [s for s in sessions if s.get("state") in ("working", "needs_input", "finished")]
+    if active_sessions:
+        aliases = {"codex": "codex", "claude": "claude", "claude-code": "claude"}
+        content["providers"] = sorted({aliases.get(s.get("provider"), "other")
+                                       if isinstance(s.get("provider"), str) else "other"
+                                       for s in active_sessions})
     attention = 240 if counts["needs_input"] else 60 if counts["working"] else 0
     aps = {"timestamp": int(now), "event": "end" if ending else "update", "content-state": content,
            "stale-date": int(fresh_until), "relevance-score": (observed + attention) / 10_000_000}

@@ -71,7 +71,10 @@ struct ComputerDetail: View {
             .navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
             .alert("Display name", isPresented: $rename) {
                 TextField("Name", text: $name)
-                Button("Save") { presentation.setDisplayName(name, source: paired) }
+                Button("Save") {
+                    presentation.setDisplayName(name, source: paired)
+                    if let paired { Task { await model.monitoring.refreshComputerName(paired.sourceID) } }
+                }
                 Button("Cancel", role: .cancel) {}
             } message: { Text("Shown in Paceman. Doesn’t rename your computer.") }
             .confirmationDialog("Remove \(presentation.displayName(source: paired))?", isPresented: $remove, titleVisibility: .visible) {

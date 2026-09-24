@@ -190,6 +190,7 @@ final class CompanionModel: ObservableObject {
             errors.removeValue(forKey: paired.sourceID)
             revokedSources.remove(paired.sourceID)
             ComputerPreferences.remove(paired.sourceID)
+            MonitoringComputerName.remove(paired.sourceID)
             pairedSources = remaining
             PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
             forwardWatchAggregate()

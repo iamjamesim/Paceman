@@ -21,14 +21,23 @@ final class PresentationModel: ObservableObject {
         preview = false; previewScreen = "activity"; neutralPreview = false
         themeFamily = ThemePreference.current
         #endif
-        if !preview, let source = PairedSourcesStore().load().first {
-            ComputerPreferences.migrateLegacy(to: source.sourceID)
+        if !preview {
+            let sources = PairedSourcesStore().load()
+            if let source = sources.first { ComputerPreferences.migrateLegacy(to: source.sourceID) }
+            syncComputerNames(sources)
         }
     }
     func setDisplayName(_ name: String, source: PairedSource?) {
         guard !preview, let source else { return }
         ComputerPreferences.setName(name, for: source.sourceID)
+        MonitoringComputerName.save(displayName(source: source), for: source.sourceID)
         nameRevision += 1
+    }
+    func syncComputerNames(_ sources: [PairedSource]) {
+        guard !preview else { return }
+        for source in sources {
+            MonitoringComputerName.save(displayName(source: source), for: source.sourceID)
+        }
     }
     var previewHasComputer: Bool { !["setup", "pairing", "watch-only"].contains(previewScreen) }
     var previewHasWatch: Bool { ["watch-weather-denied", "paired-watch", "watch-paired", "watch-only", "watch-complete", "watch-notifications", "watch-troubleshooting", "single-finished", "single-offline", "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(previewScreen) }
