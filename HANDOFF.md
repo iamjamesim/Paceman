@@ -1,6 +1,6 @@
 # Development handoff
 
-Start with README.md, docs/architecture.md and docs/validation.md. Keep this file
+Start with README.md, docs/architecture.md and docs/roadmap.md. Keep this file
 focused on current next steps; do not append chronological development diaries.
 
 ## Current delivery work

@@ -22,7 +22,7 @@ final class Diagnostics {
         append(entry)
     }
 
-    func recordBluetoothError(_ stage: String, error: Error?) {
+    func recordError(_ stage: String, error: Error?) {
         let nsError = error as NSError?
         append([
             "at": Date().timeIntervalSince1970,
@@ -31,6 +31,10 @@ final class Diagnostics {
             "errorDomain": nsError?.domain ?? "unknown",
             "errorCode": nsError?.code ?? 0,
         ])
+    }
+
+    func recordBluetoothError(_ stage: String, error: Error?) {
+        recordError(stage, error: error)
     }
 
     private func append(_ entry: [String: Any]) {

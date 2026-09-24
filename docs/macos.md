@@ -108,10 +108,11 @@ observed event time across restarts so a routine restart does not repeat setup
 guidance. Presence does not prove Codex has trusted a hook; the panel does not
 claim to know trust state.
 
-## iPhone notifications from the Mac
+## iPhone notifications and Live Activities from the Mac
 
 Pairing and receiving Codex events do not start APNs delivery. The installing
-agent must also set up the Mac APNs worker when the user wants iPhone alerts.
+agent must also set up the Mac APNs worker for iPhone alerts and automatic
+Live Activity starts/updates.
 First, check that the phone has enabled Paceman notifications and registered a
 push destination with this Mac. Locate the user's existing private APNs JSON
 config and `.p8` key on the Mac without printing or pasting the key. The config's
@@ -135,6 +136,10 @@ Notification Center. Working/Idle are quiet, passive entries; Needs input and
 Finished request an alert and sound, subject to iOS notification settings.
 Apple's status 200 means it accepted the send, not that iOS displayed it. See
 [direct push delivery](direct-push-test.md) for device and watch validation.
+The phone registers its ActivityKit remote-start token automatically after
+pairing. A new active agent session can then start a Live Activity with the
+phone app closed; the source worker uses the same private APNs setup and logs
+`live_activity_start_accepted` separately from ordinary alerts.
 
 ## Pause, remove access, and uninstall
 

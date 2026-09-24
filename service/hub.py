@@ -82,6 +82,10 @@ class Store:
                     environment TEXT NOT NULL, cursor INTEGER NOT NULL DEFAULT 0,
                     expires REAL NOT NULL, next_attempt REAL NOT NULL DEFAULT 0,
                     attempts INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS live_activity_starts(
+                    client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
+                    cursor INTEGER NOT NULL DEFAULT 0, next_attempt REAL NOT NULL DEFAULT 0,
+                    attempts INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS push_devices(
                     client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
                     mode TEXT NOT NULL, cursor INTEGER NOT NULL, next_attempt REAL NOT NULL DEFAULT 0,
@@ -142,6 +146,7 @@ class Store:
                 db.execute("UPDATE clients SET hash=?,last_seen=0 WHERE id=?", (digest(credential), client_id))
                 db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
                 db.execute("DELETE FROM live_activities WHERE client_id=?", (client_id,))
+                db.execute("DELETE FROM live_activity_starts WHERE client_id=?", (client_id,))
             else:
                 db.execute("INSERT INTO clients(id,hash,created) VALUES (?,?,?)", (client_id, digest(credential), now))
             db.execute("INSERT OR REPLACE INTO client_devices VALUES (?,?,?,?)", (client_id, *identity))
@@ -176,6 +181,7 @@ class Store:
             db.execute("BEGIN IMMEDIATE")
             db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
             db.execute("DELETE FROM live_activities WHERE client_id=?", (client_id,))
+            db.execute("DELETE FROM live_activity_starts WHERE client_id=?", (client_id,))
             db.execute("DELETE FROM client_devices WHERE client_id=?", (client_id,))
             return db.execute("DELETE FROM clients WHERE id=?", (client_id,)).rowcount > 0
 
@@ -187,6 +193,7 @@ class Store:
                 return False
             db.execute("DELETE FROM push_devices WHERE client_id=?", (client[0],))
             db.execute("DELETE FROM live_activities WHERE client_id=?", (client[0],))
+            db.execute("DELETE FROM live_activity_starts WHERE client_id=?", (client[0],))
             db.execute("DELETE FROM client_devices WHERE client_id=?", (client[0],))
             db.execute("DELETE FROM clients WHERE id=?", (client[0],))
             return True
@@ -223,7 +230,31 @@ class Store:
                 "lastResult": row["last_result"], "lastAPNsID": row["last_apns_id"]}
 
     def live_activity(self, credential: str, payload: dict) -> dict | None:
-        if (not isinstance(payload, dict) or not isinstance(payload.get("activityID"), str)
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid activity registration")
+        action = payload.get("action")
+        if action in ("register-start", "remove-start"):
+            if action == "register-start" and (not isinstance(payload.get("deviceToken"), str)
+                    or not re.fullmatch(r"[0-9a-f]{32,512}", payload["deviceToken"])
+                    or len(payload["deviceToken"]) % 2
+                    or payload.get("environment") not in ("development", "production")):
+                raise ValueError("Invalid start token")
+            with self.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                client = db.execute("SELECT id FROM clients WHERE hash=?", (digest(credential),)).fetchone()
+                if not client:
+                    return None
+                if action == "remove-start":
+                    db.execute("DELETE FROM live_activity_starts WHERE client_id=?", (client[0],))
+                else:
+                    old = db.execute("SELECT token,environment FROM live_activity_starts WHERE client_id=?", (client[0],)).fetchone()
+                    if old is None or (old["token"], old["environment"]) != (payload["deviceToken"], payload["environment"]):
+                        revision = db.execute("SELECT MAX(seq) FROM events").fetchone()[0]
+                        db.execute("INSERT OR REPLACE INTO live_activity_starts(client_id,token,environment,cursor) "
+                                   "VALUES (?,?,?,?)", (client[0], payload["deviceToken"], payload["environment"],
+                                                        max(0, revision - 1)))
+            return {"registered": action == "register-start"}
+        if (not isinstance(payload.get("activityID"), str)
                 or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", payload["activityID"])):
             raise ValueError("Invalid activity ID")
         remove = payload.get("action") == "remove"
@@ -240,11 +271,12 @@ class Store:
             if remove:
                 db.execute("DELETE FROM live_activities WHERE client_id=? AND activity_id=?",
                            (client[0], payload["activityID"]))
+                db.execute("UPDATE live_activity_starts SET next_attempt=0 WHERE client_id=?", (client[0],))
             else:
                 old = db.execute("SELECT * FROM live_activities WHERE client_id=?", (client[0],)).fetchone()
                 values = (payload["activityID"], payload["deviceToken"], payload["environment"])
                 if old is None or tuple(old[k] for k in ("activity_id", "token", "environment")) != values:
-                    expiry = old["expires"] if old and old["activity_id"] == payload["activityID"] else time.time() + 3600
+                    expiry = old["expires"] if old and old["activity_id"] == payload["activityID"] else time.time() + 8 * 3600
                     db.execute("INSERT OR REPLACE INTO live_activities(client_id,activity_id,token,environment,expires) VALUES (?,?,?,?,?)",
                                (client[0], *values, expiry))
         return {"registered": not remove}

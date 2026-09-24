@@ -108,7 +108,7 @@ notification content as a data protocol. A bounded queue coalesces overflow into
 a current-state request. No periodic request or keepalive is emitted.
 # Direct push destination extension
 
-The optional direct-APNs probe adds `/v1/push` to this test source. All three
+Direct APNs adds `/v1/push` and `/v1/live-activity` to each paired source. These
 methods require the same paired `Authorization: Bearer …` credential as snapshot
 reads. The server derives ownership from that credential; callers cannot select
 another client ID. These are private Tailscale endpoints, not a public relay API.
@@ -133,6 +133,19 @@ needs-input and finished request active presentation and sound. These are alert-
 synchronization. Passive entries remain visible in the notification list. The
 retired `background` mode is rejected. No watch polling is used.
 See [direct push delivery](direct-push-test.md) for validation and limitations.
+
+`POST /v1/live-activity` accepts a paired client's ActivityKit destinations:
+
+- `{ "action": "register-start", "deviceToken": "lowercase hex", "environment": "development" | "production" }`
+  registers the token that lets this computer start an activity while the app
+  is closed. `remove-start` removes it.
+- `{ "activityID": "ActivityKit ID", "deviceToken": "lowercase hex", "environment": "development" | "production" }`
+  registers this computer's update token. `{ "activityID": "...", "action": "remove" }`
+  removes only the matching activity.
+
+The worker starts at most one activity per client/source when work begins,
+then sends revisioned display-only updates to that activity's token. The
+source database and pairing credential scope registrations and revocation.
 
 ## Optional phone snapshot metadata
 

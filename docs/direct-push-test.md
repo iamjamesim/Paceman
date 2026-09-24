@@ -12,7 +12,7 @@ locked-phone acceptance testing; a successful build is not delivery evidence.
 Desktop → APNs → iOS Notification Center → ANCS → watch sync request
                                                     ↓
                          Core Bluetooth app wake → paired-source fetch → watch
-Desktop → ActivityKit APNs → Live Activity display
+Desktop → ActivityKit start/update APNs → Live Activity display
 ```
 
 ## Delivery policy
@@ -86,26 +86,39 @@ No public inbound port or hosted relay is required for this personal setup.
 
 ## Physical validation
 
-1. Verify a foreground source fetch and watch update work. Enable notifications
-   in **Settings → Notifications**. Developer Tools shows registration status.
-2. For the initial isolation run, stop the Live Activity. Leave **Watch updates**
-   on in Watch details. Disconnect the debugger.
+1. Pair each computer and verify a foreground source fetch. The home Live
+   Activities destination should say **On** when iPhone Live Activities are
+   allowed and a computer is paired; this label does not prove remote-start
+   registration. Check registration on the source separately. This setup does
+   not require notification permission.
+   Enable notifications separately in **Settings → Notifications** for the
+   custom-watch path.
+2. Leave **Watch updates** on in Omarchy Watch details. Disconnect the debugger.
    Use firmware 0.6.2 or later and the matching phone app. Accept notification
    sharing for the watch, or enable **Share System Notifications** in Settings →
    Bluetooth. The transport lab shows authorization. Notifications must be enabled
    in Notification Center; background-only pushes do not enter ANCS.
-3. Lock the phone normally for at least three minutes. On the paired desktop,
-   trigger Working → Needs input → Working → Finished → Idle, holding each state
-   for at least 15 seconds. Observe the watch before touching either device.
-4. Record notification arrival, watch rendering and approximate latency. Passive
-   Working/Idle entries do not light the screen or make a sound; inspect the list
-   after observing the watch. Do not tap a notification during the unattended run.
+3. Lock the phone normally for at least three minutes. On a paired computer,
+   begin a new agent session without opening Paceman. Verify that the computer's
+   Live Activity starts. Trigger Working → Needs input → Working → Finished →
+   Idle, holding each state for at least 15 seconds. Observe the phone and
+   watch before touching either device. Repeat on a second computer and verify
+   both activities keep their own source names and states.
+   Confirm there is only one activity per computer through those revisions.
+   Tap one activity: it should open that computer's Home card. A finished
+   Live Activity should end automatically after its short resting period;
+   later work should be able to start another one.
+4. Record Live Activity start/update/end, notification arrival, watch rendering
+   and approximate latency. Passive Working/Idle entries do not light the screen
+   or make a sound; inspect the list after observing the watch. Do not tap a
+   notification during the unattended run.
 5. Repeat several transitions within an hour, then after 30 minutes, two hours,
    and overnight. Check cellular, network recovery and Low Power Mode separately;
    record Focus and notification-summary settings when interpreting timing.
 6. Export **Test log → Export timing log** from the phone and correlate it with
-   `push-delivery.jsonl` in the source's existing private data directory. Both logs
-   remain local. Re-enable the Live Activity afterward to compare both surfaces.
+   `push-delivery.jsonl` in each source's existing private data directory. Both
+   logs remain local. Check `live_activity_start_accepted` and
+   `live_activity_apns_accepted` separately from visible device delivery.
 
 The protocol carries a revisioned current snapshot, not a backlog. A rapidly
 superseded transition may be coalesced. The goal is timely current state, with

@@ -16,7 +16,11 @@ struct TransportDiagnostics: View {
                 }
                 Text("Finished means a turn ended, not that the agent session closed.").font(.caption).foregroundStyle(.secondary)
             }
-            MonitoringProbe(model: model, monitoring: model.monitoring)
+            Section("Live Activities") {
+                Text(model.monitoring.status)
+                Text("One ActivityKit destination is registered per paired computer. A computer starts its activity when agent work begins.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Weather") {
                 Text(model.weather.diagnostic).font(.caption.monospaced()).textSelection(.enabled)
                 Button("Retry weather request") { model.weather.retryForDiagnostics() }
@@ -55,28 +59,5 @@ struct TransportDiagnostics: View {
             }
         }
         .navigationTitle("Transport lab")
-    }
-}
-
-private struct MonitoringProbe: View {
-    @ObservedObject var model: CompanionModel
-    @ObservedObject var monitoring: MonitoringCoordinator
-    var body: some View {
-        Section("Live Activity test") {
-            Text(monitoring.status)
-            if monitoring.active {
-                Button("Stop Live Activity") { Task { await monitoring.stop() } }
-            } else {
-                ForEach(model.pairedSources, id: \.sourceID) { source in
-                    Button("Start Live Activity · \(source.endpoint.host ?? "Computer")") {
-                        if let snapshot = model.snapshots[source.sourceID] {
-                            monitoring.start(source: source, snapshot: snapshot)
-                        }
-                    }.disabled(!model.isFresh(source.sourceID))
-                }
-            }
-            Text("Quiet, one-hour desktop push test. Updates do not imply the app or watch received them.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
     }
 }

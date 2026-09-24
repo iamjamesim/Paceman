@@ -36,6 +36,10 @@ final class ProtocolTests: XCTestCase {
         let payload = Data(#"{"schema":1,"generation":"generation","revision":42,"state":"needs_input","working":3,"needsInput":2,"finished":1,"observedAt":1704067200,"freshUntil":1704067230}"#.utf8)
         let state = try JSONDecoder().decode(MonitoringActivity.ContentState.self, from: payload)
         XCTAssertEqual(state.title, "2 need input")
+        XCTAssertEqual(state.sessionSummary, "2 need input · 3 working · 1 finished")
+        XCTAssertEqual(state.sessionCount, 6)
+        XCTAssertNil(state.changedAt)
+        XCTAssertEqual(state.relevanceScore, (state.observedAt + 240) / 10_000_000)
         XCTAssertEqual(state.revision, 42)
         XCTAssertEqual(state.freshUntil - state.observedAt, 30)
         let encoded = try JSONSerialization.jsonObject(with: JSONEncoder().encode(state)) as! [String: Any]
@@ -51,7 +55,48 @@ final class ProtocolTests: XCTestCase {
         var mixed = state
         mixed.working = 1
         XCTAssertEqual(mixed.title, "Working")
-        XCTAssertEqual(mixed.presentationTitle(stale: true), "Last: Working")
+        XCTAssertEqual(mixed.sessionSummary, "1 working · 1 finished")
+    }
+
+    func testLiveActivityStatesRemainScopedToTheirComputersAndRenewFreshness() {
+        func snapshot(_ id: String, _ sessions: [AgentSession]) -> Snapshot {
+            Snapshot(schema: 1, sourceID: id, generation: id, revision: 7,
+                     sourceName: id, mode: "macos", observedAt: 100, changedAt: 100,
+                     freshFor: 30, state: sessions.first?.state ?? .idle, eventID: "7",
+                     appearance: nil, allowance: nil, sessions: sessions)
+        }
+        let mac = MonitoringActivity.ContentState(snapshot: snapshot("mac", [
+            AgentSession(id: "m1", provider: "codex", state: .working)]))
+        let linux = MonitoringActivity.ContentState(snapshot: snapshot("linux", [
+            AgentSession(id: "l1", provider: "codex", state: .needsInput),
+            AgentSession(id: "l2", provider: "claude", state: .working)]))
+        XCTAssertEqual(mac.working, 1)
+        XCTAssertEqual(mac.needsInput, 0)
+        XCTAssertEqual(linux.sessionSummary, "1 needs input · 1 working")
+        XCTAssertEqual(linux.working, 1)
+        XCTAssertEqual(linux.needsInput, 1)
+        XCTAssertEqual(mac.freshUntil, 400)
+        XCTAssertEqual(linux.freshUntil, 400)
+    }
+
+    @MainActor func testNewerLiveActivityReplacesStaleCopyForSameComputer() {
+        let old = MonitoringActivity.ContentState(generation: "old", revision: 20,
+            state: "working", working: 1, needsInput: 0, finished: 0, observedAt: 100, freshUntil: 400)
+        var newer = old
+        newer.generation = "new"
+        newer.revision = 1
+        newer.observedAt = 500
+        XCTAssertTrue(MonitoringCoordinator.prefers(newer, over: old, currentEnded: false))
+        XCTAssertFalse(MonitoringCoordinator.prefers(old, over: newer, currentEnded: false))
+        XCTAssertTrue(MonitoringCoordinator.prefers(old, over: newer, currentEnded: true))
+    }
+
+    @MainActor func testLiveActivityHomeStatusDescribesAvailability() {
+        XCTAssertEqual(MonitoringCoordinator.displayStatus(available: false, hasComputer: true),
+                       "Off in iPhone Settings")
+        XCTAssertEqual(MonitoringCoordinator.displayStatus(available: true, hasComputer: false),
+                       "Connect a computer")
+        XCTAssertEqual(MonitoringCoordinator.displayStatus(available: true, hasComputer: true), "On")
     }
 
     @MainActor func testPlaceSearchRequiresTwoTrimmedCharacters() {

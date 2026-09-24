@@ -2,47 +2,113 @@ import SwiftUI
 
 struct CompanionHome: View {
     @ObservedObject var model: CompanionModel
+    @ObservedObject var monitoring: MonitoringCoordinator
     @ObservedObject var presentation: PresentationModel
     let theme: CompanionTheme
+    var focusedSourceID: String? = nil
     let open: (FeedDestination) -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
     var paired: Bool { presentation.preview ? presentation.previewHasComputer : !model.pairedSources.isEmpty }
     var hasWatch: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.paired }
     var watchReady: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.ready }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack {
-                    HStack(spacing: 9) {
-                        PacemanMark().frame(width: 31, height: 31).foregroundStyle(theme.tint)
-                        Text("Paceman").font(.system(size: 21, weight: .medium, design: .rounded)).tracking(-0.5)
-                    }
-                    Spacer()
-                    Button { open(.settings) } label: {
-                        Image(systemName: "gearshape").font(.system(size: 19, weight: .regular)).frame(width: 44, height: 44)
-                    }.buttonStyle(.plain).accessibilityLabel("Settings")
-                }.padding(.bottom, 34)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        HStack(spacing: 9) {
+                            PacemanMark().frame(width: 31, height: 31).foregroundStyle(theme.tint)
+                            Text("Paceman").font(.system(size: 21, weight: .medium, design: .rounded)).tracking(-0.5)
+                        }
+                        Spacer()
+                        Button { open(.settings) } label: {
+                            Image(systemName: "gearshape").font(.system(size: 19, weight: .regular)).frame(width: 44, height: 44)
+                        }.buttonStyle(.plain).accessibilityLabel("Settings")
+                    }.padding(.bottom, 34)
 
-                if paired {
-                    ForEach(model.pairedSources, id: \.sourceID) { paired in
-                        computerCard(paired)
-                            .padding(.top, paired.sourceID == model.pairedSources.first?.sourceID ? 0 : 12)
+                    if paired || hasWatch {
+                        destinations.padding(.bottom, 27)
                     }
-                    if !presentation.preview {
-                        Button { open(.pairing) } label: { Label("Connect another computer", systemImage: "plus") }
-                            .font(.subheadline).padding(.top, 18)
-                    }
-                } else { agentSetup }
 
-                watchRow.padding(.top, 22)
-                if presentation.preview {
-                    Text("Design preview · sample activity").font(.caption).foregroundStyle(theme.ink.opacity(0.5)).padding(.top, 22)
-                }
-            }.padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 34)
+                    if paired {
+                        computersHeading.padding(.bottom, 9)
+                        ForEach(model.pairedSources, id: \.sourceID) { paired in
+                            computerCard(paired)
+                                .padding(.top, paired.sourceID == model.pairedSources.first?.sourceID ? 0 : 12)
+                                .id(paired.sourceID)
+                        }
+                    } else { agentSetup }
+                    if presentation.preview {
+                        Text("Design preview · sample activity").font(.caption)
+                            .foregroundStyle(theme.ink.opacity(0.5)).padding(.top, 22)
+                    }
+                }.padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 34)
+            }
+            .refreshable { if !presentation.preview { await model.refreshAll() } }
+            .onAppear {
+                if let focusedSourceID { proxy.scrollTo(focusedSourceID, anchor: .top) }
+            }
+            .onChange(of: focusedSourceID) { _, id in
+                if let id { withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo(id, anchor: .top) } }
+            }
         }
-        .refreshable { if !presentation.preview { await model.refreshAll() } }
         .foregroundStyle(theme.ink).background(CompanionCanvas(theme: theme))
         .navigationTitle("Paceman").toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var computersHeading: some View {
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 3)) : AnyLayout(HStackLayout())
+        return layout {
+            if typeSize.isAccessibilitySize {
+                Text("Computers").font(.headline)
+            } else {
+                Eyebrow(text: "Computers")
+                Spacer()
+            }
+            Button { open(.pairing) } label: {
+                Label("Connect", systemImage: "plus")
+                    .font(.subheadline.weight(.medium))
+                    .frame(minHeight: 44)
+            }.buttonStyle(.plain).accessibilityLabel("Connect computer")
+        }
+    }
+
+    private var destinations: some View {
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            Button { open(.liveActivities) } label: {
+                destinationContent(
+                    icon: AnyView(LiveActivityGlyph(theme: theme).frame(width: 37, height: 43)),
+                    name: "Live Activities",
+                    state: presentation.preview ? "On" : monitoring.status)
+            }.buttonStyle(.plain).accessibilityLabel("Live Activities, \(presentation.preview ? "On" : monitoring.status)")
+            Button { open(.watch) } label: {
+                destinationContent(
+                    icon: AnyView(WatchIllustration(theme: theme, paired: hasWatch,
+                        timeFormat: model.watch.timeFormat, state: presentation.preview ? .working : model.currentActivityState)
+                        .frame(width: 31, height: 46)),
+                    name: "Omarchy Watch",
+                    state: hasWatch ? (presentation.preview ? "Connected" : model.watch.connectionPresentation.rawValue) : "Connect watch")
+            }.buttonStyle(.plain)
+        }
+    }
+
+    private func destinationContent(icon: AnyView, name: String, state: String) -> some View {
+        HStack(spacing: 9) {
+            icon.accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name).font(.caption.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+                Text(state).font(.caption2).foregroundStyle(theme.ink.opacity(0.62))
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .padding(.horizontal, 12)
+        .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 21))
+        .overlay(RoundedRectangle(cornerRadius: 21).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
+        .contentShape(RoundedRectangle(cornerRadius: 21))
     }
 
     private var agentSetup: some View {
@@ -148,25 +214,6 @@ struct CompanionHome: View {
             Text(title).font(.subheadline.weight(.medium))
             if let detail { Text(detail).font(.caption).foregroundStyle(theme.ink.opacity(0.55)) }
         }.padding(.vertical, 20)
-    }
-    private var watchRow: some View {
-        Button { open(.watch) } label: {
-            HStack(spacing: 20) {
-                WatchIllustration(theme: theme, paired: hasWatch, timeFormat: model.watch.timeFormat, state: presentation.preview ? .working : model.currentActivityState).frame(width: hasWatch ? 45 : 55, height: hasWatch ? 68 : 83)
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(hasWatch ? "Omarchy Watch" : "Connect your watch")
-                        .font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold)).multilineTextAlignment(.leading)
-                    if hasWatch {
-                        WatchConnectionSummary(watch: model.watch, theme: theme, previewState: presentation.preview ? "connected" : nil)
-                    } else {
-                        Text("Show agent status on your wrist.").font(.subheadline).foregroundStyle(theme.ink.opacity(0.6)).multilineTextAlignment(.leading)
-                    }
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).opacity(0.45)
-            }.padding(21).background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 23))
-                .contentShape(Rectangle())
-        }.buttonStyle(.plain)
     }
 }
 

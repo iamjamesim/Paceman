@@ -59,6 +59,25 @@ struct StatusPill: View {
     }
 }
 
+/// A miniature Live Activity card, rather than a Dynamic Island or Apple Watch glyph.
+struct LiveActivityGlyph: View {
+    let theme: CompanionTheme
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 9)
+                .strokeBorder(theme.tint, lineWidth: 1.6)
+                .frame(width: 35, height: 28)
+            HStack(spacing: 3) {
+                PacemanMark().frame(width: 11, height: 11)
+                VStack(alignment: .leading, spacing: 3) {
+                    Capsule().frame(width: 11, height: 2)
+                    Capsule().frame(width: 8, height: 2).opacity(0.5)
+                }
+            }.foregroundStyle(theme.tint)
+        }.frame(width: 37, height: 43).accessibilityHidden(true)
+    }
+}
+
 struct ComputerIllustration: View {
     let theme: CompanionTheme
     var body: some View {

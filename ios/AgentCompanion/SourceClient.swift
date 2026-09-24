@@ -194,6 +194,15 @@ final class SourceClient {
         try await liveActivityRequest(source, payload: ["activityID": id, "action": "remove"])
     }
 
+    func registerLiveActivityStart(_ source: PairedSource, token: String, environment: String) async throws {
+        try await liveActivityRequest(source, payload: ["action": "register-start", "deviceToken": token,
+                                                        "environment": environment])
+    }
+
+    func removeLiveActivityStart(_ source: PairedSource) async throws {
+        try await liveActivityRequest(source, payload: ["action": "remove-start"])
+    }
+
     private func liveActivityRequest(_ source: PairedSource, payload: [String: String]) async throws {
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/live-activity"))
         request.httpMethod = "POST"

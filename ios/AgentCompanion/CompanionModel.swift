@@ -35,7 +35,7 @@ final class CompanionModel: ObservableObject {
             #if DEBUG
             let args = ProcessInfo.processInfo.arguments
             let screen = args.first(where: { $0.hasPrefix("--screen=") }) ?? ""
-            if !["--screen=setup", "--screen=pairing", "--screen=watch-only"].contains(screen) {
+            if !["--screen=setup", "--screen=pairing", "--screen=watch-only", "--screen=live-activities-setup"].contains(screen) {
                 let id = "aaaaaaaa-2222-4333-8444-555555555555"
                 pairedSources = [PairedSource(endpoint: URL(string: "https://omarchy.example.ts.net")!,
                     sourceID: id, clientID: id, credential: "preview")]
@@ -87,6 +87,7 @@ final class CompanionModel: ObservableObject {
         weather.onChange = { [weak self] value, fahrenheit in self?.watch.setWeather(value, fahrenheit: fahrenheit) }
         if !preview { weather.bind(watchID: watch.preferenceID, updates: watch.updatesEnabled) }
         forwardWatchAggregate()
+        if !preview { monitoring.configure(sources: pairedSources) }
         weatherObserver = weather.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         changeObserver = watch.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
@@ -160,6 +161,7 @@ final class CompanionModel: ObservableObject {
             forwardWatchAggregate()
             status = "Paired. Waiting for first snapshot."
             Diagnostics.shared.record("source_paired")
+            monitoring.configure(sources: values)
             Task { await PushCoordinator.shared.sync() }
             return true
         } catch { status = error.localizedDescription; return false }
@@ -186,7 +188,7 @@ final class CompanionModel: ObservableObject {
             let remaining = PairedSourceOrder.removing(paired.sourceID, from: pairedSources)
             try pairedStore.save(remaining)
             sourceEpoch = UUID()
-            if monitoring.activeSourceID == paired.sourceID { await monitoring.stop() }
+            await monitoring.removeSource(paired.sourceID)
             clearSnapshot(paired.sourceID)
             errors.removeValue(forKey: paired.sourceID)
             revokedSources.remove(paired.sourceID)
@@ -203,7 +205,7 @@ final class CompanionModel: ObservableObject {
             if removedOnComputer {
                 revokedSources.insert(paired.sourceID)
                 clearSnapshot(paired.sourceID)
-                if monitoring.activeSourceID == paired.sourceID { await monitoring.stop() }
+                await monitoring.removeSource(paired.sourceID)
                 PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
             }
             forwardWatchAggregate()
@@ -221,6 +223,7 @@ final class CompanionModel: ObservableObject {
             revokedSources.insert(sourceID)
             clearSnapshot(sourceID)
             PushCoordinator.shared.clearRemovedSource(sourceID: sourceID)
+            Task { await monitoring.removeSource(sourceID) }
         }
         forwardWatchAggregate()
     }
@@ -311,8 +314,8 @@ final class CompanionModel: ObservableObject {
             do { try SourceSnapshotCache.save(value, receivedAt: receivedAt, to: SourceSnapshotCache.url(for: sourceID)) }
             catch { Diagnostics.shared.record("source_cache_write_failed") }
             forwardWatchAggregate()
-            monitoring.restore(source: paired)
-            Task { await monitoring.registerIfNeeded() }
+            await monitoring.reconcile(sources: pairedSources.filter { !isRevoked($0.sourceID) },
+                snapshots: snapshots, fresh: Set(pairedSources.filter { isFresh($0.sourceID) }.map(\.sourceID)))
             Diagnostics.shared.record("snapshot_received", event: value.identity, state: value.state)
             PushCoordinator.shared.recoverRegistrationIfNeeded()
             if fromPush, let identity = watchAggregate?.identity {

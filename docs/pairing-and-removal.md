@@ -2,7 +2,7 @@
 
 The source, desktop panels and iPhone code support named app installations and
 removal from either side. The current iPhone pairing protocol requires connection
-management support from the source. See [validation](validation.md) for test history.
+management support from the source.
 
 ## User behavior
 

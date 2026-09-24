@@ -17,110 +17,283 @@ extension MonitoringActivity.ContentState {
             finished = snapshot.state == .finished ? 1 : 0
         }
         observedAt = snapshot.observedAt
-        freshUntil = snapshot.observedAt + snapshot.freshFor
+        // The source worker renews this bounded ActivityKit lease while it runs.
+        freshUntil = snapshot.observedAt + 300
+        changedAt = snapshot.changedAt
     }
 }
 
-/// Manual alpha probe. ActivityKit delivery never gates phone fetches or watch forwarding.
+/// The system owns background delivery. One activity and remote-start registration
+/// belong to each paired computer; no app timer is needed to keep them running.
 @MainActor
 final class MonitoringCoordinator: ObservableObject {
-    @Published private(set) var active = false
-    @Published private(set) var status = "Live Activity is off"
-    private var activity: Activity<MonitoringActivity>?
-    private var tokenTask: Task<Void, Never>?
-    private var stateTask: Task<Void, Never>?
-    private var source: PairedSource?
-    var activeSourceID: String? { active ? source?.sourceID : nil }
-    private var token: Data?
-    private var registeredToken: Data?
-    private var lastAttempt: Date?
-    private var registering = false
-    private let client = SourceClient()
+    @Published private(set) var activeSourceIDs: Set<String> = []
+    @Published private(set) var status = "Setting up Live Activities"
+    @Published private(set) var readySourceIDs: Set<String> = []
 
-    func restore(source: PairedSource) {
-        guard activity == nil else { return }
-        if let existing = Activity<MonitoringActivity>.activities.first(where: {
-            $0.attributes.sourceID == source.sourceID && ($0.activityState == .active || $0.activityState == .stale)
-        }) { observe(existing, source: source) }
+    private let client = SourceClient()
+    private var sources: [String: PairedSource] = [:]
+    private var activities: [String: Activity<MonitoringActivity>] = [:]
+    private var tokenTasks: [String: Task<Void, Never>] = [:]
+    private var stateTasks: [String: Task<Void, Never>] = [:]
+    private var activityUpdatesTask: Task<Void, Never>?
+    private var startTokenTask: Task<Void, Never>?
+    private var startToken: Data?
+    private var registeredStartTokens: [String: Data] = [:]
+    private var registeredUpdateTokens: [String: Data] = [:]
+    private var lastStartAttempts: [String: Date] = [:]
+    private var lastUpdateAttempts: [String: (token: Data, at: Date)] = [:]
+    private var updateRegistrationsInFlight: Set<String> = []
+    private var dismissedRevisions: [String: (generation: String, revision: UInt64)] = [:]
+
+    var available: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
+    var activeCount: Int { activeSourceIDs.count }
+
+    static func displayStatus(available: Bool, hasComputer: Bool) -> String {
+        if !available { return "Off in iPhone Settings" }
+        if !hasComputer { return "Connect a computer" }
+        return "On"
     }
 
-    func start(source: PairedSource, snapshot: Snapshot) {
-        guard activity == nil else { return }
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-            status = "Live Activities are disabled in iPhone Settings"; return
+    static func prefers(_ candidate: MonitoringActivity.ContentState,
+                        over current: MonitoringActivity.ContentState, currentEnded: Bool) -> Bool {
+        currentEnded || candidate.observedAt > current.observedAt
+            || (candidate.generation == current.generation && candidate.revision > current.revision)
+    }
+
+    func configure(sources: [PairedSource]) {
+        for source in sources where self.sources[source.sourceID]?.credential != source.credential {
+            registeredStartTokens.removeValue(forKey: source.sourceID)
+            readySourceIDs.remove(source.sourceID)
+            lastStartAttempts.removeValue(forKey: source.sourceID)
+            if let activity = activities[source.sourceID] {
+                registeredUpdateTokens.removeValue(forKey: activity.id)
+                lastUpdateAttempts.removeValue(forKey: activity.id)
+            }
         }
+        self.sources = Dictionary(uniqueKeysWithValues: sources.map { ($0.sourceID, $0) })
+        observeSystem()
+        for activity in Activity<MonitoringActivity>.activities { observe(activity) }
+        Task { await registerStartTokens() }
+        updateStatus()
+    }
+
+    func reconcile(sources: [PairedSource], snapshots: [String: Snapshot], fresh: Set<String>) async {
+        self.sources = Dictionary(uniqueKeysWithValues: sources.map { ($0.sourceID, $0) })
+        observeSystem()
+        for activity in Activity<MonitoringActivity>.activities { observe(activity) }
+        await registerStartTokens()
+        for (sourceID, activity) in activities where self.sources[sourceID] == nil {
+            await end(activity, sourceID: sourceID)
+        }
+        for source in sources {
+            guard let snapshot = snapshots[source.sourceID], fresh.contains(source.sourceID) else { continue }
+            if snapshot.state == .idle {
+                if let activity = activities[source.sourceID] { await end(activity, sourceID: source.sourceID) }
+                continue
+            }
+            if let activity = activities[source.sourceID] {
+                let current = activity.content.state
+                if current.generation != snapshot.generation || current.revision < snapshot.revision {
+                    let state = MonitoringActivity.ContentState(snapshot: snapshot)
+                    await activity.update(ActivityContent(state: state,
+                        staleDate: Date(timeIntervalSince1970: state.freshUntil),
+                        relevanceScore: state.relevanceScore))
+                }
+            } else if snapshot.state == .working || snapshot.state == .needsInput {
+                start(source: source, snapshot: snapshot)
+            }
+        }
+        updateStatus()
+    }
+
+    func removeSource(_ sourceID: String) async {
+        if let activity = activities[sourceID] { await end(activity, sourceID: sourceID) }
+        if let source = sources[sourceID] { try? await client.removeLiveActivityStart(source) }
+        sources.removeValue(forKey: sourceID)
+        registeredStartTokens.removeValue(forKey: sourceID)
+        readySourceIDs.remove(sourceID)
+        dismissedRevisions.removeValue(forKey: sourceID)
+        updateStatus()
+    }
+
+    private func observeSystem() {
+        guard activityUpdatesTask == nil else { return }
+        startToken = Activity<MonitoringActivity>.pushToStartToken
+        activityUpdatesTask = Task { [weak self] in
+            for await activity in Activity<MonitoringActivity>.activityUpdates {
+                guard !Task.isCancelled else { return }
+                self?.observe(activity)
+            }
+        }
+        startTokenTask = Task { [weak self] in
+            for await token in Activity<MonitoringActivity>.pushToStartTokenUpdates {
+                guard !Task.isCancelled else { return }
+                self?.startToken = token
+                self?.registeredStartTokens.removeAll()
+                self?.readySourceIDs.removeAll()
+                self?.lastStartAttempts.removeAll()
+                await self?.registerStartTokens()
+            }
+        }
+    }
+
+    private func observe(_ activity: Activity<MonitoringActivity>) {
+        let sourceID = activity.attributes.sourceID
+        guard sources[sourceID] != nil else {
+            Task { await activity.end(nil, dismissalPolicy: .immediate) }
+            return
+        }
+        if let existing = activities[sourceID] {
+            guard existing.id != activity.id else {
+                // A failed registration can recover on the next successful
+                // source refresh, even if ActivityKit keeps the same token.
+                Task { await registerUpdateToken(activity) }
+                return
+            }
+            // A newer remote start can arrive while the old activity is stale.
+            // Keep the latest source state, regardless of enumeration order on launch.
+            let old = existing.content.state
+            let new = activity.content.state
+            let newer = Self.prefers(new, over: old,
+                currentEnded: existing.activityState == .ended || existing.activityState == .dismissed)
+            guard newer else {
+                Task { await activity.end(nil, dismissalPolicy: .immediate) }
+                return
+            }
+            tokenTasks.removeValue(forKey: existing.id)?.cancel()
+            stateTasks.removeValue(forKey: existing.id)?.cancel()
+            registeredUpdateTokens.removeValue(forKey: existing.id)
+            lastUpdateAttempts.removeValue(forKey: existing.id)
+            Task {
+                await existing.end(nil, dismissalPolicy: .immediate)
+                if let source = sources[sourceID] {
+                    try? await client.removeLiveActivity(source, id: existing.id)
+                }
+            }
+        }
+        activities[sourceID] = activity
+        activeSourceIDs.insert(sourceID)
+        Diagnostics.shared.record("live_activity_observed")
+        tokenTasks[activity.id] = Task { [weak self] in
+            await self?.registerUpdateToken(activity)
+            for await _ in activity.pushTokenUpdates {
+                guard !Task.isCancelled else { return }
+                await self?.registerUpdateToken(activity)
+            }
+        }
+        stateTasks[activity.id] = Task { [weak self] in
+            for await state in activity.activityStateUpdates {
+                guard !Task.isCancelled else { return }
+                if state == .dismissed || state == .ended {
+                    await self?.activityEnded(activity, dismissed: state == .dismissed)
+                    return
+                }
+            }
+        }
+    }
+
+    private func start(source: PairedSource, snapshot: Snapshot) {
+        guard available, activities[source.sourceID] == nil else { return }
+        if let dismissed = dismissedRevisions[source.sourceID],
+           dismissed.generation == snapshot.generation,
+           snapshot.revision <= dismissed.revision { return }
         let state = MonitoringActivity.ContentState(snapshot: snapshot)
         do {
-            let value = try Activity.request(attributes: MonitoringActivity(sourceID: source.sourceID, sourceName: "Paceman"),
-                content: ActivityContent(state: state, staleDate: Date(timeIntervalSince1970: state.freshUntil)), pushType: .token)
-            observe(value, source: source)
-        } catch { status = "Couldn’t start Live Activity" }
+            let activity = try Activity.request(
+                attributes: MonitoringActivity(sourceID: source.sourceID, sourceName: snapshot.sourceName),
+                content: ActivityContent(state: state, staleDate: Date(timeIntervalSince1970: state.freshUntil),
+                                         relevanceScore: state.relevanceScore),
+                pushType: .token)
+            observe(activity)
+        } catch { Diagnostics.shared.recordError("live_activity_local_start_failed", error: error) }
     }
 
-    private func observe(_ value: Activity<MonitoringActivity>, source: PairedSource) {
-        self.source = source; activity = value; active = true
-        token = value.pushToken; registeredToken = nil; lastAttempt = nil
-        status = "Registering Live Activity on computer"
-        tokenTask?.cancel(); stateTask?.cancel()
-        tokenTask = Task { [weak self] in
-            await self?.registerIfNeeded()
-            for await token in value.pushTokenUpdates {
-                guard !Task.isCancelled else { return }
-                self?.token = token
-                await self?.registerIfNeeded()
+    private func registerStartTokens() async {
+        guard available, let token = startToken,
+              let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
+              ["development", "production"].contains(environment) else { updateStatus(); return }
+        for source in sources.values where registeredStartTokens[source.sourceID] != token {
+            guard lastStartAttempts[source.sourceID].map({ Date().timeIntervalSince($0) >= 30 }) != false else { continue }
+            lastStartAttempts[source.sourceID] = Date()
+            do {
+                try await client.registerLiveActivityStart(source,
+                    token: token.map { String(format: "%02x", $0) }.joined(), environment: environment)
+                guard sources[source.sourceID]?.credential == source.credential else {
+                    try? await client.removeLiveActivityStart(source)
+                    continue
+                }
+                registeredStartTokens[source.sourceID] = token
+                readySourceIDs.insert(source.sourceID)
+                Diagnostics.shared.record("live_activity_start_token_registered")
+            } catch { Diagnostics.shared.recordError("live_activity_start_token_registration_failed", error: error) }
+        }
+        updateStatus()
+    }
+
+    private func registerUpdateToken(_ activity: Activity<MonitoringActivity>) async {
+        let sourceID = activity.attributes.sourceID
+        guard activities[sourceID]?.id == activity.id,
+              let source = sources[sourceID], let token = activity.pushToken,
+              registeredUpdateTokens[activity.id] != token,
+              !updateRegistrationsInFlight.contains(activity.id),
+              lastUpdateAttempts[activity.id].map({ $0.token != token || Date().timeIntervalSince($0.at) >= 15 }) != false,
+              let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
+              ["development", "production"].contains(environment) else { return }
+        updateRegistrationsInFlight.insert(activity.id)
+        lastUpdateAttempts[activity.id] = (token, Date())
+        defer {
+            updateRegistrationsInFlight.remove(activity.id)
+            if activities[sourceID]?.id == activity.id,
+               (activity.pushToken != token || sources[sourceID]?.credential != source.credential) {
+                Task { await registerUpdateToken(activity) }
             }
         }
-        stateTask = Task { [weak self] in
-            for await state in value.activityStateUpdates {
-                guard !Task.isCancelled else { return }
-                if state == .dismissed || state == .ended { await self?.stop(); return }
+        do {
+            try await client.registerLiveActivity(source, id: activity.id,
+                token: token.map { String(format: "%02x", $0) }.joined(), environment: environment)
+            guard activities[source.sourceID]?.id == activity.id,
+                  sources[source.sourceID]?.credential == source.credential else {
+                try? await client.removeLiveActivity(source, id: activity.id)
+                return
             }
+            guard activity.pushToken == token else { return }
+            registeredUpdateTokens[activity.id] = token
+            Diagnostics.shared.record("live_activity_update_token_registered")
+        } catch {
+            Diagnostics.shared.recordError("live_activity_update_token_registration_failed", error: error)
         }
     }
 
-    func registerIfNeeded() async {
-        guard let activity, let source, let token, token != registeredToken, !registering,
-              lastAttempt.map({ Date().timeIntervalSince($0) >= 30 }) != false else { return }
-        registering = true; lastAttempt = Date()
-        defer { registering = false }
-        let id = activity.id
-        do {
-            let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String ?? ""
-            try await client.registerLiveActivity(source, id: id, token: token.map { String(format: "%02x", $0) }.joined(), environment: environment)
-            guard self.activity?.id == id else {
-                try? await client.removeLiveActivity(source, id: id); return
-            }
-            registeredToken = token
-            status = "Registered · awaiting desktop updates"
-        } catch { status = "Couldn’t register Live Activity on computer" }
+    private func activityEnded(_ activity: Activity<MonitoringActivity>, dismissed: Bool) async {
+        let sourceID = activity.attributes.sourceID
+        guard activities[sourceID]?.id == activity.id else { return }
+        if dismissed {
+            dismissedRevisions[sourceID] = (activity.content.state.generation,
+                activity.content.state.revision)
+        }
+        activities.removeValue(forKey: sourceID)
+        activeSourceIDs.remove(sourceID)
+        tokenTasks.removeValue(forKey: activity.id)?.cancel()
+        stateTasks.removeValue(forKey: activity.id)?.cancel()
+        registeredUpdateTokens.removeValue(forKey: activity.id)
+        lastUpdateAttempts.removeValue(forKey: activity.id)
+        if let source = sources[sourceID] { try? await client.removeLiveActivity(source, id: activity.id) }
     }
 
-    #if DEBUG
-    func preview(_ scenario: String) async {
-        for existing in Activity<MonitoringActivity>.activities { await existing.end(nil, dismissalPolicy: .immediate) }
-        let now = Date().timeIntervalSince1970
-        let state = MonitoringActivity.ContentState(generation: "preview", revision: 1,
-            state: scenario == "mixed" ? "needs_input" : scenario,
-            working: scenario == "working" || scenario == "mixed" ? 2 : 0,
-            needsInput: scenario == "needs_input" || scenario == "mixed" ? 1 : 0,
-            finished: scenario == "finished" ? 1 : 0, observedAt: now,
-            freshUntil: scenario == "stale" ? now - 60 : now + 1800)
-        do {
-            activity = try Activity.request(attributes: MonitoringActivity(sourceID: "preview", sourceName: "Omarchy"),
-                content: ActivityContent(state: state, staleDate: Date(timeIntervalSince1970: state.freshUntil)), pushType: nil)
-        } catch { status = "Couldn’t start preview" }
-    }
-    #endif
-
-    func stop() async {
-        guard let activity else { return }
-        let source = source
-        self.activity = nil; active = false; token = nil; registeredToken = nil
-        tokenTask?.cancel(); tokenTask = nil
-        stateTask?.cancel(); stateTask = nil
-        status = "Live Activity is off"
+    private func end(_ activity: Activity<MonitoringActivity>, sourceID: String) async {
+        guard activities[sourceID]?.id == activity.id else { return }
+        activities.removeValue(forKey: sourceID)
+        activeSourceIDs.remove(sourceID)
+        tokenTasks.removeValue(forKey: activity.id)?.cancel()
+        stateTasks.removeValue(forKey: activity.id)?.cancel()
+        registeredUpdateTokens.removeValue(forKey: activity.id)
+        lastUpdateAttempts.removeValue(forKey: activity.id)
         await activity.end(nil, dismissalPolicy: .immediate)
-        if let source { try? await client.removeLiveActivity(source, id: activity.id) }
-        // Offline removal is bounded by the source's one-hour probe registration expiry.
+        if let source = sources[sourceID] { try? await client.removeLiveActivity(source, id: activity.id) }
+    }
+
+    private func updateStatus() {
+        status = Self.displayStatus(available: available, hasComputer: !sources.isEmpty)
     }
 }

@@ -171,7 +171,7 @@ struct WatchDetail: View {
                     .background(theme.canvas)
             }
         }.foregroundStyle(theme.ink).background(theme.canvas)
-            .navigationTitle(paired ? "Watch" : "Connect watch").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(paired ? "Omarchy Watch" : "Connect Omarchy Watch").navigationBarTitleDisplayMode(.inline)
             .confirmationDialog("Remove Omarchy Watch?", isPresented: $remove, titleVisibility: .visible) {
                 Button("Remove watch", role: .destructive) {
                     removing = true

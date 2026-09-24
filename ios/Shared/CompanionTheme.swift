@@ -38,3 +38,23 @@ extension Color {
         self.init(.sRGB, red: Double((n >> 16) & 255)/255, green: Double((n >> 8) & 255)/255, blue: Double(n & 255)/255, opacity: 1)
     }
 }
+
+/// A fixed watch-face palette for ActivityKit. The Lock Screen uses a matte
+/// surface; the Island stays system black. Warm ink and state lights echo the
+/// watch without making each computer's source appearance a separate theme.
+enum MonitoringPalette {
+    static let background = Color(companionHex: "121212")
+    static let ink = Color(companionHex: "E7E3D8")
+    static let muted = Color(companionHex: "A8ADA7")
+    static let input = Color(companionHex: "DBBC7F")
+    static let working = Color(companionHex: "A7C080")
+    static let finished = Color(companionHex: "8F9892")
+
+    static func robotColor(for state: String) -> Color {
+        switch state {
+        case "needs_input": input
+        case "working": working
+        default: finished
+        }
+    }
+}

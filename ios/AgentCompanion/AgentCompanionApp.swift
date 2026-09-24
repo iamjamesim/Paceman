@@ -20,13 +20,6 @@ struct AgentCompanionApp: App {
     var body: some Scene {
         WindowGroup {
             CompanionRoot(model: model, presentation: presentation)
-                .task {
-                    #if DEBUG
-                    if presentation.preview, let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--monitoring-preview=") }) {
-                        await model.monitoring.preview(String(argument.dropFirst("--monitoring-preview=".count)))
-                    }
-                    #endif
-                }
                 .onChange(of: phase, initial: true) { _, value in
                     guard !presentation.preview else { return }
                     model.setForeground(value == .active)
@@ -36,20 +29,24 @@ struct AgentCompanionApp: App {
     }
 }
 
-enum FeedDestination: Hashable { case computer, otherComputer(String), watch, pairing, notifications, watchNotifications, watchTroubleshooting, settings, weather, diagnostics }
+enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, pairing, notifications, watchNotifications, watchTroubleshooting, settings, weather, diagnostics }
 
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
     @State private var path: [FeedDestination] = []
+    @State private var focusedSourceID: String?
     var theme: CompanionTheme { presentation.theme(source: model.preferredAppearance) }
     var body: some View {
         NavigationStack(path: $path) {
-            CompanionHome(model: model, presentation: presentation, theme: theme) { path.append($0) }
+            CompanionHome(model: model, monitoring: model.monitoring, presentation: presentation,
+                theme: theme, focusedSourceID: focusedSourceID) { path.append($0) }
                 .navigationDestination(for: FeedDestination.self) { destination in
                     switch destination {
                     case .computer: ComputerDetail(model: model, presentation: presentation, theme: theme)
                     case .otherComputer(let id): ComputerDetail(model: model, presentation: presentation, theme: theme, sourceID: id)
+                    case .liveActivities: LiveActivitiesDetail(model: model, monitoring: model.monitoring,
+                        presentation: presentation, theme: theme)
                     case .watch: WatchDetail(model: model, theme: theme, preview: presentation.preview, previewConnected: presentation.previewHasWatch, previewPhase: presentation.previewWatchPhase, previewComplete: presentation.previewScreen == "watch-complete", previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen) ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") { path.append(.watchNotifications) }
                     case .pairing: PairingFlow(model: model, theme: theme, preview: presentation.preview)
                     case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview)
@@ -76,6 +73,7 @@ struct CompanionRoot: View {
                 #endif
                 path = [.watch]
             case "settings": path = [.settings]
+            case "live-activities", "multi-live-activities", "live-activities-setup", "live-activities-off": path = [.liveActivities]
             case "pairing", "reconnect": path = [.pairing]
             case "notifications": path = [.notifications]
             case "watch-notifications": path = [.watchNotifications]
@@ -92,7 +90,13 @@ struct CompanionRoot: View {
         }
         .onOpenURL { url in
             guard url.scheme == "agentcompanion" else { return }
-            path = model.pairedSources.isEmpty && url.host == "connect" ? [.pairing] : []
+            if url.host == "computer", let id = url.pathComponents.dropFirst().first,
+               model.pairedSources.contains(where: { $0.sourceID == id }) {
+                focusedSourceID = id
+                path = []
+            } else {
+                path = model.pairedSources.isEmpty && url.host == "connect" ? [.pairing] : []
+            }
         }
     }
 }

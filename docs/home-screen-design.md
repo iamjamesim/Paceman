@@ -1,17 +1,29 @@
 # Phone home design
 
 The home screen answers, in order:
-1. Which computer or computers are connected?
-2. Is its activity current, or is the app recovering the connection?
+1. Are Live Activities and Omarchy Watch available to show updates?
+2. Which computers are connected, and is their activity current?
 3. What are the agents doing; does anything need input?
-4. Is the watch connected, and when was activity last sent to it?
 
 Keep computer identity and connection freshness above the activity divider.
-Activity belongs below it; the watch is a separate destination. Preserve the
+Activity belongs below it; the custom watch is a separate destination beside
+Live Activities above the computer cards. Preserve the
 outline Paceman brand mark. The smaller filled robots describe agent state only,
 with the state label stacked below. A single session needs no count headline.
 Historical robots are still and muted. No received activity is not historical activity.
 Background transport registration and alert permission are not home-screen setup steps.
+The Live Activities status describes iPhone availability, not whether an active
+session currently has an activity or whether every computer has completed a
+background registration attempt. Its detail page uses the same centered
+illustration and status as the other device pages, then shows only the computers
+currently displayed by ActivityKit. A computer still being checked for automatic
+start appears as guidance only while that condition exists. Connect belongs in
+the Computers heading.
+Opening a Live Activity lands on its computer card, where the current agent
+rows are already visible, rather than the computer's connection-management
+detail. A finished Live Activity ends automatically after a brief resting period;
+opening its computer card does not acknowledge work. The card is a current/last-known view, not a durable
+activity-history screen.
 
 ## Multiple-computer behavior: 2026-09-23
 
@@ -25,8 +37,8 @@ their source hosts under those names to distinguish them.
 Each computer fetches and caches independently. The watch combines only fresh
 activity by urgency across all sources. Appearance and allowance each use the
 first paired source with a valid value as a stable default, whether or not that
-computer is currently active; removing it selects the next valid value. The manual Live
-Activity probe asks which computer to follow and has no implicit primary source.
+computer is currently active; removing it selects the next valid value. Live
+Activities are independently owned by their source computers.
 The old primary/additional storage keys migrate into one ordered list. The first
 entry is only the default position for legacy single-computer navigation.
 

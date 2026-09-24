@@ -110,16 +110,33 @@ def live_notification(snapshot: dict, now: float, ending=False) -> tuple[dict, d
     if not sessions and snapshot["state"] in counts:
         counts[snapshot["state"]] = 1
     observed = min(now, snapshot["observedAt"])
-    fresh_until = observed + snapshot["freshFor"]
+    # A source-side renewal every four minutes keeps an unchanged active state
+    # current. If its worker disappears, ActivityKit marks it stale after five.
+    fresh_until = observed + 300
     content = {"schema": 1, "generation": snapshot["generation"], "revision": snapshot["revision"],
                "state": snapshot["state"], "working": counts["working"], "needsInput": counts["needs_input"],
-               "finished": counts["finished"], "observedAt": observed, "freshUntil": fresh_until}
+               "finished": counts["finished"], "observedAt": observed, "freshUntil": fresh_until,
+               "changedAt": snapshot["changedAt"]}
+    attention = 240 if counts["needs_input"] else 60 if counts["working"] else 0
     aps = {"timestamp": int(now), "event": "end" if ending else "update", "content-state": content,
-           "stale-date": int(fresh_until)}
+           "stale-date": int(fresh_until), "relevance-score": (observed + attention) / 10_000_000}
     if ending:
         aps["dismissal-date"] = int(now)
     return {"aps": aps}, {"apns-push-type": "liveactivity", "apns-priority": "5",
         "apns-expiration": str(int(now + 60)), "apns-id": str(uuid.uuid4())}
+
+
+def live_start_notification(snapshot: dict, now: float) -> tuple[dict, dict]:
+    """Start one computer's activity; Apple requires a visible start alert."""
+    payload, headers = live_notification(snapshot, now)
+    source = " ".join(str(snapshot.get("sourceName", "Computer")).split())[:64] or "Computer"
+    payload["aps"].update({"event": "start", "attributes-type": "MonitoringActivity",
+        "attributes": {"sourceID": snapshot["sourceID"], "sourceName": source},
+        "input-push-token": 1,
+        "alert": {"title": "Paceman is following " + source,
+                  "body": "Live agent activity is available on your Lock Screen."}})
+    headers["apns-priority"] = "10"
+    return payload, headers
 
 
 class APNs:
@@ -221,12 +238,19 @@ class Worker:
 
     def step_live_activities(self, now):
         snapshot = self.store.snapshot()
+        self.step_live_starts(snapshot, now)
         with self.store.connect() as db:
             devices = [dict(row) for row in db.execute(
-                "SELECT l.* FROM live_activities l JOIN clients c ON l.client_id=c.id WHERE l.next_attempt<=?", (now,))]
+                "SELECT l.* FROM live_activities l JOIN clients c ON l.client_id=c.id")]
         for device in devices:
-            ending = now >= device["expires"]
-            if not ending and device["cursor"] >= snapshot["revision"]:
+            ending = (now >= device["expires"] or snapshot["state"] == "idle"
+                      or (snapshot["state"] == "finished" and now - snapshot["changedAt"] >= 90))
+            changed = device["cursor"] < snapshot["revision"]
+            due = now >= device["next_attempt"]
+            heartbeat = not changed and due and now >= device["next_attempt"] + 225
+            if not ending and not (due and (changed or heartbeat)):
+                continue
+            if ending and not due:
                 continue
             # A rotated token, replacement activity or revoked pairing invalidates this send.
             with self.store.connect() as db:
@@ -242,12 +266,58 @@ class Worker:
                 if invalid or (ending and accepted) or now > device["expires"] + 300:
                     db.execute("DELETE FROM live_activities WHERE client_id=? AND token=? AND activity_id=?",
                                (device["client_id"], device["token"], device["activity_id"]))
+                    if ending and accepted:
+                        db.execute("UPDATE live_activity_starts SET cursor=?,next_attempt=0 WHERE client_id=?",
+                                   (snapshot["revision"], device["client_id"]))
                 else:
                     delay = 15 if accepted else min(300, 15 * 2 ** min(device["attempts"], 5))
+                    retry_cursor = min(device["cursor"], snapshot["revision"] - 1)
                     db.execute("UPDATE live_activities SET cursor=?,next_attempt=?,attempts=? WHERE client_id=? AND token=? AND activity_id=?",
-                               (snapshot["revision"] if accepted else device["cursor"], now + delay,
+                               (snapshot["revision"] if accepted else retry_cursor, now + delay,
                                 0 if accepted else device["attempts"] + 1, device["client_id"], device["token"], device["activity_id"]))
             self.log({"at": now, "stage": "live_activity_apns_accepted" if accepted else "live_activity_apns_failed",
+                      "revision": snapshot["revision"], "status": result.status, "reason": result.reason})
+
+    def step_live_starts(self, snapshot, now):
+        if snapshot["state"] == "idle" or (snapshot["state"] == "finished"
+                and now - snapshot["changedAt"] >= 90):
+            # A successful remote start reserves this source for one active run.
+            # The update token may arrive later; revisions must not start copies.
+            with self.store.connect() as db:
+                db.execute("UPDATE live_activity_starts SET cursor=?,next_attempt=0",
+                           (snapshot["revision"],))
+            return
+        if (snapshot["state"] not in ("working", "needs_input")
+                or now >= snapshot["observedAt"] + snapshot["freshFor"]):
+            return
+        with self.store.connect() as db:
+            devices = [dict(row) for row in db.execute(
+                "SELECT s.* FROM live_activity_starts s JOIN clients c ON s.client_id=c.id "
+                "LEFT JOIN live_activities l ON l.client_id=s.client_id "
+                "WHERE l.client_id IS NULL AND s.cursor<? AND s.next_attempt<=?",
+                (snapshot["revision"], now))]
+        for device in devices:
+            with self.store.connect() as db:
+                current = db.execute("SELECT * FROM live_activity_starts WHERE client_id=?", (device["client_id"],)).fetchone()
+                active = db.execute("SELECT 1 FROM live_activities WHERE client_id=?", (device["client_id"],)).fetchone()
+            if active or current is None or dict(current) != device:
+                continue
+            payload, headers = live_start_notification(snapshot, now)
+            result = self.sender.send({**device, "mode": "liveactivity"}, payload, headers, now)
+            accepted = result.status == 200
+            invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
+            with self.store.connect() as db:
+                if invalid:
+                    db.execute("DELETE FROM live_activity_starts WHERE client_id=? AND token=?",
+                               (device["client_id"], device["token"]))
+                else:
+                    delay = 8 * 3600 if accepted else min(300, 15 * 2 ** min(device["attempts"], 5))
+                    db.execute("UPDATE live_activity_starts SET cursor=?,next_attempt=?,attempts=? "
+                               "WHERE client_id=? AND token=?",
+                               (snapshot["revision"] if accepted else device["cursor"], now + delay,
+                                0 if accepted else device["attempts"] + 1,
+                                device["client_id"], device["token"]))
+            self.log({"at": now, "stage": "live_activity_start_accepted" if accepted else "live_activity_start_failed",
                       "revision": snapshot["revision"], "status": result.status, "reason": result.reason})
 
     def log(self, value):

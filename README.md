@@ -21,7 +21,7 @@ lifecycle hooks.
 | `firmware/esp32-watch/` | ESP32 watch firmware, simulator, fonts and build tools |
 | `tests/` | Source API, persistence and APNs tests |
 | `scripts/` | Local checks, source pairing and iOS asset/project generation |
-| `docs/` | Setup, architecture, contracts and validation |
+| `docs/` | Setup, architecture and contracts |
 
 The watch package comes from Omarchy Watch v0.6.1. Its existing layout and wire
 protocol are retained; see its [provenance](firmware/esp32-watch/UPSTREAM.md).
@@ -37,7 +37,6 @@ protocol are retained; see its [provenance](firmware/esp32-watch/UPSTREAM.md).
 - [System lifecycle map](docs/system-lifecycle.md): state ownership, freshness and recovery.
 - [Architecture](docs/architecture.md): component boundaries and data flow.
 - [Protocol](docs/protocol.md): source API and phone-to-watch contract.
-- [Validation](docs/validation.md): verified behavior and remaining device tests.
 - [Pairing and removal](docs/pairing-and-removal.md): identified connections, upgrade behavior, and Mac acceptance.
 - [Prototype scope](docs/paceman-prototype.md): the experience we are finishing.
 - [Handoff](HANDOFF.md): next work and compatibility constraints.
