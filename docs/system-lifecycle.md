@@ -35,8 +35,8 @@ answer these separately:
 4. **Presentation:** Which surfaces should show or alert on the state?
 
 A sleeping computer does not unpair the phone. A watch can be connected while the
-computer is unavailable. A retained theme can remain valid while agent activity is
-historical and an allowance has expired.
+computer is unavailable. The phone's theme selection remains available while
+agent activity is historical and an allowance has expired.
 
 ## State ownership
 
@@ -48,7 +48,7 @@ historical and an allowance has expired.
 | Watch ownership and identity | Phone + watch | Phone Keychain/UserDefaults; watch NVS | Explicit removal, owner change or factory reset |
 | Watch preferences | Phone | Per-watch UserDefaults; accepted profile in watch NVS | User edit or watch removal |
 | Watch activity | Latest delivered source event | Phone delivery bookkeeping; watch RAM | Next event, wearer clearing an attention state, or watch reboot |
-| Theme | Source profile | Desktop snapshot, protected phone cache, watch NVS | New valid theme or explicit source removal |
+| Theme | Phone preference | Phone App Group defaults; accepted watch profile in NVS | User selects a family; watch resyncs when connected |
 | Allowance | Source profile | Desktop snapshot, protected phone cache, watch NVS | New reading; becomes unavailable after its recorded reset |
 | Weather | Phone | Protected phone cache; watch NVS profile | Refresh, confirmed movement, preference change or expiry |
 | Live Activity | Source event | ActivityKit system state | New event, stale date or lifecycle end |
@@ -74,7 +74,7 @@ state; they are never treated as the relationship itself.
 
 | Disruption | What the user keeps | Recovery |
 | --- | --- | --- |
-| Computer sleeps or network disappears | Pairing, theme, historical activity and valid cached allowance | Next foreground fetch, APNs event or watch request checks the source |
+| Computer sleeps or network disappears | Pairing, phone-selected theme, historical activity and valid cached allowance | Next foreground fetch, APNs event or watch request checks the source |
 | Source restarts | Pairing and its stored snapshot | Omarchy reconciles live processes; Mac clears hook-only sessions until a new hook arrives |
 | Phone is suspended or system-terminated | Protected snapshot, credentials, preferences and Bluetooth identity | APNs, Core Bluetooth restoration or foreground lifecycle restores execution |
 | Watch leaves range or loses power | Pairing and accepted profile; a reboot does not show stale activity | Core Bluetooth reconnects; the handshake fetches and reconciles current state |

@@ -170,7 +170,7 @@ enum WatchWire {
     }
 
     static func profile(owner: UUID, revision: UInt32, now: Date = Date(), offset: Int,
-                        version: UInt8 = 1, theme: CompanionTheme = .solitude,
+                        version: UInt8 = 1, theme: CompanionTheme = ThemeFamily.paceman.glance,
                         allowance: CodexAllowance? = nil, brightness: Int = 50, hours: UInt8 = 24,
                         weather: WatchWeather? = nil, fahrenheit: Bool = false) -> Data {
         let version = min(5, max(1, version))
@@ -187,7 +187,7 @@ enum WatchWire {
         var raw = owner.uuid
         withUnsafeBytes(of: &raw) { data.append(contentsOf: $0) }
         if version >= 2 {
-            let palette = theme.valid ? theme : .solitude
+            let palette = theme.valid ? theme : ThemeFamily.paceman.glance
             for hex in [palette.background, palette.foreground] { data.appendRGB(hex) }
             if let weather {
                 data.appendLE(Int64(weather.observedAt.timeIntervalSince1970))

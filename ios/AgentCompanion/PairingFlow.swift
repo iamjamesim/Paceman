@@ -20,11 +20,11 @@ struct PairingFlow: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text(reconnecting ? "Reconnect your computer" : "Connect your computer").font(theme.monospaced ? theme.font(27, emphasis: true) : .title.weight(.semibold))
                     Text("Open the Paceman panel on your computer and select the QR button.")
-                        .font(.body).lineSpacing(4).foregroundStyle(theme.ink.opacity(0.65))
+                        .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
                     if reconnecting {
-                        Text("Scanning a fresh QR code renews this phone’s access. Your watch stays paired.").font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
+                        Text("Scanning a fresh QR code renews this phone’s access. Your watch stays paired.").font(.subheadline).foregroundStyle(theme.secondaryInk)
                     }
-                    Text("Keep Tailscale connected on both devices.").font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
+                    Text("Keep Tailscale connected on both devices.").font(.subheadline).foregroundStyle(theme.secondaryInk)
                 }
                 if let parsed {
                     VStack(alignment: .leading, spacing: 16) {
@@ -161,7 +161,7 @@ struct NotificationDeliveryControls: View {
             Text(title).font(.headline)
             if !detail.isEmpty {
                 Text(detail).font(.subheadline)
-                    .foregroundStyle(theme.ink.opacity(0.65))
+                    .foregroundStyle(theme.secondaryInk)
             }
             switch step {
             case .permission, .enable:
@@ -194,7 +194,7 @@ struct RecommendedNotificationSettings: View {
                 Text("Recommended iPhone settings")
                     .font(.title2.weight(.semibold))
                 Text(guidance)
-                    .font(.subheadline).lineSpacing(2).foregroundStyle(theme.ink.opacity(0.65))
+                    .font(.subheadline).lineSpacing(2).foregroundStyle(theme.secondaryInk)
                     .tint(theme.tint).allowsHitTesting(!preview)
             }
             if typeSize.isAccessibilitySize {
@@ -246,7 +246,7 @@ struct RecommendedNotificationSettings: View {
                     RoundedRectangle(cornerRadius: 2).fill(theme.ink.opacity(0.35)).frame(width: 20, height: 7).offset(y: -15)
                 }
             }.frame(height: 50)
-            Text(title).font(.caption).multilineTextAlignment(.center).foregroundStyle(theme.ink.opacity(selected ? 1 : 0.65))
+            Text(title).font(.caption).multilineTextAlignment(.center).foregroundStyle(selected ? theme.ink : theme.secondaryInk)
                 .frame(maxWidth: .infinity, minHeight: 28, alignment: .top)
             recommendationValue(enabled: selected, font: .caption)
         }.frame(maxWidth: .infinity)
@@ -271,16 +271,16 @@ struct WatchSharingGuidance: View {
     var body: some View {
         if !watch.supportsNotificationSync && watch.ready {
             Text("Update your watch firmware to receive notifications while the phone is locked.")
-                .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
+                .font(.subheadline).foregroundStyle(theme.secondaryInk)
         } else if watch.notificationSharingStatus == false {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Enable notification sharing").font(.headline)
                 Text("In Settings → Bluetooth → Omarchy Watch, enable Share System Notifications.")
-                    .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
+                    .font(.subheadline).foregroundStyle(theme.secondaryInk)
             }
         } else if !watch.ready {
             Text("Reconnect your watch to check notification sharing.")
-                .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
+                .font(.subheadline).foregroundStyle(theme.secondaryInk)
         }
     }
 }

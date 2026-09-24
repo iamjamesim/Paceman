@@ -41,7 +41,7 @@ struct CompanionHome: View {
                     } else { agentSetup }
                     if presentation.preview {
                         Text("Design preview · sample activity").font(.caption)
-                            .foregroundStyle(theme.ink.opacity(0.5)).padding(.top, 22)
+                            .foregroundStyle(theme.secondaryInk).padding(.top, 22)
                     }
                 }.padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 34)
             }
@@ -79,15 +79,13 @@ struct CompanionHome: View {
         return layout {
             Button { open(.liveActivities) } label: {
                 destinationContent(
-                    icon: AnyView(LiveActivityGlyph(theme: theme).frame(width: 37, height: 43)),
+                    icon: AnyView(LiveActivityGlyph(theme: presentation.themeFamily.glance).frame(width: 37, height: 43)),
                     name: "Live Activities",
                     state: presentation.preview ? "On" : monitoring.status)
             }.buttonStyle(.plain).accessibilityLabel("Live Activities, \(presentation.preview ? "On" : monitoring.status)")
             Button { open(.watch) } label: {
                 destinationContent(
-                    icon: AnyView(WatchIllustration(theme: theme, paired: hasWatch,
-                        timeFormat: model.watch.timeFormat, state: presentation.preview ? .working : model.currentActivityState)
-                        .frame(width: 31, height: 46)),
+                    icon: AnyView(WatchGlyph(theme: presentation.themeFamily.glance, timeFormat: model.watch.timeFormat)),
                     name: "Omarchy Watch",
                     state: hasWatch ? (presentation.preview ? "Connected" : model.watch.connectionPresentation.rawValue) : "Connect watch")
             }.buttonStyle(.plain)
@@ -95,11 +93,11 @@ struct CompanionHome: View {
     }
 
     private func destinationContent(icon: AnyView, name: String, state: String) -> some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 8) {
             icon.accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(name).font(.caption.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
-                Text(state).font(.caption2).foregroundStyle(theme.ink.opacity(0.62))
+                Text(state).font(.caption2).foregroundStyle(theme.secondaryInk)
                     .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
@@ -116,11 +114,11 @@ struct CompanionHome: View {
             HStack {
                 Eyebrow(text: "Agents")
                 Spacer()
-                Image(systemName: "laptopcomputer").font(.system(size: 18, weight: .medium)).foregroundStyle(theme.ink.opacity(0.65)).accessibilityHidden(true)
+                Image(systemName: "laptopcomputer").font(.system(size: 18, weight: .medium)).foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 9) {
                 Text("Connect your agents").font(theme.monospaced ? theme.font(25, emphasis: true) : .title2.weight(.semibold)).tracking(-0.8).fixedSize(horizontal: false, vertical: true)
-                Text("Connect the computer running your agents.").font(.subheadline).foregroundStyle(theme.ink.opacity(0.65)).fixedSize(horizontal: false, vertical: true)
+                Text("Connect the computer running your agents.").font(.subheadline).foregroundStyle(theme.secondaryInk).fixedSize(horizontal: false, vertical: true)
             }
             CompanionButton(title: "Connect computer", theme: theme, symbol: "plus") { open(.pairing) }
         }.padding(23).background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
@@ -142,14 +140,14 @@ struct CompanionHome: View {
                 HStack(spacing: 10) {
                     Image(systemName: "laptopcomputer")
                         .font(.system(size: 18, weight: .regular))
-                        .frame(width: 24).foregroundStyle(theme.ink.opacity(0.65)).accessibilityHidden(true)
+                        .frame(width: 24).foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(presentation.displayName(source: paired))
                             .font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold))
                             .multilineTextAlignment(.leading)
                         if model.pairedSources.filter({ presentation.displayName(source: $0) == presentation.displayName(source: paired) }).count > 1,
                            let host = paired.endpoint.host {
-                            Text(host).font(.caption2).foregroundStyle(theme.ink.opacity(0.55))
+                            Text(host).font(.caption2).foregroundStyle(theme.secondaryInk)
                                 .multilineTextAlignment(.leading)
                         }
                     }
@@ -159,7 +157,7 @@ struct CompanionHome: View {
             }.buttonStyle(.plain).accessibilityHint("Manage this computer's connection")
             if state != .current {
                 HStack {
-                    Text(state.rawValue).font(.caption).foregroundStyle(theme.ink.opacity(0.7))
+                    Text(state.rawValue).font(.caption).foregroundStyle(theme.secondaryInk)
                     if state == .revoked {
                         Spacer()
                         Button("Reconnect") { open(.otherComputer(id)) }
@@ -169,23 +167,23 @@ struct CompanionHome: View {
             }
             if firstPreview || model.lastContacts[id] != nil {
                 ComputerReceiptLabel(model: model, presentation: presentation, sourceID: id)
-                    .font(.caption2).foregroundStyle(theme.ink.opacity(0.5)).padding(.top, 5)
+                    .font(.caption2).foregroundStyle(theme.secondaryInk).padding(.top, 5)
             }
             Color.clear.frame(height: 16)
             CompanionRule(theme: theme)
             if state == .revoked {
                 Text("Reconnect to receive activity from this computer.")
-                    .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65)).padding(.top, 18)
+                    .font(.subheadline).foregroundStyle(theme.secondaryInk).padding(.top, 18)
             } else {
                 if historical && content.hasActivity {
-                    Text("Last known activity").font(.caption).foregroundStyle(theme.ink.opacity(0.55)).padding(.top, 16)
+                    Text("Last known activity").font(.caption).foregroundStyle(theme.secondaryInk).padding(.top, 16)
                 }
                 switch content {
                 case .sessions(let sessions):
                     let rows = AgentDisplayRow.rows(sessions)
                     if rows.count > 1 && !historical {
                         Text([content.headline, content.supportingStatus].compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(theme.ink.opacity(0.65)).padding(.top, 16)
+                            .font(.caption).foregroundStyle(theme.secondaryInk).padding(.top, 16)
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         if index > 0 { CompanionRule(theme: theme) }
@@ -201,7 +199,7 @@ struct CompanionHome: View {
                 }
             }
             if !presentation.preview && value?.mode == "synthetic" {
-                Text("Test source").font(.caption2).foregroundStyle(theme.ink.opacity(0.5))
+                Text("Test source").font(.caption2).foregroundStyle(theme.secondaryInk)
             }
         }
         .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 6)
@@ -212,7 +210,7 @@ struct CompanionHome: View {
     private func emptyActivity(_ title: String, detail: String?) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.subheadline.weight(.medium))
-            if let detail { Text(detail).font(.caption).foregroundStyle(theme.ink.opacity(0.55)) }
+            if let detail { Text(detail).font(.caption).foregroundStyle(theme.secondaryInk) }
         }.padding(.vertical, 20)
     }
 }
@@ -229,12 +227,12 @@ struct AgentFeedRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(session.displayName).font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
                 if !detail.isEmpty {
-                    Text(detail).font(.caption).foregroundStyle(theme.ink.opacity(0.55)).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    Text(detail).font(.caption).foregroundStyle(theme.secondaryInk).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                 }
                 if typeSize.isAccessibilitySize { stateLabel }
             }
             if !typeSize.isAccessibilitySize { Spacer(minLength: 7); stateLabel }
-        }.padding(.vertical, 16).foregroundStyle(theme.ink.opacity(animate ? 1 : 0.6)).accessibilityElement(children: .combine)
+        }.padding(.vertical, 16).foregroundStyle(animate ? theme.ink : theme.secondaryInk).accessibilityElement(children: .combine)
     }
     private var stateLabel: some View {
         VStack(alignment: typeSize.isAccessibilitySize ? .leading : .center, spacing: 6) {
@@ -314,14 +312,14 @@ struct WatchConnectionSummary: View {
                     Circle().fill(ready ? theme.tint : theme.ink.opacity(0.3)).frame(width: 5, height: 5)
                 }
                 Text(status).font(.footnote)
-            }.foregroundStyle(theme.ink.opacity(0.65))
+            }.foregroundStyle(theme.secondaryInk)
             Group {
                 if previewState == "connected" { Text("Last sent just now") }
                 else if previewState != nil {
                     if previewState != "off" { Text("No updates sent yet") }
                 } else if let date = watch.lastDelivered { ReceiptTimeLabel(prefix: "Last sent", date: date) }
                 else if watch.updatesEnabled { Text("No updates sent yet") }
-            }.font(.caption).foregroundStyle(theme.ink.opacity(0.5))
+            }.font(.caption).foregroundStyle(theme.secondaryInk)
         }
     }
 }

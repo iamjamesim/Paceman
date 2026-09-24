@@ -32,7 +32,8 @@ struct LiveActivitiesDetail: View {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(spacing: 20) {
                     if !typeSize.isAccessibilitySize {
-                        LiveActivityIllustration()
+                        LiveActivityIllustration(palette: presentation.themeFamily.activity,
+                            outline: theme.secondaryInk.opacity(0.3))
                             .frame(width: 260, height: 126)
                             .accessibilityHidden(true)
                     }
@@ -45,19 +46,19 @@ struct LiveActivitiesDetail: View {
                             Circle().fill(enabled && !model.pairedSources.isEmpty ? theme.tint : theme.ink.opacity(0.3))
                                 .frame(width: 5, height: 5)
                             Text(displayStatus).font(.footnote)
-                        }.foregroundStyle(theme.ink.opacity(0.65))
+                        }.foregroundStyle(theme.secondaryInk)
                     }
                 }.multilineTextAlignment(.center).frame(maxWidth: .infinity)
                     .padding(.top, 20).padding(.bottom, 12)
                 if !enabled {
                     Text("Turn on Live Activities to see agent activity on your Lock Screen and Dynamic Island.")
-                        .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                        .font(.footnote).foregroundStyle(theme.secondaryInk)
                     CompanionButton(title: "Open iPhone Settings", theme: theme, symbol: "gearshape") {
                         UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
                     }
                 } else if model.pairedSources.isEmpty {
                     Text("Connect a computer to see agent activity on your Lock Screen and Dynamic Island.")
-                        .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                        .font(.footnote).foregroundStyle(theme.secondaryInk)
                     NavigationLink(value: FeedDestination.pairing) {
                         Label("Connect computer", systemImage: "plus").font(.subheadline).frame(minHeight: 44)
                     }
@@ -66,7 +67,7 @@ struct LiveActivitiesDetail: View {
                     Text("Showing now").font(.headline)
                     if activeSources.isEmpty {
                         Text("No Live Activities now. They appear when agents start work.")
-                            .font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
+                            .font(.subheadline).foregroundStyle(theme.secondaryInk)
                     } else {
                         ForEach(activeSources, id: \.sourceID) { source in
                             HStack(spacing: 12) {
@@ -84,12 +85,12 @@ struct LiveActivitiesDetail: View {
                             Image(systemName: "laptopcomputer").frame(width: 26).accessibilityHidden(true)
                             Text(presentation.displayName(source: source)).lineLimit(2)
                             Spacer(minLength: 8)
-                            Text("Checking").foregroundStyle(theme.ink.opacity(0.65))
+                            Text("Checking").foregroundStyle(theme.secondaryInk)
                         }.font(.subheadline).accessibilityElement(children: .combine)
                     }
                     if !checkingSources.isEmpty {
                         Text("Paceman retries automatically. If a computer stays here, check its Sharing and connection.")
-                            .font(.footnote).foregroundStyle(theme.ink.opacity(0.62))
+                            .font(.footnote).foregroundStyle(theme.secondaryInk)
                     }
                 }
             }.padding(.horizontal, 26).padding(.bottom, 30)
@@ -99,6 +100,8 @@ struct LiveActivitiesDetail: View {
 }
 
 private struct LiveActivityIllustration: View {
+    let palette: MonitoringPalette
+    let outline: Color
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 7) {
@@ -107,19 +110,20 @@ private struct LiveActivityIllustration: View {
                 Spacer()
                 Text("PREVIEW").tracking(1.4).font(.system(size: 8, weight: .semibold, design: .rounded))
             }.font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundStyle(MonitoringPalette.muted)
+                .foregroundStyle(palette.muted)
             HStack(spacing: 10) {
                 Image("Robot-excited")
                     .renderingMode(.template).resizable().scaledToFit()
                     .frame(width: 28, height: 28)
-                    .foregroundStyle(MonitoringPalette.robotColor(for: "working"))
+                    .foregroundStyle(palette.robotColor(for: "working"))
                 Text("Working").font(.system(size: 23, weight: .semibold, design: .rounded))
-                    .foregroundStyle(MonitoringPalette.ink)
+                    .foregroundStyle(palette.ink)
             }
         }
         .padding(19)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(MonitoringPalette.background, in: RoundedRectangle(cornerRadius: 26))
+        .background(palette.background, in: RoundedRectangle(cornerRadius: 26))
+        .overlay(RoundedRectangle(cornerRadius: 26).strokeBorder(outline, lineWidth: 1))
     }
 }
 
@@ -130,13 +134,178 @@ struct CompanionSettings: View {
     var body: some View {
         List {
             Section {
+                NavigationLink(value: FeedDestination.appearance) {
+                    HStack {
+                        Label("Appearance", systemImage: "paintpalette")
+                        Spacer()
+                        Text(presentation.themeFamily.name).foregroundStyle(theme.secondaryInk)
+                    }
+                }
                 NavigationLink(value: FeedDestination.notifications) { Label("Notifications", systemImage: "bell") }
-            }.listRowBackground(theme.ink.opacity(0.04))
+            }.listRowBackground(theme.panel)
             Section {
                 NavigationLink(value: FeedDestination.diagnostics) {
                     Label("Developer tools", systemImage: "wrench.and.screwdriver")
                 }.disabled(presentation.preview)
-            } footer: { Text("Paceman · Prototype") }.listRowBackground(theme.ink.opacity(0.04))
-        }.scrollContentBackground(.hidden).background(theme.canvas).navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
+            } footer: { Text("Paceman · Prototype") }.listRowBackground(theme.panel)
+        }.scrollContentBackground(.hidden).background(theme.canvas).foregroundStyle(theme.ink)
+            .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct AppearanceSettings: View {
+    @ObservedObject var model: CompanionModel
+    @ObservedObject var presentation: PresentationModel
+    let theme: CompanionTheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var showingCredits = false
+
+    var body: some View {
+        List {
+            Section {
+                ForEach(ThemeFamily.allCases) { family in
+                    Button {
+                        presentation.selectTheme(family, model: model)
+                    } label: {
+                        Group {
+                            if typeSize.isAccessibilitySize {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    themeName(family)
+                                    PaletteSwatches(family: family, dark: colorScheme == .dark, outline: theme.ink)
+                                }
+                            } else {
+                                HStack(spacing: 12) {
+                                    themeName(family)
+                                    Spacer(minLength: 8)
+                                    PaletteSwatches(family: family, dark: colorScheme == .dark, outline: theme.ink)
+                                }
+                            }
+                        }
+                        .padding(.vertical, typeSize.isAccessibilitySize ? 7 : 5)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(family.name)
+                    .accessibilityValue(presentation.themeFamily == family ? "Selected" : "")
+                    .listRowBackground(theme.panel)
+                }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(theme.canvas)
+        .foregroundStyle(theme.ink)
+        .navigationTitle("Appearance")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Palette credits", systemImage: "info.circle") { showingCredits = true }
+                    .labelStyle(.iconOnly)
+            }
+        }
+        .sheet(isPresented: $showingCredits) {
+            PaletteCredits(theme: theme)
+        }
+    }
+
+    private func themeName(_ family: ThemeFamily) -> some View {
+        HStack(spacing: 8) {
+            Text(family.name).font(.body)
+            if presentation.themeFamily == family {
+                Image(systemName: "checkmark")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(theme.tint)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+}
+
+private struct PaletteSwatches: View {
+    let family: ThemeFamily
+    let dark: Bool
+    let outline: Color
+
+    private var colors: [Color] {
+        let phone = family.phone(dark: dark || !family.supportsLight)
+        let glance = family.glance
+        let activity = family.activity
+        if phone.accent != glance.accent {
+            return [phone.tint, glance.tint, family == .paceman ? activity.input : activity.working]
+        }
+        switch family {
+        case .paceman:
+            return [phone.tint, activity.input, glance.ink]
+        case .monochrome:
+            return [phone.tint, activity.working, activity.finished]
+        default:
+            return [phone.tint, activity.working, glance.ink]
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(colors.indices, id: \.self) { index in
+                Circle()
+                    .fill(colors[index])
+                    .overlay(Circle().strokeBorder(outline.opacity(0.22), lineWidth: 0.5))
+                    .frame(width: 18, height: 18)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct PaletteCredits: View {
+    let theme: CompanionTheme
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    credit("Ayu", creator: "ayu-theme", url: "https://github.com/ayu-theme/ayu-colors")
+                    credit("Sakura Mochi", creator: "OldJobobo", url: "https://github.com/OldJobobo/omarchy-sakura-mochi-theme")
+                    credit("Miasma", creator: "xero", url: "https://github.com/xero/miasma.nvim")
+                    credit("Catppuccin", creator: "Catppuccin", url: "https://github.com/catppuccin/catppuccin")
+                } footer: {
+                    Text("Palettes adapted for Paceman.")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(theme.canvas)
+            .foregroundStyle(theme.ink)
+            .navigationTitle("Palette Credits")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .tint(theme.tint)
+        .presentationDetents([.medium, .large])
+    }
+
+    private func credit(_ name: String, creator: String, url: String) -> some View {
+        Link(destination: URL(string: url)!) {
+            Group {
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(name)
+                        Text(creator).foregroundStyle(theme.secondaryInk)
+                    }
+                } else {
+                    HStack {
+                        Text(name)
+                        Spacer()
+                        Text(creator).foregroundStyle(theme.secondaryInk)
+                        Image(systemName: "arrow.up.right").font(.caption).foregroundStyle(theme.secondaryInk)
+                    }
+                }
+            }
+        }
+        .listRowBackground(theme.panel)
     }
 }

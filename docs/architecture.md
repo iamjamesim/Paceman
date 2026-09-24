@@ -4,7 +4,7 @@ Paceman connects agent workspaces to personal gear. Work remains in the source
 agent environment; the hub presents current state and relays it to accessories.
 
 ```text
-Omarchy events + desktop palette, Mac Codex hooks (or synthetic test source)
+Omarchy events, Mac Codex hooks (or synthetic test source)
     │
     ▼
 Private source service ── HTTPS snapshot ──► iPhone ── BLE ──► watch
@@ -58,16 +58,17 @@ packets and restoration. `CompanionHome` and `PresentationModel` present current
 sessions and connection state; `ios/Shared/` defines theme and Live Activity types.
 
 The app shows independently paired computer activity cards. Workspace setup becomes a status card; watch setup becomes
-a connection row. Settings contains notifications and developer tools. A valid
-source palette is followed automatically. The WidgetKit extension hosts Live
-Activities only; there are no Home Screen or Lock Screen status widgets.
+a connection row. Settings contains Appearance, notifications, and developer tools.
+The phone owns the selected theme family independently of paired computers. The
+WidgetKit extension reads it from shared App Group preferences for Live Activities.
+There are no Home Screen or Lock Screen status widgets.
 
 ## Watch device package
 
 `firmware/esp32-watch/` retains the upstream firmware/simulator/tools layout so
 shared C rendering code and relative build paths remain coherent. Firmware owns
 rendering, power, BLE bonding and persisted owner identity. The phone negotiates
-profile v1–v5 for time, palette, weather, watch settings and source-reported Codex
+profile v1–v5 for time, the phone-selected palette, weather, watch settings and source-reported Codex
 allowance, and still uses activity v1. The accepted profile survives watch
 restarts; agent activity remains an in-memory event state.
 

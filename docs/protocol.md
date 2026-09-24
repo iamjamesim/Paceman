@@ -167,21 +167,19 @@ A snapshot may also carry a resolved appearance object:
 }
 ```
 
-Colors are six-digit RGB hex, optionally prefixed with `#`. `monospaced` selects
-the bundled JetBrains Mono family; arbitrary remote fonts/assets are not loaded.
-Missing or invalid optional presentation metadata is ignored without discarding
-a valid core snapshot. The app uses its neutral appearance until a valid source appearance
-is supplied. There is no user-facing local theme picker. A source increments
-its revision when session content changes. The Omarchy collector supplies live
-appearance metadata using the desktop bar overrides and accent contrast fallback.
-BLE theme forwarding is implemented by the alpha profile restoration below.
+Colors are six-digit RGB hex, optionally prefixed with `#`. This legacy field
+remains decodable, but the iPhone does not use it to select a theme. Missing or
+invalid optional metadata never discards a valid core snapshot. The Omarchy
+collector may still supply appearance metadata, while the phone-selected family
+controls the app, watch profile, and Live Activities. Following a computer's
+theme would require a future explicit option. A source increments its revision
+when session content changes.
 
 ## Alpha watch profile restoration
 
-The phone now negotiates profile v1–v5 from the watch identity. Rich profiles carry
-the source palette and optional Codex allowance; weather is absent pending the
-phone provider, brightness remains 50%, and hour cycle remains 24-hour in this
-first slice. Profile writes are serialized against activity writes and reconciled
+The phone negotiates profile v1–v5 from the watch identity. v2+ profiles carry
+the phone-selected background and foreground; v3+ also carries its accent.
+Optional Codex allowance remains source-reported. Profile writes are serialized against activity writes and reconciled
 against the last successfully written content. Clock passage alone does not cause
 writes on every source poll; reconnect synchronizes time again. Original allowance
 observation/reset timestamps are never replaced by transmission time.

@@ -36,16 +36,16 @@ struct ComputerDetail: View {
                         HStack(spacing: 5) {
                             Circle().fill(connection == .current ? theme.tint : theme.ink.opacity(0.3)).frame(width: 5, height: 5)
                             Text(connection.rawValue).font(.footnote)
-                        }.foregroundStyle(theme.ink.opacity(0.65))
+                        }.foregroundStyle(theme.secondaryInk)
                         if connection != .revoked {
                             ComputerReceiptLabel(model: model, presentation: presentation, sourceID: paired?.sourceID)
-                                .font(.caption).foregroundStyle(theme.ink.opacity(0.5))
+                                .font(.caption).foregroundStyle(theme.secondaryInk)
                         }
                     }
                 }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.top, 20).padding(.bottom, 12)
                 if connection == .revoked {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Scan a new pairing code from this computer.").font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                        Text("Scan a new pairing code from this computer.").font(.footnote).foregroundStyle(theme.secondaryInk)
                         NavigationLink { PairingFlow(model: model, theme: theme) } label: {
                             Label("Scan QR code", systemImage: "qrcode.viewfinder").font(.subheadline)
                                 .frame(minHeight: 44)
@@ -53,7 +53,7 @@ struct ComputerDetail: View {
                     }
                 } else if connection == .reconnecting {
                     Text("It will reconnect when this computer is awake and online.")
-                        .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                        .font(.footnote).foregroundStyle(theme.secondaryInk)
                 }
                 CompanionRule(theme: theme)
                 Button { name = presentation.displayName(source: paired); rename = true } label: {
@@ -65,7 +65,7 @@ struct ComputerDetail: View {
                 CompanionRule(theme: theme)
                 DeviceRemovalButton(title: removing ? "Removing…" : "Remove computer", theme: theme) { remove = true }
                     .disabled(removing || paired == nil).allowsHitTesting(!presentation.preview)
-                if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.ink.opacity(0.65)) }
+                if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.secondaryInk) }
             }.padding(.horizontal, 26).padding(.bottom, 30)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
@@ -94,9 +94,9 @@ struct ComputerDetail: View {
 
     private var nameValue: some View {
         HStack(spacing: 8) {
-            Text(presentation.displayName(source: paired)).foregroundStyle(theme.ink.opacity(0.6))
+            Text(presentation.displayName(source: paired)).foregroundStyle(theme.secondaryInk)
             Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium))
-                .foregroundStyle(theme.ink.opacity(0.45))
+                .foregroundStyle(theme.secondaryInk)
         }
     }
 }
@@ -124,6 +124,7 @@ struct WatchDetail: View {
     @State private var brightnessDraft: Double?
     @ObservedObject var model: CompanionModel
     let theme: CompanionTheme
+    let watchTheme: CompanionTheme
     var preview = false
     var previewConnected = false
     var previewPhase = WatchSetupPhase.idle
@@ -149,7 +150,7 @@ struct WatchDetail: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 if !paired || justPaired || previewComplete {
-                    WatchIllustration(theme: theme, paired: paired, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133)
+                    WatchIllustration(theme: watchTheme, paired: paired, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
                 if justPaired || (preview && previewComplete) {
@@ -201,12 +202,12 @@ struct WatchDetail: View {
             Text(instructionTitle).font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
             HStack(alignment: .top, spacing: 12) {
                 if inProgress { ProgressView().tint(theme.tint).padding(.top, 3) }
-                Text(instructionDetail).font(.body).lineSpacing(4).foregroundStyle(theme.ink.opacity(0.65))
+                Text(instructionDetail).font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
             }
             if !inProgress {
                 DisclosureGroup("Already paired to another device?") {
                     Text("A watch can be paired to one phone or computer at a time. Transferring it to this phone isn't supported yet. Disconnecting Bluetooth on the other device won't make it available.")
-                        .font(.footnote).foregroundStyle(theme.ink.opacity(0.65)).padding(.top, 8)
+                        .font(.footnote).foregroundStyle(theme.secondaryInk).padding(.top, 8)
                 }.font(.footnote).padding(.top, 12)
             }
         }
@@ -258,7 +259,7 @@ struct WatchDetail: View {
                 Text("Watch connected").font(.title2.weight(.semibold))
             }
             Text("Next, set up notifications so your watch can receive updates while your iPhone is locked.")
-                .font(.body).lineSpacing(3).foregroundStyle(theme.ink.opacity(0.65))
+                .font(.body).lineSpacing(3).foregroundStyle(theme.secondaryInk)
         }
     }
     private var pairingCompletionActions: some View {
@@ -273,7 +274,7 @@ struct WatchDetail: View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(spacing: 20) {
                 if !typeSize.isAccessibilitySize {
-                    WatchIllustration(theme: theme, paired: true, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133).accessibilityHidden(true)
+                    WatchIllustration(theme: watchTheme, paired: true, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133).accessibilityHidden(true)
                 }
                 VStack(spacing: 9) {
                     Text("Omarchy Watch")
@@ -295,7 +296,7 @@ struct WatchDetail: View {
             }
             if !preview, let guidance = model.watch.connectionPresentation.guidance {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(guidance).font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                    Text(guidance).font(.footnote).foregroundStyle(theme.secondaryInk)
                     if model.watch.connectionPresentation == .disconnected {
                         Button("Try again") { model.watch.setEnabled(true) }
                             .font(.subheadline).frame(minHeight: 44)
@@ -308,7 +309,7 @@ struct WatchDetail: View {
                     .tint(theme.tint).allowsHitTesting(!preview)
                 if !updatesEnabled {
                     Text(!preview && model.watch.lastDelivered != nil ? "Your watch stays paired. Its last activity may remain on screen." : "Your watch stays paired.")
-                        .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                        .font(.footnote).foregroundStyle(theme.secondaryInk)
                 }
             }
             CompanionRule(theme: theme)
@@ -316,7 +317,7 @@ struct WatchDetail: View {
                 Toggle("Alert sound", isOn: Binding(get: { preview ? true : model.watch.soundEnabled }, set: { model.watch.setSoundEnabled($0) }))
                     .tint(theme.tint).allowsHitTesting(!preview)
                 Text("When an agent needs input or finishes a turn.")
-                    .font(.footnote).foregroundStyle(theme.ink.opacity(0.65))
+                    .font(.footnote).foregroundStyle(theme.secondaryInk)
             }
             CompanionRule(theme: theme)
             if typeSize.isAccessibilitySize {
@@ -331,7 +332,7 @@ struct WatchDetail: View {
                         Text("Brightness")
                         Spacer()
                         Text("\(Int(brightnessDraft ?? Double(model.watch.brightness)))%")
-                            .foregroundStyle(theme.ink.opacity(0.65)).monospacedDigit()
+                            .foregroundStyle(theme.secondaryInk).monospacedDigit()
                     }
                     Slider(value: Binding(get: { brightnessDraft ?? Double(model.watch.brightness) }, set: { brightnessDraft = $0 }),
                            in: 20...100, step: 1, onEditingChanged: { editing in
@@ -349,8 +350,8 @@ struct WatchDetail: View {
                 HStack {
                     Text("Weather")
                     Spacer()
-                    Text(model.weather.summary).foregroundStyle(theme.ink.opacity(0.65))
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.ink.opacity(0.4))
+                    Text(model.weather.summary).foregroundStyle(theme.secondaryInk)
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.secondaryInk)
                 }
             }.allowsHitTesting(!preview)
             CompanionRule(theme: theme)
@@ -358,13 +359,13 @@ struct WatchDetail: View {
                 HStack {
                     Text("Troubleshoot updates")
                     Spacer()
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.ink.opacity(0.4))
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.secondaryInk)
                 }.frame(minHeight: 44)
             }.allowsHitTesting(!preview)
             CompanionRule(theme: theme)
             DeviceRemovalButton(title: removing ? "Removing…" : "Remove watch", theme: theme) { remove = true }
                 .disabled(removing).allowsHitTesting(!preview)
-            if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.ink.opacity(0.65)) }
+            if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.secondaryInk) }
         }.padding(.top, 12)
     }
 }
@@ -380,7 +381,7 @@ struct WatchUpdateTroubleshooting: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Check these settings").font(.title2.weight(.semibold))
                     Text("Keep notifications and Bluetooth on.")
-                        .font(.body).lineSpacing(3).foregroundStyle(theme.ink.opacity(0.65))
+                        .font(.body).lineSpacing(3).foregroundStyle(theme.secondaryInk)
                 }
                 CompanionRule(theme: theme)
                 if let notificationProblem {
@@ -388,10 +389,10 @@ struct WatchUpdateTroubleshooting: View {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             VStack(alignment: .leading, spacing: 5) {
                                 Text("iPhone notifications")
-                                Text(notificationProblem).font(.footnote).foregroundStyle(theme.ink.opacity(0.6))
+                                Text(notificationProblem).font(.footnote).foregroundStyle(theme.secondaryInk)
                             }
                             Spacer(minLength: 12)
-                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.ink.opacity(0.4))
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.secondaryInk)
                         }
                         .frame(minHeight: 52)
                     }.allowsHitTesting(!preview)
@@ -399,18 +400,18 @@ struct WatchUpdateTroubleshooting: View {
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     Text("Notification sharing")
-                    Text(sharingGuidance).font(.footnote).lineSpacing(2).foregroundStyle(theme.ink.opacity(0.6))
+                    Text(sharingGuidance).font(.footnote).lineSpacing(2).foregroundStyle(theme.secondaryInk)
                 }
                 CompanionRule(theme: theme)
                 VStack(alignment: .leading, spacing: 7) {
                     Text("Connections")
                     Text("Keep Bluetooth and Tailscale connected, and make sure your computer is awake and online.")
-                        .font(.footnote).lineSpacing(2).foregroundStyle(theme.ink.opacity(0.6))
+                        .font(.footnote).lineSpacing(2).foregroundStyle(theme.secondaryInk)
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     Text("Focus and Scheduled Summary can delay updates.")
                     Text("Don’t swipe Paceman away from the app switcher.")
-                }.font(.footnote).lineSpacing(2).foregroundStyle(theme.ink.opacity(0.5))
+                }.font(.footnote).lineSpacing(2).foregroundStyle(theme.secondaryInk)
                     .padding(.top, 2)
             }.padding(.horizontal, 26).padding(.vertical, 28)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)

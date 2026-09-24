@@ -199,10 +199,16 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private var acceptedProfile = false
     private var profileVersion: UInt8 = 1
     private var desiredSnapshot: Snapshot?
+    private var selectedTheme = ThemePreference.current.glance
     private var sourceProfileResolved = true
     private var weather: WatchWeather?
     private var weatherFahrenheit = false
     var preferenceID: String? { pairingReceipt?.watchID }
+    func setTheme(_ value: CompanionTheme) {
+        guard selectedTheme != value else { return }
+        selectedTheme = value
+        writeProfileIfNeeded()
+    }
     func setWeather(_ value: WatchWeather?, fahrenheit: Bool) {
         guard weather != value || weatherFahrenheit != fahrenheit else { return }
         weather = value
@@ -956,7 +962,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         let now = Date()
         let packet = WatchWire.profile(owner: owner, revision: 1, now: now,
             offset: TimeZone.current.secondsFromGMT() / 60, version: profileVersion,
-            theme: desiredSnapshot?.appearance ?? .solitude, allowance: desiredSnapshot?.allowance,
+            theme: selectedTheme, allowance: desiredSnapshot?.allowance,
             brightness: brightness, hours: timeFormat.hours(), weather: weather, fahrenheit: weatherFahrenheit)
         // Clock passage does not trigger writes on every poll. Reconnection always
         // resyncs time, and changes in timezone/data/appearance update the profile.
@@ -967,7 +973,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         guard revision > 0 else { return }
         let payload = WatchWire.profile(owner: owner, revision: revision, now: now,
             offset: TimeZone.current.secondsFromGMT() / 60, version: profileVersion,
-            theme: desiredSnapshot?.appearance ?? .solitude, allowance: desiredSnapshot?.allowance,
+            theme: selectedTheme, allowance: desiredSnapshot?.allowance,
             brightness: brightness, hours: timeFormat.hours(), weather: weather, fahrenheit: weatherFahrenheit)
         sentProfileFingerprint = fingerprint
         profileWritePending = true

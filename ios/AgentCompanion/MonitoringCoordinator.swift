@@ -20,6 +20,7 @@ extension MonitoringActivity.ContentState {
         // The source worker renews this bounded ActivityKit lease while it runs.
         freshUntil = snapshot.observedAt + 300
         changedAt = snapshot.changedAt
+        themeID = ThemePreference.current.rawValue
     }
 }
 
@@ -76,6 +77,16 @@ final class MonitoringCoordinator: ObservableObject {
         for activity in Activity<MonitoringActivity>.activities { observe(activity) }
         Task { await registerStartTokens() }
         updateStatus()
+    }
+
+    func refreshTheme(_ family: ThemeFamily) async {
+        for activity in Activity<MonitoringActivity>.activities where activity.activityState == .active || activity.activityState == .stale {
+            var state = activity.content.state
+            state.themeID = family.rawValue
+            await activity.update(ActivityContent(state: state,
+                staleDate: activity.content.staleDate,
+                relevanceScore: activity.content.relevanceScore))
+        }
     }
 
     func reconcile(sources: [PairedSource], snapshots: [String: Snapshot], fresh: Set<String>) async {

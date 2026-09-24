@@ -3,11 +3,12 @@ import SwiftUI
 import WidgetKit
 
 struct MonitoringLiveActivity: Widget {
+    private var palette: MonitoringPalette { ThemePreference.current.activity }
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: MonitoringActivity.self) { context in
             MonitoringLockScreen(context: context)
-                .activityBackgroundTint(MonitoringPalette.background)
-                .activitySystemActionForegroundColor(MonitoringPalette.ink)
+                .activityBackgroundTint(palette.background)
+                .activitySystemActionForegroundColor(palette.ink)
                 .widgetURL(computerURL(context.attributes.sourceID))
         } dynamicIsland: { context in
             DynamicIsland {
@@ -20,25 +21,25 @@ struct MonitoringLiveActivity: Widget {
             } compactLeading: {
                 MonitoringRobot(state: context.state.dominantState)
                     .frame(width: 18, height: 18)
-                    .foregroundStyle(context.isStale ? MonitoringPalette.muted : MonitoringPalette.robotColor(for: context.state.dominantState))
+                    .foregroundStyle(context.isStale ? palette.muted : palette.robotColor(for: context.state.dominantState))
             } compactTrailing: {
                 if context.isStale {
                     Text("OLD").font(.system(.caption2, design: .rounded, weight: .bold))
-                        .foregroundStyle(MonitoringPalette.muted)
+                        .foregroundStyle(palette.muted)
                         .accessibilityLabel("Last known activity")
                 } else if context.state.needsInput > 0 {
                     Text("\(context.state.needsInput)!")
-                        .foregroundStyle(MonitoringPalette.input)
+                        .foregroundStyle(palette.input)
                         .accessibilityLabel(context.state.title)
                 } else {
                     Text("\(context.state.sessionCount)")
-                        .foregroundStyle(MonitoringPalette.ink)
+                        .foregroundStyle(palette.ink)
                         .accessibilityLabel(context.state.title)
                 }
             } minimal: {
                 MonitoringRobot(state: context.state.dominantState)
                     .frame(width: 18, height: 18)
-                    .foregroundStyle(context.isStale ? MonitoringPalette.muted : MonitoringPalette.robotColor(for: context.state.dominantState))
+                    .foregroundStyle(context.isStale ? palette.muted : palette.robotColor(for: context.state.dominantState))
             }
             .widgetURL(computerURL(context.attributes.sourceID))
         }
@@ -66,6 +67,7 @@ private struct MonitoringCard: View {
     let state: MonitoringActivity.ContentState
     let stale: Bool
     let compact: Bool
+    private var palette: MonitoringPalette { ThemePreference.current.activity }
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 9 : 11) {
@@ -77,11 +79,11 @@ private struct MonitoringCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .layoutPriority(1)
-                .foregroundStyle(MonitoringPalette.ink.opacity(0.82))
+                .foregroundStyle(palette.ink.opacity(0.82))
                 Spacer(minLength: 0)
                 Text("\(state.sessionCount) \(state.sessionCount == 1 ? "session" : "sessions")")
                     .fixedSize()
-                    .foregroundStyle(MonitoringPalette.muted)
+                    .foregroundStyle(palette.muted)
             }
             .font(.system(compact ? .caption2 : .caption, design: .rounded, weight: .medium))
             MonitoringStateLine(state: state, stale: stale, compact: compact)
@@ -95,16 +97,17 @@ private struct MonitoringStateLine: View {
     let state: MonitoringActivity.ContentState
     let stale: Bool
     let compact: Bool
+    private var palette: MonitoringPalette { ThemePreference.current.activity }
 
     var body: some View {
         HStack(spacing: compact ? 9 : 11) {
             MonitoringRobot(state: state.dominantState)
                 .frame(width: compact ? 25 : 31, height: compact ? 25 : 31)
-                .foregroundStyle(stale ? MonitoringPalette.muted : MonitoringPalette.robotColor(for: state.dominantState))
+                .foregroundStyle(stale ? palette.muted : palette.robotColor(for: state.dominantState))
                 .accessibilityHidden(true)
             Text(stale ? "Last known: \(state.title)" : state.title)
                 .font(.system(compact ? .headline : .title2, design: .rounded, weight: .semibold))
-                .foregroundStyle(stale ? MonitoringPalette.muted : MonitoringPalette.ink)
+                .foregroundStyle(stale ? palette.muted : palette.ink)
                 .lineLimit(compact ? 1 : 2)
                 .minimumScaleFactor(0.75)
             Spacer(minLength: 0)
@@ -116,6 +119,7 @@ private struct MonitoringDetails: View {
     let state: MonitoringActivity.ContentState
     let stale: Bool
     let compact: Bool
+    private var palette: MonitoringPalette { ThemePreference.current.activity }
 
     var body: some View {
         Group {
@@ -128,13 +132,13 @@ private struct MonitoringDetails: View {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 5) {
                         if state.sessionCount <= 6 {
-                            ForEach(0..<state.needsInput, id: \.self) { _ in light(MonitoringPalette.input) }
-                            ForEach(0..<state.working, id: \.self) { _ in light(MonitoringPalette.working) }
-                            ForEach(0..<state.finished, id: \.self) { _ in light(MonitoringPalette.finished) }
+                            ForEach(0..<state.needsInput, id: \.self) { _ in light(palette.input) }
+                            ForEach(0..<state.working, id: \.self) { _ in light(palette.working) }
+                            ForEach(0..<state.finished, id: \.self) { _ in light(palette.finished) }
                         } else {
-                            if state.needsInput > 0 { light(MonitoringPalette.input) }
-                            if state.working > 0 { light(MonitoringPalette.working) }
-                            if state.finished > 0 { light(MonitoringPalette.finished) }
+                            if state.needsInput > 0 { light(palette.input) }
+                            if state.working > 0 { light(palette.working) }
+                            if state.finished > 0 { light(palette.finished) }
                         }
                     }.accessibilityHidden(true)
                     Text(state.sessionSummary)
@@ -149,7 +153,7 @@ private struct MonitoringDetails: View {
             }
         }
         .font(.system(compact ? .caption2 : .caption, design: .rounded, weight: .medium))
-        .foregroundStyle(MonitoringPalette.muted)
+        .foregroundStyle(palette.muted)
     }
 
     private func light(_ color: Color) -> some View {

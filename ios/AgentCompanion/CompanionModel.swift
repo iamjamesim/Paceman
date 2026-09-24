@@ -114,23 +114,20 @@ final class CompanionModel: ObservableObject {
 
     /// Decorative watch previews may reflect current activity, never cached activity.
     var currentActivityState: ActivityState { watchAggregate?.state ?? .idle }
-    var preferredAppearance: CompanionTheme? {
-        return pairedSources.compactMap { paired -> CompanionTheme? in
-            guard let theme = snapshots[paired.sourceID]?.appearance, theme.valid else { return nil }
-            return theme
-        }.first
-    }
-
     private var watchAggregate: Snapshot? {
         guard !pairedSources.isEmpty else { return nil }
         let current = pairedSources.compactMap { paired -> Snapshot? in
             isFresh(paired.sourceID) ? snapshots[paired.sourceID] : nil
         }
         let profiles = pairedSources.compactMap { snapshots[$0.sourceID] }
-        let appearance = profiles.compactMap { $0.appearance }.first { $0.valid }
         let allowance = profiles.compactMap { $0.allowance }.first { $0.valid }
-        return WatchAggregate.make(current: current, appearance: appearance,
+        return WatchAggregate.make(current: current, appearance: nil,
                                    allowance: allowance, now: Date().timeIntervalSince1970)
+    }
+
+    func setTheme(_ family: ThemeFamily) {
+        watch.setTheme(family.glance)
+        Task { await monitoring.refreshTheme(family) }
     }
 
     private func forwardWatchAggregate() {

@@ -159,6 +159,15 @@ See pairing-and-removal.md for the watch ownership distinction and validation li
 
 ## Daily-use state contract
 
+Appearance is selected once in Settings and applies across every computer card.
+The app follows iPhone light/dark appearance for families with both variants;
+Sakura Mochi and Miasma remain dark. The watch illustration and Live Activity
+preview use the selected dark glance palette even when the phone is light.
+At home-tile size, Live Activities show a small status robot and text lines on
+the dark card; the tile's status reports availability, not an agent state. The
+custom watch shows a three-letter day, status-robot sample, and a dominant time
+without shrinking the full detail face.
+
 The normal screen does not turn temporary absence into setup work:
 
 | Situation | Computer card | Activity area | Watch card |

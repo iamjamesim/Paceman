@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class PresentationModel: ObservableObject {
     @Published private var nameRevision = 0
+    @Published private(set) var themeFamily: ThemeFamily
     let preview: Bool
     let previewScreen: String
     let neutralPreview: Bool
@@ -14,8 +15,11 @@ final class PresentationModel: ObservableObject {
         preview = args.contains("--design-preview")
         previewScreen = args.first(where: { $0.hasPrefix("--screen=") }).map { String($0.dropFirst(9)) } ?? "activity"
         neutralPreview = args.contains("--neutral")
+        let previewTheme = args.first(where: { $0.hasPrefix("--theme=") }).map { String($0.dropFirst(8)) }
+        themeFamily = preview ? ThemeFamily(rawValue: previewTheme ?? "") ?? .paceman : ThemePreference.current
         #else
         preview = false; previewScreen = "activity"; neutralPreview = false
+        themeFamily = ThemePreference.current
         #endif
         if !preview, let source = PairedSourcesStore().load().first {
             ComputerPreferences.migrateLegacy(to: source.sourceID)
@@ -52,9 +56,13 @@ final class PresentationModel: ObservableObject {
                 AgentSession(id: "2", provider: "claude", state: .working, name: "API cleanup", project: "paceman"),
                 AgentSession(id: "3", provider: "codex", state: .finished, name: "Update watch theme", project: "omarchy-watch")]
     }
-    func theme(source: CompanionTheme?) -> CompanionTheme {
-        if preview { return neutralPreview || !previewHasComputer ? .companion : .rose }
-        return source?.valid == true ? source! : .companion
+    func theme(dark: Bool) -> CompanionTheme { themeFamily.phone(dark: dark) }
+    func selectTheme(_ family: ThemeFamily, model: CompanionModel) {
+        guard family != themeFamily else { return }
+        themeFamily = family
+        guard !preview else { return }
+        ThemePreference.save(family)
+        model.setTheme(family)
     }
     func displayName(source: PairedSource?) -> String {
         if preview, source?.endpoint.host == "macbook.example.ts.net" {

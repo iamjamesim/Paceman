@@ -29,14 +29,15 @@ struct AgentCompanionApp: App {
     }
 }
 
-enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, pairing, notifications, watchNotifications, watchTroubleshooting, settings, weather, diagnostics }
+enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, pairing, notifications, watchNotifications, watchTroubleshooting, settings, appearance, weather, diagnostics }
 
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
     @State private var path: [FeedDestination] = []
     @State private var focusedSourceID: String?
-    var theme: CompanionTheme { presentation.theme(source: model.preferredAppearance) }
+    @Environment(\.colorScheme) private var colorScheme
+    var theme: CompanionTheme { presentation.theme(dark: !presentation.themeFamily.supportsLight || colorScheme == .dark) }
     var body: some View {
         NavigationStack(path: $path) {
             CompanionHome(model: model, monitoring: model.monitoring, presentation: presentation,
@@ -47,18 +48,20 @@ struct CompanionRoot: View {
                     case .otherComputer(let id): ComputerDetail(model: model, presentation: presentation, theme: theme, sourceID: id)
                     case .liveActivities: LiveActivitiesDetail(model: model, monitoring: model.monitoring,
                         presentation: presentation, theme: theme)
-                    case .watch: WatchDetail(model: model, theme: theme, preview: presentation.preview, previewConnected: presentation.previewHasWatch, previewPhase: presentation.previewWatchPhase, previewComplete: presentation.previewScreen == "watch-complete", previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen) ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") { path.append(.watchNotifications) }
+                    case .watch: WatchDetail(model: model, theme: theme, watchTheme: presentation.themeFamily.glance, preview: presentation.preview, previewConnected: presentation.previewHasWatch, previewPhase: presentation.previewWatchPhase, previewComplete: presentation.previewScreen == "watch-complete", previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen) ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") { path.append(.watchNotifications) }
                     case .pairing: PairingFlow(model: model, theme: theme, preview: presentation.preview)
                     case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview)
                     case .watchNotifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview) { path = [] }
                     case .watchTroubleshooting: WatchUpdateTroubleshooting(model: model, theme: theme, preview: presentation.preview)
                     case .settings: CompanionSettings(model: model, presentation: presentation, theme: theme)
+                    case .appearance: AppearanceSettings(model: model, presentation: presentation, theme: theme)
                     case .diagnostics: TransportDiagnostics(model: model)
                     case .weather: WeatherSettings(weather: model.weather, theme: theme)
                     }
                 }
         }
-        .tint(theme.tint).preferredColorScheme(theme.dark ? .dark : .light)
+        .tint(theme.tint)
+        .preferredColorScheme(presentation.themeFamily.supportsLight ? nil : .dark)
         .onAppear {
             guard presentation.preview else { return }
             switch presentation.previewScreen {
@@ -73,6 +76,7 @@ struct CompanionRoot: View {
                 #endif
                 path = [.watch]
             case "settings": path = [.settings]
+            case "appearance": path = [.settings, .appearance]
             case "live-activities", "multi-live-activities", "live-activities-setup", "live-activities-off": path = [.liveActivities]
             case "pairing", "reconnect": path = [.pairing]
             case "notifications": path = [.notifications]

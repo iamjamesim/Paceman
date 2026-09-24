@@ -15,6 +15,9 @@ struct MonitoringActivity: ActivityAttributes {
         var freshUntil: Double
         // Optional so an activity created by an earlier build still decodes.
         var changedAt: Double? = nil
+        // A local palette change refreshes the visible view without changing
+        // the computer-owned activity state. Remote updates may omit this.
+        var themeID: String? = nil
         var sessionCount: Int { working + needsInput + finished }
         // Keep fresh input prominent, but a newer working activity can overtake
         // an old one once its five-minute freshness lease has expired.

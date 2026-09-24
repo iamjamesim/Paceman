@@ -39,6 +39,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(state.sessionSummary, "2 need input · 3 working · 1 finished")
         XCTAssertEqual(state.sessionCount, 6)
         XCTAssertNil(state.changedAt)
+        XCTAssertNil(state.themeID)
         XCTAssertEqual(state.relevanceScore, (state.observedAt + 240) / 10_000_000)
         XCTAssertEqual(state.revision, 42)
         XCTAssertEqual(state.freshUntil - state.observedAt, 30)
@@ -769,6 +770,45 @@ final class ProtocolTests: XCTestCase {
                 XCTAssertEqual(WatchWire.read32(Array(packet), at: 95), 1800086400)
             }
         }
+    }
+
+    func testThemeFamiliesResolveAndEncodeWatchColorsIndependentlyOfSource() {
+        XCTAssertEqual(ThemeFamily.allCases.count, 6)
+        for family in ThemeFamily.allCases {
+            let light = family.phone(dark: false)
+            let dark = family.phone(dark: true)
+            XCTAssertEqual(light.dark, !family.supportsLight, family.name)
+            XCTAssertTrue(dark.dark, family.name)
+            XCTAssertTrue(family.glance.dark, family.name)
+            XCTAssertTrue(light.valid && dark.valid && family.glance.valid, family.name)
+            XCTAssertGreaterThanOrEqual(light.secondaryOpacity, 0.5, family.name)
+            XCTAssertLessThanOrEqual(light.secondaryOpacity, 1, family.name)
+
+            let watch = family.glance
+            let packet = WatchWire.profile(owner: UUID(), revision: 1,
+                now: Date(timeIntervalSince1970: 1800000000), offset: 0,
+                version: 3, theme: watch)
+            func rgb(_ value: String) -> [UInt8] {
+                let n = CompanionTheme.hex(value)!
+                return [UInt8((n >> 16) & 255), UInt8((n >> 8) & 255), UInt8(n & 255)]
+            }
+            XCTAssertEqual(Array(packet[36..<42]), rgb(watch.background) + rgb(watch.foreground), family.name)
+            XCTAssertEqual(Array(packet[81..<84]), rgb(watch.accent), family.name)
+        }
+        XCTAssertEqual(ThemeFamily.sakuraMochi.phone(dark: false), ThemeFamily.sakuraMochi.phone(dark: true))
+        XCTAssertEqual(ThemeFamily.miasma.phone(dark: false), ThemeFamily.miasma.phone(dark: true))
+        XCTAssertNotEqual(ThemeFamily.ayu.phone(dark: false), ThemeFamily.ayu.phone(dark: true))
+    }
+
+    func testThemePreferenceFallsBackForUnknownFamily() {
+        let suite = "theme-test-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(ThemePreference.load(from: defaults), .paceman)
+        defaults.set("future-theme", forKey: ThemePreference.key)
+        XCTAssertEqual(ThemePreference.load(from: defaults), .paceman)
+        defaults.set(ThemeFamily.catppuccin.rawValue, forKey: ThemePreference.key)
+        XCTAssertEqual(ThemePreference.load(from: defaults), .catppuccin)
     }
 
     func testLegacyAllowanceExpiresWhileV5RetainsHistoryWithoutRefill() {

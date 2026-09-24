@@ -59,7 +59,7 @@ struct WeatherSettings: View {
                             }
                         }
                     }
-                }.foregroundStyle(theme.ink.opacity(0.65))
+                }.foregroundStyle(theme.secondaryInk)
             }
             if weather.preferences.enabled {
                 Section {
@@ -135,7 +135,7 @@ private struct WeatherPlaceSearch: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(result.title).foregroundStyle(theme.ink)
                             if !result.subtitle.isEmpty {
-                                Text(result.subtitle).font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
+                                Text(result.subtitle).font(.subheadline).foregroundStyle(theme.secondaryInk)
                             }
                         }.padding(.vertical, 4)
                     }
@@ -143,7 +143,7 @@ private struct WeatherPlaceSearch: View {
                     .listRowBackground(Color.clear)
                 }
                 if let message = search.message {
-                    Text(message).font(.subheadline).foregroundStyle(theme.ink.opacity(0.65))
+                    Text(message).font(.subheadline).foregroundStyle(theme.secondaryInk)
                         .listRowBackground(Color.clear).listRowSeparator(.hidden)
                 }
             }

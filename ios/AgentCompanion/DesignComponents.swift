@@ -59,22 +59,73 @@ struct StatusPill: View {
     }
 }
 
-/// A miniature Live Activity card, rather than a Dynamic Island or Apple Watch glyph.
+/// A miniature dark Live Activity card with the same status-robot artwork used
+/// in actual activities. The surrounding tile reports availability separately.
 struct LiveActivityGlyph: View {
     let theme: CompanionTheme
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 9)
-                .strokeBorder(theme.tint, lineWidth: 1.6)
+                .fill(theme.canvas)
+                .overlay(RoundedRectangle(cornerRadius: 9)
+                    .strokeBorder(theme.ink.opacity(0.25), lineWidth: 0.6))
                 .frame(width: 35, height: 28)
             HStack(spacing: 3) {
-                PacemanMark().frame(width: 11, height: 11)
+                Image("Robot-excited").renderingMode(.template).resizable().scaledToFit()
+                    .frame(width: 11, height: 11).foregroundStyle(theme.tint)
                 VStack(alignment: .leading, spacing: 3) {
-                    Capsule().frame(width: 11, height: 2)
-                    Capsule().frame(width: 8, height: 2).opacity(0.5)
+                    Capsule().fill(theme.ink).frame(width: 11, height: 2)
+                    Capsule().fill(theme.ink.opacity(0.55)).frame(width: 8, height: 2)
                 }
-            }.foregroundStyle(theme.tint)
+            }
         }.frame(width: 37, height: 43).accessibilityHidden(true)
+    }
+}
+
+/// A compact watch face for destination rows. Show the real clock at a legible
+/// scale; the detailed face belongs on the watch screen.
+struct WatchGlyph: View {
+    let theme: CompanionTheme
+    var timeFormat = WatchTimeFormat.system
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color(companionHex: "303330"))
+                .frame(width: 14, height: 43)
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(companionHex: "424742"))
+                .frame(width: 32, height: 33)
+            RoundedRectangle(cornerRadius: 6)
+                .fill(theme.canvas)
+                .frame(width: 28, height: 29)
+            TimelineView(.everyMinute) { context in
+                VStack(alignment: .leading, spacing: 1.5) {
+                    HStack(spacing: 0) {
+                        Text(formatted(context.date, "EEE").uppercased())
+                            .font(.custom("JetBrainsMono-Regular", size: 4.5))
+                            .foregroundStyle(theme.ink.opacity(0.6))
+                        Spacer(minLength: 0)
+                        Image("Robot-excited").renderingMode(.template).resizable().scaledToFit()
+                            .frame(width: 6, height: 6).foregroundStyle(theme.tint)
+                    }.frame(height: 6)
+                    Text(formatted(context.date, timeFormat.hours() == 12 ? "h:mm" : "HH:mm"))
+                        .font(.custom("JetBrainsMono-Regular", size: 10))
+                        .tracking(-0.6)
+                        .foregroundStyle(theme.tint)
+                        .lineLimit(1).minimumScaleFactor(0.75)
+                }
+                .frame(width: 24, alignment: .leading)
+            }
+        }
+        .frame(width: 32, height: 43)
+        .dynamicTypeSize(.medium)
+        .accessibilityHidden(true)
+    }
+    private func formatted(_ date: Date, _ format: String) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = format
+        return formatter.string(from: date)
     }
 }
 
