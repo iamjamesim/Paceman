@@ -1,8 +1,9 @@
 # Paceman themes: design study and build map
 
 Status: six-family picker implemented in the iPhone app. The selected theme
-belongs to the phone. Physical watch color delivery and remote Live Activity
-repainting still require hardware acceptance checks.
+belongs to the phone. The user has confirmed that theme changes appear on the
+physical custom watch and a visible Live Activity. A full per-family pass and
+the suspended remote-start path remain separate acceptance checks.
 
 ## What the references teach
 
@@ -197,6 +198,8 @@ connected, empty, stale, and multiple-computer screens listed above were
 unchanged by this picker refinement. The revised app was
 installed and launched on the paired iPhone.
 
-Still to confirm on hardware: App Group repaint of a remotely started Live
-Activity while the app is suspended, and accepted/watch-visible BLE colors for
-each family. Those checks require a running source and paired physical watch.
+The user confirmed on 24 September that selected themes adapt on the physical
+custom watch and visible Live Activity. This confirms the normal propagation
+path. Still to check separately: all six families on watch hardware, and a
+remotely started Live Activity repainting after a selection change while the
+app is suspended.
