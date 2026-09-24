@@ -33,11 +33,11 @@ explanation; one computer's registration does not block another's activity.
 
 The source APNs payload contains source identity, state counts, revision and
 freshness, not task names, project paths, prompts or transcripts. The Live
-Activity uses a fixed matte-black surface with warm text and restrained
-Everforest-inspired state lights, plus the app's robot glyph. The robot
-uses amber for input, a softer green for working, and a muted tone for finished;
-this keeps the compact Island's state visible even with one session. The in-app
-preview shares these colors. The header gives the computer and session count.
+Activity uses the phone-selected family's dark glance surface and ink. Its
+prominent robot uses that family's accent, matching the custom watch; finished
+robots soften and stale content is muted. Small session lights retain separate
+state colors. The in-app preview shares the same palette. The header gives the
+computer and session count.
 One session shows how long it has held its current state; multiple sessions
 show their state distribution as lights and counts. The expanded Island uses
 its full-width bottom region for that same hierarchy so ordinary computer

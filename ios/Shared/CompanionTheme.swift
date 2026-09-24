@@ -149,6 +149,7 @@ enum ThemePreference {
 struct MonitoringPalette {
     let background: Color
     let ink: Color
+    let accent: Color
     let muted: Color
     let input: Color
     let working: Color
@@ -157,6 +158,7 @@ struct MonitoringPalette {
     init(base: CompanionTheme, muted: String, input: String, working: String, finished: String) {
         background = base.canvas
         ink = base.ink
+        accent = base.tint
         self.muted = Color(companionHex: muted)
         self.input = Color(companionHex: input)
         self.working = Color(companionHex: working)
@@ -164,10 +166,6 @@ struct MonitoringPalette {
     }
 
     func robotColor(for state: String) -> Color {
-        switch state {
-        case "needs_input": input
-        case "working": working
-        default: finished
-        }
+        state == "finished" ? accent.opacity(0.75) : accent
     }
 }

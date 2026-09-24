@@ -117,7 +117,9 @@ adapted. This is not a byte-for-byte port. Bundled notices are in
 `ios/Resources/ThemeLicenses.txt`.
 
 The colored phone and Live Activity palettes retain status roles distinct from
-decorative accents. Monochrome carries state through words, robot forms,
+the family accent. In Live Activities, the prominent robot uses the family accent
+like the custom watch; small session lights retain their state colors. Stale
+activity is muted, and finished robots use a softer accent. Monochrome carries state through words, robot forms,
 weight, and position, with grayscale intensity only. The phone and Live
 Activity must never require hue recognition. Actual display,
 reduced-luminance, increased-contrast, and color-vision checks remain necessary.
