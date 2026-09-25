@@ -59,6 +59,12 @@ startup and service restarts. Original allowance timestamps remain unchanged, so
 the watch can show cached history and then `AWAITING UPDATE` after the real reset;
 retention never invents fresh quota.
 
+On macOS, the optional Codex CLI App Server query reads ChatGPT account limits
+every five minutes while the source runs. Paceman keeps only the reduced
+allowance in the current source event; it stores no account identifier or auth
+token. Failed queries clear the Mac's reported allowance. The watch's selection
+across multiple sources is a display choice, not account-level merging.
+
 ## Disruption contract
 
 | Event | Activity | Theme and allowance | Recovery trigger |
@@ -67,7 +73,7 @@ retention never invents fresh quota.
 | Phone process restarts | Restore only as historical/stale | Restore protected cache | App lifecycle and Bluetooth restoration |
 | Watch disconnects while powered | Keep current activity in RAM | Keep its NVS profile | Core Bluetooth reconnect and profile reconciliation |
 | Watch loses power | Start without stale activity | Restore its NVS profile when RTC is trustworthy | Core Bluetooth reconnect and current snapshot fetch |
-| Desktop restarts | Reconcile live processes | Restore current SQLite event | Source startup reconciliation |
+| Desktop restarts | Omarchy reconciles live processes; Mac clears hook-only sessions until a new hook | Restore current SQLite event; Mac refreshes its optional allowance | Source startup reconciliation |
 | Source access is revoked | Clear | Clear | New pairing required |
 | User removes the source | Clear | Clear | New pairing required |
 

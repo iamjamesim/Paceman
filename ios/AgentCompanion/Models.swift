@@ -35,6 +35,21 @@ struct Snapshot: Codable {
 }
 
 enum WatchAggregate {
+    static func selectAllowance(current: [Snapshot], profiles: [Snapshot], now: Double) -> CodexAllowance? {
+        func recent(_ snapshot: Snapshot) -> CodexAllowance? {
+            guard let value = snapshot.allowance, value.valid,
+                  Double(value.updatedAt) <= now,
+                  now - Double(value.updatedAt) <= 1800,
+                  Double(value.resetsAt) > now else { return nil }
+            return value
+        }
+        // Prefer a reading from a connected computer. Pairing order breaks ties,
+        // rather than whichever agent happened to change state most recently.
+        return current.compactMap(recent).first
+            ?? profiles.compactMap(recent).first
+            ?? profiles.compactMap(\.allowance).first { $0.valid }
+    }
+
     static func make(current: [Snapshot], appearance: CompanionTheme?,
                      allowance: CodexAllowance?, now: Double) -> Snapshot {
         let priority: [ActivityState: Int] = [.needsInput: 0, .working: 1, .finished: 2, .idle: 3]

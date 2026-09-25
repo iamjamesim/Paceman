@@ -120,7 +120,8 @@ final class CompanionModel: ObservableObject {
             isFresh(paired.sourceID) ? snapshots[paired.sourceID] : nil
         }
         let profiles = pairedSources.compactMap { snapshots[$0.sourceID] }
-        let allowance = profiles.compactMap { $0.allowance }.first { $0.valid }
+        let allowance = WatchAggregate.selectAllowance(current: current, profiles: profiles,
+                                                       now: Date().timeIntervalSince1970)
         return WatchAggregate.make(current: current, appearance: nil,
                                    allowance: allowance, now: Date().timeIntervalSince1970)
     }

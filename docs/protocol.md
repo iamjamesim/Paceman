@@ -195,9 +195,13 @@ against the last successfully written content. Clock passage alone does not caus
 writes on every source poll; reconnect synchronizes time again. Original allowance
 observation/reset timestamps are never replaced by transmission time.
 
-Omarchy snapshots may include `allowance` with provider `codex`, remaining (0–100),
+Omarchy and Mac snapshots may include `allowance` with provider `codex`, remaining (0–100),
 window (1 weekly, 2 session), updatedAt and resetsAt (Unix seconds). Missing/invalid
-records produce null. This is source-scoped, not verified account identity.
+records produce null. This is source-scoped, not verified account identity. The
+Mac source uses the read-only Codex App Server account limits API when a locally
+authenticated CLI is available; unavailable or unsupported data is `null`. The
+watch chooses a recent connected-source reading first and keeps last-known
+history if none is current.
 Allowance-only changes advance revision without changing activity eventID or
 triggering APNs activity alerts. Profile v4 receives unavailable after staleness or
 reset; v5 preserves historical values for the firmware's local expiry rules.

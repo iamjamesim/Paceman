@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import socket
 import sqlite3
@@ -7,7 +8,9 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
+from service.codex_limits import parse_codex_allowance, read_codex_allowance
 from service.hub import Store
 from service.macos import MacSource
 from service.push import live_notification
@@ -15,6 +18,79 @@ from macos.codex_hook import workspace_label
 
 
 class MacSourceTests(unittest.TestCase):
+    def test_mac_allowance_is_presentation_only(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            allowance = {"provider": "codex", "remaining": 68, "window": 1,
+                         "updatedAt": 1780000000, "resetsAt": 1780600000}
+            with MacSource(store, socket_path=root / "hook.sock",
+                           allowance_reader=lambda: allowance) as source:
+                initial = store.snapshot()
+                source.tick()
+                source.allowance_thread.join(timeout=2)
+                updated = store.snapshot()
+                self.assertEqual(updated["allowance"], allowance)
+                self.assertEqual(updated["eventID"], initial["eventID"])
+                self.assertGreater(updated["revision"], initial["revision"])
+                self.assertEqual(updated["state"], "idle")
+
+    def test_mac_allowance_missing_clears_without_new_activity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            with MacSource(store, socket_path=root / "hook.sock",
+                           allowance_reader=lambda: None) as source:
+                source.allowance = {"provider": "codex", "remaining": 10, "window": 2,
+                                    "updatedAt": 1780000000, "resetsAt": 1780000300}
+                source.publish_current()
+                previous = store.snapshot()
+                source.tick()
+                source.allowance_thread.join(timeout=2)
+                updated = store.snapshot()
+                self.assertIsNone(updated["allowance"])
+                self.assertEqual(updated["eventID"], previous["eventID"])
+
+    def test_codex_limits_parser_selects_most_depleted_window(self):
+        now = 1780000000
+        limits = {"rateLimitsByLimitId": {"codex": {"limitId": "codex",
+            "primary": {"usedPercent": 25, "windowDurationMins": 300, "resetsAt": now + 1000},
+            "secondary": {"usedPercent": 61, "windowDurationMins": 10080, "resetsAt": now + 5000}}}}
+        self.assertEqual(parse_codex_allowance(limits, now),
+                         {"provider": "codex", "remaining": 39, "window": 1,
+                          "updatedAt": now, "resetsAt": now + 5000})
+        limits["rateLimitsByLimitId"]["codex"]["secondary"]["usedPercent"] = 101
+        self.assertIsNone(parse_codex_allowance(limits, now))
+        limits["rateLimitsByLimitId"]["codex"]["secondary"]["usedPercent"] = 61
+        limits["rateLimitsByLimitId"]["codex"]["secondary"]["resetsAt"] = now - 1
+        self.assertIsNone(parse_codex_allowance(limits, now))
+
+    def test_codex_limit_reader_uses_only_chatgpt_account(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = Path(temporary) / "codex"
+            binary.write_text("#!/usr/bin/env python3\n"
+                "import json, os, sys, time\n"
+                "for line in sys.stdin:\n"
+                " msg=json.loads(line)\n"
+                " if msg.get('id') == 1: result={'userAgent': 'test'}\n"
+                " elif msg.get('id') == 2: result={'account': {'type': os.getenv('FAKE_ACCOUNT_TYPE', 'chatgpt')}}\n"
+                " elif msg.get('id') == 3: result={'rateLimits': {'limitId': 'codex', "
+                "'primary': {'usedPercent': 20, 'windowDurationMins': 300, "
+                "'resetsAt': int(time.time()) + 300}}}\n"
+                " else: continue\n"
+                " print(json.dumps({'id': msg['id'], 'result': result}), flush=True)\n")
+            binary.chmod(0o700)
+            with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": str(binary)}):
+                value = read_codex_allowance()
+            self.assertEqual(value["provider"], "codex")
+            self.assertEqual(value["remaining"], 80)
+            self.assertEqual(value["window"], 2)
+            with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": str(binary),
+                                              "FAKE_ACCOUNT_TYPE": "apiKey"}):
+                self.assertIsNone(read_codex_allowance())
+
     def test_lifecycle_and_multiple_sessions(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

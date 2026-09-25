@@ -41,10 +41,10 @@ card, computer detail, and Live Activity. Before the first snapshot, show the
 paired host's first label; do not guess a hardware model from it.
 
 Each computer fetches and caches independently. The watch combines only fresh
-activity by urgency across all sources. Appearance and allowance each use the
-first paired source with a valid value as a stable default, whether or not that
-computer is currently active; removing it selects the next valid value. Live
-Activities are independently owned by their source computers.
+activity by urgency across all sources. Allowance prefers a recent reading from
+a connected source in pairing order, then a recent paired-source reading, then
+cached history. It does not merge accounts. Live Activities are independently
+owned by their source computers.
 The old primary/additional storage keys migrate into one ordered list. The first
 entry is only the default position for legacy single-computer navigation.
 

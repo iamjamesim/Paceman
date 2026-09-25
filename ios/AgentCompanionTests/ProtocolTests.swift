@@ -7,6 +7,22 @@ import MapKit
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    func testWatchAllowancePrefersFreshConnectedSourceThenCachedHistory() {
+        let now = 1_790_000_000.0
+        func source(_ id: String, updated: Int64, reset: Int64, remaining: Int) -> Snapshot {
+            Snapshot(schema: 1, sourceID: id, generation: "generation", revision: 1,
+                     sourceName: id, mode: "macos", observedAt: now, changedAt: now,
+                     freshFor: 30, state: .idle, eventID: "1", appearance: nil,
+                     allowance: CodexAllowance(provider: "codex", remaining: remaining, window: 1,
+                                               updatedAt: updated, resetsAt: reset), sessions: nil)
+        }
+        let older = source("linux", updated: Int64(now) - 4000, reset: Int64(now) + 100, remaining: 5)
+        let mac = source("mac", updated: Int64(now) - 60, reset: Int64(now) + 900, remaining: 80)
+        XCTAssertEqual(WatchAggregate.selectAllowance(current: [mac], profiles: [older, mac], now: now)?.remaining, 80)
+        XCTAssertEqual(WatchAggregate.selectAllowance(current: [], profiles: [older, mac], now: now)?.remaining, 80)
+        XCTAssertEqual(WatchAggregate.selectAllowance(current: [], profiles: [older], now: now)?.remaining, 5)
+    }
+
     func testWatchAggregateChoosesFreshAttentionAcrossComputers() {
         func source(_ id: String, _ state: ActivityState, _ changed: Double) -> Snapshot {
             Snapshot(schema: 1, sourceID: id, generation: "generation", revision: 1,

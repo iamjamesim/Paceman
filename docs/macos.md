@@ -197,9 +197,20 @@ live Codex desktop and ChatGPT Work acceptance pass. Official OpenAI docs descri
 hooks in the Codex runtime for Codex and ChatGPT Work; they do not establish
 ordinary Chat coverage. Hook scripts also need to exist where the work runs.
 
-The Mac source does not currently supply an Omarchy palette or Codex allowance.
-The watch profile takes each durable field from the first paired source with a
-valid value, keeping the appearance stable as computers become active or idle.
+The Mac source supplies Codex allowance when an executable Codex CLI is available
+and signed in to a ChatGPT account. Every five minutes while the source runs, a
+short-lived local App Server process reads `account/read` and
+`account/rateLimits/read`; it never starts a task, signs in, reads transcripts,
+or sends account details to the phone. It selects the most depleted recognized
+Codex window and sends only remaining percentage, window type, observation time,
+and reset time. If the CLI or limits are unavailable, allowance is unknown.
+The installed background process checks the CLI on its PATH, the standard
+Homebrew paths, or `PACEMAN_CODEX_BIN` if set in its environment. The account
+used by a separately installed CLI may differ from the Codex desktop app's
+account; Paceman cannot verify that the accounts match. An Omarchy palette is
+not supplied because themes are chosen on the phone. The watch prefers a recent
+allowance from a connected source, then a recent paired-source reading, then
+cached history. Readings have no cross-computer account identity.
 The menu bar shows observed hook sessions; Linux's
 process-verified counts have a stronger liveness guarantee.
 

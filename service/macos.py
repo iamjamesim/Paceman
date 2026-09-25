@@ -19,6 +19,8 @@ import threading
 import time
 import unicodedata
 
+from service.codex_limits import read_codex_allowance
+
 
 EVENT_STATES = {
     "started": "idle", "working": "working", "needs-input": "needs_input",
@@ -45,7 +47,8 @@ class HookHandler(socketserver.StreamRequestHandler):
 
 
 class MacSource:
-    def __init__(self, store, *, socket_path: Path, computer_name: str | None = None):
+    def __init__(self, store, *, socket_path: Path, computer_name: str | None = None,
+                 allowance_reader=read_codex_allowance):
         self.store = store
         self.socket_path = socket_path
         self.computer_name = (computer_name or socket.gethostname()).split(".")[0][:80]
@@ -54,6 +57,11 @@ class MacSource:
         self.thread = None
         self.socket_inode = None
         self.last_event_at = 0
+        self.allowance_reader = allowance_reader
+        self.allowance = None
+        self.allowance_thread = None
+        self.next_allowance_at = 0.0
+        self.closed = False
 
     def __enter__(self):
         self.socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -120,9 +128,13 @@ class MacSource:
         return self
 
     def __exit__(self, *_):
+        with self.lock:
+            self.closed = True
         if self.thread is not None:
             self.server.shutdown()
             self.thread.join(timeout=2)
+        if self.allowance_thread is not None:
+            self.allowance_thread.join(timeout=2)
         if self.server is not None:
             self.server.server_close()
         try:
@@ -176,7 +188,23 @@ class MacSource:
     def tick(self):
         # Hook lifecycle events own session state. Elapsed time alone is not
         # evidence that an open Codex conversation has ended.
-        pass
+        with self.lock:
+            if self.closed or time.monotonic() < self.next_allowance_at:
+                return
+            self.next_allowance_at = time.monotonic() + 300
+            self.allowance_thread = threading.Thread(target=self._refresh_allowance, daemon=True)
+            self.allowance_thread.start()
+
+    def _refresh_allowance(self):
+        try:
+            allowance = self.allowance_reader()
+        except Exception:
+            allowance = None
+        with self.lock:
+            if self.closed:
+                return
+            self.allowance = allowance
+            self.publish_current()
 
     def publish_current(self):
         with self.lock, self.store.connect() as db:
@@ -198,7 +226,7 @@ class MacSource:
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         old = json.loads(last["payload"]) if last["payload"] else {}
         payload = {"sourceName": self.computer_name, "mode": "macos", "state": state,
-                   "sessions": sessions, "sessionLiveness": "hook"}
+                   "sessions": sessions, "sessionLiveness": "hook", "allowance": self.allowance}
         if old_key and old_key[0] == activity_key and all(old.get(k) == v for k, v in payload.items()):
             return False
         changed = not old_key or old_key[0] != activity_key
