@@ -246,6 +246,15 @@ a long name, active work with a missing hook, sharing off, and source stopped.
 The no-event guidance was also checked at an accessibility text size. The
 installed menu-bar popover itself remains a hands-on visual check.
 
+On 2026-09-24, the source and signed iPhone app were updated without resetting
+the Mac's phone pairing or previously reviewed hooks. The Mac source published
+a fresh Codex allowance through the bundled desktop runtime; a later phone fetch
+was observed, and the user confirmed the physical watch showed a current CODEX
+allowance. A fresh local Codex task advanced `lastAgentEventAt`, and APNs accepted
+new notification and Live Activity sends with status 200. The user also confirmed
+a new Mac Paceman notification appeared on the iPhone. Allowance reset,
+unavailable, and clean desktop-only installations still need acceptance tests.
+
 The daily-use check registered the signed menu app as an Open at Login item and
 verified that its registration can be turned off and back on without stopping
 the source. The one Paceman background agent, existing phone pairing, private
