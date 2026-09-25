@@ -21,7 +21,7 @@ struct MonitoringLiveActivity: Widget {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } compactLeading: {
-                MonitoringRobot(state: context.state.dominantState)
+                MonitoringRobot(state: context.state.dominantState, animate: !context.isStale)
                     .frame(width: 18, height: 18)
                     .foregroundStyle(context.isStale ? palette.muted : palette.robotColor(for: context.state.dominantState))
             } compactTrailing: {
@@ -40,7 +40,7 @@ struct MonitoringLiveActivity: Widget {
                         .accessibilityLabel(context.state.title)
                 }
             } minimal: {
-                MonitoringRobot(state: context.state.dominantState)
+                MonitoringRobot(state: context.state.dominantState, animate: !context.isStale)
                     .frame(width: 18, height: 18)
                     .foregroundStyle(context.isStale ? palette.muted : palette.robotColor(for: context.state.dominantState))
             }
@@ -131,7 +131,7 @@ private struct MonitoringStateLine: View {
 
     var body: some View {
         HStack(spacing: compact ? 9 : 11) {
-            MonitoringRobot(state: state.dominantState)
+            MonitoringRobot(state: state.dominantState, animate: !stale)
                 .frame(width: compact ? 25 : 31, height: compact ? 25 : 31)
                 .foregroundStyle(stale ? palette.muted : palette.robotColor(for: state.dominantState))
                 .accessibilityHidden(true)

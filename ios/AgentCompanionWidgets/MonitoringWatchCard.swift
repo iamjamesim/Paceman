@@ -14,7 +14,7 @@ struct MonitoringWatchCard: View {
     var body: some View {
         HStack(spacing: 7) {
             if !dynamicTypeSize.isAccessibilitySize {
-                MonitoringRobot(state: state.dominantState)
+                MonitoringRobot(state: state.dominantState, animate: !stale)
                     .frame(width: 23, height: 23)
                     .foregroundStyle(stale ? palette.muted : palette.robotColor(for: state.dominantState))
             }
@@ -47,6 +47,27 @@ struct MonitoringWatchCard: View {
 
 struct MonitoringRobot: View {
     let state: String
+    let animate: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isLuminanceReduced) private var isLuminanceReduced
+
+    private var stateTransition: AnyTransition {
+        guard animate && !reduceMotion && !isLuminanceReduced else { return .identity }
+        let duration: Double
+        switch state {
+        case "working", "finished": duration = 2
+        case "needs_input": duration = 1
+        default: return .identity
+        }
+        return .asymmetric(
+            insertion: .modifier(
+                active: MonitoringRobotMotion(state: state, progress: 0),
+                identity: MonitoringRobotMotion(state: state, progress: 1)
+            ).animation(.linear(duration: duration)),
+            removal: .opacity.animation(.easeOut(duration: 0.2))
+        )
+    }
 
     var body: some View {
         Group {
@@ -54,8 +75,43 @@ struct MonitoringRobot: View {
             else { PacemanMark(expression: state == "finished" ? .finished : state == "needs_input" ? .needsInput : .neutral) }
         }
         .id(state)
-        .transition(.opacity.combined(with: .scale(scale: 0.86)))
+        .transition(stateTransition)
         .accessibilityHidden(true)
+    }
+}
+
+/// ActivityKit permits one brief animation per content update, so each state
+/// plays one complete cycle and returns to its resting pose within two seconds.
+private struct MonitoringRobotMotion: ViewModifier, Animatable {
+    let state: String
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let phase = Double(progress)
+        let sway = sin(2 * .pi * phase)
+        let bounce: Double
+        if phase < 0.32 {
+            bounce = ease(phase / 0.32)
+        } else if phase < 0.64 {
+            bounce = 1 - ease((phase - 0.32) / 0.32)
+        } else {
+            bounce = 0
+        }
+
+        return content
+            .opacity(state == "working" ? 1 - (1 - 100.0 / 255.0) * (1 - cos(2 * .pi * phase)) / 2 : 1)
+            .offset(x: state == "finished" ? 2 * sway : 0,
+                    y: state == "needs_input" ? -3 * bounce : 0)
+            .rotationEffect(.degrees(state == "finished" ? 4 * sway : 0))
+    }
+
+    private func ease(_ value: Double) -> Double {
+        (1 - cos(.pi * value)) / 2
     }
 }
 
