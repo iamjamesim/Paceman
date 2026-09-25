@@ -17,13 +17,11 @@ For a grouped provider row, keep its session count in the name and show the
 state distribution below only when those sessions have different states.
 Historical robots are still and muted. No received activity is not historical activity.
 Background transport registration and alert permission are not home-screen setup steps.
-The Live Activities status describes iPhone availability, not whether an active
-session currently has an activity or whether every computer has completed a
-background registration attempt. Its detail page uses the same centered
-illustration and status as the other device pages, then shows only the computers
-currently displayed by ActivityKit. A computer still being checked for automatic
-start appears as guidance only while that condition exists. Connect belongs in
-the Computers heading.
+The Live Activities tile reports how many paired computers have the feature
+enabled, or points to iPhone Settings when ActivityKit permission is off. It
+does not report the number of active activities or registration attempts. Its
+detail page contains the per-computer switches. Connect belongs in the
+Computers heading.
 Opening a Live Activity lands on its computer card, where the current agent
 rows are already visible, rather than the computer's connection-management
 detail. A finished Live Activity ends automatically after a brief resting period;

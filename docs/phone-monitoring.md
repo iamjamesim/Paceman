@@ -27,14 +27,17 @@ run only while the app is in the foreground; remote start owns background
 recovery. Re-pairing clears remembered registrations so the new credential
 registers them again. An authenticated source can start an activity while the
 app is closed. The required remote-start alert may appear once when the activity
-starts. No in-app switch or Developer Tools step is required. The home status
-describes ActivityKit availability, not registration or the current number of
-running sessions. If the user disables Live Activities in iPhone Settings, the
-home status says so and links to Settings. Otherwise it says On for paired
-computers; it does not turn a transient registration attempt into a setup task.
-The detail page shows which computers currently have an ActivityKit activity.
-It shows per-computer automatic-start checking only while that state needs
-explanation; one computer's registration does not block another's activity.
+starts. The Live Activities page has one switch per paired computer, defaulting
+to on. Turning a computer off first removes its remote-start registration on
+that computer, then ends the phone's existing activity. If the computer cannot
+confirm the change, its switch remains on and the page reports the failure.
+Turning it on restores automatic registration. There is no duplicate switch on
+the computer-management page and no second global app switch. iPhone Settings
+owns app-wide ActivityKit permission; the page links there only when that
+permission is off. The home status reports how many computers are enabled, not
+the number of running activities or transient registration attempts. The Live
+Activities page has no active/checking registration lists; computer connectivity
+is shown on the computer cards and detail pages.
 
 The source APNs payload contains source identity, known agent type codes, state
 counts, revision and freshness. It may include one short workspace name when
@@ -49,7 +52,7 @@ surface and ink. Its
 prominent robot and active headline use that family's accent, matching the
 custom watch's active focal points. Finished robots soften, finished headlines
 use ink, and stale content is muted. Small session lights retain separate state
-colors. The in-app preview shares the same palette. The header names the
+colors. The header names the
 computer using the phone's display name (the source-reported name unless renamed
 on the phone) and shows a count only when there is
 more than one session. The headline names the dominant state without repeating

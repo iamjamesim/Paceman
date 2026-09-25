@@ -35,6 +35,9 @@ final class MonitoringCoordinator: ObservableObject {
     @Published private(set) var activeSourceIDs: Set<String> = []
     @Published private(set) var status = "Setting up Live Activities"
     @Published private(set) var readySourceIDs: Set<String> = []
+    @Published private(set) var disabledSourceIDs: Set<String> = []
+    @Published private(set) var changingSourceIDs: Set<String> = []
+    @Published private(set) var settingErrors: [String: String] = [:]
 
     private let client = SourceClient()
     private var sources: [String: PairedSource] = [:]
@@ -52,14 +55,23 @@ final class MonitoringCoordinator: ObservableObject {
     private var orphanCleanupsInFlight: Set<String> = []
     private var lastOrphanCleanupAttempts: [String: Date] = [:]
     private var dismissedRevisions: [String: (generation: String, revision: UInt64)] = [:]
+    private var turningOffSourceIDs: Set<String> = []
 
     var available: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
     var activeCount: Int { activeSourceIDs.count }
+    func isEnabled(_ sourceID: String) -> Bool { !disabledSourceIDs.contains(sourceID) }
+    private func canMonitor(_ sourceID: String) -> Bool {
+        isEnabled(sourceID) && !turningOffSourceIDs.contains(sourceID)
+    }
 
-    static func displayStatus(available: Bool, hasComputer: Bool) -> String {
+    static func displayStatus(available: Bool, pairedCount: Int, enabledCount: Int) -> String {
         if !available { return "Off in iPhone Settings" }
-        if !hasComputer { return "Connect a computer" }
-        return "On"
+        if pairedCount == 0 { return "Connect a computer" }
+        if enabledCount == 0 { return "Off" }
+        if enabledCount == pairedCount {
+            return "On for \(pairedCount) computer\(pairedCount == 1 ? "" : "s")"
+        }
+        return "On for \(enabledCount) of \(pairedCount) computers"
     }
 
     static func prefers(_ candidate: MonitoringActivity.ContentState,
@@ -69,6 +81,7 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     func configure(sources: [PairedSource]) {
+        disabledSourceIDs = Set(sources.filter { !LiveActivityPreferences.enabled(for: $0.sourceID) }.map(\.sourceID))
         for source in sources where self.sources[source.sourceID]?.credential != source.credential {
             registeredStartTokens.removeValue(forKey: source.sourceID)
             readySourceIDs.remove(source.sourceID)
@@ -83,6 +96,51 @@ final class MonitoringCoordinator: ObservableObject {
         for activity in Activity<MonitoringActivity>.activities { observe(activity) }
         Task {
             await reconcileOrphanedRegistrations()
+            await registerStartTokens()
+        }
+        updateStatus()
+    }
+
+    /// A source must confirm removal of its remote-start token before the
+    /// switch can report Off. Otherwise an offline Mac could still start a
+    /// Live Activity while the phone app is suspended.
+    func setEnabled(_ enabled: Bool, for sourceID: String) async {
+        guard let source = sources[sourceID], !changingSourceIDs.contains(sourceID),
+              enabled != isEnabled(sourceID) else { return }
+        changingSourceIDs.insert(sourceID)
+        settingErrors.removeValue(forKey: sourceID)
+        defer { changingSourceIDs.remove(sourceID) }
+        if enabled {
+            disabledSourceIDs.remove(sourceID)
+            LiveActivityPreferences.setEnabled(true, for: sourceID)
+            registeredStartTokens.removeValue(forKey: sourceID)
+            lastStartAttempts.removeValue(forKey: sourceID)
+            await registerStartTokens()
+            updateStatus()
+            return
+        }
+        turningOffSourceIDs.insert(sourceID)
+        readySourceIDs.remove(sourceID)
+        do {
+            try await client.removeLiveActivityStart(source)
+            guard sources[sourceID]?.credential == source.credential else {
+                turningOffSourceIDs.remove(sourceID)
+                return
+            }
+            LiveActivityPreferences.setEnabled(false, for: sourceID)
+            disabledSourceIDs.insert(sourceID)
+            turningOffSourceIDs.remove(sourceID)
+            registeredStartTokens.removeValue(forKey: sourceID)
+            lastStartAttempts.removeValue(forKey: sourceID)
+            if let activity = activities[sourceID] { await end(activity, sourceID: sourceID) }
+            UserDefaults.standard.removeObject(forKey: Self.registrationKey(sourceID))
+        } catch {
+            turningOffSourceIDs.remove(sourceID)
+            settingErrors[sourceID] = "Couldn't turn off Live Activities. Try again when this computer is online."
+            if registeredStartTokens[sourceID] != nil { readySourceIDs.insert(sourceID) }
+            lastStartAttempts.removeValue(forKey: sourceID)
+            for activity in Activity<MonitoringActivity>.activities
+            where activity.attributes.sourceID == sourceID { observe(activity) }
             await registerStartTokens()
         }
         updateStatus()
@@ -119,6 +177,11 @@ final class MonitoringCoordinator: ObservableObject {
             await end(activity, sourceID: sourceID)
         }
         for source in sources {
+            if !isEnabled(source.sourceID) {
+                if let activity = activities[source.sourceID] { await end(activity, sourceID: source.sourceID) }
+                continue
+            }
+            if turningOffSourceIDs.contains(source.sourceID) { continue }
             guard let snapshot = snapshots[source.sourceID], fresh.contains(source.sourceID) else { continue }
             let state = MonitoringActivity.ContentState(snapshot: snapshot)
             MonitoringProviderCache.save(state, sourceID: source.sourceID)
@@ -147,7 +210,11 @@ final class MonitoringCoordinator: ObservableObject {
         sources.removeValue(forKey: sourceID)
         registeredStartTokens.removeValue(forKey: sourceID)
         readySourceIDs.remove(sourceID)
+        disabledSourceIDs.remove(sourceID)
+        turningOffSourceIDs.remove(sourceID)
+        settingErrors.removeValue(forKey: sourceID)
         dismissedRevisions.removeValue(forKey: sourceID)
+        LiveActivityPreferences.remove(sourceID)
         UserDefaults.standard.removeObject(forKey: Self.registrationKey(sourceID))
         MonitoringProviderCache.remove(sourceID)
         updateStatus()
@@ -178,6 +245,15 @@ final class MonitoringCoordinator: ObservableObject {
         let sourceID = activity.attributes.sourceID
         guard sources[sourceID] != nil else {
             Task { await activity.end(nil, dismissalPolicy: .immediate) }
+            return
+        }
+        guard isEnabled(sourceID) else {
+            Task {
+                await activity.end(nil, dismissalPolicy: .immediate)
+                if let source = sources[sourceID] {
+                    try? await client.removeLiveActivity(source, id: activity.id)
+                }
+            }
             return
         }
         if let existing = activities[sourceID] {
@@ -230,7 +306,7 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func start(source: PairedSource, snapshot: Snapshot) {
-        guard available, UIApplication.shared.applicationState == .active,
+        guard available, canMonitor(source.sourceID), UIApplication.shared.applicationState == .active,
               activities[source.sourceID] == nil else { return }
         if let dismissed = dismissedRevisions[source.sourceID],
            dismissed.generation == snapshot.generation,
@@ -250,14 +326,15 @@ final class MonitoringCoordinator: ObservableObject {
         guard available, let token = startToken,
               let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
               ["development", "production"].contains(environment) else { updateStatus(); return }
-        for source in sources.values where registeredStartTokens[source.sourceID] != token {
+        for source in sources.values where canMonitor(source.sourceID) && registeredStartTokens[source.sourceID] != token {
             guard lastStartAttempts[source.sourceID].map({ Date().timeIntervalSince($0) >= 30 }) != false else { continue }
             lastStartAttempts[source.sourceID] = Date()
             do {
                 try await client.registerLiveActivityStart(source,
                     token: token.map { String(format: "%02x", $0) }.joined(), environment: environment,
                     displayName: ComputerPreferences.name(for: source.sourceID))
-                guard sources[source.sourceID]?.credential == source.credential else {
+                guard sources[source.sourceID]?.credential == source.credential,
+                      canMonitor(source.sourceID) else {
                     try? await client.removeLiveActivityStart(source)
                     continue
                 }
@@ -272,7 +349,7 @@ final class MonitoringCoordinator: ObservableObject {
     private func registerUpdateToken(_ activity: Activity<MonitoringActivity>) async {
         let sourceID = activity.attributes.sourceID
         guard activities[sourceID]?.id == activity.id,
-              let source = sources[sourceID], let token = activity.pushToken,
+              canMonitor(sourceID), let source = sources[sourceID], let token = activity.pushToken,
               registeredUpdateTokens[activity.id] != token,
               !updateRegistrationsInFlight.contains(activity.id),
               lastUpdateAttempts[activity.id].map({ $0.token != token || Date().timeIntervalSince($0.at) >= 15 }) != false,
@@ -291,7 +368,8 @@ final class MonitoringCoordinator: ObservableObject {
             try await client.registerLiveActivity(source, id: activity.id,
                 token: token.map { String(format: "%02x", $0) }.joined(), environment: environment)
             guard activities[source.sourceID]?.id == activity.id,
-                  sources[source.sourceID]?.credential == source.credential else {
+                  sources[source.sourceID]?.credential == source.credential,
+                  canMonitor(source.sourceID) else {
                 try? await client.removeLiveActivity(source, id: activity.id)
                 return
             }
@@ -316,7 +394,7 @@ final class MonitoringCoordinator: ObservableObject {
         let systemIDs = Set(Activity<MonitoringActivity>.activities
             .filter { $0.activityState == .active || $0.activityState == .stale }
             .map(\.id))
-        for (sourceID, source) in sources {
+        for (sourceID, source) in sources where canMonitor(sourceID) {
             let key = Self.registrationKey(sourceID)
             guard let storedID = UserDefaults.standard.string(forKey: key),
                   !systemIDs.contains(storedID),
@@ -369,6 +447,23 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     private func updateStatus() {
-        status = Self.displayStatus(available: available, hasComputer: !sources.isEmpty)
+        status = Self.displayStatus(available: available, pairedCount: sources.count,
+            enabledCount: sources.keys.filter { isEnabled($0) }.count)
+    }
+}
+
+enum LiveActivityPreferences {
+    private static func key(_ sourceID: String) -> String { "live-activity-enabled.\(sourceID)" }
+
+    static func enabled(for sourceID: String, defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: key(sourceID)) as? Bool ?? true
+    }
+
+    static func setEnabled(_ enabled: Bool, for sourceID: String, defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: key(sourceID))
+    }
+
+    static func remove(_ sourceID: String, defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: key(sourceID))
     }
 }

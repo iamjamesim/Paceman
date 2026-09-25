@@ -11,6 +11,12 @@ struct CompanionHome: View {
     var paired: Bool { presentation.preview ? presentation.previewHasComputer : !model.pairedSources.isEmpty }
     var hasWatch: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.paired }
     var watchReady: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.ready }
+    private var liveActivitiesStatus: String {
+        presentation.preview
+            ? MonitoringCoordinator.displayStatus(available: presentation.previewScreen != "live-activities-off",
+                pairedCount: model.pairedSources.count, enabledCount: model.pairedSources.count)
+            : monitoring.status
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -81,8 +87,8 @@ struct CompanionHome: View {
                 destinationContent(
                     icon: AnyView(LiveActivityGlyph(theme: presentation.themeFamily.glance).frame(width: 37, height: 43)),
                     name: "Live Activities",
-                    state: presentation.preview ? "On" : monitoring.status)
-            }.buttonStyle(.plain).accessibilityLabel("Live Activities, \(presentation.preview ? "On" : monitoring.status)")
+                    state: liveActivitiesStatus)
+            }.buttonStyle(.plain).accessibilityLabel("Live Activities, \(liveActivitiesStatus)")
             Button { open(.watch) } label: {
                 destinationContent(
                     icon: AnyView(WatchGlyph(theme: presentation.themeFamily.glance, timeFormat: model.watch.timeFormat)),

@@ -279,3 +279,21 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual({value['attributes']['sourceID'] for value in starts},
                          {self.store.metadata('source_id'), second.metadata('source_id')})
         self.assertEqual({value['content-state']['state'] for value in starts}, {'working', 'needs_input'})
+
+    def test_removing_one_computers_start_registration_keeps_other_computer_enabled(self):
+        second = Store(Path(self.tmp.name) / 'second.sqlite3')
+        second_client = second.redeem(second.invite('https://second.example')['invitation'], device=device())
+        registration = {'action': 'register-start', 'deviceToken': 'cd' * 32,
+                        'environment': 'development'}
+        self.store.live_activity(self.credential, registration)
+        second.live_activity(second_client['credential'], registration)
+        self.assertEqual(self.store.live_activity(self.credential, {'action': 'remove-start'}),
+                         {'registered': False})
+        self.store.emit('working')
+        second.emit('working')
+        now = time.time() + 1
+        self.worker.step(now)
+        Worker(second, self.sender, Path(self.tmp.name) / 'second-push.jsonl').step(now)
+        starts = [call[1]['aps'] for call in self.sender.calls if call[1]['aps']['event'] == 'start']
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(starts[0]['attributes']['sourceID'], second.metadata('source_id'))

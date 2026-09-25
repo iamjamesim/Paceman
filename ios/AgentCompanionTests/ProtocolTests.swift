@@ -129,12 +129,27 @@ final class ProtocolTests: XCTestCase {
         XCTAssertTrue(MonitoringCoordinator.prefers(old, over: newer, currentEnded: true))
     }
 
-    @MainActor func testLiveActivityHomeStatusDescribesAvailability() {
-        XCTAssertEqual(MonitoringCoordinator.displayStatus(available: false, hasComputer: true),
+    @MainActor func testLiveActivityHomeStatusDescribesSettings() {
+        XCTAssertEqual(MonitoringCoordinator.displayStatus(available: false, pairedCount: 2, enabledCount: 2),
                        "Off in iPhone Settings")
-        XCTAssertEqual(MonitoringCoordinator.displayStatus(available: true, hasComputer: false),
+        XCTAssertEqual(MonitoringCoordinator.displayStatus(available: true, pairedCount: 0, enabledCount: 0),
                        "Connect a computer")
-        XCTAssertEqual(MonitoringCoordinator.displayStatus(available: true, hasComputer: true), "On")
+        XCTAssertEqual(MonitoringCoordinator.displayStatus(available: true, pairedCount: 2, enabledCount: 0), "Off")
+        XCTAssertEqual(MonitoringCoordinator.displayStatus(available: true, pairedCount: 1, enabledCount: 1),
+                       "On for 1 computer")
+        XCTAssertEqual(MonitoringCoordinator.displayStatus(available: true, pairedCount: 2, enabledCount: 1),
+                       "On for 1 of 2 computers")
+    }
+
+    func testLiveActivityPreferencesArePerComputerAndDefaultOn() {
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let first = "first", second = "second"
+        XCTAssertTrue(LiveActivityPreferences.enabled(for: first, defaults: defaults))
+        LiveActivityPreferences.setEnabled(false, for: first, defaults: defaults)
+        XCTAssertFalse(LiveActivityPreferences.enabled(for: first, defaults: defaults))
+        XCTAssertTrue(LiveActivityPreferences.enabled(for: second, defaults: defaults))
+        LiveActivityPreferences.remove(first, defaults: defaults)
+        XCTAssertTrue(LiveActivityPreferences.enabled(for: first, defaults: defaults))
     }
 
     @MainActor func testPlaceSearchRequiresTwoTrimmedCharacters() {
