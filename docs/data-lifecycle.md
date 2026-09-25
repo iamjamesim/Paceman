@@ -59,7 +59,7 @@ startup and service restarts. Original allowance timestamps remain unchanged, so
 the watch can show cached history and then `AWAITING UPDATE` after the real reset;
 retention never invents fresh quota.
 
-On macOS, the optional Codex CLI App Server query reads ChatGPT account limits
+On macOS, the optional Codex App Server query reads ChatGPT account limits
 every five minutes while the source runs. Paceman keeps only the reduced
 allowance in the current source event; it stores no account identifier or auth
 token. Failed queries clear the Mac's reported allowance. The watch's selection

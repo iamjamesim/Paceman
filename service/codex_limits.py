@@ -9,6 +9,7 @@ import json
 import math
 import os
 from pathlib import Path
+import plistlib
 import select
 import shutil
 import subprocess
@@ -19,9 +20,23 @@ TIMEOUT_SECONDS = 8
 MAX_RESPONSE_BYTES = 1_048_576
 
 
-def codex_binary() -> str | None:
-    candidates = [os.environ.get("PACEMAN_CODEX_BIN"), shutil.which("codex"),
-                  "/opt/homebrew/bin/codex", "/usr/local/bin/codex"]
+def codex_binary(*, application_dirs: tuple[Path, ...] | None = None) -> str | None:
+    if application_dirs is None:
+        application_dirs = (Path("/Applications"), Path.home() / "Applications")
+    # Prefer the runtime owned by the desktop client. A separately installed CLI
+    # may be signed in to another account. This is an optional bundle detail,
+    # verified by bundle ID and executable presence rather than assumed.
+    candidates = [os.environ.get("PACEMAN_CODEX_BIN")]
+    for directory in application_dirs:
+        for name in ("Codex.app", "ChatGPT.app"):
+            bundle = directory / name
+            try:
+                info = plistlib.loads((bundle / "Contents/Info.plist").read_bytes())
+            except (OSError, ValueError, TypeError):
+                continue
+            if isinstance(info, dict) and info.get("CFBundleIdentifier") == "com.openai.codex":
+                candidates.append(str(bundle / "Contents/Resources/codex"))
+    candidates.extend((shutil.which("codex"), "/opt/homebrew/bin/codex", "/usr/local/bin/codex"))
     for candidate in candidates:
         if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
             return str(Path(candidate).resolve())

@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import plistlib
 import socket
 import sqlite3
 import subprocess
@@ -10,7 +11,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from service.codex_limits import parse_codex_allowance, read_codex_allowance
+from service.codex_limits import codex_binary, parse_codex_allowance, read_codex_allowance
 from service.hub import Store
 from service.macos import MacSource
 from service.push import live_notification
@@ -18,6 +19,18 @@ from macos.codex_hook import workspace_label
 
 
 class MacSourceTests(unittest.TestCase):
+    def test_codex_desktop_runtime_is_found_without_cli(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bundle = root / "ChatGPT.app" / "Contents"
+            (bundle / "Resources").mkdir(parents=True)
+            (bundle / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "com.openai.codex"}))
+            binary = bundle / "Resources/codex"
+            binary.write_text("#!/bin/sh\nexit 0\n")
+            binary.chmod(0o700)
+            with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": ""}):
+                self.assertEqual(codex_binary(application_dirs=(root,)), str(binary.resolve()))
+
     def test_mac_allowance_is_presentation_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
