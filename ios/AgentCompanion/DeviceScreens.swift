@@ -30,7 +30,7 @@ struct ComputerDetail: View {
                         ComputerIllustration(theme: theme).frame(width: 190).accessibilityHidden(true)
                     }
                     VStack(spacing: 9) {
-                        Text(presentation.displayName(source: paired))
+                        Text(presentation.displayName(source: paired, snapshot: paired.flatMap { model.snapshots[$0.sourceID] }))
                             .font(theme.monospaced && !typeSize.isAccessibilitySize ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
                             .fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 5) {
@@ -56,7 +56,7 @@ struct ComputerDetail: View {
                         .font(.footnote).foregroundStyle(theme.secondaryInk)
                 }
                 CompanionRule(theme: theme)
-                Button { name = presentation.displayName(source: paired); rename = true } label: {
+                Button { name = presentation.displayName(source: paired, snapshot: paired.flatMap { model.snapshots[$0.sourceID] }); rename = true } label: {
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 12) { Text("Display name"); Spacer(minLength: 10); nameValue }
                         VStack(alignment: .leading, spacing: 8) { Text("Display name"); nameValue }
@@ -72,12 +72,13 @@ struct ComputerDetail: View {
             .alert("Display name", isPresented: $rename) {
                 TextField("Name", text: $name)
                 Button("Save") {
-                    presentation.setDisplayName(name, source: paired)
+                    presentation.setDisplayName(name, source: paired,
+                        snapshot: paired.flatMap { model.snapshots[$0.sourceID] })
                     if let paired { Task { await model.monitoring.refreshComputerName(paired.sourceID) } }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { Text("Shown in Paceman. Doesn’t rename your computer.") }
-            .confirmationDialog("Remove \(presentation.displayName(source: paired))?", isPresented: $remove, titleVisibility: .visible) {
+            .confirmationDialog("Remove \(presentation.displayName(source: paired, snapshot: paired.flatMap { model.snapshots[$0.sourceID] }))?", isPresented: $remove, titleVisibility: .visible) {
                 Button("Remove computer", role: .destructive) {
                     guard let paired else { return }
                     removing = true
@@ -97,7 +98,7 @@ struct ComputerDetail: View {
 
     private var nameValue: some View {
         HStack(spacing: 8) {
-            Text(presentation.displayName(source: paired)).foregroundStyle(theme.secondaryInk)
+            Text(presentation.displayName(source: paired, snapshot: paired.flatMap { model.snapshots[$0.sourceID] })).foregroundStyle(theme.secondaryInk)
             Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium))
                 .foregroundStyle(theme.secondaryInk)
         }

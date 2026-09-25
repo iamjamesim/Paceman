@@ -72,7 +72,7 @@ struct LiveActivitiesDetail: View {
                         ForEach(activeSources, id: \.sourceID) { source in
                             HStack(spacing: 12) {
                                 Image(systemName: "laptopcomputer").frame(width: 26).accessibilityHidden(true)
-                                Text(presentation.displayName(source: source)).lineLimit(2)
+                                Text(presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID])).lineLimit(2)
                             }.font(.subheadline)
                         }
                     }
@@ -83,7 +83,7 @@ struct LiveActivitiesDetail: View {
                     ForEach(checkingSources, id: \.sourceID) { source in
                         HStack(spacing: 12) {
                             Image(systemName: "laptopcomputer").frame(width: 26).accessibilityHidden(true)
-                            Text(presentation.displayName(source: source)).lineLimit(2)
+                            Text(presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID])).lineLimit(2)
                             Spacer(minLength: 8)
                             Text("Checking").foregroundStyle(theme.secondaryInk)
                         }.font(.subheadline).accessibilityElement(children: .combine)

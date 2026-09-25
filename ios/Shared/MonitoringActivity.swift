@@ -128,15 +128,40 @@ enum MonitoringProviderCache {
     }
 }
 
-/// The phone owns display names. Its widget reads the same names from the app
-/// group because ActivityKit's remote-start attributes cannot be renamed.
+/// One rule for names shown on the phone and in ActivityKit. The source reports
+/// a name; a phone rename wins; the paired host is only a pre-snapshot fallback.
+enum ComputerDisplayName {
+    static func resolve(override: String?, reported: String?, host: String?) -> String {
+        if let override, let name = formatted(override, replaceHyphens: false) { return name }
+        if let reported, let name = formatted(reported, replaceHyphens: true) { return name }
+        if let host {
+            let firstLabel = String(host.split(separator: ".").first ?? "")
+            if let name = formatted(firstLabel, replaceHyphens: true) { return name }
+        }
+        return "Your computer"
+    }
+
+    private static func formatted(_ value: String, replaceHyphens: Bool) -> String? {
+        let name = (replaceHyphens ? value.replacingOccurrences(of: "-", with: " ") : value)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : String(name.prefix(60))
+    }
+}
+
+/// The phone mirrors resolved names into the app group because ActivityKit's
+/// remote-start attributes cannot be renamed.
 enum MonitoringComputerName {
     private static func key(_ sourceID: String) -> String { "live-activity-computer-name.\(sourceID)" }
 
+    static func storedName(sourceID: String,
+                           defaults: UserDefaults = ThemePreference.sharedDefaults) -> String? {
+        defaults.string(forKey: key(sourceID)).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
     static func displayName(sourceID: String, fallback: String,
                             defaults: UserDefaults = ThemePreference.sharedDefaults) -> String {
-        defaults.string(forKey: key(sourceID)).flatMap { $0.isEmpty ? nil : $0 }
-            ?? fallback.replacingOccurrences(of: "-", with: " ")
+        storedName(sourceID: sourceID, defaults: defaults)
+            ?? ComputerDisplayName.resolve(override: nil, reported: fallback, host: nil)
     }
 
     static func save(_ name: String, for sourceID: String,

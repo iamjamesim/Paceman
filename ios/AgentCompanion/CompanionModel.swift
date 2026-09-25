@@ -49,7 +49,7 @@ final class CompanionModel: ObservableObject {
                 let long = screen == "--screen=multi-long"
                 let observed = Date().timeIntervalSince1970 - (stale ? 300 : 0)
                 snapshots[id] = Snapshot(schema: 1, sourceID: id, generation: id, revision: 1,
-                    sourceName: "MacBook Pro", mode: "macos", observedAt: observed,
+                    sourceName: "Jamess-MacBook-Pro", mode: "macos", observedAt: observed,
                     changedAt: observed, freshFor: 30, state: empty ? .idle : stale ? .finished : .working,
                     eventID: "1", appearance: nil, allowance: nil,
                     sessions: empty ? [] : [AgentSession(id: "mac-task", provider: "codex",
@@ -300,6 +300,10 @@ final class CompanionModel: ObservableObject {
                 throw HubError.message("Source clock is ahead")
             }
             let age = max(0, Date().timeIntervalSince1970 - value.observedAt)
+            let displayName = ComputerPreferences.displayName(for: sourceID,
+                sourceName: value.sourceName, host: paired.endpoint.host)
+            let nameChanged = MonitoringComputerName.storedName(sourceID: sourceID) != displayName
+            if nameChanged { MonitoringComputerName.save(displayName, for: sourceID) }
             snapshots[sourceID] = value
             let receivedAt = Date()
             lastContacts[sourceID] = receivedAt
@@ -314,6 +318,7 @@ final class CompanionModel: ObservableObject {
             forwardWatchAggregate()
             await monitoring.reconcile(sources: pairedSources.filter { !isRevoked($0.sourceID) },
                 snapshots: snapshots, fresh: Set(pairedSources.filter { isFresh($0.sourceID) }.map(\.sourceID)))
+            if nameChanged { await monitoring.refreshComputerName(sourceID) }
             Diagnostics.shared.record("snapshot_received", event: value.identity, state: value.state)
             PushCoordinator.shared.recoverRegistrationIfNeeded()
             if fromPush, let identity = watchAggregate?.identity {

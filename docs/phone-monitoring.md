@@ -50,7 +50,8 @@ prominent robot and active headline use that family's accent, matching the
 custom watch's active focal points. Finished robots soften, finished headlines
 use ink, and stale content is muted. Small session lights retain separate state
 colors. The in-app preview shares the same palette. The header names the
-computer using the phone's display name and shows a count only when there is
+computer using the phone's display name (the source-reported name unless renamed
+on the phone) and shows a count only when there is
 more than one session. The headline names the dominant state without repeating
 the count. A fresh activity names its known agent type and, when unambiguous,
 the workspace below the headline. A mixed-state activity also shows its

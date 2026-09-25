@@ -63,6 +63,12 @@ struct CompanionRoot: View {
         .tint(theme.tint)
         .preferredColorScheme(presentation.themeFamily.supportsLight ? nil : .dark)
         .onAppear {
+            if !presentation.preview {
+                presentation.syncComputerNames(model.pairedSources, snapshots: model.snapshots)
+                for source in model.pairedSources {
+                    Task { await model.monitoring.refreshComputerName(source.sourceID) }
+                }
+            }
             guard presentation.preview else { return }
             switch presentation.previewScreen {
             case "weather", "weather-current", "weather-place", "weather-denied", "weather-permission", "weather-unavailable":
@@ -93,7 +99,10 @@ struct CompanionRoot: View {
             else if new == nil { path = [] }
         }
         .onChange(of: model.pairedSources.map(\.sourceID)) { _, _ in
-            presentation.syncComputerNames(model.pairedSources)
+            presentation.syncComputerNames(model.pairedSources, snapshots: model.snapshots)
+        }
+        .onChange(of: model.snapshots.mapValues(\.sourceName)) { _, _ in
+            presentation.syncComputerNames(model.pairedSources, snapshots: model.snapshots)
         }
         .onOpenURL { url in
             guard url.scheme == "agentcompanion" else { return }

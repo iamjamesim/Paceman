@@ -142,10 +142,10 @@ struct CompanionHome: View {
                         .font(.system(size: 18, weight: .regular))
                         .frame(width: 24).foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(presentation.displayName(source: paired))
+                        Text(presentation.displayName(source: paired, snapshot: value))
                             .font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold))
                             .multilineTextAlignment(.leading)
-                        if model.pairedSources.filter({ presentation.displayName(source: $0) == presentation.displayName(source: paired) }).count > 1,
+                        if model.pairedSources.filter({ presentation.displayName(source: $0, snapshot: model.snapshots[$0.sourceID]) == presentation.displayName(source: paired, snapshot: value) }).count > 1,
                            let host = paired.endpoint.host {
                             Text(host).font(.caption2).foregroundStyle(theme.secondaryInk)
                                 .multilineTextAlignment(.leading)

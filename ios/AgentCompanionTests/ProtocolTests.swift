@@ -669,6 +669,27 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(ComputerPreferences.name(for: "second", defaults: defaults), "Second")
     }
 
+    func testReportedComputerNameIsDefaultAndRenameWins() {
+        let suite = "reported-computer-name-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(ComputerPreferences.displayName(for: "mac", sourceName: "Jamess-MacBook-Pro",
+            host: "jamess-macbook-pro.example.net", defaults: defaults), "Jamess MacBook Pro")
+        XCTAssertEqual(ComputerPreferences.displayName(for: "other", sourceName: "Omarchy",
+            host: "omarchy.example.net", defaults: defaults), "Omarchy")
+        ComputerPreferences.setName("Desk", for: "mac", defaults: defaults)
+        XCTAssertEqual(ComputerPreferences.displayName(for: "mac", sourceName: "Jamess-MacBook-Pro",
+            host: "jamess-macbook-pro.example.net", defaults: defaults), "Desk")
+        ComputerPreferences.setName("Desk-1", for: "mac", defaults: defaults)
+        XCTAssertEqual(ComputerPreferences.displayName(for: "mac", sourceName: "Jamess-MacBook-Pro",
+            host: "jamess-macbook-pro.example.net", defaults: defaults), "Desk-1")
+        ComputerPreferences.setName("", for: "mac", defaults: defaults)
+        XCTAssertEqual(ComputerPreferences.displayName(for: "mac", sourceName: "Jamess-MacBook-Pro",
+            host: "jamess-macbook-pro.example.net", defaults: defaults), "Jamess MacBook Pro")
+        XCTAssertEqual(ComputerPreferences.displayName(for: "new", sourceName: nil,
+            host: "dev-workstation.example.net", defaults: defaults), "dev workstation")
+    }
+
     func testLiveActivityComputerNamesUsePhoneDisplayName() {
         let suite = "live-activity-computer-names-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!

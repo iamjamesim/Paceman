@@ -24,19 +24,27 @@ final class PresentationModel: ObservableObject {
         if !preview {
             let sources = PairedSourcesStore().load()
             if let source = sources.first { ComputerPreferences.migrateLegacy(to: source.sourceID) }
-            syncComputerNames(sources)
+            syncComputerNames(sources, snapshots: Dictionary(uniqueKeysWithValues: sources.compactMap { source in
+                SourceSnapshotCache.load(sourceID: source.sourceID, from: SourceSnapshotCache.url(for: source.sourceID))
+                    .map { (source.sourceID, $0.0) }
+            }))
         }
     }
-    func setDisplayName(_ name: String, source: PairedSource?) {
+    func setDisplayName(_ name: String, source: PairedSource?, snapshot: Snapshot?) {
         guard !preview, let source else { return }
         ComputerPreferences.setName(name, for: source.sourceID)
-        MonitoringComputerName.save(displayName(source: source), for: source.sourceID)
+        MonitoringComputerName.save(displayName(source: source, snapshot: snapshot), for: source.sourceID)
         nameRevision += 1
     }
-    func syncComputerNames(_ sources: [PairedSource]) {
+    func syncComputerNames(_ sources: [PairedSource], snapshots: [String: Snapshot]) {
         guard !preview else { return }
         for source in sources {
-            MonitoringComputerName.save(displayName(source: source), for: source.sourceID)
+            let snapshot = snapshots[source.sourceID]
+            guard snapshot != nil || ComputerPreferences.name(for: source.sourceID) != nil else { continue }
+            let name = displayName(source: source, snapshot: snapshot)
+            if MonitoringComputerName.storedName(sourceID: source.sourceID) != name {
+                MonitoringComputerName.save(name, for: source.sourceID)
+            }
         }
     }
     var previewHasComputer: Bool { !["setup", "pairing", "watch-only"].contains(previewScreen) }
@@ -73,17 +81,14 @@ final class PresentationModel: ObservableObject {
         ThemePreference.save(family)
         model.setTheme(family)
     }
-    func displayName(source: PairedSource?) -> String {
+    func displayName(source: PairedSource?, snapshot: Snapshot? = nil) -> String {
         if preview, source?.endpoint.host == "macbook.example.ts.net" {
-            return previewScreen == "multi-long" ? "James’s development MacBook Pro" : "MacBook Pro"
+            return previewScreen == "multi-long" ? "James’s development MacBook Pro" : "Jamess MacBook Pro"
         }
         if preview { return previewScreen == "computer-long" ? "James’s development workstation" : neutralPreview ? "MacBook Pro" : "Omarchy" }
-        if let source, let name = ComputerPreferences.name(for: source.sourceID), !name.isEmpty { return name }
-        guard let host = source?.endpoint.host else { return "Your computer" }
-        let short = String(host.split(separator: ".").first ?? "Computer")
-        if short.contains("macbook") { return "MacBook Pro" }
-        if short.contains("omarchy") { return "Omarchy" }
-        return short.replacingOccurrences(of: "-", with: " ").capitalized
+        guard let source else { return "Your computer" }
+        return ComputerPreferences.displayName(for: source.sourceID,
+            sourceName: snapshot?.sourceName, host: source.endpoint.host)
     }
 }
 
@@ -197,6 +202,11 @@ enum ComputerPreferences {
     static func setName(_ name: String, for id: String, defaults: UserDefaults = .standard) {
         let value = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
         defaults.set(value, forKey: key(id))
+    }
+    static func displayName(for id: String, sourceName: String?, host: String?,
+                            defaults: UserDefaults = .standard) -> String {
+        ComputerDisplayName.resolve(override: name(for: id, defaults: defaults),
+            reported: sourceName, host: host)
     }
     static func migrateLegacy(to id: String, defaults: UserDefaults = .standard) {
         if name(for: id, defaults: defaults) == nil, let legacy = defaults.string(forKey: "computer-name") {

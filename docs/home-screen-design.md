@@ -35,6 +35,10 @@ Pairing order stays stable; repairing one keeps its position, and removing one
 leaves the others' credentials, caches and state intact. Activity does not reorder
 cards while the user is reading or tapping. If two display names match, show
 their source hosts under those names to distinguish them.
+Use each source's reported name as its default display name, with hyphens shown
+as spaces. A phone rename overrides that source's reported name on the home
+card, computer detail, and Live Activity. Before the first snapshot, show the
+paired host's first label; do not guess a hardware model from it.
 
 Each computer fetches and caches independently. The watch combines only fresh
 activity by urgency across all sources. Appearance and allowance each use the
