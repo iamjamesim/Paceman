@@ -109,6 +109,8 @@ remain within each family; the watch has no fourth color.
 | **Miasma** | Dark only | `#222222` / `#242D1D` / `#C2C2B0` / `#D7C483` | `#222222` / `#C2C2B0` / `#D7C483` |
 | **Catppuccin** | `#EFF1F5` / `#E6E9EF` / `#4C4F69` / `#8839EF` | `#1E1E2E` / `#313244` / `#CDD6F4` / `#CBA6F7` | `#11111B` / `#CDD6F4` / `#CBA6F7` |
 
+The app icon uses Paceman's dark background and mint accent across platforms.
+
 Ayu's light accent is darkened from its canonical orange for legible small
 controls on near-white; it remains an explicitly adapted Ayu port. Miasma uses
 its canonical gold as the watch accent because the darker olive accent is less
