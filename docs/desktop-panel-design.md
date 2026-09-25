@@ -110,10 +110,10 @@ collapses expanded phone details before closing the panel; in the QR overlay,
 it dismisses the overlay. Recovery errors use plain language. Keyboard and mouse
 controls use the same focus treatment.
 
-Activity combines the watch’s agent-face glyph with explicit words. Working uses
-the same gentle 1.3-second fade each way; attention and completion stay static in
-the desktop panel. Animation stops when the panel closes. Text always carries
-the state, so neither motion nor icon recognition is required.
+Activity combines the watch’s agent-face glyph with explicit words. Its fade,
+bounce, and sway follow the [shared motion spec](agent-state-motion.md).
+Animation stops when the panel closes. Text always carries the state, so neither
+motion nor icon recognition is required.
 The mark occupies a fixed trailing slot, with the state label right-aligned
 beside it. Reserve that slot in idle/off states too, so changing labels or hiding
 the mark never shifts the visual anchor or the row height.

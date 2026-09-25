@@ -73,8 +73,9 @@ Island shows a muted robot and a clock; expanded and Lock Screen views say Last 
 last update time. Newer activity for the same computer supersedes an older stale
 activity. ActivityKit relevance keeps fresh needs-input states prominent while
 letting newer activity overtake them after their freshness lease expires.
-ActivityKit animates state changes briefly but does not run the phone/watch's
-continuous robot motion while the Lock Screen is idle. Tapping opens the
+ActivityKit animates state changes briefly but does not run the
+[shared agent motion](agent-state-motion.md) continuously while the Lock Screen
+is idle. Tapping opens the
 matching computer card on Home, where current agent rows are already shown;
 the computer detail remains for connection management. Tapping does not silently
 acknowledge a result. The source ends a settled finished Live Activity automatically;
