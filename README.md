@@ -50,6 +50,25 @@ PATH="$PWD/.venv/bin:$PATH" bash scripts/check.sh
 On a Mac with Xcode, also run `bash scripts/check-on-mac.sh` and run the
 `AgentCompanion` scheme's tests on an installed iPhone simulator.
 
+## Current Codex compatibility
+
+Paceman monitors local Codex sessions through reviewed hooks on each connected
+computer. Its two desktop sources have different adapters:
+
+| Computer and Codex surface | Current status |
+| --- | --- |
+| macOS, Codex desktop app | Real hook events and an iPhone notification were observed; its allowance reached the custom watch. Agent-state delivery to the watch still needs a fuller hardware pass. |
+| macOS, Codex CLI | Uses the same installed hooks; a real CLI event was observed. Session removal after CLI exit still needs correction, so this path is beta. |
+| Omarchy, Codex CLI | Tested through the separately installed Omarchy Watch for Codex companion and Paceman's process-verified receiver. |
+| Omarchy, Codex desktop app | Not validated with Paceman yet. The official [Linux desktop preview](https://learn.chatgpt.com/docs/linux/linux-app) supports Arch, but shared hook configuration alone does not prove the companion, process ownership, or allowance path works. |
+
+For macOS, install Paceman and review its seven Codex hooks in the app or CLI.
+The Mac's allowance requires a locally signed-in Codex desktop runtime or CLI.
+For Omarchy, install and review the separate companion hooks; its allowance
+currently comes from Omarchy's agents panel. Only local sessions that deliver
+those hooks are monitored. See the [Mac setup](docs/macos.md),
+[Omarchy setup](docs/desktop.md), and [readiness gaps](docs/readiness-gaps.md).
+
 ## Current limits
 
 The alpha can pair more than one computer and one custom watch. The phone forwards
