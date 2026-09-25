@@ -54,17 +54,15 @@ struct MonitoringRobot: View {
 
     private var stateTransition: AnyTransition {
         guard animate && !reduceMotion && !isLuminanceReduced else { return .identity }
-        let duration: Double
         switch state {
-        case "working", "finished": duration = 2
-        case "needs_input": duration = 1
+        case "working", "finished", "needs_input": break
         default: return .identity
         }
         return .asymmetric(
             insertion: .modifier(
                 active: MonitoringRobotMotion(state: state, progress: 0),
                 identity: MonitoringRobotMotion(state: state, progress: 1)
-            ).animation(.linear(duration: duration)),
+            ).animation(.linear(duration: 2)),
             removal: .opacity.animation(.easeOut(duration: 0.2))
         )
     }
@@ -80,8 +78,8 @@ struct MonitoringRobot: View {
     }
 }
 
-/// ActivityKit permits one brief animation per content update, so each state
-/// plays one complete cycle and returns to its resting pose within two seconds.
+/// ActivityKit permits one brief animation per content update. The shorter
+/// needs-input cadence plays twice; the other states play once in two seconds.
 private struct MonitoringRobotMotion: ViewModifier, Animatable {
     let state: String
     var progress: CGFloat
@@ -94,11 +92,12 @@ private struct MonitoringRobotMotion: ViewModifier, Animatable {
     func body(content: Content) -> some View {
         let phase = Double(progress)
         let sway = sin(2 * .pi * phase)
+        let bouncePhase = (phase * 2).truncatingRemainder(dividingBy: 1)
         let bounce: Double
-        if phase < 0.32 {
-            bounce = ease(phase / 0.32)
-        } else if phase < 0.64 {
-            bounce = 1 - ease((phase - 0.32) / 0.32)
+        if bouncePhase < 0.32 {
+            bounce = ease(bouncePhase / 0.32)
+        } else if bouncePhase < 0.64 {
+            bounce = 1 - ease((bouncePhase - 0.32) / 0.32)
         } else {
             bounce = 0
         }

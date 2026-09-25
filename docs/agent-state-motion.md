@@ -33,11 +33,11 @@ Playback follows the surface's visibility and freshness rules:
   Omarchy animates while its panel is open and the source is running and sharing.
 - ActivityKit Live Activities, including the Dynamic Island and Apple Watch
   Smart Stack tile, animate each fresh state change once, then hold still.
-  Working fades to 100/255 and back in 2 seconds; Needs input keeps its
-  320 ms rise, 320 ms return, and 360 ms rest; Finished completes its full
-  ±4°/±2-point sway in 2 seconds. Idle, stale activity, Reduce Motion, and
-  reduced-luminance displays stay still. ActivityKit cannot run the repeating
-  cycles used by the other surfaces.
+  Working fades to 100/255 and back once in 2 seconds; Needs input plays two
+  bounces, each with a 320 ms rise, 320 ms return, and 360 ms rest; Finished
+  completes one full ±4°/±2-point sway in 2 seconds. Idle, stale activity,
+  Reduce Motion, and reduced-luminance displays stay still. ActivityKit cannot
+  run the repeating cycles used by the other surfaces.
 
 The large brand mark and decorative previews are not agent-state indicators and
 do not use this motion.
