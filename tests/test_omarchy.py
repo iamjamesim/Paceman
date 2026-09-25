@@ -34,7 +34,13 @@ class OmarchyTests(unittest.TestCase):
         self.processes.identify.return_value = ProcessIdentity(100, '1', 'test-boot')
         self.processes.is_alive.return_value = True
         self.source = self.enterContext(OmarchySource(self.store,
-            socket_path=self.root / 'omarchy-watch.sock', state_dir=self.root / 'omarchy', processes=self.processes))
+            socket_path=self.root / 'omarchy-watch.sock', state_dir=self.root / 'omarchy',
+            processes=self.processes, computer_name='build-station.example.net'))
+
+    def test_source_reports_computer_identity(self):
+        snapshot = self.store.snapshot()
+        self.assertEqual(snapshot['sourceName'], 'build-station')
+        self.assertEqual(snapshot['mode'], 'omarchy')
 
     def test_allowance_changes_do_not_generate_activity_or_export_other_fields(self):
         import datetime as dt

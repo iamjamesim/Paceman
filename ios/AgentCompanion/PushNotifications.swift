@@ -52,10 +52,12 @@ struct PushRegistrationReceipt: Codable, Equatable {
     let clientID: String
     let token: String
     let environment: String
+    var displayName: String? = nil
 
-    func matches(source: PairedSource, token: String, environment: String) -> Bool {
+    func matches(source: PairedSource, token: String, environment: String,
+                 displayName: String? = nil) -> Bool {
         sourceID == source.sourceID && clientID == source.clientID &&
-        self.token == token && self.environment == environment
+        self.token == token && self.environment == environment && self.displayName == displayName
     }
 }
 
@@ -181,18 +183,22 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         }
         var completed = 0
         for source in sources {
+            let displayName = ComputerPreferences.name(for: source.sourceID)
             let receiptKey = "push-registration-receipt.\(source.sourceID)"
             let receipt = Vault.load(PushRegistrationReceipt.self, key: receiptKey)
                 ?? Vault.load(PushRegistrationReceipt.self, key: "push-registration-receipt")
-            if receipt?.matches(source: source, token: token, environment: environment) == true {
+            if receipt?.matches(source: source, token: token, environment: environment,
+                                displayName: displayName) == true {
                 completed += 1
                 continue
             }
             do {
-                try await client.registerPush(source, token: token, environment: environment)
+                try await client.registerPush(source, token: token, environment: environment,
+                                              displayName: displayName)
                 guard enabled, model?.pairedSources.contains(where: { $0.sourceID == source.sourceID && $0.credential == source.credential }) == true else { continue }
                 try Vault.save(PushRegistrationReceipt(sourceID: source.sourceID, clientID: source.clientID,
-                                                        token: token, environment: environment), key: receiptKey)
+                                                        token: token, environment: environment,
+                                                        displayName: displayName), key: receiptKey)
                 completed += 1
                 Diagnostics.shared.record("push_destination_registered")
             } catch {

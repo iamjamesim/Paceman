@@ -55,13 +55,17 @@ class Result:
     apns_id: str
 
 
-def notification_copy(event: dict) -> dict:
+def source_display_name(source_name: object, phone_name: str | None = None) -> str:
+    reported = str(source_name or "Computer").replace("-", " ")
+    return " ".join((phone_name or reported).split())[:60] or "Computer"
+
+
+def notification_copy(event: dict, phone_name: str | None = None) -> dict:
     # Only bounded source/provider/state metadata goes on the lock screen.
     # Never include event labels, prompts, paths or transcript content.
     raw = event.get("payload")
     value = json.loads(raw) if raw else {}
-    source = value.get("sourceName", "Computer")
-    source = " ".join(str(source).split())[:64] or "Computer"
+    source = source_display_name(value.get("sourceName"), phone_name)
     sessions = value.get("sessions", [])
     matching = [s for s in sessions if s.get("state") == event["state"]]
     providers = {"codex": "Codex", "claude": "Claude", "claude-code": "Claude"}
@@ -81,12 +85,13 @@ def notification_copy(event: dict) -> dict:
     return {"title": titles[event["state"]], "body": body}
 
 
-def notification(source_id: str, generation: str, event: dict, now: float) -> tuple[dict, dict]:
+def notification(source_id: str, generation: str, event: dict, now: float,
+                 phone_name: str | None = None) -> tuple[dict, dict]:
     """Push contains a hint only. The paired HTTPS source remains authoritative."""
     if event["state"] not in ("working", "idle", "needs_input", "finished"):
         raise ValueError("Unknown activity state")
     passive = event["state"] in ("working", "idle")
-    aps = {"alert": notification_copy(event), "thread-id": source_id}
+    aps = {"alert": notification_copy(event, phone_name), "thread-id": source_id}
     if passive:
         aps["interruption-level"] = "passive"
     else:
@@ -139,10 +144,11 @@ def live_notification(snapshot: dict, now: float, ending=False) -> tuple[dict, d
         "apns-expiration": str(int(now + 60)), "apns-id": str(uuid.uuid4())}
 
 
-def live_start_notification(snapshot: dict, now: float) -> tuple[dict, dict]:
+def live_start_notification(snapshot: dict, now: float,
+                            phone_name: str | None = None) -> tuple[dict, dict]:
     """Start one computer's activity; Apple requires a visible start alert."""
     payload, headers = live_notification(snapshot, now)
-    source = " ".join(str(snapshot.get("sourceName", "Computer")).split())[:64] or "Computer"
+    source = source_display_name(snapshot.get("sourceName"), phone_name)
     payload["aps"].update({"event": "start", "attributes-type": "MonitoringActivity",
         "attributes": {"sourceID": snapshot["sourceID"], "sourceName": source},
         "input-push-token": 1,
@@ -222,9 +228,10 @@ class Worker:
             # Re-check ownership immediately before sending; revocation also removes the destination.
             with self.store.connect() as db:
                 current = db.execute("SELECT * FROM push_devices WHERE client_id=?", (device["client_id"],)).fetchone()
-            if current is None or dict(current) != device:
+                owner = db.execute("SELECT display_name FROM clients WHERE id=?", (device["client_id"],)).fetchone()
+            if current is None or dict(current) != device or owner is None:
                 continue
-            payload, headers = notification(source_id, generation, event, now)
+            payload, headers = notification(source_id, generation, event, now, owner["display_name"])
             result = self.sender.send(device, payload, headers, now)
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             retry = result.status in (0, 429, 500, 503) or result.reason == "ExpiredProviderToken"
@@ -313,9 +320,10 @@ class Worker:
             with self.store.connect() as db:
                 current = db.execute("SELECT * FROM live_activity_starts WHERE client_id=?", (device["client_id"],)).fetchone()
                 active = db.execute("SELECT 1 FROM live_activities WHERE client_id=?", (device["client_id"],)).fetchone()
-            if active or current is None or dict(current) != device:
+                owner = db.execute("SELECT display_name FROM clients WHERE id=?", (device["client_id"],)).fetchone()
+            if active or current is None or dict(current) != device or owner is None:
                 continue
-            payload, headers = live_start_notification(snapshot, now)
+            payload, headers = live_start_notification(snapshot, now, owner["display_name"])
             result = self.sender.send({**device, "mode": "liveactivity"}, payload, headers, now)
             accepted = result.status == 200
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")

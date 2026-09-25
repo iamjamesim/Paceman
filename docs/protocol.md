@@ -113,10 +113,14 @@ methods require the same paired `Authorization: Bearer …` credential as snapsh
 reads. The server derives ownership from that credential; callers cannot select
 another client ID. These are private Tailscale endpoints, not a public relay API.
 
-- `POST`: `{ "deviceToken": "lowercase hex", "environment": "development" | "production", "mode": "alert" }`.
+- `POST`: `{ "deviceToken": "lowercase hex", "environment": "development" | "production", "mode": "alert", "displayName": "optional phone override" }`.
   Validated payloads upsert that client's destination. Re-registering an unchanged
   token preserves pending work and retry state. A changed token or environment starts
   after the current event, avoiding historical alert replay.
+  The optional display name is scoped to the paired phone and used only for visible
+  push copy. An empty string clears its override; an omitted field preserves the
+  previous value for older clients. Without an override, push uses the source's
+  reported computer name with hyphens shown as spaces.
   The wire field `mode` remains fixed at `alert`; background-only registrations are rejected.
 - `GET`: returns `registered`, and when present `environment`, `mode`,
   `lastResult`, `lastAPNsID`. POST returns the same registration status. Neither response returns a destination token.
@@ -136,9 +140,10 @@ See [direct push delivery](direct-push-test.md) for validation and limitations.
 
 `POST /v1/live-activity` accepts a paired client's ActivityKit destinations:
 
-- `{ "action": "register-start", "deviceToken": "lowercase hex", "environment": "development" | "production" }`
+- `{ "action": "register-start", "deviceToken": "lowercase hex", "environment": "development" | "production", "displayName": "optional phone override" }`
   registers the token that lets this computer start an activity while the app
-  is closed. `remove-start` removes it.
+  is closed and updates the same per-phone name for the required start alert.
+  `remove-start` removes the token.
 - `{ "activityID": "ActivityKit ID", "deviceToken": "lowercase hex", "environment": "development" | "production" }`
   registers this computer's update token. `{ "activityID": "...", "action": "remove" }`
   removes only the matching activity.

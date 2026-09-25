@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import unittest
 
@@ -32,6 +33,16 @@ class PushWorkerTests(unittest.TestCase):
 
     def pair(self):
         return self.store.redeem(self.store.invite("https://source.example")["invitation"], device=device())
+
+    def test_existing_source_database_adds_per_phone_name(self):
+        old = Path(self.tmp.name) / "old.sqlite3"
+        with sqlite3.connect(old) as db:
+            db.execute("CREATE TABLE clients(id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL, "
+                       "created REAL NOT NULL, last_seen REAL NOT NULL DEFAULT 0)")
+        Store(old)
+        with sqlite3.connect(old) as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(clients)")}
+        self.assertIn("display_name", columns)
 
     def register(self, mode="alert"):
         return self.store.push_device(self.client["credential"], {
@@ -69,6 +80,30 @@ class PushWorkerTests(unittest.TestCase):
         payload, _ = notification("source", "generation", event, 100)
         self.assertEqual(payload["aps"]["alert"]["title"], "2 sessions need input")
         self.assertEqual(payload["aps"]["alert"]["body"], "Omarchy · 1 working")
+
+    def test_phone_names_are_scoped_to_each_push_destination(self):
+        other = self.pair()
+        self.store.push_device(self.client["credential"], {"deviceToken": self.device_token,
+            "environment": "development", "mode": "alert", "displayName": "Studio Mac"})
+        self.store.push_device(other["credential"], {"deviceToken": "cd" * 32,
+            "environment": "development", "mode": "alert", "displayName": "Travel Mac"})
+        revision = self.emit("needs_input")
+        with self.store.connect() as db:
+            db.execute("UPDATE events SET payload=? WHERE seq=?",
+                       (json.dumps({"sourceName": "reported-host"}), revision))
+        self.worker.step(100)
+        bodies = {call[0]["token"]: call[1]["aps"]["alert"]["body"] for call in self.sender.calls}
+        self.assertEqual(bodies, {self.device_token: "Studio Mac", "cd" * 32: "Travel Mac"})
+        self.store.push_device(self.client["credential"], {"deviceToken": self.device_token,
+            "environment": "development", "mode": "alert", "displayName": ""})
+        self.assertEqual(self.store.push_device(other["credential"])["registered"], True)
+        with self.store.connect() as db:
+            names = dict(db.execute("SELECT id,display_name FROM clients"))
+        self.assertIsNone(names[self.client["clientID"]])
+        self.assertEqual(names[other["clientID"]], "Travel Mac")
+        self.assertEqual(notification("source", "generation", {"seq": 1, "state": "working", "at": 100,
+            "payload": json.dumps({"sourceName": "reported-host"})}, 100)[0]["aps"]["alert"]["body"],
+            "reported host")
 
     def test_registration_is_scoped_and_revocation_removes_destination(self):
         other = self.pair()

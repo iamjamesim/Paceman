@@ -244,6 +244,17 @@ class MonitoringTests(unittest.TestCase):
         with self.store.connect() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM live_activity_starts').fetchone()[0], 0)
 
+    def test_remote_start_uses_this_phones_computer_name(self):
+        now = time.time()
+        self.store.live_activity(self.credential, {
+            'action': 'register-start', 'deviceToken': 'cd' * 32,
+            'environment': 'development', 'displayName': 'Studio Mac'})
+        self.store.emit('working')
+        self.worker.step(now + 1)
+        start = next(call[1] for call in self.sender.calls if call[1]['aps'].get('event') == 'start')
+        self.assertEqual(start['aps']['alert']['title'], 'Paceman is following Studio Mac')
+        self.assertEqual(start['aps']['attributes']['sourceName'], 'Studio Mac')
+
     def test_invalid_start_token_and_unauthorized_registration(self):
         payload = {'action': 'register-start', 'deviceToken': 'cd' * 32, 'environment': 'development'}
         self.assertIsNone(self.store.live_activity('invalid', payload))

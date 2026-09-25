@@ -181,6 +181,17 @@ class HTTPTests(unittest.TestCase):
         self.store.revoke(pair["clientID"])
         self.assertEqual(self.request("GET", "/v1/push", token=pair["credential"])[0], 401)
 
+    def test_push_registration_rejects_invalid_display_names(self):
+        pair = self.paired()
+        base = {"deviceToken": "ab" * 32, "environment": "development", "mode": "alert"}
+        for name in (" ", " bad", "bad\nname", "x" * 1025, 7):
+            self.assertEqual(self.request("POST", "/v1/push", {**base, "displayName": name},
+                                          pair["credential"])[0], 400)
+        self.assertEqual(self.request("POST", "/v1/push", {**base, "displayName": "Desk"},
+                                      pair["credential"])[0], 200)
+        self.assertEqual(self.request("POST", "/v1/push", {**base, "displayName": "Café 🧑‍💻"},
+                                      pair["credential"])[0], 200)
+
 
 if __name__ == "__main__":
     unittest.main()

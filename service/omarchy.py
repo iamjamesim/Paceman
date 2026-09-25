@@ -89,7 +89,8 @@ class EventHandler(socketserver.StreamRequestHandler):
 
 
 class OmarchySource:
-    def __init__(self, store, *, socket_path: Path | None = None, state_dir: Path | None = None, processes=None):
+    def __init__(self, store, *, socket_path: Path | None = None, state_dir: Path | None = None,
+                 processes=None, computer_name: str | None = None):
         self.store = store
         self.socket_path = socket_path or default_socket()
         self.state_dir = state_dir or Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy"
@@ -100,6 +101,7 @@ class OmarchySource:
         self.socket_inode = None
         self.last_event_at = 0
         self.processes = processes if processes is not None else CodexProcesses()
+        self.computer_name = (computer_name or socket.gethostname()).split(".")[0][:80] or "Computer"
 
     def __enter__(self):
         # Never steal a live desktop socket or remove an unrelated filesystem entry.
@@ -264,7 +266,7 @@ class OmarchySource:
         # file being temporarily unavailable during restart must not erase them.
         current_appearance = appearance(self.state_dir)
         current_allowance = allowance_snapshot(self.state_dir / "agents/usage/codex.json", int(time.time()))
-        payload = {"sourceName": "Omarchy", "mode": "omarchy", "state": state, "sessions": sessions,
+        payload = {"sourceName": self.computer_name, "mode": "omarchy", "state": state, "sessions": sessions,
                    "sessionLiveness": "process",
                    "appearance": current_appearance if current_appearance is not None else old.get("appearance"),
                    "allowance": current_allowance if current_allowance is not None else old.get("allowance")}

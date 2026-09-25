@@ -172,12 +172,14 @@ final class SourceClient {
         return value
     }
 
-    func registerPush(_ source: PairedSource, token: String, environment: String) async throws {
+    func registerPush(_ source: PairedSource, token: String, environment: String,
+                      displayName: String? = nil) async throws {
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/push"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token, "environment": environment, "mode": "alert"])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token,
+            "environment": environment, "mode": "alert", "displayName": displayName ?? ""])
         let data = try await response(request)
         struct Registration: Decodable { let registered: Bool }
         let registration = try JSONDecoder().decode(Registration.self, from: data)
@@ -198,9 +200,11 @@ final class SourceClient {
         try await liveActivityRequest(source, payload: ["activityID": id, "action": "recover"])
     }
 
-    func registerLiveActivityStart(_ source: PairedSource, token: String, environment: String) async throws {
+    func registerLiveActivityStart(_ source: PairedSource, token: String, environment: String,
+                                   displayName: String? = nil) async throws {
         try await liveActivityRequest(source, payload: ["action": "register-start", "deviceToken": token,
-                                                        "environment": environment])
+                                                        "environment": environment,
+                                                        "displayName": displayName ?? ""])
     }
 
     func removeLiveActivityStart(_ source: PairedSource) async throws {

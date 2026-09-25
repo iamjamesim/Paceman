@@ -104,6 +104,9 @@ final class MonitoringCoordinator: ObservableObject {
               (activity.activityState == .active || activity.activityState == .stale) {
             await activity.update(activity.content)
         }
+        registeredStartTokens.removeValue(forKey: sourceID)
+        lastStartAttempts.removeValue(forKey: sourceID)
+        await registerStartTokens()
     }
 
     func reconcile(sources: [PairedSource], snapshots: [String: Snapshot], fresh: Set<String>) async {
@@ -252,7 +255,8 @@ final class MonitoringCoordinator: ObservableObject {
             lastStartAttempts[source.sourceID] = Date()
             do {
                 try await client.registerLiveActivityStart(source,
-                    token: token.map { String(format: "%02x", $0) }.joined(), environment: environment)
+                    token: token.map { String(format: "%02x", $0) }.joined(), environment: environment,
+                    displayName: ComputerPreferences.name(for: source.sourceID))
                 guard sources[source.sourceID]?.credential == source.credential else {
                     try? await client.removeLiveActivityStart(source)
                     continue

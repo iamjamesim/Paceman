@@ -56,6 +56,18 @@ def digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def registered_display_name(payload: dict) -> str | None:
+    """Optional phone-owned name; an empty string clears a previous override."""
+    if "displayName" not in payload:
+        return None
+    name = payload["displayName"]
+    if (not isinstance(name, str) or len(name.encode("utf-8")) > 1024 or name != name.strip()
+            or any(unicodedata.category(char).startswith("C") and char not in "\u200c\u200d"
+                   for char in name)):
+        raise ValueError("Invalid display name")
+    return name
+
+
 class Store:
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -91,6 +103,8 @@ class Store:
                     mode TEXT NOT NULL, cursor INTEGER NOT NULL, next_attempt REAL NOT NULL DEFAULT 0,
                     attempts INTEGER NOT NULL DEFAULT 0, last_result TEXT, last_apns_id TEXT);
             """)
+            if "display_name" not in {row[1] for row in db.execute("PRAGMA table_info(clients)")}:
+                db.execute("ALTER TABLE clients ADD COLUMN display_name TEXT")
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM clients c LEFT JOIN client_devices d ON d.client_id=c.id "
                           "WHERE d.client_id IS NULL LIMIT 1").fetchone():
@@ -208,6 +222,7 @@ class Store:
                     or payload.get("environment") not in ("development", "production")
                     or payload.get("mode") != "alert"):
                 raise ValueError("Invalid push registration")
+            display_name = registered_display_name(payload)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             client = db.execute("SELECT id FROM clients WHERE hash=?", (digest(credential),)).fetchone()
@@ -217,6 +232,8 @@ class Store:
             if remove:
                 db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
             elif payload is not None:
+                if display_name is not None:
+                    db.execute("UPDATE clients SET display_name=? WHERE id=?", (display_name or None, client_id))
                 old = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
                 values = (payload["deviceToken"], payload["environment"], payload["mode"])
                 if old is None or tuple(old[k] for k in ("token", "environment", "mode")) != values:
@@ -239,6 +256,7 @@ class Store:
                     or len(payload["deviceToken"]) % 2
                     or payload.get("environment") not in ("development", "production")):
                 raise ValueError("Invalid start token")
+            display_name = registered_display_name(payload) if action == "register-start" else None
             with self.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 client = db.execute("SELECT id FROM clients WHERE hash=?", (digest(credential),)).fetchone()
@@ -247,6 +265,8 @@ class Store:
                 if action == "remove-start":
                     db.execute("DELETE FROM live_activity_starts WHERE client_id=?", (client[0],))
                 else:
+                    if display_name is not None:
+                        db.execute("UPDATE clients SET display_name=? WHERE id=?", (display_name or None, client[0]))
                     old = db.execute("SELECT token,environment FROM live_activity_starts WHERE client_id=?", (client[0],)).fetchone()
                     if old is None or (old["token"], old["environment"]) != (payload["deviceToken"], payload["environment"]):
                         revision = db.execute("SELECT MAX(seq) FROM events").fetchone()[0]

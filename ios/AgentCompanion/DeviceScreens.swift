@@ -74,7 +74,12 @@ struct ComputerDetail: View {
                 Button("Save") {
                     presentation.setDisplayName(name, source: paired,
                         snapshot: paired.flatMap { model.snapshots[$0.sourceID] })
-                    if let paired { Task { await model.monitoring.refreshComputerName(paired.sourceID) } }
+                    if let paired {
+                        Task {
+                            await model.monitoring.refreshComputerName(paired.sourceID)
+                            await PushCoordinator.shared.sync()
+                        }
+                    }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { Text("Shown in Paceman. Doesn’t rename your computer.") }

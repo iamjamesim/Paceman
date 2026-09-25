@@ -260,6 +260,12 @@ final class ProtocolTests: XCTestCase {
         XCTAssertTrue(receipt.matches(source: source, token: "token", environment: "development"))
         XCTAssertFalse(receipt.matches(source: source, token: "new-token", environment: "development"))
         XCTAssertFalse(receipt.matches(source: source, token: "token", environment: "production"))
+        XCTAssertFalse(receipt.matches(source: source, token: "token", environment: "development",
+                                       displayName: "Studio Mac"))
+        var renamed = receipt
+        renamed.displayName = "Studio Mac"
+        XCTAssertTrue(renamed.matches(source: source, token: "token", environment: "development",
+                                      displayName: "Studio Mac"))
         let other = PairedSource(endpoint: source.endpoint, sourceID: "source",
                                  clientID: "other-client", credential: "secret")
         XCTAssertFalse(receipt.matches(source: other, token: "token", environment: "development"))
@@ -581,12 +587,13 @@ final class ProtocolTests: XCTestCase {
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
                 let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
                 XCTAssertEqual(body["mode"] as? String, "alert")
+                XCTAssertEqual(body["displayName"] as? String, "Studio Mac")
                 XCTAssertNil(body["presentation"])
                 return (200, try JSONSerialization.data(withJSONObject: ["registered": confirmed]))
             }
             do {
                 try await client.registerPush(source, token: String(repeating: "ab", count: 32),
-                                              environment: "development")
+                                              environment: "development", displayName: "Studio Mac")
                 XCTAssertTrue(confirmed, "Unconfirmed registration must fail")
             } catch {
                 XCTAssertFalse(confirmed, "Confirmed registration must succeed")
