@@ -38,7 +38,8 @@ struct MonitoringWatchCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 2)
+        .padding(.leading, 8)
+        .padding(.trailing, 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(name), \(status)\(!stale && state.hasMixedStates ? ", \(state.sessionCount) sessions" : "")")
