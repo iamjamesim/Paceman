@@ -36,8 +36,7 @@ struct CompanionRoot: View {
     @ObservedObject var presentation: PresentationModel
     @State private var path: [FeedDestination] = []
     @State private var focusedSourceID: String?
-    @Environment(\.colorScheme) private var colorScheme
-    var theme: CompanionTheme { presentation.theme(dark: !presentation.themeFamily.supportsLight || colorScheme == .dark) }
+    var theme: CompanionTheme { presentation.theme(dark: true) }
     var body: some View {
         NavigationStack(path: $path) {
             CompanionHome(model: model, monitoring: model.monitoring, presentation: presentation,
@@ -61,7 +60,7 @@ struct CompanionRoot: View {
                 }
         }
         .tint(theme.tint)
-        .preferredColorScheme(presentation.themeFamily.supportsLight ? nil : .dark)
+        .preferredColorScheme(.dark)
         .onAppear {
             if !presentation.preview {
                 presentation.syncComputerNames(model.pairedSources, snapshots: model.snapshots)

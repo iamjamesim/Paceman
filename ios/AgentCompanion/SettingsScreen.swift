@@ -100,7 +100,6 @@ struct AppearanceSettings: View {
     @ObservedObject var presentation: PresentationModel
     let theme: CompanionTheme
     @Environment(\.dynamicTypeSize) private var typeSize
-    @Environment(\.colorScheme) private var colorScheme
     @State private var showingCredits = false
 
     var body: some View {
@@ -114,13 +113,13 @@ struct AppearanceSettings: View {
                             if typeSize.isAccessibilitySize {
                                 VStack(alignment: .leading, spacing: 10) {
                                     themeName(family)
-                                    PaletteSwatches(family: family, dark: colorScheme == .dark, outline: theme.ink)
+                                    PaletteSwatches(family: family, outline: theme.ink)
                                 }
                             } else {
                                 HStack(spacing: 12) {
                                     themeName(family)
                                     Spacer(minLength: 8)
-                                    PaletteSwatches(family: family, dark: colorScheme == .dark, outline: theme.ink)
+                                    PaletteSwatches(family: family, outline: theme.ink)
                                 }
                             }
                         }
@@ -165,11 +164,10 @@ struct AppearanceSettings: View {
 
 private struct PaletteSwatches: View {
     let family: ThemeFamily
-    let dark: Bool
     let outline: Color
 
     private var colors: [Color] {
-        let phone = family.phone(dark: dark || !family.supportsLight)
+        let phone = family.phone(dark: true)
         let glance = family.glance
         let activity = family.activity
         if phone.accent != glance.accent {

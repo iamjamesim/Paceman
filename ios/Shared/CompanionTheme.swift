@@ -72,7 +72,7 @@ extension Color {
 /// Stable family IDs belong to the phone. Source-provided `appearance` remains
 /// decodable for older snapshots, but never selects the user's palette.
 enum ThemeFamily: String, CaseIterable, Identifiable {
-    case paceman, monochrome, ayu, sakuraMochi = "sakura-mochi", miasma, catppuccin
+    case paceman, miasma, ayu, catppuccin, sakuraMochi = "sakura-mochi", monochrome
 
     var id: String { rawValue }
     var name: String {

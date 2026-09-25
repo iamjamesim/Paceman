@@ -1,6 +1,6 @@
 # Paceman themes: design study and build map
 
-Status: six-family picker implemented in the iPhone app. The selected theme
+Status: six-family dark-only picker implemented in the iPhone app. The selected theme
 belongs to the phone. The user has confirmed that theme changes appear on the
 physical custom watch and a visible Live Activity. A full per-family pass and
 the suspended remote-start path remain separate acceptance checks.
@@ -41,15 +41,13 @@ and desktop configuration files are not part of the iPhone themes.
 | [Rosé Pine](https://github.com/rose-pine/rose-pine-palette) | Another MIT-licensed established palette with Dawn light and Main/Moon dark variants. A strong alternate to Catppuccin if it feels more distinct beside Sakura Mochi. |
 | [Ayu](https://github.com/ayu-theme/ayu-colors) | An MIT-licensed developer palette with Light, Mirage, and Dark variants. Light/Mirage pair a near-white UI with a deep blue-gray and amber accent, covering the warm-on-cool direction without making an uncredited lookalike of Retro 82. |
 
-## Theme and appearance are separate
+## Dark themes on the phone
 
-Theme selection chooses a **family**: Paceman, Monochrome, or an expressive
-family. On the iPhone, families that have both light and dark variants use the
-initial **System** appearance setting. Paceman Night is therefore a variant of
-Paceman, not a picker row. Monochrome is genuine grayscale in both phone
-variants, not permanently dark. A deliberately dark-only theme such as Miasma
-or Sakura Mochi may stay dark in the app rather than receiving an invented
-light version. The phone choice is global across paired computers.
+Theme selection chooses a **family**. Every offered phone appearance uses its
+dark palette, including when iPhone system appearance is light. The picker order
+is Paceman, Miasma, Ayu, Catppuccin, Sakura Mochi, then Monochrome. The phone
+choice is global across paired computers. Existing light palette tokens remain
+in the catalog but have no user-facing picker option.
 
 The custom AMOLED watch and Lock Screen Live Activity use the selected family's
 dark glance palette in both iOS appearances. The Dynamic Island remains system
@@ -63,22 +61,20 @@ use additional palette colors for their existing roles, but should not add
 accents solely to decorate an element. SF remains the app/Live Activity
 typeface; the watch keeps its JetBrains Mono face and established layout.
 
-## Proposed initial catalog
+## Catalog and order
 
-Four was a cautious exploration count, not a product limit. Target **six
-families** for launch: **Paceman, Monochrome, Ayu, Sakura Mochi, Miasma, and
-Catppuccin**. Paceman uses the app's existing brand colors; Monochrome is a
-deliberate grayscale utility. Neither claims a novel color scheme. The other
+The picker offers **six families** in the order above. Paceman uses the app's
+existing brand colors; Monochrome is a deliberate grayscale utility.
+Neither claims a novel color scheme. The other
 four use established palettes with visible credit and license notices. Ayu
 replaces the Signal sketch, which followed Retro 82's navy/amber/teal idea too
 closely to justify a separate invented identity. Pulse likewise yields to
 Sakura Mochi. This gives the picker familiar green, pure neutral, blue/amber,
 vivid pink, earthy olive, and pastel violet identities.
 
-Use Ayu Light/Mirage and Catppuccin Latte/Mocha for phone light/dark. Paceman
-and Monochrome also follow system light/dark. Sakura Mochi and Miasma stay
-deliberately dark on the phone. The watch and Live Activity always use the dark
-glance treatment. For named ports, preserve canonical base, text, and accent
+The phone uses Ayu Dark, Catppuccin Mocha, and the dark variants of Paceman and
+Monochrome. Sakura Mochi and Miasma remain dark. The watch and Live Activity
+always use the dark glance treatment. For named ports, preserve canonical base, text, and accent
 colors where they remain legible. When a source accent fails contrast as small
 Apple UI text, choose another source color or adjust its luminance and label
 that role as adapted.
@@ -89,8 +85,8 @@ Sakura Mochi/Catppuccin and Paceman/Miasma respectively. There is no technical
 four- or six-theme limit.
 
 Each row needs a palette specification for phone, custom watch, Lock Screen,
-and Dynamic Island; a provenance/license record; accessible light/dark roles
-where offered; and connected, empty, needs-input, stale, and multiple-computer
+and Dynamic Island; a provenance/license record; accessible dark roles;
+and connected, empty, needs-input, stale, and multiple-computer
 previews. Eight is reasonable if the additional two survive that same review.
 The picker itself stays simple: one name and three signature colors per family.
 The themed Appearance screen is the live phone preview.
@@ -103,11 +99,11 @@ remain within each family; the watch has no fourth color.
 | Family | Phone light: background / surface / ink / accent | Phone dark: background / surface / ink / accent | Watch: background / ink / accent |
 | --- | --- | --- | --- |
 | **Paceman** | `#F5F4F0` / `#EAEDE7` / `#242823` / `#456554` | `#151C18` / `#202A23` / `#E9EDE7` / `#A8D2B6` | `#0A100C` / `#E9EDE7` / `#A8D2B6` |
-| **Monochrome** | `#F4F4F4` / `#E6E6E6` / `#191919` / `#191919` | `#111111` / `#222222` / `#F1F1F1` / `#F1F1F1` | `#050505` / `#F1F1F1` / `#F1F1F1` |
-| **Ayu** | `#F8F9FA` / `#EBEEF0` / `#5C6166` / `#8A5700` | `#1F2430` / `#282E3B` / `#CCCAC2` / `#FFCC66` | `#181C26` / `#CCCAC2` / `#FFCC66` |
-| **Sakura Mochi** | Dark only | `#0B0D11` / `#201620` / `#F0B7CA` / `#FC0594` | `#0B0D11` / `#F0B7CA` / `#FC0594` |
 | **Miasma** | Dark only | `#222222` / `#242D1D` / `#C2C2B0` / `#D7C483` | `#222222` / `#C2C2B0` / `#D7C483` |
+| **Ayu** | `#F8F9FA` / `#EBEEF0` / `#5C6166` / `#8A5700` | `#1F2430` / `#282E3B` / `#CCCAC2` / `#FFCC66` | `#181C26` / `#CCCAC2` / `#FFCC66` |
 | **Catppuccin** | `#EFF1F5` / `#E6E9EF` / `#4C4F69` / `#8839EF` | `#1E1E2E` / `#313244` / `#CDD6F4` / `#CBA6F7` | `#11111B` / `#CDD6F4` / `#CBA6F7` |
+| **Sakura Mochi** | Dark only | `#0B0D11` / `#201620` / `#F0B7CA` / `#FC0594` | `#0B0D11` / `#F0B7CA` / `#FC0594` |
+| **Monochrome** | `#F4F4F4` / `#E6E6E6` / `#191919` / `#191919` | `#111111` / `#222222` / `#F1F1F1` / `#F1F1F1` | `#050505` / `#F1F1F1` / `#F1F1F1` |
 
 The app icon uses Paceman's dark background and mint accent across platforms.
 
@@ -145,8 +141,8 @@ is a numeric starting point.
 ## Interaction
 
 Appearance in iPhone Settings has one row per **family** with its name and
-three signature color swatches. The first is the phone accent for the current
-appearance; the other two show distinct colors from the watch and Live Activity
+three signature color swatches. The first is the dark phone accent;
+the other two show distinct colors from the watch and Live Activity
 palette. The screen itself renders in the selected phone theme. The selected
 row has a checkmark. Source links
 sit behind one info button in the navigation bar. Selecting a family persists
@@ -158,14 +154,14 @@ computer remains a later explicit mode.
 
 1. Define an immutable family catalog and per-appearance role tokens in
    `ios/Shared/`, separate from the source `appearance` DTO. Persist the family
-   ID in phone preferences. Resolve iOS light/dark appearance at rendering time;
-   replace `PresentationModel.theme(source:)` and the forced color scheme in
-   `AgentCompanionApp.swift`. Unknown IDs fall back to Paceman.
+   ID in phone preferences. Resolve the dark phone palette at rendering time
+   and prefer the dark system appearance in `AgentCompanionApp.swift`.
+   Unknown IDs fall back to Paceman.
 2. Add the Settings picker and adapt the app's existing components without
    changing its screen hierarchy. Audit current uses of `theme.tint` and
    opacity-based secondary text, especially status displays, card surfaces,
    long names, and accessibility sizes. Review connected, empty, stale, and
-   multiple-computer states in both phone appearances.
+   multiple-computer states in the dark phone appearance.
 3. Make `CompanionModel` and `WatchLink` forward the selected glance palette
    independently of source activity. The current v2–v5 watch profile already
    carries background, foreground, and one accent. Map each selected family
@@ -182,7 +178,7 @@ computer remains a later explicit mode.
    is suspended. [Apple's shared data guidance](https://developer.apple.com/documentation/widgetkit/developing-a-widgetkit-strategy)
    and [ActivityKit push contract](https://developer.apple.com/documentation/ActivityKit/starting-and-updating-live-activities-with-activitykit-push-notifications)
    support this split.
-5. Revise the four source-owned docs named above. Test light/dark resolution,
+5. Revise the four source-owned docs named above. Test dark resolution under both iPhone system appearances,
    preference fallback, multi-computer independence, BLE color packets, and
    widget rendering. Review full affected phone screens plus the custom watch,
    Lock Screen, and Island for every family and activity state. Use simulator
@@ -215,6 +211,11 @@ credits sheet was reviewed in dark Sakura Mochi. The
 connected, empty, stale, and multiple-computer screens listed above were
 unchanged by this picker refinement. The revised app was
 installed and launched on the paired iPhone.
+
+After comparing the full set of physical phone screenshots, the picker now
+offers only dark appearances in this order: Paceman, Miasma, Ayu, Catppuccin,
+Sakura Mochi, Monochrome. A simulator set to system Light showed the dark picker
+and grouped Ayu activity; the signed iPhone build passed and was installed.
 
 The user confirmed on 24 September that selected themes adapt on the physical
 custom watch and visible Live Activity. This confirms the normal propagation
