@@ -199,8 +199,7 @@ private struct MonitoringRobot: View {
     var body: some View {
         Group {
             if state == "idle" { Image(systemName: "minus").resizable().scaledToFit() }
-            else { Image(state == "finished" ? "Robot-happy" : "Robot-excited")
-                .renderingMode(.template).resizable().scaledToFit() }
+            else { PacemanMark(expression: state == "finished" ? .finished : state == "needs_input" ? .needsInput : .neutral) }
         }
         .id(state)
         .transition(.opacity.combined(with: .scale(scale: 0.86)))

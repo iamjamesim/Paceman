@@ -279,7 +279,8 @@ int main(int argc, char **argv)
         /* Start from a visible fixture, including when testing the idle state. */
         layout.agent_state = WATCH_AGENT_FINISHED;
         watch_face_layout_set_agent_state(&layout, state, true);
-        const char *expected_glyph = state == WATCH_AGENT_FINISHED ? "󱜙" : "󱚣";
+        const char *expected_glyph = state == WATCH_AGENT_FINISHED ? "\xEE\x84\x82" :
+                                     state == WATCH_AGENT_ATTENTION ? "\xEE\x84\x81" : "\xEE\x84\x80";
         if (strcmp(lv_label_get_text(layout.agent), expected_glyph) != 0) {
             fputs("Unexpected agent expression\n", stderr);
             return 1;

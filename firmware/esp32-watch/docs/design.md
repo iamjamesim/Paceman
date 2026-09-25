@@ -116,8 +116,9 @@ work.
 
 Agent activity distinguishes working, needs input, finished, and absent.
 The face prioritizes input requests, then unacknowledged completions, then work.
-The `robot-excited` glyph pulses in opacity while working and bounces for input.
-Finished uses the `robot-happy` glyph with a gentle sway. Idle is hidden.
+The Paceman face has open eyes while working, chevron eyes for input, and
+rounded happy eyes when finished. It pulses in opacity while working, bounces
+for input, and sways when finished. Idle is hidden.
 Animations run only while the screen is awake, and repeated snapshots do not
 restart them. Input requests use two equal notes; completion uses a descending
 pair. The panel's shared Sound toggle controls both. Fresh alerts wake the face

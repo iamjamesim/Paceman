@@ -308,8 +308,9 @@ private struct Panel: View {
                     Text(!model.status.sharingEnabled ? "Paused"
                          : model.status.running ? (activitySetup?.label ?? activity) : "Unavailable")
                         .foregroundStyle(.secondary)
-                    if model.status.running && model.status.activity != "idle" {
-                        PacemanMark().frame(width: 21, height: 21)
+                    if model.status.running, let state = model.status.activity, state != "idle" {
+                        MenuActivityRobot(state: state)
+                            .frame(width: 21, height: 21)
                             .foregroundStyle(Color(nsColor: .labelColor))
                     } else { Color.clear.frame(width: 21, height: 21) }
                 }
@@ -377,6 +378,32 @@ private struct Panel: View {
                 if connection.id != clients.last?.id { Divider() }
             }
         }
+    }
+}
+
+/// The menu panel uses the same state motion as the phone at its existing size.
+private struct MenuActivityRobot: View {
+    let state: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var visible = false
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion || !visible)) { context in
+            let time = reduceMotion || !visible ? 0 : context.date.timeIntervalSinceReferenceDate
+            let pulse = (1 - cos(time * .pi / 1.3)) / 2
+            let bounceTime = time.truncatingRemainder(dividingBy: 1)
+            let bounce = bounceTime < 0.64 ? (1 - cos(bounceTime * .pi / 0.32)) / 2 : 0
+            let sway = sin(time * 2 * .pi / 4.2)
+            PacemanMark(expression: state == "finished" ? .finished
+                        : state == "needs_input" ? .needsInput : .neutral)
+                .opacity(state == "working" ? 1 - pulse * (155.0 / 255) : 1)
+                .rotationEffect(.degrees(state == "finished" ? sway * 4 : 0))
+                .offset(x: state == "finished" ? sway * 2 : 0,
+                        y: state == "needs_input" ? -bounce * 3 : 0)
+        }
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
+        .accessibilityHidden(true)
     }
 }
 

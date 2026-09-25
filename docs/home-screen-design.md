@@ -12,13 +12,16 @@ solid Paceman brand mark with open eyes and the bold italic `PACEMAN` header.
 Use the theme's prominent accent for the mark and foreground color for the
 wordmark. The mark supplies one restrained color point in the header.
 Computer cards use the same subtle phone surface
-as the destination boxes, with the Live Activity's robot and state headline
+as the destination boxes, with the Live Activity's Paceman face and state headline
 below the divider.
 One session shows its identity beneath that headline; multiple named sessions
 remain separate rows with their own state labels. A single session needs no count headline.
 For a grouped provider row, keep its session count in the name and show the
 state distribution below only when those sessions have different states.
-Historical robots are still and muted. No received activity is not historical activity.
+The face keeps the brand silhouette: open eyes while working, chevrons for
+needs input, and wide rounded arches when finished. The existing fade, bounce,
+and sway timings remain; idle has no face. Historical robots are still and muted.
+No received activity is not historical activity.
 On the phone, the fresh robot and active headline share the theme accent.
 Ayu Light uses a warmer amber for these large elements; its small labels and
 controls keep the darker amber needed for text contrast. The dark Live Activity

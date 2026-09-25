@@ -61,6 +61,13 @@ The PNG is exact at the framebuffer level. Display calibration, ambient light,
 rounded glass, and viewing distance still make the physical watch the final
 authority for optical decisions.
 
+The activity face is a generated 32-pixel Paceman font subset. Regenerate it
+from the repository root on macOS with:
+
+```bash
+xcrun swift scripts/make-watch-robot-font.swift firmware/esp32-watch/firmware/main/fonts/paceman_32_agent.c
+```
+
 ## Allowance preview and resource-color checks
 
 These options use fixed fixtures and the shared firmware rim implementation.

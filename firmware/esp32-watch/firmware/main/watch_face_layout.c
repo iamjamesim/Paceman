@@ -9,7 +9,7 @@ LV_FONT_DECLARE(jetbrains_mono_22);
 LV_FONT_DECLARE(jetbrains_mono_26_connection);
 LV_FONT_DECLARE(jetbrains_mono_27);
 LV_FONT_DECLARE(jetbrains_mono_30_battery);
-LV_FONT_DECLARE(jetbrains_mono_32_agent);
+LV_FONT_DECLARE(paceman_32_agent);
 LV_FONT_DECLARE(jetbrains_mono_42);
 LV_FONT_DECLARE(jetbrains_mono_48_icons);
 LV_FONT_DECLARE(jetbrains_mono_114);
@@ -114,8 +114,8 @@ void watch_face_layout_create(lv_obj_t *screen,
     lv_obj_set_style_text_align(layout->connection, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_pos(layout->connection, 247, 62);
 
-    // Omarchy's Material Design robot-excited glyph (U+F16A3).
-    layout->agent = make_label(screen, "󱚣", &jetbrains_mono_32_agent);
+    // Custom Paceman face, drawn from the same silhouette as the phone mark.
+    layout->agent = make_label(screen, "\xEE\x84\x80", &paceman_32_agent);
     lv_obj_set_style_text_color(layout->agent, accent_color, 0);
     lv_obj_set_size(layout->agent, 38, 38);
     lv_obj_set_style_text_align(layout->agent, LV_TEXT_ALIGN_CENTER, 0);
@@ -306,7 +306,8 @@ void watch_face_layout_set_agent_state(watch_face_layout_t *layout,
     layout->agent_state = state;
     layout->agent_animated = animate;
     lv_obj_t *agent = layout->agent;
-    lv_label_set_text(agent, state == WATCH_AGENT_FINISHED ? "󱜙" : "󱚣");
+    lv_label_set_text(agent, state == WATCH_AGENT_FINISHED ? "\xEE\x84\x82"
+                             : state == WATCH_AGENT_ATTENTION ? "\xEE\x84\x81" : "\xEE\x84\x80");
     lv_anim_delete(agent, NULL);
     lv_obj_set_y(agent, 53);
     lv_obj_set_style_translate_x(agent, 0, 0);

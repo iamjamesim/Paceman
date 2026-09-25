@@ -224,15 +224,30 @@ PanelKeyCatcher {
           Layout.minimumWidth: Style.space(24)
           Layout.maximumWidth: Style.space(24)
           implicitHeight: Style.space(24)
-          Text {
+          PacemanMark {
             id: activityMark
             anchors.centerIn: parent
+            width: parent.width
+            height: parent.height
             visible: root.view.running && root.view.sharing
               && ["working", "needs_input", "finished"].indexOf(root.sourceState.activity) >= 0
-            text: root.sourceState.activity === "finished" ? "󱜙" : "󱚣"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.subtitle * 1.25
+            expression: root.sourceState.activity
+            ink: root.foreground
+            property real bounceOffset: 0
+            property real swayPhase: 0
+            transform: [
+              Translate {
+                x: root.sourceState.activity === "finished"
+                  ? Math.sin(activityMark.swayPhase * Math.PI / 180) * 2 : 0
+                y: activityMark.bounceOffset
+              },
+              Rotation {
+                origin.x: activityMark.width / 2
+                origin.y: activityMark.height / 2
+                angle: root.sourceState.activity === "finished"
+                  ? Math.sin(activityMark.swayPhase * Math.PI / 180) * 4 : 0
+              }
+            ]
             Accessible.ignored: true
             SequentialAnimation on opacity {
               running: root.animateActivity && activityMark.visible && root.sourceState.activity === "working"
@@ -241,6 +256,22 @@ PanelKeyCatcher {
               onStopped: activityMark.opacity = 1
               NumberAnimation { from: 1; to: 0.4; duration: 1300; easing.type: Easing.InOutSine }
               NumberAnimation { from: 0.4; to: 1; duration: 1300; easing.type: Easing.InOutSine }
+            }
+            SequentialAnimation on bounceOffset {
+              running: root.animateActivity && activityMark.visible && root.sourceState.activity === "needs_input"
+              loops: Animation.Infinite
+              alwaysRunToEnd: false
+              onStopped: activityMark.bounceOffset = 0
+              NumberAnimation { from: 0; to: -3; duration: 320; easing.type: Easing.InOutSine }
+              NumberAnimation { from: -3; to: 0; duration: 320; easing.type: Easing.InOutSine }
+              PauseAnimation { duration: 360 }
+            }
+            NumberAnimation on swayPhase {
+              running: root.animateActivity && activityMark.visible && root.sourceState.activity === "finished"
+              loops: Animation.Infinite
+              alwaysRunToEnd: false
+              from: 0; to: 360; duration: 4200
+              onStopped: activityMark.swayPhase = 0
             }
           }
         }

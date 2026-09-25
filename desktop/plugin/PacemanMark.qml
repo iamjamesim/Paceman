@@ -4,10 +4,12 @@ import QtQuick
 Item {
   id: root
   property color ink: "white"
+  property string expression: "neutral"
   implicitWidth: 24
   implicitHeight: 24
   readonly property real unit: Math.min(width, height) / 720
   onInkChanged: face.requestPaint()
+  onExpressionChanged: face.requestPaint()
   Item {
     width: 720 * root.unit
     height: 720 * root.unit
@@ -38,9 +40,33 @@ Item {
         roundedRect(ctx, 80, 149, 560, 448, 154)
         ctx.fill()
         ctx.globalCompositeOperation = "destination-out"
-        for (const x of [252, 424]) {
-          roundedRect(ctx, x, 314, 44, 98, 22)
-          ctx.fill()
+        if (root.expression === "needs_input") {
+          for (const center of [274, 446]) {
+            ctx.beginPath()
+            ctx.moveTo(center - 61, 383)
+            ctx.lineTo(center, 314)
+            ctx.lineTo(center + 61, 383)
+            ctx.lineTo(center + 39, 405)
+            ctx.lineTo(center, 360)
+            ctx.lineTo(center - 39, 405)
+            ctx.closePath()
+            ctx.fill()
+          }
+        } else if (root.expression === "finished") {
+          ctx.lineWidth = 31
+          ctx.lineCap = "round"
+          ctx.strokeStyle = root.ink
+          for (const center of [230, 490]) {
+            ctx.beginPath()
+            ctx.moveTo(center - 65, 380)
+            ctx.quadraticCurveTo(center, 257, center + 65, 380)
+            ctx.stroke()
+          }
+        } else {
+          for (const x of [252, 424]) {
+            roundedRect(ctx, x, 314, 44, 98, 22)
+            ctx.fill()
+          }
         }
         ctx.restore()
       }

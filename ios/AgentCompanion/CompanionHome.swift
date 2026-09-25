@@ -302,8 +302,7 @@ struct ActivityRobot: View {
             let bounceTime = time.truncatingRemainder(dividingBy: 1)
             let bounce = bounceTime < 0.64 ? (1 - cos(bounceTime * .pi / 0.32)) / 2 : 0
             let sway = sin(time * 2 * .pi / 4.2)
-            Image(state == .finished ? "Robot-happy" : "Robot-excited")
-                .resizable().scaledToFit()
+            PacemanMark(expression: state == .finished ? .finished : state == .needsInput ? .needsInput : .neutral)
                 .opacity(state == .working ? 1 - pulse * (155.0 / 255) : 1)
                 .rotationEffect(.degrees(state == .finished ? sway * 4 : 0))
                 .offset(x: state == .finished ? sway * 2 : 0, y: state == .needsInput ? -bounce * 3 : 0)

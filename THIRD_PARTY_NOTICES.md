@@ -30,11 +30,12 @@ dependencies.lock; downloaded dependencies are not committed here.
 Third-party licenses apply to their respective components. This private prototype
 has not selected a blanket public distribution license for the remaining code.
 
-The iPhone activity robots in `ios/Resources/Assets.xcassets/Robot-*.imageset`
-are the Material Design Icons `robot-excited` and `robot-happy` from
-[Pictogrammers](https://github.com/Templarian/MaterialDesign), licensed under
-Apache 2.0. They match the Nerd Fonts glyphs U+F16A3 and U+F1719 used by
-the desktop and watch. See `ios/Resources/MaterialDesignIcons-LICENSE.txt`.
+Paceman's activity expressions use the Material Design Icons
+[robot-excited](https://pictogrammers.com/library/mdi/icon/robot-excited/) and
+[robot-happy](https://pictogrammers.com/library/mdi/icon/robot-happy/) as visual
+references for the eyes on Paceman's own robot silhouette. Those icons were
+created by Colton Wiscombe and distributed by Pictogrammers under Apache 2.0.
+See `ios/Resources/MaterialDesignIcons-LICENSE.txt`.
 
 The allowance parser in `service/allowance.py` and its parser tests adapt
 Omarchy Watch's `desktop/daemon/omarchy_watchd.py` and `test_allowance.py`, under

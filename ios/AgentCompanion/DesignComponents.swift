@@ -72,7 +72,7 @@ struct LiveActivityGlyph: View {
                     .strokeBorder(theme.ink.opacity(0.25), lineWidth: 0.6))
                 .frame(width: 35, height: 28)
             HStack(spacing: 3) {
-                Image("Robot-excited").renderingMode(.template).resizable().scaledToFit()
+                PacemanMark()
                     .frame(width: 11, height: 11).foregroundStyle(theme.tint)
                 VStack(alignment: .leading, spacing: 3) {
                     Capsule().fill(theme.ink).frame(width: 11, height: 2)
@@ -106,7 +106,7 @@ struct WatchGlyph: View {
                             .font(.custom("JetBrainsMono-Regular", size: 4.5))
                             .foregroundStyle(theme.ink.opacity(0.6))
                         Spacer(minLength: 0)
-                        Image("Robot-excited").renderingMode(.template).resizable().scaledToFit()
+                        PacemanMark()
                             .frame(width: 6, height: 6).foregroundStyle(theme.tint)
                     }.frame(height: 6)
                     Text(formatted(context.date, timeFormat.hours() == 12 ? "h:mm" : "HH:mm"))

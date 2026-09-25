@@ -17,7 +17,7 @@ idf_component_register(
         "fonts/jetbrains_mono_30_battery.c"
         "fonts/jetbrains_mono_42.c"
         "fonts/jetbrains_mono_48_icons.c"
-        "fonts/jetbrains_mono_32_agent.c"
+        "fonts/paceman_32_agent.c"
         "fonts/jetbrains_mono_114.c"
     INCLUDE_DIRS
         "."
