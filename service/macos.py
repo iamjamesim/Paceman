@@ -26,6 +26,7 @@ EVENT_STATES = {
     "started": "idle", "working": "working", "needs-input": "needs_input",
     "completed": "finished", "interrupted": "idle", "ended": "idle",
 }
+ATTENTION_DELAY = 5.0
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
 
 
@@ -48,7 +49,7 @@ class HookHandler(socketserver.StreamRequestHandler):
 
 class MacSource:
     def __init__(self, store, *, socket_path: Path, computer_name: str | None = None,
-                 allowance_reader=read_codex_allowance):
+                 allowance_reader=read_codex_allowance, monotonic=time.monotonic):
         self.store = store
         self.socket_path = socket_path
         self.computer_name = (computer_name or socket.gethostname()).split(".")[0][:80]
@@ -62,6 +63,8 @@ class MacSource:
         self.allowance_thread = None
         self.next_allowance_at = 0.0
         self.closed = False
+        self.monotonic = monotonic
+        self.pending_attention = {}
 
     def __enter__(self):
         self.socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -163,20 +166,36 @@ class MacSource:
             db.execute("BEGIN IMMEDIATE")
             previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
             if event == "ended":
-                if previous is None:
+                pending = self.pending_attention.pop(key, None)
+                if previous is None and pending is None:
                     return False
                 db.execute("DELETE FROM mac_sessions WHERE id=?", (key,))
             else:
                 workspace_label = workspace_label or (previous["workspace_label"] if previous else None)
-                if (previous and previous["turn"] == turn and previous["state"] == EVENT_STATES[event]
-                        and previous["workspace_label"] == workspace_label):
-                    return False
                 # A late callback for an earlier turn must not overwrite the
                 # current one. SessionStart has no turn and only registers once.
                 if previous and event == "started":
                     return False
                 if (previous and previous["turn"] and turn and previous["turn"] != turn
                         and command.get("hook") != "UserPromptSubmit"):
+                    return False
+                if (previous and previous["turn"] == turn and previous["state"] == "finished"
+                        and event == "working" and command.get("hook") == "PostToolUse"):
+                    return False
+                if event == "needs-input":
+                    pending = self.pending_attention.get(key)
+                    if (pending and pending[0] == turn) or (previous and previous["turn"] == turn
+                            and previous["state"] == "needs_input"):
+                        return False
+                    self.pending_attention[key] = (turn, self.monotonic() + ATTENTION_DELAY,
+                                                   workspace_label)
+                    self.last_event_at = time.time()
+                    db.execute("INSERT OR REPLACE INTO metadata VALUES ('mac_last_agent_event_at',?)",
+                               (str(self.last_event_at),))
+                    return False
+                self.pending_attention.pop(key, None)
+                if (previous and previous["turn"] == turn and previous["state"] == EVENT_STATES[event]
+                        and previous["workspace_label"] == workspace_label):
                     return False
                 db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
                            (key, turn, EVENT_STATES[event], time.time(), workspace_label))
@@ -189,9 +208,30 @@ class MacSource:
         # Hook lifecycle events own session state. Elapsed time alone is not
         # evidence that an open Codex conversation has ended.
         with self.lock:
-            if self.closed or time.monotonic() < self.next_allowance_at:
+            if self.closed:
                 return
-            self.next_allowance_at = time.monotonic() + 300
+            now = self.monotonic()
+            due = [(key, pending) for key, pending in self.pending_attention.items()
+                   if pending[1] <= now]
+            if due:
+                with self.store.connect() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    changed = False
+                    for key, (turn, _, workspace_label) in due:
+                        self.pending_attention.pop(key, None)
+                        previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
+                        if previous and previous["turn"] != turn:
+                            continue
+                        if previous and previous["state"] in ("needs_input", "finished"):
+                            continue
+                        db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
+                                   (key, turn, "needs_input", time.time(), workspace_label))
+                        changed = True
+                    if changed:
+                        self._publish(db)
+            if now < self.next_allowance_at:
+                return
+            self.next_allowance_at = now + 300
             self.allowance_thread = threading.Thread(target=self._refresh_allowance, daemon=True)
             self.allowance_thread.start()
 

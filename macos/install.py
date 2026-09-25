@@ -74,7 +74,7 @@ PYTHON = runtime_python()
 HOOK_PURPOSES = (
     ("SessionStart", "show a new Codex task as idle"),
     ("UserPromptSubmit", "show the task as working when a prompt is sent"),
-    ("PermissionRequest", "show that the task needs your input"),
+    ("PermissionRequest", "show input needed if approval remains pending for five seconds"),
     ("PostToolUse", "return the task to working after a tool finishes"),
     ("Stop", "show the task as finished when its turn ends"),
     ("Interrupt", "show the task as idle when its turn is interrupted"),

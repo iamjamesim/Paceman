@@ -109,10 +109,15 @@ class MacSourceTests(unittest.TestCase):
             root = Path(temporary)
             root.chmod(0o700)
             store = Store(root / "hub.sqlite3")
-            with MacSource(store, socket_path=root / "hook.sock", computer_name="My Mac") as source:
+            clock = [10.0]
+            with MacSource(store, socket_path=root / "hook.sock", computer_name="My Mac",
+                           allowance_reader=lambda: None, monotonic=lambda: clock[0]) as source:
                 self.assertTrue(source.receive(dict(command="agent-event", session="one", turn="1",
                                                     event="working", workspaceLabel="paceman")))
-                self.assertTrue(source.receive(dict(command="agent-event", session="two", turn="2", event="needs-input")))
+                self.assertFalse(source.receive(dict(command="agent-event", session="two", turn="2", event="needs-input")))
+                self.assertEqual(store.snapshot()["state"], "working")
+                clock[0] += 5.1
+                source.tick()
                 value = store.snapshot()
                 self.assertEqual(value["mode"], "macos")
                 self.assertEqual(value["sourceName"], "My Mac")
@@ -129,6 +134,10 @@ class MacSourceTests(unittest.TestCase):
                 self.assertFalse(source.receive(dict(command="agent-event", session="two", turn="2", event="needs-input")))
                 self.assertTrue(source.receive(dict(command="agent-event", session="two", turn="2", event="completed")))
                 self.assertEqual(store.snapshot()["state"], "working")
+                finished = store.snapshot()
+                self.assertFalse(source.receive(dict(command="agent-event", session="two", turn="2",
+                                                     event="working", hook="PostToolUse")))
+                self.assertEqual(store.snapshot()["sessions"], finished["sessions"])
                 self.assertTrue(source.receive(dict(command="agent-event", session="one", turn="1", event="ended")))
                 self.assertEqual(store.snapshot()["state"], "finished")
                 last_event = source.last_event_at
@@ -136,6 +145,51 @@ class MacSourceTests(unittest.TestCase):
                 self.assertEqual(store.snapshot()["state"], "idle")
                 self.assertEqual(store.snapshot()["sessions"], [])
                 self.assertEqual(source.last_event_at, last_event)
+
+    def test_short_approval_does_not_publish_attention(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            clock = [10.0]
+            with MacSource(store, socket_path=root / "hook.sock",
+                           allowance_reader=lambda: None, monotonic=lambda: clock[0]) as source:
+                source.receive(dict(command="agent-event", session="one", turn="1", event="working"))
+                before = store.snapshot()["revision"]
+                self.assertFalse(source.receive(dict(command="agent-event", session="one", turn="1",
+                                                     event="needs-input")))
+                clock[0] += 4.0
+                source.tick()
+                self.assertEqual(store.snapshot()["revision"], before)
+                self.assertFalse(source.receive(dict(command="agent-event", session="one", turn="1",
+                                                     event="working", hook="PostToolUse")))
+                clock[0] += 2.0
+                source.tick()
+                self.assertEqual(store.snapshot()["revision"], before)
+                self.assertEqual(store.snapshot()["state"], "working")
+                source.receive(dict(command="agent-event", session="one", turn="1", event="needs-input"))
+                source.receive(dict(command="agent-event", session="one", turn="1", event="completed"))
+                clock[0] += 6.0
+                source.tick()
+                self.assertEqual(store.snapshot()["state"], "finished")
+
+    def test_terminal_hook_retries_during_source_restart(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            process = subprocess.Popen([sys.executable, "macos/codex_hook.py"],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, env={"PACEMAN_HOOK_SOCKET": str(root / "hook.sock")})
+            process.stdin.write(json.dumps({"hook_event_name": "Stop", "session_id": "one",
+                                            "turn_id": "1"}))
+            process.stdin.close()
+            time.sleep(.2)
+            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None):
+                self.assertEqual(process.wait(timeout=2), 0)
+                with process.stdout, process.stderr:
+                    self.assertEqual(json.loads(process.stdout.read()), {"continue": True})
+                self.assertEqual(store.snapshot()["state"], "finished")
 
     def test_workspace_label_prefers_repository_root_without_a_path(self):
         with tempfile.TemporaryDirectory() as temporary:

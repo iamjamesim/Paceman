@@ -60,7 +60,7 @@ pending entries; inspect the Paceman entries each surface presents.
 | --- | --- |
 | `SessionStart` | Show a new Codex task as idle |
 | `UserPromptSubmit` | Show it as working when a prompt is sent |
-| `PermissionRequest` | Show that it needs your input |
+| `PermissionRequest` | Show input needed if approval remains pending for five seconds |
 | `PostToolUse` | Return it to working after a tool finishes |
 | `Stop` | Show it as finished when its turn ends |
 | `Interrupt` | Show it as idle when its turn is interrupted |
@@ -184,15 +184,20 @@ above for background alerts.
 The hook script sends only lifecycle event names plus opaque session and turn
 IDs to a private user-owned Unix socket. It does not send prompts, answers,
 transcripts, command arguments, or project paths. `UserPromptSubmit` becomes
-Working, `PermissionRequest` becomes Needs input, `PostToolUse` resumes Working,
-`Stop` becomes Finished, `Interrupt` becomes Idle, and `SessionEnd` removes the
-session. SessionStart registers an idle session. The script never makes a Codex
-turn depend on Paceman being available.
+Working. A `PermissionRequest` becomes Needs input only if it is still pending
+after five seconds; a quick tool result cancels it without publishing an
+attention event. `PostToolUse` resumes Working, `Stop` becomes Finished,
+`Interrupt` becomes Idle, and `SessionEnd` removes the session. SessionStart
+registers an idle session. The hook script checks the source's receipt and
+briefly retries turn-ending events during a source restart. It never makes a
+Codex turn depend on Paceman being available.
 
 The Mac has no Linux `/proc` ownership proof. A received hook confirms local
 activity but does not prove that a session remains open indefinitely. The source
 clears hook-derived sessions when it restarts; a new hook repopulates them. No
-elapsed-time watchdog declares an open session stuck. This behavior needs a
+elapsed-time watchdog declares an open session stuck. A longer automatically
+approved tool may still appear to need input because hooks do not report the
+approval resolution itself. This behavior needs a
 live Codex desktop and ChatGPT Work acceptance pass. Official OpenAI docs describe
 hooks in the Codex runtime for Codex and ChatGPT Work; they do not establish
 ordinary Chat coverage. Hook scripts also need to exist where the work runs.

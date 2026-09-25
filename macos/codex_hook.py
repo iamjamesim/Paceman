@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import socket
 import sys
+import time
 import unicodedata
 
 
@@ -13,6 +14,26 @@ EVENTS = {
     "PermissionRequest": "needs-input", "PostToolUse": "working",
     "Stop": "completed", "Interrupt": "interrupted", "SessionEnd": "ended",
 }
+TERMINAL_HOOKS = {"Stop", "Interrupt", "SessionEnd"}
+
+
+def deliver(message, path, hook):
+    """Require the source's receipt; briefly retry lifecycle-ending events."""
+    deadline = time.monotonic() + (1.0 if hook in TERMINAL_HOOKS else 0.0)
+    while True:
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                connection.settimeout(.2 if hook in TERMINAL_HOOKS else .15)
+                connection.connect(str(path))
+                connection.sendall(json.dumps(message, separators=(",", ":")).encode() + b"\n")
+                response = connection.makefile("rb").readline(256)
+                if json.loads(response).get("ok") is True:
+                    return
+        except (OSError, ValueError, AttributeError):
+            pass
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(min(.1, max(0, deadline - time.monotonic())))
 
 
 def workspace_label(cwd):
@@ -48,10 +69,7 @@ def main():
                        "event": event, "hook": data["hook_event_name"]}
             if label := workspace_label(data.get("cwd")):
                 message["workspaceLabel"] = label
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-                connection.settimeout(.15)
-                connection.connect(str(path))
-                connection.sendall(json.dumps(message, separators=(",", ":")).encode() + b"\n")
+            deliver(message, path, data["hook_event_name"])
     except (OSError, ValueError, TypeError, KeyError):
         # Monitoring must never prevent an agent turn or approval from running.
         pass
