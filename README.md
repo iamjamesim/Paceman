@@ -64,7 +64,7 @@ computer. Its two desktop sources have different adapters:
 | Omarchy, Codex CLI | Tested through the separately installed Omarchy Watch for Codex companion and Paceman's process-verified receiver. |
 | Omarchy, Codex desktop app | Not validated with Paceman yet. The official [Linux desktop preview](https://learn.chatgpt.com/docs/linux/linux-app) supports Arch, but shared hook configuration alone does not prove the companion, process ownership, or allowance path works. |
 
-For macOS, install Paceman and review its seven Codex hooks in the app or CLI.
+For macOS, install Paceman and review its eight Codex hooks in the app or CLI.
 The Mac's allowance requires a locally signed-in Codex desktop runtime or CLI.
 For Omarchy, install and review the separate companion hooks; its allowance
 currently comes from Omarchy's agents panel. Only local sessions that deliver

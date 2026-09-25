@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import macos.install as installer
 from macos.install import PYTHON, install_hooks
-from macos.codex_hook import EVENTS
+from macos.codex_hook import EVENTS, QUESTION_MATCHER
 from macos.control import missing_hooks
 
 
@@ -36,7 +36,8 @@ class MacInstallTests(unittest.TestCase):
             self.assertTrue(second["customSetting"])
             self.assertEqual(len(second["hooks"]["Stop"]), 2)
             self.assertEqual(second["hooks"]["Stop"][0]["hooks"][0]["command"], "echo existing")
-            self.assertEqual(len(second["hooks"]), 7)
+            self.assertEqual(len(second["hooks"]), 8)
+            self.assertEqual(second["hooks"]["PreToolUse"][0]["matcher"], QUESTION_MATCHER)
 
     def test_hook_upgrade_replaces_old_interpreter_without_adding_a_second_row(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -52,6 +53,25 @@ class MacInstallTests(unittest.TestCase):
             self.assertEqual(stop[0]["hooks"][0]["command"],
                              f"{shlex.quote(PYTHON)} {shlex.quote(str(script))}")
 
+    def test_question_hook_upgrade_preserves_other_handlers_in_shared_group(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hooks.json"
+            script = installer.ROOT / "lib/macos/codex_hook.py"
+            old_command = f"/old/python3 {shlex.quote(str(script))}"
+            other = {"type": "command", "command": "echo other"}
+            path.write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [
+                other, {"type": "command", "command": old_command, "timeout": 3}
+            ]}]}}))
+
+            self.assertIn("PreToolUse", install_hooks(path))
+            groups = json.loads(path.read_text())["hooks"]["PreToolUse"]
+            self.assertEqual(groups[0]["hooks"], [other])
+            self.assertNotIn("matcher", groups[0])
+            self.assertEqual(groups[1]["matcher"], QUESTION_MATCHER)
+            self.assertEqual(groups[1]["hooks"][0]["command"],
+                             f"{shlex.quote(PYTHON)} {shlex.quote(str(script))}")
+            self.assertEqual(install_hooks(path), [])
+
     def test_missing_hooks_distinguishes_partial_and_complete_install(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -61,7 +81,8 @@ class MacInstallTests(unittest.TestCase):
             self.assertEqual(set(missing_hooks(config, script)), set(EVENTS))
             command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
             config.write_text(json.dumps({"hooks": {
-                event: [{"hooks": [{"type": "command", "command": command}]}]
+                event: [{**({"matcher": QUESTION_MATCHER} if event == "PreToolUse" else {}),
+                         "hooks": [{"type": "command", "command": command}]}]
                 for event in EVENTS if event != "Stop"
             }}))
             self.assertEqual(missing_hooks(config, script), ["Stop"])
@@ -153,7 +174,7 @@ class MacInstallTests(unittest.TestCase):
             else:
                 self.assertEqual(plistlib.loads(plist.read_bytes())["ProgramArguments"][0],
                                  str(app / "Contents/MacOS/PacemanBackground"))
-                self.assertEqual(len(json.loads(hooks.read_text())["hooks"]), 7)
+                self.assertEqual(len(json.loads(hooks.read_text())["hooks"]), 8)
             self.assertEqual(push_plist.exists(), failed)
             self.assertEqual(len(bootstraps), 3 if failed else 1)
 

@@ -18,7 +18,7 @@ import urllib.request
 import uuid
 
 from desktop.control import private_endpoint
-from macos.codex_hook import EVENTS as CODEX_EVENTS
+from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint
 
 ROOT = Path.home() / "Library/Application Support/Paceman"
@@ -53,6 +53,7 @@ def missing_hooks(config_path: Path | None = None, script_path: Path | None = No
         groups = groups_by_event.get(event, [])
         if not isinstance(groups, list) or not any(
             isinstance(group, dict) and isinstance(group.get("hooks"), list)
+            and (event != "PreToolUse" or group.get("matcher") == QUESTION_MATCHER)
             and any(installed(item) for item in group["hooks"])
             for group in groups
         ):

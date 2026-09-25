@@ -43,7 +43,7 @@ commands. The installing agent must give the steps for the surface the user is
 using, name the Paceman entries to review, and stay through a real event check.
 
 **In the Codex app:** Open **Settings → Hooks → User config (All projects)**.
-Find the seven event rows in the table below. Codex labels each command hook
+Find the eight event rows in the table below. Codex labels each command hook
 **Hook 1**, so expand each row and check that its source is **User config —
 ~/.codex/hooks.json** and its command is the installed Python running
 `~/Library/Application Support/Paceman/lib/macos/codex_hook.py`. After inspecting
@@ -61,6 +61,7 @@ pending entries; inspect the Paceman entries each surface presents.
 | `SessionStart` | Show a new Codex task as idle |
 | `UserPromptSubmit` | Show it as working when a prompt is sent |
 | `PermissionRequest` | Show input needed if approval remains pending for five seconds |
+| `PreToolUse` | Show input needed if a blocking or async question remains pending for five seconds |
 | `PostToolUse` | Return it to working after a tool finishes |
 | `Stop` | Show it as finished when its turn ends |
 | `Interrupt` | Show it as idle when its turn is interrupted |
@@ -101,7 +102,7 @@ button creates a five-minute invitation; the phone scans it from
 pairings. The panel's contact time means an authenticated snapshot
 was served to that phone, not that a watch displayed it.
 
-The activity row checks for the seven installed Paceman hook commands. If any
+The activity row checks for the eight installed Paceman hook commands. If any
 are missing, it says **Setup needed** and directs the user to ask their Codex
 agent to rerun the Mac installer. If the commands are present but no real hook
 event has ever arrived, it says **No activity yet** and points to the app's
@@ -181,12 +182,25 @@ above for background alerts.
 
 ## Codex coverage and limits
 
-The hook script sends only lifecycle event names plus opaque session and turn
-IDs to a private user-owned Unix socket. It does not send prompts, answers,
-transcripts, command arguments, or project paths. `UserPromptSubmit` becomes
-Working. A `PermissionRequest` becomes Needs input only if it is still pending
-after five seconds; a quick tool result cancels it without publishing an
-attention event. `PostToolUse` resumes Working, `Stop` becomes Finished,
+The hook script sends lifecycle event names, opaque session and turn IDs, and
+an optional short project label to a private user-owned Unix socket. It does
+not send prompts, answers, transcripts, command arguments, or project paths.
+`UserPromptSubmit` becomes Working. A `PermissionRequest` for approval or a
+`PreToolUse` for `request_user_input` becomes Needs input after five seconds.
+A quick tool result cancels that attention. A `PreToolUse` for
+`request_user_input_async` also becomes Needs input after five seconds, but
+its quick tool result does not clear the pending question. Attention stays
+above Working or Finished until another user message, interruption, or session
+end. The next message is only a proxy for an answer; a dismissal without a
+new message has no resolution hook. Codex gives the async question an item ID,
+but the current user-message schema has no documented reply-to field for it.
+The hook adapter does not forward the question's tool-call ID, and no later
+hook supplies a correlated answer ID. A new, unrelated user message can clear
+Needs input early, while dismissal without a new message can leave it showing.
+This is a best-effort attention signal, not a confirmed per-question pending
+state.
+
+Other `PostToolUse` events resume Working, `Stop` becomes Finished,
 `Interrupt` becomes Idle, and `SessionEnd` removes the session. SessionStart
 registers an idle session. The hook script checks the source's receipt and
 briefly retries turn-ending events during a source restart. It never makes a
@@ -242,7 +256,9 @@ sharing-off and long-list fixtures; the QR sheet was reviewed after fixing its
 image sizing and wrapped instructions. The user confirmed the menu-bar icon is
 visible and the Mac appears as a second computer on the iPhone. The Mac source
 reported one paired iPhone with recent authenticated fetches. The user then
-reviewed and trusted the seven Paceman hooks in the Codex app. Live events from
+reviewed and trusted the seven Paceman hooks available then in the Codex app.
+The eighth, `PreToolUse`, was added later and was not part of that verification.
+Live events from
 the active local app task advanced `lastAgentEventAt` from `0` and changed the
 source from Needs input to Working after an approval. A fresh local Codex CLI
 task using `gpt-5.5` completed with `OK` and advanced the event time again.

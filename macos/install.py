@@ -13,6 +13,8 @@ import subprocess
 import sys
 import tempfile
 
+from macos.codex_hook import QUESTION_MATCHER
+
 REPO = Path(__file__).resolve().parent.parent
 ROOT = Path.home() / "Library/Application Support/Paceman"
 APP = Path.home() / "Applications/Paceman.app"
@@ -75,6 +77,7 @@ HOOK_PURPOSES = (
     ("SessionStart", "show a new Codex task as idle"),
     ("UserPromptSubmit", "show the task as working when a prompt is sent"),
     ("PermissionRequest", "show input needed if approval remains pending for five seconds"),
+    ("PreToolUse", "show input needed if a blocking or async question remains pending for five seconds"),
     ("PostToolUse", "return the task to working after a tool finishes"),
     ("Stop", "show the task as finished when its turn ends"),
     ("Interrupt", "show the task as idle when its turn is interrupted"),
@@ -112,14 +115,27 @@ def install_hooks(path: Path | None = None):
                     continue
                 if len(arguments) == 2 and arguments[1] == script:
                     installed = True
+                    if event == "PreToolUse" and group.get("matcher") != QUESTION_MATCHER:
+                        # Matcher belongs to the group. Keep unrelated handlers
+                        # in a shared group on their original match pattern.
+                        if len(group["hooks"]) == 1:
+                            group["matcher"] = QUESTION_MATCHER
+                        else:
+                            group["hooks"].remove(item)
+                            groups.append({"matcher": QUESTION_MATCHER, "hooks": [item]})
+                        changed.append(event)
                     if item.get("type") != "command" or item.get("command") != command or item.get("timeout") != 3:
                         item.update(type="command", command=command, timeout=3)
-                        changed.append(event)
+                        if event not in changed:
+                            changed.append(event)
                     break
             if installed:
                 break
         if not installed:
-            groups.append({"hooks": [{"type": "command", "command": command, "timeout": 3}]})
+            group = {"hooks": [{"type": "command", "command": command, "timeout": 3}]}
+            if event == "PreToolUse":
+                group["matcher"] = QUESTION_MATCHER
+            groups.append(group)
             changed.append(event)
     if not changed:
         return changed
@@ -393,13 +409,14 @@ def print_hook_review_steps(wrapper: Path):
     print("  Codex calls each row 'Hook 1'. Identify Paceman by expanding the row")
     print("  and checking its source (User config, ~/.codex/hooks.json) and command:")
     print(f"     {shlex.quote(PYTHON)} {shlex.quote(str(ROOT / 'lib/macos/codex_hook.py'))}")
-    print("  Review these seven event rows with the user:")
+    print("  Review these eight event rows with the user:")
     for event, purpose in HOOK_PURPOSES:
         print(f"     {event}: {purpose}")
-    print("  The script sends only event names and opaque session/turn IDs to the")
-    print("  private local Paceman socket; no prompts, replies, transcripts, tool")
-    print("  arguments, or project paths. The user decides whether to trust each")
-    print("  Paceman row individually. Do not choose Trust all or bypass review.")
+    print("  The script sends event names, opaque session/turn IDs, and an optional")
+    print("  short project label to the private local Paceman socket; no prompts,")
+    print("  replies, transcripts, tool arguments, or project paths.")
+    print("  The user decides whether to trust each Paceman row individually.")
+    print("  Do not choose Trust all or bypass review.")
     print("  Stay with the user, then send a prompt in a fresh local Codex task")
     print("  and verify lastAgentEventAt advances in:")
     print(f'     "{wrapper}" status')

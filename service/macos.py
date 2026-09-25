@@ -24,6 +24,7 @@ from service.codex_limits import read_codex_allowance
 
 EVENT_STATES = {
     "started": "idle", "working": "working", "needs-input": "needs_input",
+    "question-opened": "needs_input",
     "completed": "finished", "interrupted": "idle", "ended": "idle",
 }
 ATTENTION_DELAY = 5.0
@@ -66,6 +67,11 @@ class MacSource:
         self.closed = False
         self.monotonic = monotonic
         self.pending_attention = {}
+        # Async questions outlive the tool call and may outlive the turn.
+        # A later user message is only a proxy for resolution: Codex hooks do
+        # not identify which async question, if any, that message answers.
+        self.pending_questions = {}
+        self.published_questions = set()
 
     def __enter__(self):
         self.socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -168,7 +174,9 @@ class MacSource:
             previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
             if event == "ended":
                 pending = self.pending_attention.pop(key, None)
-                if previous is None and pending is None:
+                question = self.pending_questions.pop(key, None)
+                self.published_questions.discard(key)
+                if previous is None and pending is None and question is None:
                     return False
                 db.execute("DELETE FROM mac_sessions WHERE id=?", (key,))
             else:
@@ -183,6 +191,17 @@ class MacSource:
                 if (previous and previous["turn"] == turn and previous["state"] == "finished"
                         and event == "working" and command.get("hook") == "PostToolUse"):
                     return False
+                if event == "question-opened":
+                    self.pending_questions[key] = (turn, self.monotonic() + ATTENTION_DELAY,
+                                                   workspace_label)
+                    self.published_questions.discard(key)
+                    if previous is None:
+                        db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
+                                   (key, turn, "working", time.time(), workspace_label))
+                    self.last_event_at = time.time()
+                    db.execute("INSERT OR REPLACE INTO metadata VALUES ('mac_last_agent_event_at',?)",
+                               (str(self.last_event_at),))
+                    return False
                 if event == "needs-input":
                     pending = self.pending_attention.get(key)
                     if (pending and pending[0] == turn) or (previous and previous["turn"] == turn
@@ -195,8 +214,12 @@ class MacSource:
                                (str(self.last_event_at),))
                     return False
                 self.pending_attention.pop(key, None)
+                question_cleared = False
+                if command.get("hook") in ("UserPromptSubmit", "Interrupt"):
+                    question_cleared = self.pending_questions.pop(key, None) is not None
+                    self.published_questions.discard(key)
                 if (previous and previous["turn"] == turn and previous["state"] == EVENT_STATES[event]
-                        and previous["workspace_label"] == workspace_label):
+                        and previous["workspace_label"] == workspace_label and not question_cleared):
                     return False
                 db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
                            (key, turn, EVENT_STATES[event], time.time(), workspace_label))
@@ -230,13 +253,21 @@ class MacSource:
                         changed = True
                     if changed:
                         self._publish(db)
+            newly_due = {key for key, (_, due, _) in self.pending_questions.items()
+                         if due <= now and key not in self.published_questions}
+            if newly_due:
+                self.published_questions.update(newly_due)
+                self.publish_current()
             # Stop completes a turn, but some clients do not deliver SessionEnd.
             # Keep its result long enough to notice, then retire only that
             # finished display row. A later prompt creates it again.
             with self.store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
-                retired = db.execute("DELETE FROM mac_sessions WHERE state='finished' AND updated<=?",
-                                     (time.time() - FINISHED_RETENTION,)).rowcount
+                retired = 0
+                for row in db.execute("SELECT id FROM mac_sessions WHERE state='finished' AND updated<=?",
+                                      (time.time() - FINISHED_RETENTION,)):
+                    if row["id"] not in self.pending_questions:
+                        retired += db.execute("DELETE FROM mac_sessions WHERE id=?", (row["id"],)).rowcount
                 if retired:
                     self._publish(db, lifecycle_only=True)
             if now < self.next_allowance_at:
@@ -263,15 +294,19 @@ class MacSource:
 
     def _publish(self, db, *, lifecycle_only=False) -> bool:
         records = db.execute("SELECT * FROM mac_sessions ORDER BY id").fetchall()
+        now_monotonic = self.monotonic()
         sessions = []
         for row in records:
-            session = {"id": row["id"], "provider": "codex", "state": row["state"]}
+            question = self.pending_questions.get(row["id"])
+            state = "needs_input" if question and question[1] <= now_monotonic else row["state"]
+            session = {"id": row["id"], "provider": "codex", "state": state}
             if row["workspace_label"]:
                 session["workspaceLabel"] = row["workspace_label"]
             sessions.append(session)
         state = next((candidate for candidate in ("needs_input", "working", "finished")
-                      if any(row["state"] == candidate for row in records)), "idle")
-        activity_key = json.dumps([(row["id"], row["turn"], row["state"]) for row in records])
+                      if any(session["state"] == candidate for session in sessions)), "idle")
+        activity_key = json.dumps([(row["id"], row["turn"], session["state"])
+                                   for row, session in zip(records, sessions)])
         old_key = db.execute("SELECT value FROM metadata WHERE key='activity_key'").fetchone()
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         old = json.loads(last["payload"]) if last["payload"] else {}

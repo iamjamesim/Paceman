@@ -11,10 +11,12 @@ import unicodedata
 
 EVENTS = {
     "SessionStart": "started", "UserPromptSubmit": "working",
-    "PermissionRequest": "needs-input", "PostToolUse": "working",
+    "PermissionRequest": "needs-input", "PreToolUse": "needs-input",
+    "PostToolUse": "working",
     "Stop": "completed", "Interrupt": "interrupted", "SessionEnd": "ended",
 }
 TERMINAL_HOOKS = {"Stop", "Interrupt", "SessionEnd"}
+QUESTION_MATCHER = "^request_user_input(_async)?$"
 
 
 def deliver(message, path, hook):
@@ -61,6 +63,12 @@ def main():
     try:
         data = json.load(sys.stdin)
         event = EVENTS.get(data.get("hook_event_name"))
+        # A question is a tool call, not a permission request. The async call
+        # returns before the answer, so its attention has a distinct lifecycle.
+        if data.get("hook_event_name") == "PreToolUse":
+            tool = data.get("tool_name")
+            event = ("question-opened" if tool == "request_user_input_async"
+                     else "needs-input" if tool == "request_user_input" else None)
         session = data.get("session_id")
         turn = data.get("turn_id") or ""
         if event and isinstance(session, str):

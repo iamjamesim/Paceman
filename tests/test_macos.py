@@ -173,6 +173,73 @@ class MacSourceTests(unittest.TestCase):
                 source.tick()
                 self.assertEqual(store.snapshot()["state"], "finished")
 
+    def test_blocking_question_needs_input_until_tool_returns(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            clock = [10.0]
+            with MacSource(store, socket_path=root / "hook.sock",
+                           allowance_reader=lambda: None, monotonic=lambda: clock[0]) as source:
+                source.next_allowance_at = float("inf")
+
+                def hook(name, tool_name=None):
+                    payload = {"hook_event_name": name, "session_id": "one", "turn_id": "1"}
+                    if tool_name:
+                        payload["tool_name"] = tool_name
+                    subprocess.run([sys.executable, "macos/codex_hook.py"], input=json.dumps(payload),
+                                   env={"PACEMAN_HOOK_SOCKET": str(root / "hook.sock")},
+                                   capture_output=True, text=True, check=True)
+
+                hook("UserPromptSubmit")
+                hook("PreToolUse", "Bash")
+                clock[0] += 6
+                source.tick()
+                self.assertEqual(store.snapshot()["state"], "working")
+
+                hook("PreToolUse", "request_user_input")
+                clock[0] += 6
+                source.tick()
+                self.assertEqual(store.snapshot()["state"], "needs_input")
+                hook("PostToolUse", "request_user_input")
+                self.assertEqual(store.snapshot()["state"], "working")
+
+    def test_async_question_remains_attention_until_next_user_message(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            clock = [10.0]
+            with MacSource(store, socket_path=root / "hook.sock",
+                           allowance_reader=lambda: None, monotonic=lambda: clock[0]) as source:
+                source.next_allowance_at = float("inf")
+
+                def hook(name, tool_name=None, turn="1"):
+                    payload = {"hook_event_name": name, "session_id": "one", "turn_id": turn}
+                    if tool_name:
+                        payload["tool_name"] = tool_name
+                    subprocess.run([sys.executable, "macos/codex_hook.py"], input=json.dumps(payload),
+                                   env={"PACEMAN_HOOK_SOCKET": str(root / "hook.sock")},
+                                   capture_output=True, text=True, check=True)
+
+                hook("UserPromptSubmit")
+                hook("PreToolUse", "request_user_input_async")
+                hook("PostToolUse", "request_user_input_async")
+                self.assertEqual(store.snapshot()["state"], "working")
+                clock[0] += 6
+                source.tick()
+                self.assertEqual(store.snapshot()["state"], "needs_input")
+                hook("PostToolUse", "Bash")
+                hook("Stop")
+                self.assertEqual(store.snapshot()["state"], "needs_input")
+                with store.connect() as db:
+                    db.execute("UPDATE mac_sessions SET updated=?",
+                               (time.time() - FINISHED_RETENTION - 1,))
+                source.tick()
+                self.assertEqual(store.snapshot()["state"], "needs_input")
+                hook("UserPromptSubmit", turn="2")
+                self.assertEqual(store.snapshot()["state"], "working")
+
     def test_finished_rows_retire_without_expiring_live_work(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
