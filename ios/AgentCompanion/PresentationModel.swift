@@ -93,6 +93,7 @@ struct AgentSession: Codable, Identifiable, Equatable {
     let state: ActivityState
     var name: String?
     var project: String?
+    var workspaceLabel: String?
     var displayName: String { String((name ?? (provider == "fixture" ? "Test agent" : provider.capitalized)).prefix(80)) }
     var detail: String {
         if provider == "fixture" { return "Local test source" }

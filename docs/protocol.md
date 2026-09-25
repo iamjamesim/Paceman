@@ -153,6 +153,12 @@ The iPhone can display `sessions` entries containing `id`, `provider`, and `stat
 with optional `name` and `project` strings. Synthetic mode emits a fixture session;
 the Omarchy adapter emits opaque session IDs, providers and lifecycle states.
 It does not read task names, projects or conversation content from the companion.
+The Mac Codex hook may add a short repository or working-directory label as
+`workspaceLabel`. It sends no full path or prompt to the source. This field is
+separate from optional task `project` metadata so it does not change how the
+phone groups unnamed sessions. The Live Activity
+includes this label only if all active sessions share it; otherwise it keeps
+the existing agent-type summary.
 
 A snapshot may also carry a resolved appearance object:
 

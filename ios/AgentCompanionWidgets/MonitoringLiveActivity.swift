@@ -78,6 +78,10 @@ private struct MonitoringCard: View {
         return MonitoringActivity.ContentState.agentSummary(for: MonitoringProviderCache.codes(
             sourceID: sourceID, generation: state.generation, revision: state.revision))
     }
+    private var contextLabel: String? {
+        let parts = [agentSummary, state.workspaceLabel].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 9 : 11) {
@@ -99,8 +103,8 @@ private struct MonitoringCard: View {
             }
             .font(.system(compact ? .caption2 : .caption, design: .rounded, weight: .medium))
             MonitoringStateLine(state: state, stale: stale, compact: compact)
-            if stale || state.hasMixedStates || agentSummary != nil {
-                MonitoringDetails(state: state, agentSummary: agentSummary, stale: stale, compact: compact)
+            if stale || state.hasMixedStates || contextLabel != nil {
+                MonitoringDetails(state: state, contextLabel: contextLabel, stale: stale, compact: compact)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -131,7 +135,7 @@ private struct MonitoringStateLine: View {
 
 private struct MonitoringDetails: View {
     let state: MonitoringActivity.ContentState
-    let agentSummary: String?
+    let contextLabel: String?
     let stale: Bool
     let compact: Bool
     private var palette: MonitoringPalette { ThemePreference.current.activity }
@@ -147,8 +151,10 @@ private struct MonitoringDetails: View {
                 VStack(alignment: .leading, spacing: 5) {
                     if state.hasMixedStates {
                         HStack(spacing: 5) {
-                            if let agent = agentSummary {
-                                Text(agent).foregroundStyle(palette.ink.opacity(0.76))
+                            if let contextLabel {
+                                Text(contextLabel)
+                                    .lineLimit(compact ? 1 : 2)
+                                    .foregroundStyle(palette.ink.opacity(0.76))
                                 Spacer(minLength: 8)
                             }
                             stateLights.accessibilityHidden(true)
@@ -156,8 +162,10 @@ private struct MonitoringDetails: View {
                         Text(state.sessionSummary)
                             .lineLimit(compact ? 1 : 2)
                             .minimumScaleFactor(0.75)
-                    } else if let agent = agentSummary {
-                        Text(agent).foregroundStyle(palette.ink.opacity(0.76))
+                    } else if let contextLabel {
+                        Text(contextLabel)
+                            .lineLimit(compact ? 1 : 2)
+                            .foregroundStyle(palette.ink.opacity(0.76))
                     }
                 }
             }

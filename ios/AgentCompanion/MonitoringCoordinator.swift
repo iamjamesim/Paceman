@@ -24,6 +24,7 @@ extension MonitoringActivity.ContentState {
         themeID = ThemePreference.current.rawValue
         providers = Self.providerCodes((snapshot.sessions ?? [])
             .filter { $0.state != .idle }.map(\.provider))
+        workspaceLabel = Self.sharedWorkspaceLabel(sessions.filter { $0.state != .idle }.map(\.workspaceLabel))
     }
 }
 

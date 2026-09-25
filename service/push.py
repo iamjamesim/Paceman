@@ -104,7 +104,7 @@ def notification(source_id: str, generation: str, event: dict, now: float) -> tu
 
 
 def live_notification(snapshot: dict, now: float, ending=False) -> tuple[dict, dict]:
-    """Display-only envelope shared with MonitoringActivity.ContentState; no private text."""
+    """Display-only envelope shared with MonitoringActivity.ContentState."""
     sessions = snapshot.get("sessions") or []
     counts = {state: sum(s.get("state") == state for s in sessions) for state in ("working", "needs_input", "finished")}
     if not sessions and snapshot["state"] in counts:
@@ -123,6 +123,13 @@ def live_notification(snapshot: dict, now: float, ending=False) -> tuple[dict, d
         content["providers"] = sorted({aliases.get(s.get("provider"), "other")
                                        if isinstance(s.get("provider"), str) else "other"
                                        for s in active_sessions})
+        workspaces = {s.get("workspaceLabel") for s in active_sessions if isinstance(s, dict)}
+        if len(workspaces) == 1:
+            label = next(iter(workspaces))
+            if (isinstance(label, str) and 1 <= len(label) <= 40
+                    and label == label.strip() and "/" not in label and "\\" not in label
+                    and label.isprintable()):
+                content["workspaceLabel"] = label
     attention = 240 if counts["needs_input"] else 60 if counts["working"] else 0
     aps = {"timestamp": int(now), "event": "end" if ending else "update", "content-state": content,
            "stale-date": int(fresh_until), "relevance-score": (observed + attention) / 10_000_000}

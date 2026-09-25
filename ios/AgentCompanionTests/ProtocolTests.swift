@@ -41,6 +41,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(state.changedAt)
         XCTAssertNil(state.themeID)
         XCTAssertNil(state.agentSummary)
+        XCTAssertNil(state.workspaceLabel)
         XCTAssertEqual(state.relevanceScore, (state.observedAt + 240) / 10_000_000)
         XCTAssertEqual(state.revision, 42)
         XCTAssertEqual(state.freshUntil - state.observedAt, 30)
@@ -90,6 +91,12 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(linux.agentSummary, "Codex + Claude")
         XCTAssertEqual(MonitoringActivity.ContentState.providerCodes(["codex", "claude-code", "private-agent"]),
                        ["claude", "codex", "other"])
+        XCTAssertEqual(MonitoringActivity.ContentState.sharedWorkspaceLabel(["paceman", "paceman"]), "paceman")
+        XCTAssertNil(MonitoringActivity.ContentState.sharedWorkspaceLabel(["paceman", "other"]))
+        XCTAssertNil(MonitoringActivity.ContentState.sharedWorkspaceLabel(["/private/paceman"]))
+        let enriched = MonitoringActivity.ContentState(snapshot: snapshot("enriched", [
+            AgentSession(id: "e1", provider: "codex", state: .working, workspaceLabel: "paceman")]))
+        XCTAssertEqual(enriched.workspaceLabel, "paceman")
         XCTAssertEqual(mac.freshUntil, 400)
         XCTAssertEqual(linux.freshUntil, 400)
     }
@@ -366,8 +373,8 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testUnnamedSessionsGroupWithoutLosingStatesOrNamedRows() {
-        let sessions = [AgentSession(id: "1", provider: "codex", state: .idle),
-                        AgentSession(id: "2", provider: "codex", state: .needsInput),
+        let sessions = [AgentSession(id: "1", provider: "codex", state: .idle, workspaceLabel: "paceman"),
+                        AgentSession(id: "2", provider: "codex", state: .needsInput, workspaceLabel: "paceman"),
                         AgentSession(id: "3", provider: "codex", state: .finished),
                         AgentSession(id: "4", provider: "codex", state: .working, name: "Fix checkout"),
                         AgentSession(id: "5", provider: "claude", state: .working)]

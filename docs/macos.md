@@ -8,7 +8,8 @@ meaning and action hierarchy follow [desktop panel design](desktop-panel-design.
 The installation has one **Paceman** background item. While Sharing is on, it
 runs the local activity source and, if configured, the iPhone notification
 sender. The menu-bar app is its visible control. Codex hooks report lifecycle
-state to the source; they do not transmit prompts or transcripts. Pairing uses
+state and an optional short workspace label to the source; they do not transmit
+prompts, full paths, or transcripts. Pairing uses
 the user's private Tailscale connection. Python remains an implementation
 dependency, but macOS starts a signed Paceman helper rather than presenting two
 unidentified `python3` login items.
@@ -68,9 +69,11 @@ pending entries; inspect the Paceman entries each surface presents.
 These event names and **Hook 1** are Codex's labels. The current documented hook
 format has no per-hook display-name field; `statusMessage` describes execution
 status and does not rename a review row. Identify Paceman by its expanded
-command. The script sends only the lifecycle name and opaque session/turn IDs
-to Paceman's private local socket. It does not send prompts, replies,
-transcripts, tool arguments, or project paths. The agent must not choose
+command. The script sends the lifecycle name, session/turn IDs, and, when
+available, a short repository or working-directory name to Paceman's private
+local socket. It does not send prompts, replies, transcripts, tool arguments,
+or full project paths. The workspace name may appear on the iPhone Lock Screen
+when it describes every active session. The agent must not choose
 **Trust all**, approve hooks on the user's behalf, or bypass trust.
 
 After review, the agent records the current `lastAgentEventAt`, helps the user

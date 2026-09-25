@@ -21,6 +21,8 @@ struct MonitoringActivity: ActivityAttributes {
         // Bounded agent identities only; no session names, paths, or prompts.
         // Optional so activities created by older builds still decode.
         var providers: [String]? = nil
+        // One shared, path-free workspace label when it describes every active session.
+        var workspaceLabel: String? = nil
         var sessionCount: Int { working + needsInput + finished }
         // Keep fresh input prominent, but a newer working activity can overtake
         // an old one once its five-minute freshness lease has expired.
@@ -69,6 +71,16 @@ struct MonitoringActivity: ActivityAttributes {
                 default: "other"
                 }
             })).sorted()
+        }
+        static func sharedWorkspaceLabel(_ labels: [String?]) -> String? {
+            guard !labels.isEmpty else { return nil }
+            let workspaces = Set(labels)
+            guard workspaces.count == 1, let label = labels.first ?? nil,
+                  (1...40).contains(label.count), label == label.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !label.contains("/"), !label.contains("\\"),
+                  !label.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+            else { return nil }
+            return label
         }
         var sessionSummary: String {
             [(needsInput, needsInput == 1 ? "needs input" : "need input"),

@@ -126,6 +126,19 @@ class MonitoringTests(unittest.TestCase):
         self.assertNotIn('PRIVATE PROMPT', json.dumps(content))
         self.assertNotIn('/private/work', json.dumps(content))
 
+    def test_live_activity_shows_only_a_shared_path_free_workspace_label(self):
+        snapshot = self.store.snapshot()
+        snapshot['sessions'] = [
+            {'state': 'needs_input', 'provider': 'codex', 'workspaceLabel': 'paceman'},
+            {'state': 'working', 'provider': 'codex', 'workspaceLabel': 'paceman'},
+        ]
+        content = live_notification(snapshot, time.time())[0]['aps']['content-state']
+        self.assertEqual(content['workspaceLabel'], 'paceman')
+        snapshot['sessions'][1]['workspaceLabel'] = 'another-project'
+        self.assertNotIn('workspaceLabel', live_notification(snapshot, time.time())[0]['aps']['content-state'])
+        snapshot['sessions'][1]['workspaceLabel'] = '/private/project'
+        self.assertNotIn('workspaceLabel', live_notification(snapshot, time.time())[0]['aps']['content-state'])
+
     def test_live_activity_uses_one_display_palette_and_has_state_time(self):
         snapshot = self.store.snapshot()
         snapshot['appearance'] = {'background': '#191724', 'foreground': 'E0DEF4',

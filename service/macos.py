@@ -17,6 +17,7 @@ import socketserver
 import stat
 import threading
 import time
+import unicodedata
 
 
 EVENT_STATES = {
@@ -82,7 +83,10 @@ class MacSource:
             self.server.source = self
             with self.store.connect() as db:
                 db.execute("CREATE TABLE IF NOT EXISTS mac_sessions (id TEXT PRIMARY KEY, "
-                           "turn TEXT NOT NULL, state TEXT NOT NULL, updated REAL NOT NULL)")
+                           "turn TEXT NOT NULL, state TEXT NOT NULL, updated REAL NOT NULL, "
+                           "workspace_label TEXT)")
+                if "workspace_label" not in {row[1] for row in db.execute("PRAGMA table_info(mac_sessions)")}:
+                    db.execute("ALTER TABLE mac_sessions ADD COLUMN workspace_label TEXT")
                 db.execute("INSERT OR REPLACE INTO metadata VALUES ('mode','macos')")
                 previous_event = db.execute("SELECT value FROM metadata WHERE key='mac_last_agent_event_at'").fetchone()
                 if previous_event:
@@ -135,6 +139,13 @@ class MacSource:
                 or not isinstance(turn, str) or (turn and not IDENTIFIER.fullmatch(turn))
                 or event not in EVENT_STATES):
             raise ValueError("Invalid event")
+        workspace_label = command.get("workspaceLabel")
+        if workspace_label is not None:
+            if (not isinstance(workspace_label, str) or not 1 <= len(workspace_label) <= 40
+                    or workspace_label != workspace_label.strip()
+                    or "/" in workspace_label or "\\" in workspace_label
+                    or any(unicodedata.category(char).startswith("C") for char in workspace_label)):
+                workspace_label = None
         key = hashlib.sha256(("codex:" + session).encode()).hexdigest()
         with self.lock, self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -144,7 +155,9 @@ class MacSource:
                     return False
                 db.execute("DELETE FROM mac_sessions WHERE id=?", (key,))
             else:
-                if previous and previous["turn"] == turn and previous["state"] == EVENT_STATES[event]:
+                workspace_label = workspace_label or (previous["workspace_label"] if previous else None)
+                if (previous and previous["turn"] == turn and previous["state"] == EVENT_STATES[event]
+                        and previous["workspace_label"] == workspace_label):
                     return False
                 # A late callback for an earlier turn must not overwrite the
                 # current one. SessionStart has no turn and only registers once.
@@ -153,8 +166,8 @@ class MacSource:
                 if (previous and previous["turn"] and turn and previous["turn"] != turn
                         and command.get("hook") != "UserPromptSubmit"):
                     return False
-                db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?)",
-                           (key, turn, EVENT_STATES[event], time.time()))
+                db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
+                           (key, turn, EVENT_STATES[event], time.time(), workspace_label))
             self.last_event_at = time.time()
             db.execute("INSERT OR REPLACE INTO metadata VALUES ('mac_last_agent_event_at',?)",
                        (str(self.last_event_at),))
@@ -172,7 +185,12 @@ class MacSource:
 
     def _publish(self, db) -> bool:
         records = db.execute("SELECT * FROM mac_sessions ORDER BY id").fetchall()
-        sessions = [{"id": row["id"], "provider": "codex", "state": row["state"]} for row in records]
+        sessions = []
+        for row in records:
+            session = {"id": row["id"], "provider": "codex", "state": row["state"]}
+            if row["workspace_label"]:
+                session["workspaceLabel"] = row["workspace_label"]
+            sessions.append(session)
         state = next((candidate for candidate in ("needs_input", "working", "finished")
                       if any(row["state"] == candidate for row in records)), "idle")
         activity_key = json.dumps([(row["id"], row["turn"], row["state"]) for row in records])

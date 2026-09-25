@@ -37,10 +37,12 @@ It shows per-computer automatic-start checking only while that state needs
 explanation; one computer's registration does not block another's activity.
 
 The source APNs payload contains source identity, known agent type codes, state
-counts, revision and freshness, not task names, project paths, prompts or
-transcripts. A real Mac or Omarchy session currently supplies only its agent
-type and state, so the Lock Screen does not invent a task title. When an older
-source sender omits the provider, the phone can reuse one it fetched for the
+counts, revision and freshness. It may include one short workspace name when
+every active session on that computer reports the same path-free label. It never
+includes task names, full project paths, prompts or transcripts. The Mac hook
+derives that label from the repository root or working directory; Omarchy still
+supplies only agent type and state. The Lock Screen does not invent a task title.
+When an older source sender omits the provider, the phone can reuse one it fetched for the
 same source generation and revision. A newer unseen state gets no inferred
 provider. The Live Activity uses the phone-selected family's dark glance
 surface and ink. Its
@@ -50,8 +52,9 @@ use ink, and stale content is muted. Small session lights retain separate state
 colors. The in-app preview shares the same palette. The header names the
 computer using the phone's display name and shows a count only when there is
 more than one session. The headline names the dominant state without repeating
-the count. A fresh activity names its known agent type below the headline. A
-mixed-state activity also shows its distribution as lights and counts. Stale
+the count. A fresh activity names its known agent type and, when unambiguous,
+the workspace below the headline. A mixed-state activity also shows its
+distribution as lights and counts. Stale
 activity instead shows its last update
 time. The expanded Island uses
 its full-width bottom region for that same hierarchy so ordinary computer
