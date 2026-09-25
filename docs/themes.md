@@ -45,7 +45,7 @@ and desktop configuration files are not part of the iPhone themes.
 
 Theme selection chooses a **family**. Every offered phone appearance uses its
 dark palette, including when iPhone system appearance is light. The picker order
-is Paceman, Miasma, Ayu, Catppuccin, Sakura Mochi, then Monochrome. The phone
+is Paceman, Ayu, Catppuccin, Miasma, Sakura Mochi, then Monochrome. The phone
 choice is global across paired computers. Existing light palette tokens remain
 in the catalog but have no user-facing picker option.
 
@@ -99,9 +99,9 @@ remain within each family; the watch has no fourth color.
 | Family | Phone light: background / surface / ink / accent | Phone dark: background / surface / ink / accent | Watch: background / ink / accent |
 | --- | --- | --- | --- |
 | **Paceman** | `#F5F4F0` / `#EAEDE7` / `#242823` / `#456554` | `#151C18` / `#202A23` / `#E9EDE7` / `#A8D2B6` | `#0A100C` / `#E9EDE7` / `#A8D2B6` |
-| **Miasma** | Dark only | `#222222` / `#242D1D` / `#C2C2B0` / `#D7C483` | `#222222` / `#C2C2B0` / `#D7C483` |
 | **Ayu** | `#F8F9FA` / `#EBEEF0` / `#5C6166` / `#8A5700` | `#1F2430` / `#282E3B` / `#CCCAC2` / `#FFCC66` | `#181C26` / `#CCCAC2` / `#FFCC66` |
 | **Catppuccin** | `#EFF1F5` / `#E6E9EF` / `#4C4F69` / `#8839EF` | `#1E1E2E` / `#313244` / `#CDD6F4` / `#CBA6F7` | `#11111B` / `#CDD6F4` / `#CBA6F7` |
+| **Miasma** | Dark only | `#222222` / `#242D1D` / `#C2C2B0` / `#D7C483` | `#222222` / `#C2C2B0` / `#D7C483` |
 | **Sakura Mochi** | Dark only | `#0B0D11` / `#201620` / `#F0B7CA` / `#FC0594` | `#0B0D11` / `#F0B7CA` / `#FC0594` |
 | **Monochrome** | `#F4F4F4` / `#E6E6E6` / `#191919` / `#191919` | `#111111` / `#222222` / `#F1F1F1` / `#F1F1F1` | `#050505` / `#F1F1F1` / `#F1F1F1` |
 
@@ -213,7 +213,7 @@ unchanged by this picker refinement. The revised app was
 installed and launched on the paired iPhone.
 
 After comparing the full set of physical phone screenshots, the picker now
-offers only dark appearances in this order: Paceman, Miasma, Ayu, Catppuccin,
+offers only dark appearances in this order: Paceman, Ayu, Catppuccin, Miasma,
 Sakura Mochi, Monochrome. A simulator set to system Light showed the dark picker
 and grouped Ayu activity; the signed iPhone build passed and was installed.
 
