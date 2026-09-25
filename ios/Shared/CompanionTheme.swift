@@ -72,20 +72,26 @@ extension Color {
 /// Stable family IDs belong to the phone. Source-provided `appearance` remains
 /// decodable for older snapshots, but never selects the user's palette.
 enum ThemeFamily: String, CaseIterable, Identifiable {
-    case paceman, ayu, catppuccin, miasma, sakuraMochi = "sakura-mochi", monochrome
+    case ayu, catppuccin, osakaJade = "osaka-jade", sakuraMochi = "sakura-mochi", miasma, monochrome
+
+    // The deliberate picker order puts the everyday palette first, then softer
+    // and more expressive alternatives, with grayscale last.
+    static var allCases: [ThemeFamily] {
+        [.ayu, .osakaJade, .catppuccin, .sakuraMochi, .miasma, .monochrome]
+    }
 
     var id: String { rawValue }
     var name: String {
         switch self {
-        case .paceman: "Paceman"
         case .monochrome: "Monochrome"
         case .ayu: "Ayu"
         case .sakuraMochi: "Sakura Mochi"
         case .miasma: "Miasma"
         case .catppuccin: "Catppuccin"
+        case .osakaJade: "Osaka Jade"
         }
     }
-    var supportsLight: Bool { self != .sakuraMochi && self != .miasma }
+    var supportsLight: Bool { self != .sakuraMochi && self != .miasma && self != .osakaJade }
 
     private func colors(_ background: String, _ surface: String, _ foreground: String, _ accent: String) -> CompanionTheme {
         CompanionTheme(id: rawValue, name: name, background: background,
@@ -94,9 +100,6 @@ enum ThemeFamily: String, CaseIterable, Identifiable {
 
     func phone(dark: Bool) -> CompanionTheme {
         switch self {
-        case .paceman:
-            dark ? colors("151C18", "202A23", "E9EDE7", "A8D2B6")
-                 : colors("F5F4F0", "EAEDE7", "242823", "456554")
         case .monochrome:
             dark ? colors("111111", "222222", "F1F1F1", "F1F1F1")
                  : colors("F4F4F4", "E6E6E6", "191919", "191919")
@@ -108,29 +111,33 @@ enum ThemeFamily: String, CaseIterable, Identifiable {
         case .catppuccin:
             dark ? colors("1E1E2E", "313244", "CDD6F4", "CBA6F7")
                  : colors("EFF1F5", "E6E9EF", "4C4F69", "8839EF")
+        case .osakaJade:
+            // Justin Lowry's Osaka Jade, with its lighter foreground and bright
+            // cyan mapped to phone text and active marks for small-screen contrast.
+            colors("111C18", "23372B", "D6D5BC", "8CD3CB")
         }
     }
 
     var glance: CompanionTheme {
         switch self {
-        case .paceman: colors("0A100C", "0A100C", "E9EDE7", "A8D2B6")
         case .monochrome: colors("050505", "050505", "F1F1F1", "F1F1F1")
         case .ayu: colors("181C26", "181C26", "CCCAC2", "FFCC66")
         case .sakuraMochi: phone(dark: true)
         case .miasma: phone(dark: true)
         case .catppuccin: colors("11111B", "11111B", "CDD6F4", "CBA6F7")
+        case .osakaJade: colors("0C1512", "0C1512", "D6D5BC", "8CD3CB")
         }
     }
 
     var activity: MonitoringPalette {
         let base = glance
         switch self {
-        case .paceman: return MonitoringPalette(base: base, muted: "A5B2A8", input: "D6B86D", working: "A8D2B6", finished: "8C9B90")
         case .monochrome: return MonitoringPalette(base: base, muted: "B9B9B9", input: "F1F1F1", working: "C5C5C5", finished: "8E8E8E")
         case .ayu: return MonitoringPalette(base: base, muted: "AAAAB0", input: "FFCC66", working: "80BFFF", finished: "9098A7")
         case .sakuraMochi: return MonitoringPalette(base: base, muted: "BD9AA9", input: "FC0594", working: "50DE89", finished: "8E8490")
         case .miasma: return MonitoringPalette(base: base, muted: "A7AA98", input: "D7C483", working: "A6B66E", finished: "858B78")
         case .catppuccin: return MonitoringPalette(base: base, muted: "A6ADC8", input: "CBA6F7", working: "89B4FA", finished: "8992AC")
+        case .osakaJade: return MonitoringPalette(base: base, muted: "81B8A8", input: "E5C736", working: "8CD3CB", finished: "53685B")
         }
     }
 }
@@ -140,7 +147,11 @@ enum ThemePreference {
     static let key = "selected-theme-family"
     static var sharedDefaults: UserDefaults { UserDefaults(suiteName: appGroup) ?? .standard }
     static func load(from defaults: UserDefaults) -> ThemeFamily {
-        ThemeFamily(rawValue: defaults.string(forKey: key) ?? "") ?? .paceman
+        let stored = defaults.string(forKey: key)
+        // Existing explicit green selections keep a green palette after the
+        // retired Paceman row is replaced by Osaka Jade.
+        if stored == "paceman" { return .osakaJade }
+        return stored.flatMap(ThemeFamily.init(rawValue:)) ?? .ayu
     }
     static var current: ThemeFamily { load(from: sharedDefaults) }
     static func save(_ family: ThemeFamily) { sharedDefaults.set(family.rawValue, forKey: key) }

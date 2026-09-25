@@ -16,7 +16,7 @@ final class PresentationModel: ObservableObject {
         previewScreen = args.first(where: { $0.hasPrefix("--screen=") }).map { String($0.dropFirst(9)) } ?? "activity"
         neutralPreview = args.contains("--neutral")
         let previewTheme = args.first(where: { $0.hasPrefix("--theme=") }).map { String($0.dropFirst(8)) }
-        themeFamily = preview ? ThemeFamily(rawValue: previewTheme ?? "") ?? .paceman : ThemePreference.current
+        themeFamily = preview ? ThemeFamily(rawValue: previewTheme ?? "") ?? .ayu : ThemePreference.current
         #else
         preview = false; previewScreen = "activity"; neutralPreview = false
         themeFamily = ThemePreference.current

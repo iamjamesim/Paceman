@@ -4,15 +4,19 @@ Ayu (adapted for Paceman UI roles)
 https://github.com/ayu-theme/ayu-colors
 Copyright (c) Konstantin Pschera <me@kons.ch> (kons.ch)
 
+Osaka Jade (adapted for Paceman UI roles)
+https://github.com/Justikun/omarchy-osaka-jade-theme
+Copyright (c) 2025 Justin Lowry
+
+Catppuccin (Mocha, adapted for Paceman UI roles)
+https://github.com/catppuccin/catppuccin
+Copyright (c) 2021 Catppuccin
+
 Sakura Mochi (adapted for Paceman UI roles)
 https://github.com/OldJobobo/omarchy-sakura-mochi-theme
 Copyright (c) 2026 OldJobobo
 
-Catppuccin (Latte and Mocha, adapted for Paceman UI roles)
-https://github.com/catppuccin/catppuccin
-Copyright (c) 2021 Catppuccin
-
-The three palettes above are used under the MIT License:
+The four palettes above are used under the MIT License:
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

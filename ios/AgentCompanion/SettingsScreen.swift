@@ -170,16 +170,13 @@ private struct PaletteSwatches: View {
         let phone = family.phone(dark: true)
         let glance = family.glance
         let activity = family.activity
-        if phone.accent != glance.accent {
-            return [phone.tint, glance.tint, family == .paceman ? activity.input : activity.working]
-        }
         switch family {
-        case .paceman:
+        case .osakaJade:
             return [phone.tint, activity.input, glance.ink]
         case .monochrome:
             return [phone.tint, activity.working, activity.finished]
         default:
-            return [phone.tint, activity.working, glance.ink]
+            return [phone.tint, phone.accent == glance.accent ? activity.working : glance.tint, glance.ink]
         }
     }
 
@@ -206,9 +203,10 @@ private struct PaletteCredits: View {
             List {
                 Section {
                     credit("Ayu", creator: "ayu-theme", url: "https://github.com/ayu-theme/ayu-colors")
+                    credit("Osaka Jade", creator: "Justin Lowry", url: "https://github.com/Justikun/omarchy-osaka-jade-theme")
+                    credit("Catppuccin", creator: "Catppuccin", url: "https://github.com/catppuccin/catppuccin")
                     credit("Sakura Mochi", creator: "OldJobobo", url: "https://github.com/OldJobobo/omarchy-sakura-mochi-theme")
                     credit("Miasma", creator: "xero", url: "https://github.com/xero/miasma.nvim")
-                    credit("Catppuccin", creator: "Catppuccin", url: "https://github.com/catppuccin/catppuccin")
                 } footer: {
                     Text("Palettes adapted for Paceman.")
                 }

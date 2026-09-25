@@ -896,7 +896,7 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testThemeFamiliesResolveAndEncodeWatchColorsIndependentlyOfSource() {
-        XCTAssertEqual(ThemeFamily.allCases.count, 6)
+        XCTAssertEqual(ThemeFamily.allCases, [.ayu, .osakaJade, .catppuccin, .sakuraMochi, .miasma, .monochrome])
         for family in ThemeFamily.allCases {
             let light = family.phone(dark: false)
             let dark = family.phone(dark: true)
@@ -920,6 +920,7 @@ final class ProtocolTests: XCTestCase {
         }
         XCTAssertEqual(ThemeFamily.sakuraMochi.phone(dark: false), ThemeFamily.sakuraMochi.phone(dark: true))
         XCTAssertEqual(ThemeFamily.miasma.phone(dark: false), ThemeFamily.miasma.phone(dark: true))
+        XCTAssertEqual(ThemeFamily.osakaJade.phone(dark: false), ThemeFamily.osakaJade.phone(dark: true))
         XCTAssertNotEqual(ThemeFamily.ayu.phone(dark: false), ThemeFamily.ayu.phone(dark: true))
     }
 
@@ -927,9 +928,11 @@ final class ProtocolTests: XCTestCase {
         let suite = "theme-test-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        XCTAssertEqual(ThemePreference.load(from: defaults), .paceman)
+        XCTAssertEqual(ThemePreference.load(from: defaults), .ayu)
         defaults.set("future-theme", forKey: ThemePreference.key)
-        XCTAssertEqual(ThemePreference.load(from: defaults), .paceman)
+        XCTAssertEqual(ThemePreference.load(from: defaults), .ayu)
+        defaults.set("paceman", forKey: ThemePreference.key)
+        XCTAssertEqual(ThemePreference.load(from: defaults), .osakaJade)
         defaults.set(ThemeFamily.catppuccin.rawValue, forKey: ThemePreference.key)
         XCTAssertEqual(ThemePreference.load(from: defaults), .catppuccin)
     }

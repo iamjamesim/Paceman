@@ -34,7 +34,7 @@ and desktop configuration files are not part of the iPhone themes.
 | --- | --- |
 | [Miasma](https://github.com/OldJobobo/omarchy-miasma-theme) | A port of [xero's original Neovim palette](https://github.com/xero/miasma.nvim), released CC0. Strong candidate for a named, attributed palette port. Its dark character can remain dark in the app. Map canonical colors to Paceman roles and check contrast; do not transplant terminal ANSI roles directly into UI. |
 | [Sakura Mochi](https://github.com/OldJobobo/omarchy-sakura-mochi-theme) | OldJobobo's pink/green Omarchy scheme, with an MIT license. A distinct expressive option worth testing as an attributed dark phone/watch theme. Review the license notice before incorporating exact values. |
-| [Osaka Jade](https://github.com/Justikun/omarchy-osaka-jade-theme) | Justikun's green Omarchy theme, with an MIT license. Attractive, but compare full surfaces with Paceman and Miasma to ensure it earns a separate row. |
+| [Osaka Jade](https://github.com/Justikun/omarchy-osaka-jade-theme) | Justin Lowry's green Omarchy theme, with an MIT license. Its source colors are adapted to the phone, watch, and Live Activity; it replaces the former Paceman green row. |
 | [Retro 82](https://github.com/OldJobobo/omarchy-retro-82-theme) | OldJobobo's navy/amber/teal theme; its README credits @niraletter for palette inspiration and feedback. No license was visible in the repository review. Ayu now fills the blue/amber slot with its own established palette and clear reuse terms. |
 | [Batman](https://github.com/OldJobobo/omarchy-batman-theme) | An Omarchy adaptation of FredHappyface's Tinted Theming Base24 Batman scheme. Its strong yellow/graphite pairing is useful reference, but the Batman name and scheme provenance make it a weak choice for a Paceman launch row. |
 | [Catppuccin](https://github.com/catppuccin/catppuccin) | A mature, MIT-licensed palette with Latte for light and several dark flavors. A named port can use its own light/dark system instead of inventing a counterpart. Follow its [role guidance](https://github.com/catppuccin/catppuccin/blob/main/docs/style-guide.md) when adapting it. |
@@ -45,9 +45,12 @@ and desktop configuration files are not part of the iPhone themes.
 
 Theme selection chooses a **family**. Every offered phone appearance uses its
 dark palette, including when iPhone system appearance is light. The picker order
-is Paceman, Ayu, Catppuccin, Miasma, Sakura Mochi, then Monochrome. The phone
+is Ayu, Osaka Jade, Catppuccin, Sakura Mochi, Miasma, then Monochrome. Ayu is
+the default for a new installation. The phone
 choice is global across paired computers. Existing light palette tokens remain
-in the catalog but have no user-facing picker option.
+in the catalog for Ayu, Catppuccin, and Monochrome but have no user-facing picker option.
+An existing saved Paceman green selection resolves to Osaka Jade; other saved
+choices retain their family.
 
 The custom AMOLED watch and Lock Screen Live Activity use the selected family's
 dark glance palette in both iOS appearances. The Dynamic Island remains system
@@ -63,31 +66,24 @@ typeface; the watch keeps its JetBrains Mono face and established layout.
 
 ## Catalog and order
 
-The picker offers **six families** in the order above. Paceman uses the app's
-existing brand colors; Monochrome is a deliberate grayscale utility.
-Neither claims a novel color scheme. The other
-four use established palettes with visible credit and license notices. Ayu
+The picker offers **six families** in the order above. Monochrome is a
+deliberate grayscale utility. The other five use established palettes with
+visible credit and license notices. Ayu
 replaces the Signal sketch, which followed Retro 82's navy/amber/teal idea too
 closely to justify a separate invented identity. Pulse likewise yields to
-Sakura Mochi. This gives the picker familiar green, pure neutral, blue/amber,
-vivid pink, earthy olive, and pastel violet identities.
+Sakura Mochi. The picker leads with the everyday navy/amber identity, then
+jade green, pastel violet, vivid pink, earthy olive, and pure neutral.
 
-The phone uses Ayu Dark, Catppuccin Mocha, and the dark variants of Paceman and
+The phone uses Ayu Dark, Catppuccin Mocha, Osaka Jade, and the dark variant of
 Monochrome. Sakura Mochi and Miasma remain dark. The watch and Live Activity
 always use the dark glance treatment. For named ports, preserve canonical base, text, and accent
 colors where they remain legible. When a source accent fails contrast as small
 Apple UI text, choose another source color or adjust its luminance and label
 that role as adapted.
 
-Rosé Pine and Osaka Jade are the strongest candidates for a seventh or eighth
-row if full-surface comparison shows they are meaningfully different from
-Sakura Mochi/Catppuccin and Paceman/Miasma respectively. There is no technical
-four- or six-theme limit.
-
-Each row needs a palette specification for phone, custom watch, Lock Screen,
-and Dynamic Island; a provenance/license record; accessible dark roles;
-and connected, empty, needs-input, stale, and multiple-computer
-previews. Eight is reasonable if the additional two survive that same review.
+Any additional row needs a palette specification for phone, custom watch,
+Lock Screen, and Dynamic Island; a provenance/license record; accessible dark
+roles; and connected, empty, needs-input, stale, and multiple-computer previews.
 The picker itself stays simple: one name and three signature colors per family.
 The themed Appearance screen is the live phone preview.
 
@@ -98,14 +94,15 @@ remain within each family; the watch has no fourth color.
 
 | Family | Phone light: background / surface / ink / accent | Phone dark: background / surface / ink / accent | Watch: background / ink / accent |
 | --- | --- | --- | --- |
-| **Paceman** | `#F5F4F0` / `#EAEDE7` / `#242823` / `#456554` | `#151C18` / `#202A23` / `#E9EDE7` / `#A8D2B6` | `#0A100C` / `#E9EDE7` / `#A8D2B6` |
 | **Ayu** | `#F8F9FA` / `#EBEEF0` / `#5C6166` / `#8A5700` | `#1F2430` / `#282E3B` / `#CCCAC2` / `#FFCC66` | `#181C26` / `#CCCAC2` / `#FFCC66` |
+| **Osaka Jade** | Dark only | `#111C18` / `#23372B` / `#D6D5BC` / `#8CD3CB` | `#0C1512` / `#D6D5BC` / `#8CD3CB` |
 | **Catppuccin** | `#EFF1F5` / `#E6E9EF` / `#4C4F69` / `#8839EF` | `#1E1E2E` / `#313244` / `#CDD6F4` / `#CBA6F7` | `#11111B` / `#CDD6F4` / `#CBA6F7` |
-| **Miasma** | Dark only | `#222222` / `#242D1D` / `#C2C2B0` / `#D7C483` | `#222222` / `#C2C2B0` / `#D7C483` |
 | **Sakura Mochi** | Dark only | `#0B0D11` / `#201620` / `#F0B7CA` / `#FC0594` | `#0B0D11` / `#F0B7CA` / `#FC0594` |
+| **Miasma** | Dark only | `#222222` / `#242D1D` / `#C2C2B0` / `#D7C483` | `#222222` / `#C2C2B0` / `#D7C483` |
 | **Monochrome** | `#F4F4F4` / `#E6E6E6` / `#191919` / `#191919` | `#111111` / `#222222` / `#F1F1F1` / `#F1F1F1` | `#050505` / `#F1F1F1` / `#F1F1F1` |
 
-The app icon uses Paceman's dark background and mint accent across platforms.
+The product app icon remains a fixed brand asset across platforms; choosing a
+theme changes the app, Live Activity, and watch palettes, not the home-screen icon.
 
 Ayu's light accent is darkened from its canonical orange for legible small
 controls on near-white; it remains an explicitly adapted Ayu port. Miasma uses
@@ -156,7 +153,7 @@ computer remains a later explicit mode.
    `ios/Shared/`, separate from the source `appearance` DTO. Persist the family
    ID in phone preferences. Resolve the dark phone palette at rendering time
    and prefer the dark system appearance in `AgentCompanionApp.swift`.
-   Unknown IDs fall back to Paceman.
+   Unknown IDs fall back to Ayu. A stored `paceman` ID maps to Osaka Jade.
 2. Add the Settings picker and adapt the app's existing components without
    changing its screen hierarchy. Audit current uses of `theme.tint` and
    opacity-based secondary text, especially status displays, card surfaces,
@@ -222,3 +219,13 @@ custom watch and visible Live Activity. This confirms the normal propagation
 path. Still to check separately: all six families on watch hardware, and a
 remotely started Live Activity repainting after a selection change while the
 app is suspended.
+
+On 25 September, Ayu became the default and Osaka Jade replaced the green
+Paceman picker row. The simulator review compared Ayu and Osaka Jade on the
+whole grouped-activity Home screen, and covered Osaka Jade's empty, working,
+finished, and offline screens plus a rendered watch face. The final Appearance
+screen was checked with all six rows, Ayu selected, and Osaka Jade second.
+The app and widget built, and focused tests passed for picker order, preference
+fallback and migration, and watch color encoding. This change was not installed
+on a physical phone or watch, and the updated credits sheet was checked in code
+rather than visually because the Mac UI was locked.
