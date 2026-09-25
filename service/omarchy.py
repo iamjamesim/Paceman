@@ -24,6 +24,7 @@ from service.allowance import allowance_snapshot
 from service.processes import CodexProcesses, ProcessIdentity
 
 MAX_AGE = 24 * 60 * 60
+FINISHED_RETENTION = 10 * 60
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
 EVENTS = {"working": "working", "needs-input": "needs_input", "completed": "finished",
           "interrupted": "idle", "ended": "idle"}
@@ -240,8 +241,8 @@ class OmarchySource:
             with self.store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 self.prune_processes(db)
-                # Live quiet sessions keep their latest state. Age out only
-                # closed-session tombstones, never a verified living process.
+                # Keep verified process bindings even after a completed turn
+                # disappears from the display; a new turn can use the binding.
                 cutoff = time.time() - MAX_AGE
                 db.execute("DELETE FROM omarchy_processes WHERE closed=1 AND session_id IN "
                            "(SELECT id FROM omarchy_sessions WHERE updated<?)", (cutoff,))
@@ -253,6 +254,8 @@ class OmarchySource:
     def publish(self, db, *, lifecycle_only=False) -> bool:
         records = db.execute("SELECT s.* FROM omarchy_sessions s JOIN omarchy_processes p "
                              "ON p.session_id=s.id WHERE p.closed=0 ORDER BY s.id").fetchall()
+        cutoff = time.time() - FINISHED_RETENTION
+        records = [row for row in records if row["state"] != "finished" or row["updated"] > cutoff]
         sessions = [{"id": row["id"], "provider": row["provider"], "state": row["state"]} for row in records]
         # Needs-input takes precedence; active work wins over old completions.
         state = next((state for state in ("needs_input", "working", "finished")

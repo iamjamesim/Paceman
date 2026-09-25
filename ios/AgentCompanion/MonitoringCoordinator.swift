@@ -32,6 +32,7 @@ extension MonitoringActivity.ContentState {
 /// belong to each paired computer; no app timer is needed to keep them running.
 @MainActor
 final class MonitoringCoordinator: ObservableObject {
+    private static let staleRetirementGrace: TimeInterval = 10 * 60
     @Published private(set) var activeSourceIDs: Set<String> = []
     @Published private(set) var status = "Setting up Live Activities"
     @Published private(set) var readySourceIDs: Set<String> = []
@@ -80,6 +81,23 @@ final class MonitoringCoordinator: ObservableObject {
             || (candidate.generation == current.generation && candidate.revision > current.revision)
     }
 
+    static func shouldRetireStaleActivity(isStale: Bool, staleDate: Date, now: Date) -> Bool {
+        isStale && now.timeIntervalSince(staleDate) >= staleRetirementGrace
+    }
+
+    /// The system can mark content stale while the phone is suspended, but
+    /// cannot end it on the app's behalf. Retire it on the next app opportunity.
+    func retireExpiredStaleActivities() async {
+        let now = Date()
+        for (sourceID, activity) in Array(activities) {
+            let staleDate = activity.content.staleDate
+                ?? Date(timeIntervalSince1970: activity.content.state.freshUntil)
+            guard Self.shouldRetireStaleActivity(isStale: activity.activityState == .stale,
+                                                 staleDate: staleDate, now: now) else { continue }
+            await end(activity, sourceID: sourceID)
+        }
+    }
+
     func configure(sources: [PairedSource]) {
         disabledSourceIDs = Set(sources.filter { !LiveActivityPreferences.enabled(for: $0.sourceID) }.map(\.sourceID))
         for source in sources where self.sources[source.sourceID]?.credential != source.credential {
@@ -95,6 +113,7 @@ final class MonitoringCoordinator: ObservableObject {
         observeSystem()
         for activity in Activity<MonitoringActivity>.activities { observe(activity) }
         Task {
+            await retireExpiredStaleActivities()
             await reconcileOrphanedRegistrations()
             await registerStartTokens()
         }

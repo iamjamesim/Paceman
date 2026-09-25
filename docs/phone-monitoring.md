@@ -45,6 +45,12 @@ every active session on that computer reports the same path-free label. It never
 includes task names, full project paths, prompts or transcripts. The Mac hook
 derives that label from the repository root or working directory; Omarchy still
 supplies only agent type and state. The Lock Screen does not invent a task title.
+Completed session rows retire from the source presentation after ten minutes
+if a session-end event has not removed them sooner. The Linux source keeps a
+verified process binding so a later turn can reappear without treating a quiet
+running process as closed. Working and Needs input remain until lifecycle
+evidence changes them.
+
 When an older source sender omits the provider, the phone can reuse one it fetched for the
 same source generation and revision. A newer unseen state gets no inferred
 provider. The Live Activity uses the phone-selected family's dark glance
@@ -63,8 +69,7 @@ activity instead shows its last update
 time. The expanded Island uses
 its full-width bottom region for that same hierarchy so ordinary computer
 names do not get confined beside the camera. When content is stale, the compact
-Island shows the robot
-and one OLD label; expanded and Lock Screen views say Last known and show the
+Island shows a muted robot and a clock; expanded and Lock Screen views say Last known and show the
 last update time. Newer activity for the same computer supersedes an older stale
 activity. ActivityKit relevance keeps fresh needs-input states prominent while
 letting newer activity overtake them after their freshness lease expires.
@@ -78,7 +83,11 @@ A later revision can appear normally. A stale date
 makes old content visibly historical without an app callback. The source worker
 renews a five-minute display lease every four minutes during unchanged active
 work; if that worker disappears, the activity becomes stale. Local foreground
-fetches may update an activity if they have a newer revision. Dismissal is not
+fetches may update an activity if they have a newer revision. If an activity
+remains stale for ten more minutes, the phone ends it the next time the app has
+an opportunity to run; the cached Home status remains explicitly historical.
+ActivityKit does not turn a stale date into a scheduled end while the app and
+source are suspended. Dismissal is not
 immediately reversed for the same source revision.
 After APNs accepts a remote start, the source waits for that activity's update
 token and does not start another copy for each subsequent revision of the run.
@@ -97,6 +106,16 @@ Notification permission affects the custom watch path, not ActivityKit
 authorization. Keep duplicate attention behavior under review: ordinary
 needs-input/finished notifications currently coexist with quiet ActivityKit
 updates, while a remote start necessarily includes an alert.
+
+The Smart Stack Live Activity uses the small ActivityKit family to show the
+computer name and current state; mixed activity also shows the total session
+count. A stale tile says `Last known`. A layout review rendered working,
+needs-input, finished, empty, mixed, large-count, stale, and long-name states
+at the 40, 41, 44, 45, and 49 mm widget dimensions, with the accessibility
+layout branch checked at the smallest and largest dimensions. The iOS
+widget build passed. These renders use the same SwiftUI card in a local Mac
+harness; a watchOS simulator runtime was not installed, so real Smart Stack
+appearance and delivery on a paired Apple Watch still need confirmation.
 
 ## Direct APNs alpha
 

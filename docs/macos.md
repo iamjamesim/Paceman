@@ -192,10 +192,16 @@ registers an idle session. The hook script checks the source's receipt and
 briefly retries turn-ending events during a source restart. It never makes a
 Codex turn depend on Paceman being available.
 
+Finished rows remain visible for up to ten minutes after `Stop` if `SessionEnd`
+does not arrive. This retires old completed turns from the phone and Live
+Activity without claiming that the Codex conversation itself closed. A later
+prompt brings the session back. Working and Needs input remain tied to hook
+events; elapsed time alone does not end those states.
+
 The Mac has no Linux `/proc` ownership proof. A received hook confirms local
 activity but does not prove that a session remains open indefinitely. The source
 clears hook-derived sessions when it restarts; a new hook repopulates them. No
-elapsed-time watchdog declares an open session stuck. A longer automatically
+elapsed-time watchdog declares a working or waiting session stuck. A longer automatically
 approved tool may still appear to need input because hooks do not report the
 approval resolution itself. This behavior needs a
 live Codex desktop and ChatGPT Work acceptance pass. Official OpenAI docs describe

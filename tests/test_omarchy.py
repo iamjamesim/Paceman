@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 from tests.identity import device
 from service.hub import Server, Store
-from service.omarchy import OmarchySource, appearance
+from service.omarchy import FINISHED_RETENTION, OmarchySource, appearance
 from service.push import Worker
 from service.status import DesktopStatus
 from service.processes import CodexProcesses, ProcessIdentity
@@ -160,6 +160,23 @@ class OmarchyTests(unittest.TestCase):
         self.assertEqual(self.event('ended', turn='')['state'], 'idle')
         self.assertEqual(self.event('needs-input')['state'], 'idle')
         self.assertEqual(self.event('working', turn='turn-2')['state'], 'working')
+
+    def test_finished_turn_disappears_without_losing_live_process_binding(self):
+        self.event('working', session='active')
+        self.event('completed', session='old')
+        before = self.store.snapshot()
+        with self.store.connect() as db:
+            db.execute("UPDATE omarchy_sessions SET updated=? WHERE state='finished'",
+                       (time.time() - FINISHED_RETENTION - 1,))
+        self.source.tick(force=True)
+        current = self.store.snapshot()
+        self.assertEqual(current['state'], 'working')
+        self.assertEqual(len(current['sessions']), 1)
+        self.assertEqual(current['eventID'], before['eventID'])
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM omarchy_processes WHERE closed=0").fetchone()[0], 2)
+        resumed = self.event('working', session='old', turn='turn-2')
+        self.assertEqual(len(resumed['sessions']), 2)
 
     def test_theme_updates_revision_without_realerting(self):
         first = self.event('needs-input')

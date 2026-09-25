@@ -262,6 +262,7 @@ final class CompanionModel: ObservableObject {
             changed = changed || result == .newData
             failed = failed || result == .failed
         }
+        await monitoring.retireExpiredStaleActivities()
         if fromWatch, let identity = watchAggregate?.identity { _ = await watch.waitForDelivery(of: identity) }
         return changed ? .newData : failed ? .failed : .noData
     }

@@ -26,7 +26,8 @@ struct MonitoringLiveActivity: Widget {
                     .foregroundStyle(context.isStale ? palette.muted : palette.robotColor(for: context.state.dominantState))
             } compactTrailing: {
                 if context.isStale {
-                    Text("OLD").font(.system(.caption2, design: .rounded, weight: .bold))
+                    Image(systemName: "clock")
+                        .font(.system(.caption2, weight: .semibold))
                         .foregroundStyle(palette.muted)
                         .accessibilityLabel("Last known activity")
                 } else if context.state.needsInput > 0 {
@@ -45,6 +46,7 @@ struct MonitoringLiveActivity: Widget {
             }
             .widgetURL(computerURL(context.attributes.sourceID))
         }
+        .supplementalActivityFamilies([.small])
     }
 
     private func computerURL(_ sourceID: String) -> URL? {
@@ -54,15 +56,25 @@ struct MonitoringLiveActivity: Widget {
 
 private struct MonitoringLockScreen: View {
     let context: ActivityViewContext<MonitoringActivity>
+    @Environment(\.activityFamily) private var activityFamily
 
     var body: some View {
-        MonitoringCard(sourceID: context.attributes.sourceID,
-            name: MonitoringComputerName.displayName(sourceID: context.attributes.sourceID,
-            fallback: context.attributes.sourceName),
-            state: context.state, stale: context.isStale, compact: false)
-        .padding(.horizontal, 18)
-        .padding(.vertical, 15)
-        .accessibilityElement(children: .combine)
+        Group {
+            if activityFamily == .small {
+                MonitoringWatchCard(
+                    name: MonitoringComputerName.displayName(sourceID: context.attributes.sourceID,
+                        fallback: context.attributes.sourceName),
+                    state: context.state, stale: context.isStale)
+            } else {
+                MonitoringCard(sourceID: context.attributes.sourceID,
+                    name: MonitoringComputerName.displayName(sourceID: context.attributes.sourceID,
+                        fallback: context.attributes.sourceName),
+                    state: context.state, stale: context.isStale, compact: false)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 15)
+                .accessibilityElement(children: .combine)
+            }
+        }
     }
 }
 
@@ -193,16 +205,30 @@ private struct MonitoringDetails: View {
     }
 }
 
-private struct MonitoringRobot: View {
-    let state: String
-
-    var body: some View {
-        Group {
-            if state == "idle" { Image(systemName: "minus").resizable().scaledToFit() }
-            else { PacemanMark(expression: state == "finished" ? .finished : state == "needs_input" ? .needsInput : .neutral) }
-        }
-        .id(state)
-        .transition(.opacity.combined(with: .scale(scale: 0.86)))
-        .accessibilityHidden(true)
-    }
+#if DEBUG
+private func previewActivity(working: Int = 0, input: Int = 0, finished: Int = 0) -> MonitoringActivity.ContentState {
+    MonitoringActivity.ContentState(generation: "preview", revision: 1, state: "preview",
+        working: working, needsInput: input, finished: finished,
+        observedAt: Date().timeIntervalSince1970,
+        freshUntil: Date().addingTimeInterval(300).timeIntervalSince1970)
 }
+
+#Preview("Live Activity states", as: .content,
+         using: MonitoringActivity(sourceID: "preview", sourceName: "MacBook Pro")) {
+    MonitoringLiveActivity()
+} contentStates: {
+    previewActivity(working: 1)
+    previewActivity(input: 1)
+    previewActivity(finished: 1)
+    previewActivity()
+    previewActivity(working: 2, input: 1, finished: 1)
+    previewActivity(working: 8, input: 12, finished: 4)
+}
+
+#Preview("Long computer name", as: .content,
+         using: MonitoringActivity(sourceID: "long-preview", sourceName: "James's development workstation")) {
+    MonitoringLiveActivity()
+} contentStates: {
+    previewActivity(input: 1)
+}
+#endif

@@ -129,6 +129,16 @@ final class ProtocolTests: XCTestCase {
         XCTAssertTrue(MonitoringCoordinator.prefers(old, over: newer, currentEnded: true))
     }
 
+    @MainActor func testStaleLiveActivityRetiresAfterRecoveryWindow() {
+        let staleDate = Date(timeIntervalSince1970: 1_000)
+        XCTAssertFalse(MonitoringCoordinator.shouldRetireStaleActivity(
+            isStale: false, staleDate: staleDate, now: Date(timeIntervalSince1970: 2_000)))
+        XCTAssertFalse(MonitoringCoordinator.shouldRetireStaleActivity(
+            isStale: true, staleDate: staleDate, now: Date(timeIntervalSince1970: 1_599)))
+        XCTAssertTrue(MonitoringCoordinator.shouldRetireStaleActivity(
+            isStale: true, staleDate: staleDate, now: Date(timeIntervalSince1970: 1_600)))
+    }
+
     @MainActor func testLiveActivityHomeStatusDescribesSettings() {
         XCTAssertEqual(MonitoringCoordinator.displayStatus(available: false, pairedCount: 2, enabledCount: 2),
                        "Off in iPhone Settings")

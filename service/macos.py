@@ -27,6 +27,7 @@ EVENT_STATES = {
     "completed": "finished", "interrupted": "idle", "ended": "idle",
 }
 ATTENTION_DELAY = 5.0
+FINISHED_RETENTION = 10 * 60
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
 
 
@@ -206,7 +207,7 @@ class MacSource:
 
     def tick(self):
         # Hook lifecycle events own session state. Elapsed time alone is not
-        # evidence that an open Codex conversation has ended.
+        # evidence that a working or waiting Codex conversation has ended.
         with self.lock:
             if self.closed:
                 return
@@ -229,6 +230,15 @@ class MacSource:
                         changed = True
                     if changed:
                         self._publish(db)
+            # Stop completes a turn, but some clients do not deliver SessionEnd.
+            # Keep its result long enough to notice, then retire only that
+            # finished display row. A later prompt creates it again.
+            with self.store.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                retired = db.execute("DELETE FROM mac_sessions WHERE state='finished' AND updated<=?",
+                                     (time.time() - FINISHED_RETENTION,)).rowcount
+                if retired:
+                    self._publish(db, lifecycle_only=True)
             if now < self.next_allowance_at:
                 return
             self.next_allowance_at = now + 300
@@ -251,7 +261,7 @@ class MacSource:
             db.execute("BEGIN IMMEDIATE")
             self._publish(db)
 
-    def _publish(self, db) -> bool:
+    def _publish(self, db, *, lifecycle_only=False) -> bool:
         records = db.execute("SELECT * FROM mac_sessions ORDER BY id").fetchall()
         sessions = []
         for row in records:
@@ -270,11 +280,12 @@ class MacSource:
         if old_key and old_key[0] == activity_key and all(old.get(k) == v for k, v in payload.items()):
             return False
         changed = not old_key or old_key[0] != activity_key
+        activity_changed = changed and (not lifecycle_only or old.get("state") != state)
         now = time.time()
         seq = db.execute("INSERT INTO events(at,state,label,kind) VALUES (?,?,?,?)",
-                         (now, state, "Mac activity", "activity" if changed else "presentation")).lastrowid
-        payload["eventID"] = str(seq) if changed else old["eventID"]
-        payload["changedAt"] = now if changed else old["changedAt"]
+                         (now, state, "Mac activity", "activity" if activity_changed else "presentation")).lastrowid
+        payload["eventID"] = str(seq) if activity_changed else old["eventID"]
+        payload["changedAt"] = now if activity_changed else old["changedAt"]
         db.execute("UPDATE events SET payload=? WHERE seq=?", (json.dumps(payload, separators=(",", ":")), seq))
         db.execute("INSERT OR REPLACE INTO metadata VALUES ('activity_key',?)", (activity_key,))
         return True
