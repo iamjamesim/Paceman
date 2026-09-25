@@ -181,8 +181,8 @@ struct WatchDetail: View {
                     .background(theme.canvas)
             }
         }.foregroundStyle(theme.ink).background(theme.canvas)
-            .navigationTitle(paired ? "Omarchy Watch" : "Connect Omarchy Watch").navigationBarTitleDisplayMode(.inline)
-            .confirmationDialog("Remove Omarchy Watch?", isPresented: $remove, titleVisibility: .visible) {
+            .navigationTitle(paired ? "Paceman Watch" : "Connect Paceman Watch").navigationBarTitleDisplayMode(.inline)
+            .confirmationDialog("Remove Paceman Watch?", isPresented: $remove, titleVisibility: .visible) {
                 Button("Remove watch", role: .destructive) {
                     removing = true
                     removalError = nil
@@ -233,8 +233,8 @@ struct WatchDetail: View {
     }
     private var instructionDetail: String {
         switch phase {
-        case .idle: return "Keep your Omarchy Watch close to your iPhone. We'll look for it over Bluetooth."
-        case .selecting: return "Choose Omarchy Watch in the nearby-devices picker."
+        case .idle: return "Keep your Paceman Watch close to your iPhone. We'll look for it over Bluetooth."
+        case .selecting: return "Choose Paceman Watch in the nearby-devices picker."
         case .connecting: return "Connecting to your watch…"
         case .confirming: return "Enter the code shown on your watch if asked. Allow notification sharing so your watch can receive updates while the phone is locked."
         case .checking: return "Checking the connection…"
@@ -286,7 +286,7 @@ struct WatchDetail: View {
                     WatchIllustration(theme: watchTheme, paired: true, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133).accessibilityHidden(true)
                 }
                 VStack(spacing: 9) {
-                    Text("Omarchy Watch")
+                    Text("Paceman Watch")
                         .font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
                     WatchConnectionSummary(watch: model.watch, theme: theme, previewState: preview ? previewState : nil, centered: true)
                 }
@@ -439,7 +439,7 @@ struct WatchUpdateTroubleshooting: View {
         if !model.watch.supportsNotificationSync && model.watch.ready {
             return "Update your watch firmware to receive notifications while the phone is locked."
         }
-        return "In Settings → Bluetooth → Omarchy Watch, make sure Share System Notifications is on."
+        return "In Settings → Bluetooth → your watch, make sure Share System Notifications is on."
     }
 }
 

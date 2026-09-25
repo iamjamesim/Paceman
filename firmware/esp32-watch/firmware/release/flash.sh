@@ -38,7 +38,7 @@ if [[ $version_major =~ ^[0-9]+$ ]] && ((version_major >= 5)); then
     --flash-freq 80m \
     0x0 "$release_dir/bootloader.bin" \
     0x8000 "$release_dir/partition-table.bin" \
-    0x10000 "$release_dir/omarchy_watch.bin"
+    0x10000 "$release_dir/paceman_watch.bin"
 else
   "${esptool_command[@]}" \
     --chip esp32s3 \
@@ -52,5 +52,5 @@ else
     --flash_freq 80m \
     0x0 "$release_dir/bootloader.bin" \
     0x8000 "$release_dir/partition-table.bin" \
-    0x10000 "$release_dir/omarchy_watch.bin"
+    0x10000 "$release_dir/paceman_watch.bin"
 fi

@@ -43,7 +43,7 @@ permission must lead to Settings, never another ineffective permission prompt.
 - Notification mode not selected: Enable notifications, an explicit opt-in.
 - Watch disconnected: sharing permission is unknown until connected; never call
   it denied using an old cached value. Reconnect before assessing sharing.
-- Watch connected with sharing reported disabled by an authorization-change callback: Settings → Bluetooth → Omarchy Watch → Share
+- Watch connected with sharing reported disabled by an authorization-change callback: Settings → Bluetooth → the paired watch → Share
   System Notifications. Use accurate instructions, not an unsupported deep link.
 - Configured: show the recommended iPhone notification settings. This is setup
   guidance, not a guarantee of immediate delivery under Focus or network outages.

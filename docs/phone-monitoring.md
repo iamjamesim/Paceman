@@ -1,7 +1,7 @@
 # Phone monitoring
 
 The home screen shows two destinations above the computer cards: **Live
-Activities** and **Omarchy Watch**. The cards retain each computer's name,
+Activities** and **Paceman Watch**. The cards retain each computer's name,
 connection freshness, and agent rows. **Connect** belongs in the Computers
 heading. There is no separate Computers index or aggregate activity card.
 
@@ -89,7 +89,7 @@ bounded to that duration and the worker sends an end event on expiry. New work
 can trigger a new remote start. APNs acceptance does not prove presentation on
 the phone; test on physical hardware with the phone locked.
 
-Apple Watch can show iPhone Live Activities through the system. **Omarchy
+Apple Watch can show iPhone Live Activities through the system. **Paceman
 Watch** is Paceman's separately paired custom watch and has its own Bluetooth
 status and preferences. It uses phone notifications and ANCS to request a
 fresh source snapshot while the phone is locked. These paths run in parallel.

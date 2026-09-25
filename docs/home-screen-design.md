@@ -1,7 +1,7 @@
 # Phone home design
 
 The home screen answers, in order:
-1. Are Live Activities and Omarchy Watch available to show updates?
+1. Are Live Activities and Paceman Watch available to show updates?
 2. Which computers are connected, and is their activity current?
 3. What are the agents doing; does anything need input?
 

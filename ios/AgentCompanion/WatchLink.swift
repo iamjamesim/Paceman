@@ -337,8 +337,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         status = "Select your watch in the nearby-devices picker."
         let descriptor = ASDiscoveryDescriptor()
         descriptor.bluetoothServiceUUID = Self.service
-        descriptor.bluetoothNameSubstring = "Omarchy Watch"
-        let item = ASPickerDisplayItem(name: "Omarchy Watch",
+        // The shared suffix discovers watches with either the original or current BLE name.
+        descriptor.bluetoothNameSubstring = "Watch"
+        let item = ASPickerDisplayItem(name: "Paceman Watch",
             productImage: UIImage(systemName: "applewatch")!, descriptor: descriptor)
         setupSession.showPicker(for: [item]) { [weak self] error in
             if error != nil {

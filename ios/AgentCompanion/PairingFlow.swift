@@ -275,7 +275,7 @@ struct WatchSharingGuidance: View {
         } else if watch.notificationSharingStatus == false {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Enable notification sharing").font(.headline)
-                Text("In Settings → Bluetooth → Omarchy Watch, enable Share System Notifications.")
+                Text("In Settings → Bluetooth → your watch, enable Share System Notifications.")
                     .font(.subheadline).foregroundStyle(theme.secondaryInk)
             }
         } else if !watch.ready {

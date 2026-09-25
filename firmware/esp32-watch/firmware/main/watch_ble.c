@@ -768,7 +768,7 @@ esp_err_t watch_ble_start(uint32_t pairing_passkey, bool owned)
     ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
     ble_store_config_init();
 
-    rc = ble_svc_gap_device_name_set("Omarchy Watch");
+    rc = ble_svc_gap_device_name_set("Paceman Watch");
     if (rc != 0) {
         return ESP_FAIL;
     }

@@ -167,7 +167,7 @@ info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Paceman",
         "NSCameraUsageDescription": "Scan a pairing invitation from your work computer.",
         "NSAccessorySetupKitSupports": ["Bluetooth"],
         "NSAccessorySetupBluetoothServices": ["7F510001-1B15-4F0D-B7A5-4CF3A2C98EE1"],
-        "NSAccessorySetupBluetoothNames": ["Omarchy Watch"]}
+        "NSAccessorySetupBluetoothNames": ["Watch"]}
 info["UIAppFonts"] = ["JetBrainsMono-Regular.ttf", "JetBrainsMono-SemiBold.ttf"]
 info["CFBundleURLTypes"] = [{"CFBundleURLName": "companion", "CFBundleURLSchemes": ["agentcompanion"]}]
 widget_info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Paceman",

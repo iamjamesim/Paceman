@@ -42,7 +42,7 @@ in the phone app to opt in. Update and restart both source service and worker.
   event identity.
 - Denied-before-pairing and revoked-after-setup lead to Settings. Returning
   rechecks notification authorization and Notification Center availability.
-- Sharing off leads to Settings → Bluetooth → Omarchy Watch instructions;
+- Sharing off leads to Settings → Bluetooth → the paired watch instructions;
   disconnected watches do not report sharing as denied from cached state.
 
 Seven successive custom-watch background updates passed the prior distinct-event

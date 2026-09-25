@@ -41,7 +41,7 @@
 	<true/>
 	<key>NSAccessorySetupBluetoothNames</key>
 	<array>
-		<string>Omarchy Watch</string>
+		<string>Watch</string>
 	</array>
 	<key>NSAccessorySetupBluetoothServices</key>
 	<array>

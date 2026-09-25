@@ -93,7 +93,7 @@ No public inbound port or hosted relay is required for this personal setup.
    not require notification permission.
    Enable notifications separately in **Settings → Notifications** for the
    custom-watch path.
-2. Leave **Watch updates** on in Omarchy Watch details. Disconnect the debugger.
+2. Leave **Watch updates** on in Paceman Watch details. Disconnect the debugger.
    Use firmware 0.6.2 or later and the matching phone app. Accept notification
    sharing for the watch, or enable **Share System Notifications** in Settings →
    Bluetooth. The transport lab shows authorization. Notifications must be enabled

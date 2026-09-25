@@ -92,7 +92,7 @@ struct CompanionHome: View {
             Button { open(.watch) } label: {
                 destinationContent(
                     icon: AnyView(WatchGlyph(theme: presentation.themeFamily.glance, timeFormat: model.watch.timeFormat)),
-                    name: "Omarchy Watch",
+                    name: "Paceman Watch",
                     state: hasWatch ? (presentation.preview ? "Connected" : model.watch.connectionPresentation.rawValue) : "Connect watch")
             }.buttonStyle(.plain)
         }

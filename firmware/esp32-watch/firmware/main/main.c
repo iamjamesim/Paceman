@@ -16,15 +16,15 @@
 #include "watch_ui.h"
 
 #if !CONFIG_PM_ENABLE
-#error "Omarchy Watch requires CONFIG_PM_ENABLE for dynamic power management"
+#error "Paceman Watch requires CONFIG_PM_ENABLE for dynamic power management"
 #endif
 
 #if !CONFIG_FREERTOS_USE_TICKLESS_IDLE
-#error "Omarchy Watch requires CONFIG_FREERTOS_USE_TICKLESS_IDLE"
+#error "Paceman Watch requires CONFIG_FREERTOS_USE_TICKLESS_IDLE"
 #endif
 
 #if !CONFIG_BT_CTRL_MODEM_SLEEP
-#error "Omarchy Watch requires CONFIG_BT_CTRL_MODEM_SLEEP"
+#error "Paceman Watch requires CONFIG_BT_CTRL_MODEM_SLEEP"
 #endif
 
 static const char *TAG = "omarchy_watch";

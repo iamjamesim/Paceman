@@ -1,6 +1,6 @@
 # Alpha feature completion
 
-First milestone: one Omarchy workstation, one iPhone, one Omarchy Watch that is
+First milestone: one Omarchy workstation, one iPhone, one Paceman Watch that is
 useful for daily alpha testing. Public distribution is a separate milestone.
 Keep collecting practical delivery evidence while implementing features; do not
 block watch restoration on solving the final push-service architecture.

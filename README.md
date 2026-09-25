@@ -23,8 +23,10 @@ lifecycle hooks.
 | `scripts/` | Local checks, source pairing and iOS asset/project generation |
 | `docs/` | Setup, architecture and contracts |
 
-The watch package comes from Omarchy Watch v0.6.1. Its existing layout and wire
-protocol are retained; see its [provenance](firmware/esp32-watch/UPSTREAM.md).
+Paceman Watch began as [omarchy-watch](https://github.com/iamjamesim/omarchy-watch)
+and has since evolved for Paceman's iPhone relay and connected workspaces. The
+original watch package and wire protocol are documented in its
+[provenance](firmware/esp32-watch/UPSTREAM.md).
 
 ## Start developing
 
@@ -84,5 +86,6 @@ arrangement, not a shared-key distribution design. The private source is intende
 for Tailscale access, not direct public internet exposure.
 
 The Xcode scheme, bundle IDs and Bluetooth protocol still use legacy names to
-preserve installed-device pairing. Product naming does not imply an identity migration.
+preserve installed-device pairing. Existing watches may retain their former
+Bluetooth name until their firmware is updated.
 See [third-party notices](THIRD_PARTY_NOTICES.md) for included code and fonts.

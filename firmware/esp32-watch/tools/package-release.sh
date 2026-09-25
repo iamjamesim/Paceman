@@ -9,7 +9,7 @@ version=$(sed -nE 's/set\(PROJECT_VER "([^"]+)"\)/\1/p' "$firmware_dir/CMakeList
 identity_version=$(sed -nE \
   's/.*OMARCHY_FIRMWARE_VERSION_(MAJOR|MINOR|PATCH) = ([0-9]+),/\2/p' \
   "$firmware_dir/main/watch_profile.h" | paste -sd .)
-package_name=omarchy-watch-v${version}-flash
+package_name=paceman-watch-v${version}-flash
 package_dir=$output_dir/$package_name
 archive=$output_dir/$package_name.tar.gz
 
@@ -37,11 +37,11 @@ fi
 mkdir -p "$package_dir"
 install -m 0644 "$firmware_dir/build/bootloader/bootloader.bin" "$package_dir/bootloader.bin"
 install -m 0644 "$firmware_dir/build/partition_table/partition-table.bin" "$package_dir/partition-table.bin"
-install -m 0644 "$firmware_dir/build/omarchy_watch.bin" "$package_dir/omarchy_watch.bin"
+install -m 0644 "$firmware_dir/build/omarchy_watch.bin" "$package_dir/paceman_watch.bin"
 install -m 0755 "$firmware_dir/release/flash.sh" "$package_dir/flash.sh"
 sed "s/@VERSION@/$version/g" "$firmware_dir/release/README.txt" >"$package_dir/README.txt"
 
-(cd "$package_dir" && checksum bootloader.bin partition-table.bin omarchy_watch.bin flash.sh README.txt >SHA256SUMS)
+(cd "$package_dir" && checksum bootloader.bin partition-table.bin paceman_watch.bin flash.sh README.txt >SHA256SUMS)
 (cd "$output_dir" && tar -czf "$archive" "$package_name")
 (cd "$output_dir" && checksum "$package_name.tar.gz" >"$package_name.tar.gz.sha256")
 
