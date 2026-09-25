@@ -37,6 +37,11 @@ attention work on this setup, with known background-delivery limitations recorde
 Multi-workstation UI, account linking, Apple Watch integration, and a theme gallery
 are not prerequisites.
 
+The current two-computer alpha gaps and their acceptance checks are tracked in
+[product readiness gaps](readiness-gaps.md). This earlier implementation sequence
+records the original Omarchy-watch milestone; themes are now selected on the
+phone, and Mac allowance collection has its own optional read-only adapter.
+
 See [data ownership and persistence](data-lifecycle.md) for the current memory,
 disk and device-storage boundaries.
 
