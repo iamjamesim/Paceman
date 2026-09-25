@@ -177,7 +177,7 @@ widget_info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Pacema
     "NSExtension": {"NSExtensionPointIdentifier": "com.apple.widgetkit-extension"}}
 with (root / "AgentCompanionWidgets/Info.plist").open("wb") as file: plistlib.dump(widget_info, file)
 for name in ("AgentCompanion", "AgentCompanionWidgets"):
-    entitlement = {}
+    entitlement = {"com.apple.security.application-groups": ["group.com.apselabs.agentcompanion.prototype"]}
     if name == "AgentCompanion":
         entitlement["aps-environment"] = "$(APNS_ENVIRONMENT)"
         entitlement["com.apple.developer.weatherkit"] = True

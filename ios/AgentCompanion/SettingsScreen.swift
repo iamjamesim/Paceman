@@ -19,7 +19,10 @@ struct LiveActivitiesDetail: View {
     }
 
     private var activeSources: [PairedSource] {
-        if presentation.preview { return presentation.previewScreen == "live-activities" ? Array(model.pairedSources.prefix(1)) : [] }
+        if presentation.preview {
+            if presentation.previewScreen == "multi-live-activities" { return model.pairedSources }
+            return presentation.previewScreen == "live-activities" ? Array(model.pairedSources.prefix(1)) : []
+        }
         return model.pairedSources.filter { monitoring.activeSourceIDs.contains($0.sourceID) }
     }
     private var checkingSources: [PairedSource] {
@@ -106,7 +109,7 @@ private struct LiveActivityIllustration: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 7) {
                 Image(systemName: "laptopcomputer")
-                Text("MacBook Pro")
+                Text("Computer")
                 Spacer()
                 Text("PREVIEW").tracking(1.4).font(.system(size: 8, weight: .semibold, design: .rounded))
             }.font(.system(size: 12, weight: .medium, design: .rounded))
