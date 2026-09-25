@@ -6,10 +6,10 @@ let size = 1024
 let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8,
     bytesPerRow: size * 4, space: CGColorSpaceCreateDeviceRGB(),
     bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
-// The dark Paceman palette keeps the mint mark distinct at Home Screen size.
-context.setFillColor(CGColor(red: 0.082352941, green: 0.109803922, blue: 0.094117647, alpha: 1))
+// Fixed app artwork follows the Ayu default: navy #1F2430 and yellow #FFCC66.
+context.setFillColor(CGColor(red: 31.0 / 255, green: 36.0 / 255, blue: 48.0 / 255, alpha: 1))
 context.fill(CGRect(x: 0, y: 0, width: size, height: size))
-let markColor = CGColor(red: 0.658823529, green: 0.823529412, blue: 0.713725490, alpha: 1)
+let markColor = CGColor(red: 1, green: 204.0 / 255, blue: 102.0 / 255, alpha: 1)
 context.setFillColor(markColor)
 func rounded(_ rect: CGRect, _ radius: CGFloat) -> CGPath {
     CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)

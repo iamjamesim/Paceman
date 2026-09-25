@@ -73,7 +73,8 @@ No private signing keys are checked in. A new developer should configure their o
 After adding/removing Swift files, regenerate with
 `python3 scripts/make-xcode-project.py`. The generator preserves existing per-target
 signing settings; review the resulting diff. Regenerate the icon with
-`swift scripts/make-app-icon.swift` only when its design changes.
+`swift scripts/make-app-icon.swift ios/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png`
+only when its design changes.
 
 DEBUG visual fixtures use `--design-preview`, optionally `--neutral` and
 `--screen=setup|activity|offline|watch-setup|watch-confirm|watch-complete|watch-notifications|watch-troubleshooting|settings`.

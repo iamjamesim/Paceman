@@ -101,8 +101,9 @@ remain within each family; the watch has no fourth color.
 | **Miasma** | Dark only | `#222222` / `#242D1D` / `#C2C2B0` / `#D7C483` | `#222222` / `#C2C2B0` / `#D7C483` |
 | **Monochrome** | `#F4F4F4` / `#E6E6E6` / `#191919` / `#191919` | `#111111` / `#222222` / `#F1F1F1` / `#F1F1F1` | `#050505` / `#F1F1F1` / `#F1F1F1` |
 
-The product app icon remains a fixed brand asset across platforms; choosing a
-theme changes the app, Live Activity, and watch palettes, not the home-screen icon.
+The fixed iPhone and Mac app icon uses Ayu's navy `#1F2430` and yellow
+`#FFCC66`; choosing a theme changes the app, Live Activity, and watch palettes,
+not the home-screen icon. The menu-bar icon remains a system template mark.
 
 Ayu's light accent is darkened from its canonical orange for legible small
 controls on near-white; it remains an explicitly adapted Ayu port. Miasma uses
