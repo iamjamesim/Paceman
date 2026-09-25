@@ -121,9 +121,9 @@ Color roles across surfaces:
 | Role | Phone | Live Activity | Custom watch |
 | --- | --- | --- | --- |
 | Canvas and surface | Family background and panel | Dark glance background; system black in the Island | Dark glance background |
-| Primary ink | Names, titles, normal status, and content | Computer name, finished/idle headline, and ordinary content | Date, weather, allowance text, and supporting status |
+| Primary ink | Brand wordmark, names, titles, finished/idle headlines, and ordinary content | Computer name, finished/idle headline, and ordinary content | Date, weather, allowance text, and supporting status |
 | Secondary ink | Receipt times, supporting labels, and historical rows | Session counts, elapsed time, and supporting labels | Rules and supporting information |
-| Family accent | Brand mark, selected controls, and fresh agent robots | Fresh working/needs-input robot and headline | Clock, active agent robot, and allowance rim |
+| Family accent | Brand mark, selected controls, fresh agent robots, and working/needs-input headlines | Fresh working/needs-input robot and headline | Clock, active agent robot, and allowance rim |
 | State colors | State is spelled out; needs-input label receives accent emphasis | Small per-state session lights and input count in the compact Island | State is carried by robot form and words; no separate state hues |
 | Inactive or stale | Neutral connection cues and muted last-known activity | Muted stale content; softer finished robot; neutral finished headline and idle robot | Ordinary battery remains ink; low/charging battery receives accent |
 

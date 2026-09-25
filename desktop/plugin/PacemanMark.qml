@@ -7,24 +7,48 @@ Item {
   implicitWidth: 24
   implicitHeight: 24
   readonly property real unit: Math.min(width, height) / 720
+  onInkChanged: face.requestPaint()
   Item {
     width: 720 * root.unit
     height: 720 * root.unit
     anchors.centerIn: parent
-    Rectangle {
-      // Qt's border sits inside its rectangle; include the half-stroke on each side.
-      x: 66 * root.unit; y: 135 * root.unit
-      width: 588 * root.unit; height: 476 * root.unit
-      radius: 168 * root.unit
-      color: "transparent"
-      border.color: root.ink
-      border.width: 28 * root.unit
-      antialiasing: true
+    Canvas {
+      id: face
+      anchors.fill: parent
+      renderTarget: Canvas.Image
+      function roundedRect(ctx, x, y, w, h, r) {
+        ctx.beginPath()
+        ctx.moveTo(x + r, y)
+        ctx.lineTo(x + w - r, y)
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r)
+        ctx.lineTo(x + w, y + h - r)
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+        ctx.lineTo(x + r, y + h)
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r)
+        ctx.lineTo(x, y + r)
+        ctx.quadraticCurveTo(x, y, x + r, y)
+        ctx.closePath()
+      }
+      onPaint: {
+        const ctx = getContext("2d")
+        ctx.clearRect(0, 0, width, height)
+        ctx.save()
+        ctx.scale(root.unit, root.unit)
+        ctx.fillStyle = root.ink
+        roundedRect(ctx, 80, 149, 560, 448, 154)
+        ctx.fill()
+        ctx.globalCompositeOperation = "destination-out"
+        for (const x of [252, 424]) {
+          roundedRect(ctx, x, 314, 44, 98, 22)
+          ctx.fill()
+        }
+        ctx.restore()
+      }
     }
     Rectangle {
-      x: 346 * root.unit; y: 66 * root.unit
-      width: 28 * root.unit; height: 83 * root.unit
-      radius: width / 2; color: root.ink
+      x: 346 * root.unit; y: 45 * root.unit
+      width: 28 * root.unit; height: 118 * root.unit
+      color: root.ink
     }
     Rectangle {
       x: 327 * root.unit; y: 12 * root.unit
@@ -33,21 +57,11 @@ Item {
       antialiasing: true
     }
     Repeater {
-      model: [252, 424]
+      model: [10, 666]
       Rectangle {
         required property real modelData
         x: modelData * root.unit; y: 314 * root.unit
         width: 44 * root.unit; height: 98 * root.unit
-        radius: width / 2; color: root.ink
-        antialiasing: true
-      }
-    }
-    Repeater {
-      model: [16, 672]
-      Rectangle {
-        required property real modelData
-        x: modelData * root.unit; y: 316 * root.unit
-        width: 32 * root.unit; height: 115 * root.unit
         radius: width / 2; color: root.ink
         antialiasing: true
       }

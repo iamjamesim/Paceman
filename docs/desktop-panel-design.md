@@ -19,7 +19,8 @@ display. A working local agent and successful delivery are separate states.
 Use the companion face already drawn in the iPhone app. The iPhone and Mac now
 compile the same vector in `ios/Shared/PacemanMark.swift`; Omarchy's
 `desktop/plugin/PacemanMark.qml` uses that vector's cropped app-icon coordinates.
-Keep both eyes identical and mirrored around the face center at every size.
+The face is solid, with transparent eyes. Each side piece repeats the eye shape
+at the same size and height. Keep the pairs mirrored around the face center.
 The icon keeps normal weight
 while the desktop runs and dims when it stops. A sleeping phone is not an urgent
 error, and the icon does not animate on every agent event.

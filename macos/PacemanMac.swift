@@ -151,6 +151,7 @@ private struct PairingSheet: View {
     var body: some View {
         VStack(spacing: 17) {
             PacemanMark().frame(width: 38, height: 38)
+                .foregroundStyle(Color(nsColor: .labelColor))
             Text("Connect your phone").font(.title2.weight(.semibold))
             Text("On your iPhone, open Paceman, choose to connect a computer, and scan this code.")
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary)
@@ -271,7 +272,7 @@ private struct Panel: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .center, spacing: 12) {
                 PacemanMark().frame(width: 40, height: 40)
-                    .foregroundStyle(model.status.running ? .primary : .secondary)
+                    .foregroundStyle(Color(nsColor: model.status.running ? .labelColor : .secondaryLabelColor))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Paceman").font(.title3.weight(.semibold))
                     Text(model.status.sharingEnabled
@@ -309,6 +310,7 @@ private struct Panel: View {
                         .foregroundStyle(.secondary)
                     if model.status.running && model.status.activity != "idle" {
                         PacemanMark().frame(width: 21, height: 21)
+                            .foregroundStyle(Color(nsColor: .labelColor))
                     } else { Color.clear.frame(width: 21, height: 21) }
                 }
                 if let breakdown { Text(breakdown).font(.caption).foregroundStyle(.secondary) }

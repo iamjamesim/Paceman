@@ -11,6 +11,11 @@ struct CompanionHome: View {
     var paired: Bool { presentation.preview ? presentation.previewHasComputer : !model.pairedSources.isEmpty }
     var hasWatch: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.paired }
     var watchReady: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.ready }
+    private var prominentTint: Color {
+        // Large marks and status text can use warmer amber; small labels keep the darker tint.
+        presentation.themeFamily == .ayu && !theme.dark
+            ? Color(companionHex: "B77800") : theme.tint
+    }
     private var liveActivitiesStatus: String {
         presentation.preview
             ? MonitoringCoordinator.displayStatus(available: presentation.previewScreen != "live-activities-off",
@@ -24,8 +29,11 @@ struct CompanionHome: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         HStack(spacing: 9) {
-                            PacemanMark().frame(width: 31, height: 31).foregroundStyle(theme.tint)
-                            Text("Paceman").font(.system(size: 21, weight: .medium, design: .rounded)).tracking(-0.5)
+                            PacemanMark().frame(width: 31, height: 31).foregroundStyle(prominentTint)
+                            Text("PACEMAN")
+                                .font(.custom("AvenirNext-BoldItalic", fixedSize: 21))
+                                .tracking(0.3)
+                                .accessibilityLabel("Paceman")
                         }
                         Spacer()
                         Button { open(.settings) } label: {
@@ -235,12 +243,12 @@ struct CompanionHome: View {
             if state != .idle && !typeSize.isAccessibilitySize {
                 ActivityRobot(state: state, animate: !historical)
                     .frame(width: 31, height: 31)
-                    .foregroundStyle(historical ? theme.secondaryInk : theme.tint)
+                    .foregroundStyle(historical ? theme.secondaryInk : prominentTint)
                     .accessibilityHidden(true)
             }
             Text(historical ? "Last known: \(title)" : title)
                 .font(.system(.title2, design: .rounded, weight: .semibold))
-                .foregroundStyle(historical ? theme.secondaryInk : stateColor(state))
+                .foregroundStyle(historical ? theme.secondaryInk : stateColor(state, prominent: true))
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }.padding(.top, 16)
@@ -265,8 +273,9 @@ struct CompanionHome: View {
         }.padding(.vertical, 10).accessibilityElement(children: .combine)
     }
 
-    private func stateColor(_ state: ActivityState) -> Color {
-        state == .needsInput || state == .working ? theme.tint : theme.ink
+    private func stateColor(_ state: ActivityState, prominent: Bool = false) -> Color {
+        guard state == .needsInput || state == .working else { return theme.ink }
+        return prominent ? prominentTint : theme.tint
     }
 
     private func emptyActivity(_ title: String, detail: String?) -> some View {
