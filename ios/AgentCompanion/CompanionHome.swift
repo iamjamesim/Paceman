@@ -135,15 +135,20 @@ struct CompanionHome: View {
             ? (["waiting", "offline-empty"].contains(presentation.previewScreen) ? .waiting
                 : presentation.previewSessions.isEmpty ? .empty : .sessions(presentation.previewSessions))
             : AgentFeedContent.resolve(value)
+        let rows: [AgentDisplayRow] = {
+            if case .sessions(let sessions) = content { return AgentDisplayRow.rows(sessions) }
+            return []
+        }()
         return VStack(alignment: .leading, spacing: 0) {
             Button { open(.otherComputer(id)) } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "laptopcomputer")
-                        .font(.system(size: 18, weight: .regular))
-                        .frame(width: 24).foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    if !typeSize.isAccessibilitySize {
+                        Image(systemName: "laptopcomputer")
+                            .font(.caption).foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
+                    }
                     VStack(alignment: .leading, spacing: 3) {
                         Text(presentation.displayName(source: paired, snapshot: value))
-                            .font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold))
+                            .font(.system(.subheadline, design: .rounded, weight: .medium))
                             .multilineTextAlignment(.leading)
                         if model.pairedSources.filter({ presentation.displayName(source: $0, snapshot: model.snapshots[$0.sourceID]) == presentation.displayName(source: paired, snapshot: value) }).count > 1,
                            let host = paired.endpoint.host {
@@ -151,8 +156,13 @@ struct CompanionHome: View {
                                 .multilineTextAlignment(.leading)
                         }
                     }
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).opacity(0.45)
+                    if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
+                    if !typeSize.isAccessibilitySize, case .sessions(let sessions) = content, rows.count > 1 {
+                        Text("\(sessions.count) sessions").font(.caption2).foregroundStyle(theme.secondaryInk)
+                    }
+                    if !typeSize.isAccessibilitySize {
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(theme.secondaryInk)
+                    }
                 }.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityHint("Manage this computer's connection")
             if state != .current {
@@ -161,89 +171,103 @@ struct CompanionHome: View {
                     if state == .revoked {
                         Spacer()
                         Button("Reconnect") { open(.otherComputer(id)) }
-                            .buttonStyle(.plain).font(.caption.weight(.semibold)).frame(minHeight: 44)
+                            .buttonStyle(.plain).font(.caption.weight(.semibold)).foregroundStyle(theme.ink).frame(minHeight: 44)
                     }
                 }.padding(.top, 3)
             }
-            if firstPreview || model.lastContacts[id] != nil {
+            if content != .waiting && (firstPreview || model.lastContacts[id] != nil) {
                 ComputerReceiptLabel(model: model, presentation: presentation, sourceID: id)
                     .font(.caption2).foregroundStyle(theme.secondaryInk).padding(.top, 5)
             }
-            Color.clear.frame(height: 16)
-            CompanionRule(theme: theme)
+            Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5).padding(.top, 16)
             if state == .revoked {
                 Text("Reconnect to receive activity from this computer.")
                     .font(.subheadline).foregroundStyle(theme.secondaryInk).padding(.top, 18)
             } else {
-                if historical && content.hasActivity {
-                    Text("Last known activity").font(.caption).foregroundStyle(theme.secondaryInk).padding(.top, 16)
-                }
                 switch content {
-                case .sessions(let sessions):
-                    let rows = AgentDisplayRow.rows(sessions)
-                    if rows.count > 1 && !historical {
-                        Text([content.headline, content.supportingStatus].compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(theme.secondaryInk).padding(.top, 16)
-                    }
-                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        if index > 0 { CompanionRule(theme: theme) }
-                        AgentFeedRow(session: row.session, theme: theme, animate: !historical, detailOverride: row.detail)
+                case .sessions:
+                    if let leading = rows.first {
+                        activityHeadline(leading.session.state, historical: historical)
+                        if rows.count == 1 {
+                            Text(leading.session.displayName)
+                                .font(.subheadline.weight(.medium)).foregroundStyle(historical ? theme.secondaryInk : theme.ink)
+                                .padding(.top, 10)
+                            if !leading.detail.isEmpty {
+                                Text(leading.detail).font(.caption).foregroundStyle(theme.secondaryInk).padding(.top, 3)
+                            }
+                        } else {
+                            VStack(spacing: 0) {
+                                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                                    if index > 0 { Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5) }
+                                    activityRow(row, historical: historical)
+                                }
+                            }.padding(.top, 11)
+                        }
                     }
                 case .waiting:
                     emptyActivity("No activity received yet", detail: nil)
                 case .empty:
-                    emptyActivity("No active sessions", detail: historical ? nil : "Activity appears when an agent starts.")
+                    emptyActivity(historical ? "Last known: No active sessions" : "No active sessions",
+                                  detail: historical ? nil : "Activity appears when an agent starts.")
                 case .summary(let activity):
-                    AgentFeedRow(session: AgentSession(id: "aggregate", provider: "", state: activity, name: "Agent activity"),
-                                 theme: theme, animate: !historical)
+                    activityHeadline(activity, historical: historical)
                 }
             }
             if !presentation.preview && value?.mode == "synthetic" {
-                Text("Test source").font(.caption2).foregroundStyle(theme.secondaryInk)
+                Text("Test source").font(.caption2).foregroundStyle(theme.secondaryInk).padding(.top, 12)
             }
         }
-        .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 6)
+        .foregroundStyle(theme.ink)
+        .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 20)
         .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
         .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
 
+    private func activityHeadline(_ state: ActivityState, historical: Bool) -> some View {
+        let title = state == .idle ? "No active sessions" : state.title
+        return HStack(spacing: 11) {
+            if state != .idle && !typeSize.isAccessibilitySize {
+                ActivityRobot(state: state, animate: !historical)
+                    .frame(width: 31, height: 31)
+                    .foregroundStyle(historical ? theme.secondaryInk : theme.tint)
+                    .accessibilityHidden(true)
+            }
+            Text(historical ? "Last known: \(title)" : title)
+                .font(.system(.title2, design: .rounded, weight: .semibold))
+                .foregroundStyle(historical ? theme.secondaryInk : stateColor(state))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }.padding(.top, 16)
+    }
+
+    private func activityRow(_ row: AgentDisplayRow, historical: Bool) -> some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        return layout {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.session.displayName).font(.subheadline.weight(.medium))
+                    .foregroundStyle(historical ? theme.secondaryInk : theme.ink)
+                if !row.detail.isEmpty {
+                    Text(row.detail).font(.caption).foregroundStyle(theme.secondaryInk)
+                }
+            }
+            if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
+            Text(row.session.state.title).font(.caption.weight(.medium))
+                .foregroundStyle(historical ? theme.secondaryInk : stateColor(row.session.state))
+                .fixedSize(horizontal: true, vertical: false)
+        }.padding(.vertical, 10).accessibilityElement(children: .combine)
+    }
+
+    private func stateColor(_ state: ActivityState) -> Color {
+        state == .needsInput || state == .working ? theme.tint : theme.ink
+    }
+
     private func emptyActivity(_ title: String, detail: String?) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.subheadline.weight(.medium))
+            Text(title).font(.system(.title3, design: .rounded, weight: .semibold))
             if let detail { Text(detail).font(.caption).foregroundStyle(theme.secondaryInk) }
-        }.padding(.vertical, 20)
-    }
-}
-
-struct AgentFeedRow: View {
-    let session: AgentSession
-    let theme: CompanionTheme
-    var animate = true
-    var detailOverride: String? = nil
-    private var detail: String { detailOverride ?? session.detail }
-    @Environment(\.dynamicTypeSize) private var typeSize
-    var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(session.displayName).font(theme.monospaced ? theme.font(15, emphasis: true) : .subheadline.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
-                if !detail.isEmpty {
-                    Text(detail).font(.caption).foregroundStyle(theme.secondaryInk).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                }
-                if typeSize.isAccessibilitySize { stateLabel }
-            }
-            if !typeSize.isAccessibilitySize { Spacer(minLength: 7); stateLabel }
-        }.padding(.vertical, 16).foregroundStyle(animate ? theme.ink : theme.secondaryInk).accessibilityElement(children: .combine)
-    }
-    private var stateLabel: some View {
-        VStack(alignment: typeSize.isAccessibilitySize ? .leading : .center, spacing: 6) {
-            if !typeSize.isAccessibilitySize {
-                if session.state != .idle {
-                    ActivityRobot(state: session.state, animate: animate)
-                        .frame(width: 20, height: 20).foregroundStyle(animate ? theme.tint : theme.ink.opacity(0.4))
-                }
-            }
-            Text(session.state.title).font(.caption2.weight(.medium)).foregroundStyle(animate && session.state == .needsInput ? theme.tint : theme.secondaryInk).fixedSize(horizontal: true, vertical: false)
-        }
+        }.padding(.top, 18)
     }
 }
 

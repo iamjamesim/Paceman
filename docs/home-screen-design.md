@@ -8,8 +8,11 @@ The home screen answers, in order:
 Keep computer identity and connection freshness above the activity divider.
 Activity belongs below it; the custom watch is a separate destination beside
 Live Activities above the computer cards. Preserve the
-outline Paceman brand mark. The smaller filled robots describe agent state only,
-with the state label stacked below. A single session needs no count headline.
+outline Paceman brand mark. Computer cards use the same subtle phone surface
+as the destination boxes, with the Live Activity's robot and state headline
+below the divider.
+One session shows its identity beneath that headline; multiple named sessions
+remain separate rows with their own state labels. A single session needs no count headline.
 For a grouped provider row, keep its session count in the name and show the
 state distribution below only when those sessions have different states.
 Historical robots are still and muted. No received activity is not historical activity.
@@ -26,6 +29,27 @@ rows are already visible, rather than the computer's connection-management
 detail. A finished Live Activity ends automatically after a brief resting period;
 opening its computer card does not acknowledge work. The card is a current/last-known view, not a durable
 activity-history screen.
+
+## Live Activity alignment: 2026-09-24
+
+The Home computer card shares the Live Activity's computer identity, robot,
+and prominent activity headline. Home keeps the receipt time and connection
+state above the divider because it also covers
+checking, reconnection, and computers without an ActivityKit activity. Named
+sessions remain below the headline to show which agent needs input. A stale
+headline says `Last known:` and uses muted color; a source with no snapshot
+shows `No activity received yet` only once. Grouped sessions keep their count
+in the group name without repeating it in the header.
+
+Simulator review covered current multiple sessions, current single session,
+empty, no received activity, a stale second computer, a long computer name
+and task title, grouped sessions, the dark phone appearance, and accessibility
+extra-extra-large text. The simulator build passed. The first physical-phone
+review showed that using the dark Live Activity background made the computer
+cards blend into the Miasma Home page. The cards now use the same filled phone
+surface as the destination boxes and phone theme text colors. A second
+physical-phone photo confirmed the corrected surface with two reconnecting
+computers. Fresh activity on the physical phone remains unchecked.
 
 ## Multiple-computer behavior: 2026-09-23
 
