@@ -128,8 +128,8 @@ The timing and cross-surface rules are in the
 [shared motion spec](../../../docs/agent-state-motion.md).
 Animations run only while the screen is awake, and repeated snapshots do not
 restart them. New Working turns use one softer note without waking or vibrating
-the watch. Needs input keeps the two matching high notes, Finished keeps the
-descending pair, and Failed uses two matching lower notes. The phone's Status
+the watch. Needs input keeps two spaced matching high notes, Finished uses a
+quicker and softer descending pair, and Failed holds one lower note. The phone's Status
 sounds toggle controls all four. Fresh input, completion, and failure alerts
 wake the face for five seconds, except on battery at 15% or less; that cutoff
 suppresses the wake, not the sound or optional GPIO18 haptic pulse.

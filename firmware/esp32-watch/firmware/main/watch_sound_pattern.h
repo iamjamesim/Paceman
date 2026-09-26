@@ -19,23 +19,26 @@ typedef enum {
 
 static inline unsigned watch_sound_note_count(watch_sound_kind_t kind)
 {
-    return kind == WATCH_SOUND_WORKING ? 1 : 2;
+    return kind == WATCH_SOUND_WORKING || kind == WATCH_SOUND_FAILURE ? 1 : 2;
 }
 
 static inline uint16_t watch_sound_duration_ms(watch_sound_kind_t kind)
 {
-    return kind == WATCH_SOUND_WORKING ? 130 : 380;
+    return kind == WATCH_SOUND_WORKING ? 130 :
+           kind == WATCH_SOUND_COMPLETION ? 300 :
+           kind == WATCH_SOUND_FAILURE ? 310 : 380;
 }
 
-/* Keep the existing attention and completion tones. New work gets one softer
- * note; failure has the attention rhythm at a distinctly lower pitch. */
+/* Short start, spaced high request, compact descending finish, held low fault. */
 static inline alert_note_t watch_sound_note(watch_sound_kind_t kind, unsigned index)
 {
     if (kind == WATCH_SOUND_WORKING)
         return (alert_note_t){0, 110, 1536, 10000};
-    if (index == 0)
-        return (alert_note_t){0, 110, kind == WATCH_SOUND_FAILURE ? 1280 : 2048, 18000};
-    const uint16_t second = kind == WATCH_SOUND_ATTENTION ? 2048 :
-                            kind == WATCH_SOUND_COMPLETION ? 1536 : 1280;
-    return (alert_note_t){235, 125, second, 19000};
+    if (kind == WATCH_SOUND_FAILURE)
+        return (alert_note_t){0, 280, 1280, 18000};
+    if (kind == WATCH_SOUND_COMPLETION)
+        return index == 0 ? (alert_note_t){0, 90, 2048, 15000} :
+                            (alert_note_t){130, 140, 1536, 16000};
+    return index == 0 ? (alert_note_t){0, 110, 2048, 18000} :
+                        (alert_note_t){235, 125, 2048, 19000};
 }
