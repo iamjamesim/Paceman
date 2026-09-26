@@ -41,6 +41,28 @@ static void test_resource_colors(void)
             exit(1);
         }
     }
+    /* Only attention and failure change hue; Codex capacity stays in the face tint. */
+    const watch_agent_state_t states[] = {
+        WATCH_AGENT_WORKING, WATCH_AGENT_ATTENTION, WATCH_AGENT_FAILED, WATCH_AGENT_FINISHED
+    };
+    for (unsigned i = 0; i < sizeof(states) / sizeof(states[0]); ++i) {
+        watch_face_layout_set_agent_state(&layout, states[i], false);
+        watch_face_layout_set_allowance(&layout, 10, 1, 3600);
+        const lv_color_t robot_color = lv_obj_get_style_text_color(layout.agent, 0);
+        const lv_opa_t robot_opacity = lv_obj_get_style_text_opa(layout.agent, 0);
+        const bool routine = states[i] == WATCH_AGENT_WORKING || states[i] == WATCH_AGENT_FINISHED;
+        if ((routine && !lv_color_eq(robot_color, accent)) ||
+            (states[i] == WATCH_AGENT_FINISHED ? robot_opacity != LV_OPA_70 : robot_opacity != LV_OPA_COVER)) {
+            fputs("Robot routine-state tint regression\n", stderr);
+            exit(1);
+        }
+        if (!lv_color_eq(lv_obj_get_style_line_color(layout.allowance_track, 0), accent) ||
+            !lv_color_eq(lv_obj_get_style_line_color(layout.allowance_fill, 0), accent) ||
+            !lv_color_eq(lv_obj_get_style_text_color(layout.allowance_title, 0), accent)) {
+            fputs("Robot state changed Codex allowance tint\n", stderr);
+            exit(1);
+        }
+    }
     /* Refresh transitions keep number geometry stable and clear stale markers. */
     const int64_t now = 1800000000;
     watch_face_layout_set_allowance(&layout, 54, 1, 86400);
@@ -269,24 +291,40 @@ int main(int argc, char **argv)
     if (argc == 8) {
         watch_agent_state_t state;
         if (strcmp(argv[6], "working") == 0) state = WATCH_AGENT_WORKING;
-        else if (strcmp(argv[6], "attention") == 0) state = WATCH_AGENT_ATTENTION;
+        else if (strcmp(argv[6], "attention") == 0 ||
+                 strcmp(argv[6], "needs-input") == 0) state = WATCH_AGENT_ATTENTION;
         else if (strcmp(argv[6], "finished") == 0) state = WATCH_AGENT_FINISHED;
+        else if (strcmp(argv[6], "failed") == 0) state = WATCH_AGENT_FAILED;
         else if (strcmp(argv[6], "idle") == 0) state = WATCH_AGENT_IDLE;
         else {
-            fputs("agent-state must be idle, working, attention, or finished\n", stderr);
+            fputs("agent-state must be idle, working, needs-input, finished, or failed\n", stderr);
             return 2;
         }
         /* Start from a visible fixture, including when testing the idle state. */
         layout.agent_state = WATCH_AGENT_FINISHED;
         watch_face_layout_set_agent_state(&layout, state, true);
-        const char *expected_glyph = state == WATCH_AGENT_FINISHED ? "\xEE\x84\x82" :
+        const char *expected_glyph = state == WATCH_AGENT_FAILED ? "\xEE\x84\x83" :
+                                     state == WATCH_AGENT_FINISHED ? "\xEE\x84\x82" :
                                      state == WATCH_AGENT_ATTENTION ? "\xEE\x84\x81" : "\xEE\x84\x80";
         if (strcmp(lv_label_get_text(layout.agent), expected_glyph) != 0) {
             fputs("Unexpected agent expression\n", stderr);
             return 1;
         }
+        const bool dark = (299u * theme.background[0] + 587u * theme.background[1] +
+                           114u * theme.background[2]) < 128000u;
+        const lv_color_t expected_color = state == WATCH_AGENT_ATTENTION ?
+            (dark ? lv_color_make(0xF4, 0xA6, 0x4B) : lv_color_make(0x98, 0x50, 0x0B)) :
+            state == WATCH_AGENT_FAILED ?
+            (dark ? lv_color_make(0xFA, 0x73, 0x79) : lv_color_make(0xB5, 0x2C, 0x36)) :
+            lv_color_make(theme.accent[0], theme.accent[1], theme.accent[2]);
+        if (!lv_color_eq(lv_obj_get_style_text_color(layout.agent, 0), expected_color) ||
+            (state == WATCH_AGENT_FINISHED && lv_obj_get_style_text_opa(layout.agent, 0) != LV_OPA_70)) {
+            fputs("Unexpected agent state color\n", stderr);
+            return 1;
+        }
         const unsigned duration = state == WATCH_AGENT_WORKING ? 5200 :
-                                  state == WATCH_AGENT_FINISHED ? 4200 : 4000;
+                                  state == WATCH_AGENT_FINISHED ? 4200 :
+                                  state == WATCH_AGENT_FAILED ? 40 : 4000;
         for (unsigned frame = 0; frame < duration / 40; ++frame) {
             lv_anim_refr_now();
             lv_refr_now(display);
@@ -300,13 +338,16 @@ int main(int argc, char **argv)
         if (lv_anim_count_running() != 0 ||
                 lv_obj_get_style_transform_rotation(layout.agent, 0) != 0 ||
                 lv_obj_get_style_translate_x(layout.agent, 0) != 0 ||
-                lv_obj_get_style_text_opa(layout.agent, 0) != LV_OPA_COVER) {
+                lv_obj_get_style_text_opa(layout.agent, 0) !=
+                    (state == WATCH_AGENT_FINISHED ? LV_OPA_70 : LV_OPA_COVER)) {
             fputs("Agent animation did not reset for sleep\n", stderr);
             return 1;
         }
         watch_face_layout_set_agent_state(&layout, state, true);
-        if (state != WATCH_AGENT_IDLE && lv_anim_count_running() != 1) {
-            fputs("Agent animation did not resume on wake\n", stderr);
+        const unsigned expected_animations =
+            state == WATCH_AGENT_IDLE || state == WATCH_AGENT_FAILED ? 0 : 1;
+        if (lv_anim_count_running() != expected_animations) {
+            fputs("Agent animation did not match state on wake\n", stderr);
             return 1;
         }
         watch_face_layout_set_agent_state(&layout, WATCH_AGENT_IDLE, true);

@@ -10,8 +10,10 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
+from uuid import uuid4
 
 from service.codex_limits import codex_binary, parse_codex_allowance, read_codex_allowance
+from service.codex_turns import read_codex_turn_statuses
 from service.hub import Store
 from service.macos import FINISHED_RETENTION, MacSource
 from service.push import live_notification
@@ -19,6 +21,62 @@ from macos.codex_hook import workspace_label
 
 
 class MacSourceTests(unittest.TestCase):
+    def test_codex_turn_reader_requests_status_without_items(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session, turn = str(uuid4()), str(uuid4())
+            binary = Path(temporary) / "codex"
+            binary.write_text("#!/usr/bin/env python3\n"
+                "import json, os, sys\n"
+                "for line in sys.stdin:\n"
+                " msg=json.loads(line)\n"
+                " if msg.get('id') == 1: result={'userAgent': 'test'}\n"
+                " elif msg.get('id') == 2:\n"
+                "  p=msg['params']\n"
+                "  assert p['itemsView']=='notLoaded' and p['threadId']==os.environ['TEST_SESSION']\n"
+                "  result={'data':[{'id':os.environ['TEST_TURN'],'status':'failed','items':[]}]}\n"
+                " else: continue\n"
+                " print(json.dumps({'id':msg['id'],'result':result}),flush=True)\n")
+            binary.chmod(0o700)
+            with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": str(binary),
+                                              "TEST_SESSION": session, "TEST_TURN": turn}):
+                self.assertEqual(read_codex_turn_statuses([(session, turn)]),
+                                 {(session, turn): "failed"})
+
+    def test_terminal_failure_corrects_stop_and_ignores_late_hook(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            session, turn = str(uuid4()), str(uuid4())
+            reader = lambda turns: {(session, turn): "failed"}
+            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                           turn_status_reader=reader) as source:
+                event = dict(command="agent-event", session=session, turn=turn)
+                source.receive({**event, "event": "working", "hook": "UserPromptSubmit"})
+                source.receive({**event, "event": "completed", "hook": "Stop"})
+                self.assertEqual(store.snapshot()["state"], "finished")
+                source._refresh_turn_statuses(list(source.turn_ids.items()))
+                self.assertEqual(store.snapshot()["state"], "failed")
+                self.assertEqual(store.snapshot()["sessions"][0]["state"], "failed")
+                source.receive({**event, "event": "completed", "hook": "Stop"})
+                self.assertEqual(store.snapshot()["state"], "failed")
+                source.receive({**event, "turn": str(uuid4()), "event": "working",
+                                "hook": "UserPromptSubmit"})
+                self.assertEqual(store.snapshot()["state"], "working")
+
+    def test_terminal_failure_without_stop_does_not_stay_working(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            session, turn = str(uuid4()), str(uuid4())
+            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                           turn_status_reader=lambda turns: {(session, turn): "failed"}) as source:
+                source.receive(dict(command="agent-event", session=session, turn=turn,
+                                    event="working", hook="UserPromptSubmit"))
+                source._refresh_turn_statuses(list(source.turn_ids.items()))
+                self.assertEqual(store.snapshot()["state"], "failed")
+
     def test_codex_desktop_runtime_is_found_without_cli(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -73,6 +131,7 @@ class MacSourceTests(unittest.TestCase):
             "secondary": {"usedPercent": 61, "windowDurationMins": 10080, "resetsAt": now + 5000}}}}
         self.assertEqual(parse_codex_allowance(limits, now),
                          {"provider": "codex", "remaining": 39, "window": 1,
+                          "windowDurationMins": 10080,
                           "updatedAt": now, "resetsAt": now + 5000})
         limits["rateLimitsByLimitId"]["codex"]["secondary"]["usedPercent"] = 101
         self.assertIsNone(parse_codex_allowance(limits, now))

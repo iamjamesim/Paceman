@@ -71,15 +71,17 @@ def notification_copy(event: dict, phone_name: str | None = None) -> dict:
     providers = {"codex": "Codex", "claude": "Claude", "claude-code": "Claude"}
     subject = providers.get(matching[0].get("provider"), "Agent") if len(matching) == 1 else "Agent"
     titles = {"working": f"{subject} is working", "needs_input": f"{subject} needs input",
-              "finished": f"{subject} finished its turn", "idle": "No active sessions"}
+              "finished": f"{subject} finished its turn", "failed": f"{subject} turn failed",
+              "idle": "No active sessions"}
     if len(matching) > 1:
         count = len(matching)
         titles.update(working=f"{count} sessions are working",
                       needs_input=f"{count} sessions need input",
-                      finished=f"{count} sessions finished their turns")
+                      finished=f"{count} sessions finished their turns",
+                      failed=f"{count} sessions failed")
     counts = [(state, sum(s.get("state") == state for s in sessions))
-              for state in ("needs_input", "working", "finished")]
-    labels = {"needs_input": "need input", "working": "working", "finished": "finished"}
+              for state in ("needs_input", "failed", "working", "finished")]
+    labels = {"needs_input": "need input", "failed": "failed", "working": "working", "finished": "finished"}
     summary = " · ".join(f"{n} {labels[state]}" for state, n in counts if n and state != event["state"])
     body = source + (" · " + summary if len(sessions) > 1 and summary else "")
     return {"title": titles[event["state"]], "body": body}
@@ -88,7 +90,7 @@ def notification_copy(event: dict, phone_name: str | None = None) -> dict:
 def notification(source_id: str, generation: str, event: dict, now: float,
                  phone_name: str | None = None) -> tuple[dict, dict]:
     """Push contains a hint only. The paired HTTPS source remains authoritative."""
-    if event["state"] not in ("working", "idle", "needs_input", "finished"):
+    if event["state"] not in ("working", "idle", "needs_input", "finished", "failed"):
         raise ValueError("Unknown activity state")
     passive = event["state"] in ("working", "idle")
     aps = {"alert": notification_copy(event, phone_name), "thread-id": source_id}
@@ -111,7 +113,7 @@ def notification(source_id: str, generation: str, event: dict, now: float,
 def live_notification(snapshot: dict, now: float, ending=False) -> tuple[dict, dict]:
     """Display-only envelope shared with MonitoringActivity.ContentState."""
     sessions = snapshot.get("sessions") or []
-    counts = {state: sum(s.get("state") == state for s in sessions) for state in ("working", "needs_input", "finished")}
+    counts = {state: sum(s.get("state") == state for s in sessions) for state in ("working", "needs_input", "finished", "failed")}
     if not sessions and snapshot["state"] in counts:
         counts[snapshot["state"]] = 1
     observed = min(now, snapshot["observedAt"])
@@ -120,9 +122,10 @@ def live_notification(snapshot: dict, now: float, ending=False) -> tuple[dict, d
     fresh_until = observed + 300
     content = {"schema": 1, "generation": snapshot["generation"], "revision": snapshot["revision"],
                "state": snapshot["state"], "working": counts["working"], "needsInput": counts["needs_input"],
-               "finished": counts["finished"], "observedAt": observed, "freshUntil": fresh_until,
+               "finished": counts["finished"], "failed": counts["failed"],
+               "observedAt": observed, "freshUntil": fresh_until,
                "changedAt": snapshot["changedAt"]}
-    active_sessions = [s for s in sessions if s.get("state") in ("working", "needs_input", "finished")]
+    active_sessions = [s for s in sessions if s.get("state") in ("working", "needs_input", "finished", "failed")]
     if active_sessions:
         aliases = {"codex": "codex", "claude": "claude", "claude-code": "claude"}
         content["providers"] = sorted({aliases.get(s.get("provider"), "other")
@@ -135,7 +138,7 @@ def live_notification(snapshot: dict, now: float, ending=False) -> tuple[dict, d
                     and label == label.strip() and "/" not in label and "\\" not in label
                     and label.isprintable()):
                 content["workspaceLabel"] = label
-    attention = 240 if counts["needs_input"] else 60 if counts["working"] else 0
+    attention = 240 if counts["needs_input"] or counts["failed"] else 60 if counts["working"] else 0
     aps = {"timestamp": int(now), "event": "end" if ending else "update", "content-state": content,
            "stale-date": int(fresh_until), "relevance-score": (observed + attention) / 10_000_000}
     if ending:
@@ -264,7 +267,7 @@ class Worker:
                 "SELECT l.* FROM live_activities l JOIN clients c ON l.client_id=c.id")]
         for device in devices:
             ending = (now >= device["expires"] or snapshot["state"] == "idle"
-                      or (snapshot["state"] == "finished" and now - snapshot["changedAt"] >= 90))
+                      or (snapshot["state"] in ("finished", "failed") and now - snapshot["changedAt"] >= 90))
             changed = device["cursor"] < snapshot["revision"]
             due = now >= device["next_attempt"]
             heartbeat = not changed and due and now >= device["next_attempt"] + 225
@@ -299,7 +302,7 @@ class Worker:
                       "revision": snapshot["revision"], "status": result.status, "reason": result.reason})
 
     def step_live_starts(self, snapshot, now):
-        if snapshot["state"] == "idle" or (snapshot["state"] == "finished"
+        if snapshot["state"] == "idle" or (snapshot["state"] in ("finished", "failed")
                 and now - snapshot["changedAt"] >= 90):
             # A successful remote start reserves this source for one active run.
             # The update token may arrive later; revisions must not start copies.
@@ -307,7 +310,7 @@ class Worker:
                 db.execute("UPDATE live_activity_starts SET cursor=?,next_attempt=0",
                            (snapshot["revision"],))
             return
-        if (snapshot["state"] not in ("working", "needs_input")
+        if (snapshot["state"] not in ("working", "needs_input", "failed")
                 or now >= snapshot["observedAt"] + snapshot["freshFor"]):
             return
         with self.store.connect() as db:

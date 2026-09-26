@@ -20,6 +20,7 @@ import time
 import unicodedata
 
 from service.codex_limits import read_codex_allowance
+from service.codex_turns import read_codex_turn_statuses
 
 
 EVENT_STATES = {
@@ -29,6 +30,7 @@ EVENT_STATES = {
 }
 ATTENTION_DELAY = 5.0
 FINISHED_RETENTION = 10 * 60
+TURN_STATUS_INTERVAL = 15.0
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
 
 
@@ -51,7 +53,8 @@ class HookHandler(socketserver.StreamRequestHandler):
 
 class MacSource:
     def __init__(self, store, *, socket_path: Path, computer_name: str | None = None,
-                 allowance_reader=read_codex_allowance, monotonic=time.monotonic):
+                 allowance_reader=read_codex_allowance,
+                 turn_status_reader=read_codex_turn_statuses, monotonic=time.monotonic):
         self.store = store
         self.socket_path = socket_path
         self.computer_name = (computer_name or socket.gethostname()).split(".")[0][:80]
@@ -64,6 +67,12 @@ class MacSource:
         self.allowance = None
         self.allowance_thread = None
         self.next_allowance_at = 0.0
+        self.turn_status_reader = turn_status_reader
+        self.turn_status_thread = None
+        self.next_turn_status_at = 0.0
+        # Raw Codex IDs are retained in memory only; published IDs stay hashed.
+        self.turn_ids = {}
+        self.confirmed_turns = {}
         self.closed = False
         self.monotonic = monotonic
         self.pending_attention = {}
@@ -145,6 +154,8 @@ class MacSource:
             self.thread.join(timeout=2)
         if self.allowance_thread is not None:
             self.allowance_thread.join(timeout=2)
+        if self.turn_status_thread is not None:
+            self.turn_status_thread.join(timeout=2)
         if self.server is not None:
             self.server.server_close()
         try:
@@ -176,6 +187,8 @@ class MacSource:
                 pending = self.pending_attention.pop(key, None)
                 question = self.pending_questions.pop(key, None)
                 self.published_questions.discard(key)
+                self.turn_ids.pop(key, None)
+                self.confirmed_turns.pop(key, None)
                 if previous is None and pending is None and question is None:
                     return False
                 db.execute("DELETE FROM mac_sessions WHERE id=?", (key,))
@@ -188,7 +201,14 @@ class MacSource:
                 if (previous and previous["turn"] and turn and previous["turn"] != turn
                         and command.get("hook") != "UserPromptSubmit"):
                     return False
-                if (previous and previous["turn"] == turn and previous["state"] == "finished"
+                if turn:
+                    self.turn_ids[key] = (session, turn)
+                    if self.confirmed_turns.get(key) != turn:
+                        self.confirmed_turns.pop(key, None)
+                if (previous and previous["turn"] == turn and previous["state"] == "failed"
+                        and self.confirmed_turns.get(key) == turn):
+                    return False
+                if (previous and previous["turn"] == turn and previous["state"] in ("finished", "failed")
                         and event == "working" and command.get("hook") == "PostToolUse"):
                     return False
                 if event == "question-opened":
@@ -258,16 +278,30 @@ class MacSource:
             if newly_due:
                 self.published_questions.update(newly_due)
                 self.publish_current()
+            if (now >= self.next_turn_status_at
+                    and (self.turn_status_thread is None or not self.turn_status_thread.is_alive())):
+                with self.store.connect() as db:
+                    tracked = [(key, self.turn_ids[key]) for row in db.execute(
+                        "SELECT id,turn FROM mac_sessions WHERE state IN ('working','needs_input','finished')")
+                        if (key := row["id"]) in self.turn_ids
+                        and self.confirmed_turns.get(key) != row["turn"]]
+                if tracked:
+                    self.next_turn_status_at = now + TURN_STATUS_INTERVAL
+                    self.turn_status_thread = threading.Thread(
+                        target=self._refresh_turn_statuses, args=(tracked,), daemon=True)
+                    self.turn_status_thread.start()
             # Stop completes a turn, but some clients do not deliver SessionEnd.
             # Keep its result long enough to notice, then retire only that
             # finished display row. A later prompt creates it again.
             with self.store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 retired = 0
-                for row in db.execute("SELECT id FROM mac_sessions WHERE state='finished' AND updated<=?",
+                for row in db.execute("SELECT id FROM mac_sessions WHERE state IN ('finished','failed') AND updated<=?",
                                       (time.time() - FINISHED_RETENTION,)):
                     if row["id"] not in self.pending_questions:
                         retired += db.execute("DELETE FROM mac_sessions WHERE id=?", (row["id"],)).rowcount
+                        self.turn_ids.pop(row["id"], None)
+                        self.confirmed_turns.pop(row["id"], None)
                 if retired:
                     self._publish(db, lifecycle_only=True)
             if now < self.next_allowance_at:
@@ -287,6 +321,36 @@ class MacSource:
             self.allowance = allowance
             self.publish_current()
 
+    def _refresh_turn_statuses(self, tracked):
+        try:
+            outcomes = self.turn_status_reader([pair for _, pair in tracked])
+        except Exception:
+            return
+        if not isinstance(outcomes, dict):
+            return
+        with self.lock, self.store.connect() as db:
+            if self.closed:
+                return
+            db.execute("BEGIN IMMEDIATE")
+            changed = False
+            for key, pair in tracked:
+                status = outcomes.get(pair)
+                if status not in ("completed", "failed") or self.turn_ids.get(key) != pair:
+                    continue
+                row = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
+                if row is None or row["turn"] != pair[1]:
+                    continue
+                self.confirmed_turns[key] = pair[1]
+                state = "failed" if status == "failed" else "finished"
+                if row["state"] == state:
+                    continue
+                self.pending_attention.pop(key, None)
+                db.execute("UPDATE mac_sessions SET state=?,updated=? WHERE id=?",
+                           (state, time.time(), key))
+                changed = True
+            if changed:
+                self._publish(db)
+
     def publish_current(self):
         with self.lock, self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -303,7 +367,7 @@ class MacSource:
             if row["workspace_label"]:
                 session["workspaceLabel"] = row["workspace_label"]
             sessions.append(session)
-        state = next((candidate for candidate in ("needs_input", "working", "finished")
+        state = next((candidate for candidate in ("needs_input", "failed", "working", "finished")
                       if any(session["state"] == candidate for session in sessions)), "idle")
         activity_key = json.dumps([(row["id"], row["turn"], session["state"])
                                    for row, session in zip(records, sessions)])

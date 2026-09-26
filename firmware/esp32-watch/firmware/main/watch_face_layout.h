@@ -15,6 +15,7 @@ typedef enum {
     WATCH_AGENT_WORKING,
     WATCH_AGENT_ATTENTION,
     WATCH_AGENT_FINISHED,
+    WATCH_AGENT_FAILED,
 } watch_agent_state_t;
 
 typedef struct {
@@ -24,6 +25,7 @@ typedef struct {
 } watch_face_theme_t;
 
 typedef struct {
+    lv_color_t accent_color;
     lv_obj_t *date;
     lv_obj_t *clock;
     lv_obj_t *meridiem;

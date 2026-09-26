@@ -4,6 +4,13 @@
 
 int main(int argc, char **argv)
 {
+    omarchy_activity_v1_t activity = {
+        .magic = {'O', 'A'}, .version = OMARCHY_ACTIVITY_VERSION,
+        .state = OMARCHY_ACTIVITY_FAILED, .revision = 1
+    };
+    assert(omarchy_activity_v1_is_valid(&activity));
+    activity.state = OMARCHY_ACTIVITY_FAILED + 1;
+    assert(!omarchy_activity_v1_is_valid(&activity));
     omarchy_profile_v4_t p = {0};
     if (argc == 2) {
         omarchy_profile_v5_t incoming = {0};

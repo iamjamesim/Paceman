@@ -89,8 +89,9 @@ The themed Appearance screen is the live phone preview.
 
 The initial visual comparison was a palette study. These are the core colors
 implemented from that review. Each watch tuple is
-background / foreground / accent. Extra phone and Live Activity role colors
-remain within each family; the watch has no fourth color.
+background / foreground / accent. The phone and iPhone Live Activity share a
+four-state palette. The custom watch keeps its theme accent for routine activity
+and uses alert colors only when attention is needed.
 
 | Family | Phone light: background / surface / ink / accent | Phone dark: background / surface / ink / accent | Watch: background / ink / accent |
 | --- | --- | --- | --- |
@@ -117,21 +118,20 @@ Color roles across surfaces:
 | Role | Phone | Live Activity | Custom watch |
 | --- | --- | --- | --- |
 | Canvas and surface | Family background and panel | Dark glance background; system black in the Island | Dark glance background |
-| Primary ink | Brand wordmark, names, titles, finished/idle headlines, and ordinary content | Computer name, finished/idle headline, and ordinary content | Date, weather, allowance text, and supporting status |
+| Primary ink | Brand wordmark, names, idle headlines, and ordinary content | Computer name, idle headline, and ordinary content | Date, weather, allowance text, and supporting status |
 | Secondary ink | Receipt times, supporting labels, and historical rows | Session counts, elapsed time, and supporting labels | Rules and supporting information |
-| Family accent | Brand mark, selected controls, fresh agent robots, and working/needs-input headlines | Fresh working/needs-input robot and headline | Clock, active agent robot, and allowance rim |
-| State colors | State is spelled out; needs-input label receives accent emphasis | Small per-state session lights and input count in the compact Island | State is carried by robot form and words; no separate state hues |
-| Inactive or stale | Neutral connection cues and muted last-known activity | Muted stale content; softer finished robot; neutral finished headline and idle robot | Ordinary battery remains ink; low/charging battery receives accent |
+| Family accent | Brand mark and selected controls | Theme surface and selected controls | Clock and allowance rim |
+| State colors | Robot, headline, and per-session labels: green Working, orange amber Needs input, red Failed, blue Finished | Robot, headline, small session lights, and compact attention count use the same state mapping | Agent robot: theme accent for Working, quiet accent for Finished, amber for Needs input, red for Failed |
+| Inactive or stale | Neutral connection cues and muted last-known activity | Muted stale content and idle robot | Ordinary battery remains ink; low/charging battery receives accent |
 
-The accent identifies the active focal point, not a universal success or error
-signal. A full accent headline is legible against every launch family's dark
-glance background and the Island's black; finished content recedes. Long text
-and metadata stay in ink. Phone small labels use the palette's computed
-secondary ink rather than a fixed ink opacity, so they remain legible on both
-the canvas and card surface. Small session lights retain their separate state
-colors and accompany written counts. Monochrome carries state through words,
-robot forms, weight, and position, with grayscale intensity only. The phone
-and Live Activity must never require hue recognition. Actual display,
+The family accent identifies branding and controls. The phone and Live Activity
+share four status colors, even when Monochrome is selected. The custom watch
+reserves contrasting alert colors for input and failure. Long text and metadata
+stay in ink. Phone small labels use the palette's computed secondary ink rather
+than a fixed ink opacity, so they remain legible on both the canvas and card
+surface. Small session lights accompany written counts. The phone and Live
+Activity never require hue recognition: labels and distinct robot expressions
+carry the same meaning. Actual display,
 reduced-luminance, increased-contrast, and color-vision checks remain necessary.
 [WCAG text contrast](https://www.w3.org/WAI/WCAG21/Understanding/contrast-minimum)
 is a numeric starting point.

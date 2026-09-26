@@ -4,6 +4,7 @@ enum PacemanExpression {
     case neutral
     case needsInput
     case finished
+    case failed
 }
 
 /// One vector mark for iPhone and Mac. Coordinates match the cropped app icon.
@@ -47,6 +48,26 @@ struct PacemanMark: View {
                                     path.addPath(eye.strokedPath(StrokeStyle(lineWidth: 31,
                                                                              lineCap: .round,
                                                                              lineJoin: .round)))
+                                }
+                            case .failed:
+                                for center in [426.0, 598.0] {
+                                    var eye = Path()
+                                    eye.move(to: CGPoint(x: center - 42, y: 488))
+                                    eye.addLine(to: CGPoint(x: center + 42, y: 572))
+                                    eye.move(to: CGPoint(x: center + 42, y: 488))
+                                    eye.addLine(to: CGPoint(x: center - 42, y: 572))
+                                    path.addPath(eye.strokedPath(StrokeStyle(lineWidth: 30,
+                                                                             lineCap: .round,
+                                                                             lineJoin: .round)))
+                                    // The two strokes overlap at the center. With
+                                    // even-odd fill that overlap becomes solid again;
+                                    // toggle it once more to keep the entire X open.
+                                    let overlap = 30.0 / sqrt(2.0)
+                                    path.move(to: CGPoint(x: center, y: 530 - overlap))
+                                    path.addLine(to: CGPoint(x: center + overlap, y: 530))
+                                    path.addLine(to: CGPoint(x: center, y: 530 + overlap))
+                                    path.addLine(to: CGPoint(x: center - overlap, y: 530))
+                                    path.closeSubpath()
                                 }
                             }
                         }

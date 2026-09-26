@@ -21,9 +21,9 @@ struct MonitoringLiveActivity: Widget {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } compactLeading: {
-                MonitoringRobot(state: context.state.dominantState, animate: !context.isStale)
+                PhoneMonitoringRobot(state: context.state.dominantState, animate: !context.isStale)
                     .frame(width: 18, height: 18)
-                    .foregroundStyle(context.isStale ? palette.muted : palette.robotColor(for: context.state.dominantState))
+                    .foregroundStyle(context.isStale ? palette.muted : PhoneMonitoringStatusColor.color(for: context.state.dominantState, onDark: true, fallback: palette.muted))
             } compactTrailing: {
                 if context.isStale {
                     Image(systemName: "clock")
@@ -32,7 +32,11 @@ struct MonitoringLiveActivity: Widget {
                         .accessibilityLabel("Last known activity")
                 } else if context.state.needsInput > 0 {
                     Text("\(context.state.needsInput)!")
-                        .foregroundStyle(palette.input)
+                        .foregroundStyle(PhoneMonitoringStatusColor.needsInput(onDark: true))
+                        .accessibilityLabel(context.state.title)
+                } else if context.state.failedCount > 0 {
+                    Text("\(context.state.failedCount)!")
+                        .foregroundStyle(PhoneMonitoringStatusColor.failed(onDark: true))
                         .accessibilityLabel(context.state.title)
                 } else {
                     Text("\(context.state.sessionCount)")
@@ -40,9 +44,9 @@ struct MonitoringLiveActivity: Widget {
                         .accessibilityLabel(context.state.title)
                 }
             } minimal: {
-                MonitoringRobot(state: context.state.dominantState, animate: !context.isStale)
+                PhoneMonitoringRobot(state: context.state.dominantState, animate: !context.isStale)
                     .frame(width: 18, height: 18)
-                    .foregroundStyle(context.isStale ? palette.muted : palette.robotColor(for: context.state.dominantState))
+                    .foregroundStyle(context.isStale ? palette.muted : PhoneMonitoringStatusColor.color(for: context.state.dominantState, onDark: true, fallback: palette.muted))
             }
             .widgetURL(computerURL(context.attributes.sourceID))
         }
@@ -51,6 +55,21 @@ struct MonitoringLiveActivity: Widget {
 
     private func computerURL(_ sourceID: String) -> URL? {
         URL(string: "agentcompanion://computer/\(sourceID)")
+    }
+}
+
+/// The iPhone Live Activity uses the shared failure face; the custom watch
+/// renders the matching expression from its own font glyph.
+private struct PhoneMonitoringRobot: View {
+    let state: String
+    let animate: Bool
+
+    var body: some View {
+        if state == "failed" {
+            PacemanMark(expression: .failed)
+        } else {
+            MonitoringRobot(state: state, animate: animate)
+        }
     }
 }
 
@@ -131,13 +150,13 @@ private struct MonitoringStateLine: View {
 
     var body: some View {
         HStack(spacing: compact ? 9 : 11) {
-            MonitoringRobot(state: state.dominantState, animate: !stale)
+            PhoneMonitoringRobot(state: state.dominantState, animate: !stale)
                 .frame(width: compact ? 25 : 31, height: compact ? 25 : 31)
-                .foregroundStyle(stale ? palette.muted : palette.robotColor(for: state.dominantState))
+                .foregroundStyle(stale ? palette.muted : PhoneMonitoringStatusColor.color(for: state.dominantState, onDark: true, fallback: palette.muted))
                 .accessibilityHidden(true)
             Text(stale ? "Last known: \(state.headline)" : state.headline)
                 .font(.system(compact ? .headline : .title2, design: .rounded, weight: .semibold))
-                .foregroundStyle(stale ? palette.muted : palette.headlineColor(for: state.dominantState))
+                .foregroundStyle(stale ? palette.muted : PhoneMonitoringStatusColor.color(for: state.dominantState, onDark: true, fallback: palette.ink))
                 .lineLimit(compact ? 1 : 2)
                 .minimumScaleFactor(0.75)
             Spacer(minLength: 0)
@@ -193,22 +212,24 @@ private struct MonitoringDetails: View {
     private var stateLights: some View {
         HStack(spacing: 5) {
             if state.sessionCount <= 6 {
-                ForEach(0..<state.needsInput, id: \.self) { _ in light(palette.input) }
-                ForEach(0..<state.working, id: \.self) { _ in light(palette.working) }
-                ForEach(0..<state.finished, id: \.self) { _ in light(palette.finished) }
+                ForEach(0..<state.needsInput, id: \.self) { _ in light(PhoneMonitoringStatusColor.needsInput(onDark: true)) }
+                ForEach(0..<state.failedCount, id: \.self) { _ in light(PhoneMonitoringStatusColor.failed(onDark: true)) }
+                ForEach(0..<state.working, id: \.self) { _ in light(PhoneMonitoringStatusColor.working(onDark: true)) }
+                ForEach(0..<state.finished, id: \.self) { _ in light(PhoneMonitoringStatusColor.finished(onDark: true)) }
             } else {
-                if state.needsInput > 0 { light(palette.input) }
-                if state.working > 0 { light(palette.working) }
-                if state.finished > 0 { light(palette.finished) }
+                if state.needsInput > 0 { light(PhoneMonitoringStatusColor.needsInput(onDark: true)) }
+                if state.failedCount > 0 { light(PhoneMonitoringStatusColor.failed(onDark: true)) }
+                if state.working > 0 { light(PhoneMonitoringStatusColor.working(onDark: true)) }
+                if state.finished > 0 { light(PhoneMonitoringStatusColor.finished(onDark: true)) }
             }
         }
     }
 }
 
 #if DEBUG
-private func previewActivity(working: Int = 0, input: Int = 0, finished: Int = 0) -> MonitoringActivity.ContentState {
+private func previewActivity(working: Int = 0, input: Int = 0, finished: Int = 0, failed: Int = 0) -> MonitoringActivity.ContentState {
     MonitoringActivity.ContentState(generation: "preview", revision: 1, state: "preview",
-        working: working, needsInput: input, finished: finished,
+        working: working, needsInput: input, finished: finished, failed: failed,
         observedAt: Date().timeIntervalSince1970,
         freshUntil: Date().addingTimeInterval(300).timeIntervalSince1970)
 }
@@ -220,8 +241,9 @@ private func previewActivity(working: Int = 0, input: Int = 0, finished: Int = 0
     previewActivity(working: 1)
     previewActivity(input: 1)
     previewActivity(finished: 1)
+    previewActivity(failed: 1)
     previewActivity()
-    previewActivity(working: 2, input: 1, finished: 1)
+    previewActivity(working: 2, input: 1, finished: 1, failed: 1)
     previewActivity(working: 8, input: 12, finished: 4)
 }
 

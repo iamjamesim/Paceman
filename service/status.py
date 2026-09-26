@@ -25,7 +25,7 @@ class DesktopStatus:
             return
         snapshot = self.store.snapshot()
         session_counts = {state: sum(session["state"] == state for session in snapshot["sessions"])
-                          for state in ("needs_input", "working", "finished", "idle")}
+                          for state in ("needs_input", "failed", "working", "finished", "idle")}
         clients = self.store.clients()
         with self.lock:
             phone_seen = self.phone_seen

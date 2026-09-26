@@ -188,3 +188,24 @@ struct MonitoringPalette {
         state == "working" || state == "needs_input" ? accent : ink
     }
 }
+
+/// Phone and iPhone Live Activity status colors. The Watch Smart Stack tile
+/// continues to use the theme's activity palette.
+enum PhoneMonitoringStatusColor {
+    // Brighter marks sit on the dark Live Activity; deeper tones keep status
+    // text legible on light Home themes without changing the state hue.
+    static func needsInput(onDark: Bool) -> Color { Color(companionHex: onDark ? "F4A64B" : "98500B") }
+    static func working(onDark: Bool) -> Color { Color(companionHex: onDark ? "70D996" : "14723F") }
+    static func finished(onDark: Bool) -> Color { Color(companionHex: onDark ? "8CBDF2" : "2D62A7") }
+    static func failed(onDark: Bool) -> Color { Color(companionHex: onDark ? "FA7379" : "B52C36") }
+
+    static func color(for state: String, onDark: Bool, fallback: Color) -> Color {
+        switch state {
+        case "needs_input": needsInput(onDark: onDark)
+        case "working": working(onDark: onDark)
+        case "finished": finished(onDark: onDark)
+        case "failed": failed(onDark: onDark)
+        default: fallback
+        }
+    }
+}

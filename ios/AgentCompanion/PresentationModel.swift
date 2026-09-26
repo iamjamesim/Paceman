@@ -64,11 +64,14 @@ final class PresentationModel: ObservableObject {
         if previewScreen == "grouped" {
             return [AgentSession(id: "1", provider: "codex", state: .needsInput),
                     AgentSession(id: "2", provider: "codex", state: .working),
-                    AgentSession(id: "3", provider: "codex", state: .finished)]
+                    AgentSession(id: "3", provider: "codex", state: .finished),
+                    AgentSession(id: "4", provider: "codex", state: .failed)]
         }
         guard previewScreen != "empty" else { return [] }
         if ["single-finished", "single-offline", "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(previewScreen) { return [AgentSession(id: "1", provider: "codex", state: .finished)] }
         if previewScreen == "single-working" { return [AgentSession(id: "1", provider: "codex", state: .working)] }
+        if previewScreen == "single-input" { return [AgentSession(id: "1", provider: "codex", state: .needsInput)] }
+        if previewScreen == "single-failed" { return [AgentSession(id: "1", provider: "codex", state: .failed)] }
         return [AgentSession(id: "1", provider: "codex", state: .needsInput, name: "Fix checkout redirect", project: "storefront"),
                 AgentSession(id: "2", provider: "claude", state: .working, name: "API cleanup", project: "paceman"),
                 AgentSession(id: "3", provider: "codex", state: .finished, name: "Update watch theme", project: "paceman")]
@@ -126,7 +129,7 @@ enum AgentFeedContent: Equatable {
         case .summary(let state): return state.title
         case .sessions(let sessions):
             let counts = Dictionary(grouping: sessions, by: \.state).mapValues(\.count)
-            for state in [ActivityState.needsInput, .working, .finished] {
+            for state in [ActivityState.needsInput, .failed, .working, .finished] {
                 if let count = counts[state], count > 0 { return Self.countLabel(count, state: state) }
             }
             return "No active agents"
@@ -135,7 +138,7 @@ enum AgentFeedContent: Equatable {
     var supportingStatus: String? {
         guard case .sessions(let sessions) = self else { return nil }
         let counts = Dictionary(grouping: sessions, by: \.state).mapValues(\.count)
-        let activeStates = [ActivityState.needsInput, .working, .finished].filter { (counts[$0] ?? 0) > 0 }
+        let activeStates = [ActivityState.needsInput, .failed, .working, .finished].filter { (counts[$0] ?? 0) > 0 }
         let labels = activeStates.dropFirst().map { Self.countLabel(counts[$0]!, state: $0) }
         return labels.isEmpty ? nil : labels.joined(separator: " · ")
     }
@@ -150,11 +153,12 @@ enum AgentFeedContent: Equatable {
         case .needsInput: return "\(count) \(count == 1 ? "needs" : "need") input"
         case .working: return "\(count) working"
         case .finished: return "\(count) finished"
+        case .failed: return "\(count) failed"
         case .idle: return "\(count) idle"
         }
     }
     fileprivate static func priority(_ state: ActivityState) -> Int {
-        switch state { case .needsInput: return 0; case .working: return 1; case .finished: return 2; case .idle: return 3 }
+        switch state { case .needsInput: return 0; case .failed: return 1; case .working: return 2; case .finished: return 3; case .idle: return 4 }
     }
 }
 

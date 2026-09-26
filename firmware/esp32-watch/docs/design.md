@@ -36,7 +36,8 @@ and fatal-error screens are system states rather than face variants.
   older profiles show the forecast location
 - battery level, charging state, weather, and allowance are live on hardware
 - the clock is the dominant accent focal point; the battery uses accent while
-  charging or at 20% or less, and an active agent uses an accent robot in the top rail
+  charging or at 20% or less; the agent robot in the top rail uses the face
+  accent for routine states and alert colors when attention is needed
 - tapping the battery temporarily replaces its glyph with the exact percentage
 - weather and reset text use foreground; allowance text uses accent at 20% or less
 - the allowance rim shows remaining capacity in accent over a 40% opacity track
@@ -101,7 +102,7 @@ The prototype uses the resolved Solitude palette as its initial fixture:
 | --- | --- | --- |
 | Canvas | `bar.background` (fallback: `background`) | `#101315` |
 | Supporting content | `bar.text` (fallback: `foreground`) | `#cacccc` |
-| Clock and active status | `accent` | `#798186` |
+| Clock and routine agent status | `accent` | `#798186` |
 
 These values remain the deterministic preview fixture. On hardware, the
 desktop companion reads `background`, `foreground`, and `accent` from
@@ -114,26 +115,38 @@ work.
 
 ## Agent attention
 
-Agent activity distinguishes working, needs input, finished, and absent.
-The face prioritizes input requests, then unacknowledged completions, then work.
+Agent activity distinguishes working, needs input, failed, finished, and absent.
+The face prioritizes input requests, then failed turns, then work and completed turns.
 The Paceman face has open eyes while working, chevron eyes for input, and
-rounded happy eyes when finished. It pulses in opacity while working, bounces
-for input, and sways when finished. Idle is hidden.
+rounded happy eyes when finished. Failed turns show an open-X face. Working
+uses the theme accent, Finished uses that accent at 70% opacity, Needs input
+uses amber, and Failed uses red. Alert shades deepen on light backgrounds.
+The clock and Codex allowance stay in the theme accent. The robot pulses in opacity
+while working, bounces for input, and sways when finished. Failed is still and
+idle is hidden.
 The timing and cross-surface rules are in the
 [shared motion spec](../../../docs/agent-state-motion.md).
 Animations run only while the screen is awake, and repeated snapshots do not
-restart them. Input requests use two equal notes; completion uses a descending
-pair. The panel's shared Sound toggle controls both. Fresh alerts wake the face
+restart them. Input requests and failures use two equal notes; completion uses
+a descending pair. The panel's shared Sound toggle controls these alerts. Fresh alerts wake the face
 for five seconds, except on battery at 15% or less; that cutoff suppresses the
 wake, not the sound or optional GPIO18 haptic pulse.
 An alert still fires when an earlier completion remains unacknowledged;
 retransmission and reconnect do not repeat it.
 The normal display timeout remains independent of semantic attention.
 
-Tapping the robot acknowledges every input/completion revision currently represented
+Tapping the robot acknowledges every input/failure/completion revision currently represented
 by the aggregate glyph. A new prompt implicitly acknowledges the previous
 result in that session, and interruption or session end removes it. The design
 does not infer acknowledgement from desktop window focus.
+
+The phone sends the distinct Failed wire state only when the watch advertises
+failure support. Earlier firmware receives its existing Finished presentation.
+The simulator was checked in Working, Needs input, Failed, Finished, and idle,
+including a connected face and light profile. The calmer routine-state palette
+was reviewed on full Miasma and Ayu Light face previews, then flashed; boot and
+phone reconnection were observed. On-wrist acceptance of this palette and alert
+delivery remain to be checked.
 
 ## Data freshness
 

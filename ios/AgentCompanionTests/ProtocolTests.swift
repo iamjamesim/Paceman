@@ -32,9 +32,12 @@ final class ProtocolTests: XCTestCase {
         }
         let working = source("mac", .working, 100)
         let attention = source("linux", .needsInput, 90)
+        let failed = source("studio", .failed, 95)
         let combined = WatchAggregate.make(current: [working, attention], appearance: nil, allowance: nil, now: 110)
         XCTAssertEqual(combined.state, .needsInput)
         XCTAssertEqual(combined.eventID, attention.identity)
+        XCTAssertEqual(WatchAggregate.make(current: [working, failed], appearance: nil,
+                                           allowance: nil, now: 110).state, .failed)
         XCTAssertEqual(WatchAggregate.make(current: [working], appearance: nil, allowance: nil, now: 110).state, .working)
         let unavailable = WatchAggregate.make(current: [], appearance: nil, allowance: nil, now: 150)
         XCTAssertEqual(unavailable.state, .idle)
@@ -83,6 +86,23 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(mixed.headline, "Working")
         XCTAssertTrue(mixed.hasMixedStates)
         XCTAssertEqual(mixed.sessionSummary, "1 working · 1 finished")
+    }
+
+    func testFailedTurnIsDistinctFromRecoverableWorkAndOlderActivityPayloads() throws {
+        let old = MonitoringActivity.ContentState(generation: "old", revision: 1,
+            state: "working", working: 1, needsInput: 0, finished: 0,
+            observedAt: 100, freshUntil: 400)
+        let encoded = try JSONEncoder().encode(old)
+        XCTAssertEqual(try JSONDecoder().decode(MonitoringActivity.ContentState.self,
+                                               from: encoded).failedCount, 0)
+        var failed = old
+        failed.failed = 1
+        XCTAssertEqual(failed.dominantState, "failed")
+        XCTAssertEqual(failed.headline, "Failed")
+        XCTAssertEqual(failed.sessionSummary, "1 failed · 1 working")
+        failed.needsInput = 1
+        XCTAssertEqual(failed.dominantState, "needs_input")
+        XCTAssertEqual(failed.sessionSummary, "1 needs input · 1 failed · 1 working")
     }
 
     func testLiveActivityStatesRemainScopedToTheirComputersAndRenewFreshness() {
@@ -328,6 +348,11 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(Array(packet), [79,65,1,2,3,0,4,3,2,1,8,7,6,5])
         XCTAssertEqual(WatchWire.activity(state: .finished, revision: 1,
             alert: false, sound: true, acknowledged: 0)[4], 0)
+        XCTAssertEqual(WatchWire.activity(state: .failed, revision: 1,
+            alert: true, sound: true, acknowledged: 0)[3], 4)
+        XCTAssertEqual(WatchWire.compatibleActivityState(.failed, capabilities: (1 << 10) | (1 << 8)), .failed)
+        XCTAssertEqual(WatchWire.compatibleActivityState(.failed, capabilities: (1 << 8)), .finished)
+        XCTAssertEqual(WatchWire.compatibleActivityState(.failed, capabilities: 0), .needsInput)
     }
 
     func testMinimalProfileMatchesFirmware() {

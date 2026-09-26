@@ -943,8 +943,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         let revision = same ? previous : nextRevision()
         guard revision > 0 else { return }
         let freshEvent = abs(Date().timeIntervalSince1970 - snapshot.changedAt) < 120
-        let alert = !same && !deliveredBefore && freshEvent && (snapshot.state == .needsInput || snapshot.state == .finished)
-        let state = snapshot.state == .finished && capabilities & (1 << 8) == 0 ? ActivityState.needsInput : snapshot.state
+        let alert = !same && !deliveredBefore && freshEvent &&
+            (snapshot.state == .needsInput || snapshot.state == .failed || snapshot.state == .finished)
+        let state = WatchWire.compatibleActivityState(snapshot.state, capabilities: capabilities)
         let packet = WatchWire.activity(state: state, revision: revision, alert: alert,
             sound: soundEnabled && capabilities & (1 << 7) != 0,
             acknowledged: acknowledged)

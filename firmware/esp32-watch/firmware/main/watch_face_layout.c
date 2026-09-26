@@ -28,6 +28,7 @@ const watch_face_theme_t WATCH_FACE_DEFAULT_THEME = {
 
 static lv_color_t foreground_color;
 static lv_color_t accent_color;
+static bool agent_on_dark;
 
 static lv_obj_t *make_label(lv_obj_t *parent, const char *text, const lv_font_t *font)
 {
@@ -68,6 +69,9 @@ void watch_face_layout_create(lv_obj_t *screen,
     accent_color = lv_color_make(
         theme->accent[0], theme->accent[1], theme->accent[2]
     );
+    layout->accent_color = accent_color;
+    agent_on_dark = (299u * theme->background[0] + 587u * theme->background[1] +
+                     114u * theme->background[2]) < 128000u;
 
     lv_obj_clean(screen);
     lv_obj_remove_style_all(screen);
@@ -297,6 +301,16 @@ static void agent_sway(void *object, int32_t phase)
     lv_obj_set_style_transform_rotation(object, wave * 40 / 32768, 0);
 }
 
+static lv_color_t agent_state_color(watch_agent_state_t state)
+{
+    /* Routine states belong to the face tint; interruptions use alert hues. */
+    switch (state) {
+    case WATCH_AGENT_ATTENTION: return agent_on_dark ? lv_color_make(0xF4, 0xA6, 0x4B) : lv_color_make(0x98, 0x50, 0x0B);
+    case WATCH_AGENT_FAILED: return agent_on_dark ? lv_color_make(0xFA, 0x73, 0x79) : lv_color_make(0xB5, 0x2C, 0x36);
+    default: return accent_color;
+    }
+}
+
 void watch_face_layout_set_agent_state(watch_face_layout_t *layout,
                                        watch_agent_state_t state, bool animate)
 {
@@ -306,13 +320,15 @@ void watch_face_layout_set_agent_state(watch_face_layout_t *layout,
     layout->agent_state = state;
     layout->agent_animated = animate;
     lv_obj_t *agent = layout->agent;
-    lv_label_set_text(agent, state == WATCH_AGENT_FINISHED ? "\xEE\x84\x82"
+    lv_label_set_text(agent, state == WATCH_AGENT_FAILED ? "\xEE\x84\x83"
+                             : state == WATCH_AGENT_FINISHED ? "\xEE\x84\x82"
                              : state == WATCH_AGENT_ATTENTION ? "\xEE\x84\x81" : "\xEE\x84\x80");
+    lv_obj_set_style_text_color(agent, agent_state_color(state), 0);
     lv_anim_delete(agent, NULL);
     lv_obj_set_y(agent, 53);
     lv_obj_set_style_translate_x(agent, 0, 0);
     lv_obj_set_style_transform_rotation(agent, 0, 0);
-    lv_obj_set_style_text_opa(agent, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_opa(agent, state == WATCH_AGENT_FINISHED ? LV_OPA_70 : LV_OPA_COVER, 0);
     watch_face_layout_set_agent(layout, state != WATCH_AGENT_IDLE);
     if (!animate || state == WATCH_AGENT_IDLE) {
         return;

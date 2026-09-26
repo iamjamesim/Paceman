@@ -31,7 +31,8 @@ LV_FONT_DECLARE(jetbrains_mono_114);
 _Static_assert((int)WATCH_AGENT_IDLE == OMARCHY_ACTIVITY_NONE &&
                (int)WATCH_AGENT_WORKING == OMARCHY_ACTIVITY_WORKING &&
                (int)WATCH_AGENT_ATTENTION == OMARCHY_ACTIVITY_ATTENTION &&
-               (int)WATCH_AGENT_FINISHED == OMARCHY_ACTIVITY_FINISHED,
+               (int)WATCH_AGENT_FINISHED == OMARCHY_ACTIVITY_FINISHED &&
+               (int)WATCH_AGENT_FAILED == OMARCHY_ACTIVITY_FAILED,
                "Agent presentation and protocol states must agree");
 
 enum {
@@ -466,7 +467,8 @@ static void on_agent_tap(lv_event_t *event)
     (void)event;
     if (!face_visible || !display_awake ||
         (agent_activity_state != OMARCHY_ACTIVITY_ATTENTION &&
-         agent_activity_state != OMARCHY_ACTIVITY_FINISHED) ||
+         agent_activity_state != OMARCHY_ACTIVITY_FINISHED &&
+         agent_activity_state != OMARCHY_ACTIVITY_FAILED) ||
         (int32_t)(agent_tap_allowed_after - lv_tick_get()) > 0) {
         return;
     }
@@ -852,7 +854,7 @@ void watch_ui_apply_profile_v5(const omarchy_profile_v5_t *profile)
 
 void watch_ui_apply_activity(uint8_t state, bool alert, bool sound)
 {
-    if (state > OMARCHY_ACTIVITY_FINISHED) {
+    if (state > OMARCHY_ACTIVITY_FAILED) {
         return;
     }
     const bool wake = alert && display_preview_allowed();

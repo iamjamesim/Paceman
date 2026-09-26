@@ -12,10 +12,12 @@ extension MonitoringActivity.ContentState {
         working = sessions.filter { $0.state == .working }.count
         needsInput = sessions.filter { $0.state == .needsInput }.count
         finished = sessions.filter { $0.state == .finished }.count
+        failed = sessions.filter { $0.state == .failed }.count
         if sessions.isEmpty {
             working = snapshot.state == .working ? 1 : 0
             needsInput = snapshot.state == .needsInput ? 1 : 0
             finished = snapshot.state == .finished ? 1 : 0
+            failed = snapshot.state == .failed ? 1 : 0
         }
         observedAt = snapshot.observedAt
         // The source worker renews this bounded ActivityKit lease while it runs.
@@ -216,7 +218,7 @@ final class MonitoringCoordinator: ObservableObject {
                         staleDate: Date(timeIntervalSince1970: state.freshUntil),
                         relevanceScore: state.relevanceScore))
                 }
-            } else if snapshot.state == .working || snapshot.state == .needsInput {
+            } else if snapshot.state == .working || snapshot.state == .needsInput || snapshot.state == .failed {
                 start(source: source, snapshot: snapshot)
             }
         }

@@ -401,7 +401,8 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
             return 0;
         }
         const bool alert = (incoming.state == OMARCHY_ACTIVITY_ATTENTION ||
-                            incoming.state == OMARCHY_ACTIVITY_FINISHED) &&
+                            incoming.state == OMARCHY_ACTIVITY_FINISHED ||
+                            incoming.state == OMARCHY_ACTIVITY_FAILED) &&
                            (incoming.flags & OMARCHY_ACTIVITY_ALERT) != 0 &&
                            incoming.revision > last_alerted_activity_revision &&
                            incoming.revision > activity.acknowledged_revision;
@@ -731,7 +732,7 @@ esp_err_t watch_ble_start(uint32_t pairing_passkey, bool owned)
                         OMARCHY_CAP_RTC | OMARCHY_CAP_THEME | OMARCHY_CAP_WEATHER |
                         OMARCHY_CAP_DISPLAY_BRIGHTNESS | OMARCHY_CAP_AGENT_ACTIVITY |
                         OMARCHY_CAP_COMPLETION_SOUND | OMARCHY_CAP_ACTIVITY_FINISHED |
-                        OMARCHY_CAP_NOTIFICATION_SYNC,
+                        OMARCHY_CAP_NOTIFICATION_SYNC | OMARCHY_CAP_ACTIVITY_FAILED,
         .firmware_major = OMARCHY_FIRMWARE_VERSION_MAJOR,
         .firmware_minor = OMARCHY_FIRMWARE_VERSION_MINOR,
         .firmware_patch = OMARCHY_FIRMWARE_VERSION_PATCH,
@@ -820,7 +821,8 @@ work_init_failed:
 void watch_ble_acknowledge_activity(void)
 {
     if ((activity.state != OMARCHY_ACTIVITY_ATTENTION &&
-         activity.state != OMARCHY_ACTIVITY_FINISHED) || activity.revision == 0) {
+         activity.state != OMARCHY_ACTIVITY_FINISHED &&
+         activity.state != OMARCHY_ACTIVITY_FAILED) || activity.revision == 0) {
         return;
     }
     activity.acknowledged_revision = activity.revision;

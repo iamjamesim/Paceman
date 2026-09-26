@@ -52,7 +52,8 @@ simulator/build/render-watchface /tmp/watch.ppm '#101315' '#cacccc' '#798186' '7
 magick -delay 4 -loop 0 /tmp/sway-*.ppm /tmp/sway.gif
 ```
 
-States are `working`, `attention`, `finished`, and `idle`. The renderer emits
+States are `working`, `needs-input` (also `attention`), `failed`, `finished`,
+and `idle`. The renderer emits
 complete animation cycles at 40 ms intervals using the same animations as the
 firmware, then checks sleep/wake and idle animation cleanup. Use a fresh frame
 prefix for each state so frames from longer sequences do not remain in the glob.

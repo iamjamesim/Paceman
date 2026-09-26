@@ -23,6 +23,7 @@ enum {
     OMARCHY_CAP_COMPLETION_SOUND = 1 << 7,
     OMARCHY_CAP_ACTIVITY_FINISHED = 1 << 8,
     OMARCHY_CAP_NOTIFICATION_SYNC = 1 << 9,
+    OMARCHY_CAP_ACTIVITY_FAILED = 1 << 10,
     OMARCHY_PROFILE_WEATHER_VALID = 1 << 0,
     OMARCHY_PROFILE_WEATHER_FAHRENHEIT = 1 << 1,
     OMARCHY_PROFILE_WEATHER_NIGHT = 1 << 2,
@@ -139,6 +140,7 @@ enum {
     OMARCHY_ACTIVITY_WORKING = 1,
     OMARCHY_ACTIVITY_ATTENTION = 2,
     OMARCHY_ACTIVITY_FINISHED = 3,
+    OMARCHY_ACTIVITY_FAILED = 4,
     OMARCHY_ACTIVITY_ALERT = 1 << 0,
     OMARCHY_ACTIVITY_SOUND = 1 << 1,
 };
@@ -171,7 +173,7 @@ static inline bool omarchy_activity_v1_is_valid(const omarchy_activity_v1_t *act
     return activity != NULL && activity->magic[0] == 'O' &&
            activity->magic[1] == 'A' &&
            activity->version == OMARCHY_ACTIVITY_VERSION &&
-           activity->state <= OMARCHY_ACTIVITY_FINISHED &&
+           activity->state <= OMARCHY_ACTIVITY_FAILED &&
            (activity->flags & ~(OMARCHY_ACTIVITY_ALERT | OMARCHY_ACTIVITY_SOUND)) == 0 &&
            activity->revision != 0;
 }

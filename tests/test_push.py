@@ -55,7 +55,7 @@ class PushWorkerTests(unittest.TestCase):
         return revision
 
     def test_activity_state_sets_attention_without_removing_watch_events(self):
-        for state in ("working", "idle", "needs_input", "finished"):
+        for state in ("working", "idle", "needs_input", "finished", "failed"):
             with self.subTest(state=state):
                 payload, headers = notification("source", "generation", {"seq": 1, "at": 100, "state": state}, 100)
                 passive = state in ("working", "idle")
@@ -80,6 +80,11 @@ class PushWorkerTests(unittest.TestCase):
         payload, _ = notification("source", "generation", event, 100)
         self.assertEqual(payload["aps"]["alert"]["title"], "2 sessions need input")
         self.assertEqual(payload["aps"]["alert"]["body"], "Omarchy · 1 working")
+        event["state"] = "failed"
+        event["payload"] = json.dumps({"sourceName": "Omarchy", "sessions": [
+            {"provider": "codex", "state": "failed"}]})
+        payload, _ = notification("source", "generation", event, 100)
+        self.assertEqual(payload["aps"]["alert"], {"title": "Codex turn failed", "body": "Omarchy"})
 
     def test_phone_names_are_scoped_to_each_push_destination(self):
         other = self.pair()

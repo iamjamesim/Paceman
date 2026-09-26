@@ -1,17 +1,18 @@
 import Foundation
 
 enum ActivityState: String, Codable, CaseIterable {
-    case idle, working, needsInput = "needs_input", finished
+    case idle, working, needsInput = "needs_input", finished, failed
     var title: String {
         switch self {
         case .idle: return "Idle"
         case .working: return "Working"
         case .needsInput: return "Needs input"
         case .finished: return "Finished"
+        case .failed: return "Failed"
         }
     }
     var wire: UInt8 {
-        switch self { case .idle: return 0; case .working: return 1; case .needsInput: return 2; case .finished: return 3 }
+        switch self { case .idle: return 0; case .working: return 1; case .needsInput: return 2; case .finished: return 3; case .failed: return 4 }
     }
 }
 
@@ -52,9 +53,9 @@ enum WatchAggregate {
 
     static func make(current: [Snapshot], appearance: CompanionTheme?,
                      allowance: CodexAllowance?, now: Double) -> Snapshot {
-        let priority: [ActivityState: Int] = [.needsInput: 0, .working: 1, .finished: 2, .idle: 3]
+        let priority: [ActivityState: Int] = [.needsInput: 0, .failed: 1, .working: 2, .finished: 3, .idle: 4]
         let selected = current.sorted {
-            let a = priority[$0.state] ?? 3, b = priority[$1.state] ?? 3
+            let a = priority[$0.state] ?? 4, b = priority[$1.state] ?? 4
             return a == b ? $0.changedAt > $1.changedAt : a < b
         }.first
         return Snapshot(schema: 1, sourceID: "aggregate", generation: "phone", revision: 1,
@@ -156,6 +157,13 @@ enum HubError: LocalizedError {
 }
 
 enum WatchWire {
+    static func compatibleActivityState(_ state: ActivityState, capabilities: UInt32) -> ActivityState {
+        // Earlier watch firmware rejects state 4. Keep its existing terminal
+        // representation until it advertises distinct failure support.
+        let terminal = state == .failed && capabilities & (1 << 10) == 0 ? ActivityState.finished : state
+        return terminal == .finished && capabilities & (1 << 8) == 0 ? .needsInput : terminal
+    }
+
     static func notificationSequence(_ data: Data) -> UInt32? {
         let bytes = Array(data)
         guard bytes.count == 8, bytes[0] == 79, bytes[1] == 78,

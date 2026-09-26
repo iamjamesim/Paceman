@@ -243,12 +243,12 @@ struct CompanionHome: View {
             if state != .idle && !typeSize.isAccessibilitySize {
                 ActivityRobot(state: state, animate: !historical)
                     .frame(width: 31, height: 31)
-                    .foregroundStyle(historical ? theme.secondaryInk : prominentTint)
+                    .foregroundStyle(historical ? theme.secondaryInk : stateColor(state))
                     .accessibilityHidden(true)
             }
             Text(historical ? "Last known: \(title)" : title)
                 .font(.system(.title2, design: .rounded, weight: .semibold))
-                .foregroundStyle(historical ? theme.secondaryInk : stateColor(state, prominent: true))
+                .foregroundStyle(historical ? theme.secondaryInk : stateColor(state))
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }.padding(.top, 16)
@@ -273,9 +273,8 @@ struct CompanionHome: View {
         }.padding(.vertical, 10).accessibilityElement(children: .combine)
     }
 
-    private func stateColor(_ state: ActivityState, prominent: Bool = false) -> Color {
-        guard state == .needsInput || state == .working else { return theme.ink }
-        return prominent ? prominentTint : theme.tint
+    private func stateColor(_ state: ActivityState) -> Color {
+        PhoneMonitoringStatusColor.color(for: state.rawValue, onDark: theme.dark, fallback: theme.ink)
     }
 
     private func emptyActivity(_ title: String, detail: String?) -> some View {
@@ -302,7 +301,7 @@ struct ActivityRobot: View {
             let bounceTime = time.truncatingRemainder(dividingBy: 1)
             let bounce = bounceTime < 0.64 ? (1 - cos(bounceTime * .pi / 0.32)) / 2 : 0
             let sway = sin(time * 2 * .pi / 4.2)
-            PacemanMark(expression: state == .finished ? .finished : state == .needsInput ? .needsInput : .neutral)
+            PacemanMark(expression: state == .finished ? .finished : state == .needsInput ? .needsInput : state == .failed ? .failed : .neutral)
                 .opacity(state == .working ? 1 - pulse * (155.0 / 255) : 1)
                 .rotationEffect(.degrees(state == .finished ? sway * 4 : 0))
                 .offset(x: state == .finished ? sway * 2 : 0, y: state == .needsInput ? -bounce * 3 : 0)

@@ -23,10 +23,31 @@ needs input, and wide rounded arches when finished. The existing fade, bounce,
 and sway timings follow the [shared motion spec](agent-state-motion.md); idle
 has no face. Historical robots are still and muted.
 No received activity is not historical activity.
-On the phone, the fresh robot and active headline share the theme accent.
-Ayu Light uses a warmer amber for these large elements; its small labels and
-controls keep the darker amber needed for text contrast. The dark Live Activity
-uses Ayu's brighter gold on its dark surface.
+On the phone, fresh activity uses the same state color for its robot, headline,
+and per-session label: green for Working, orange amber for Needs input, red for
+Failed, and blue for Finished. These colors also match the iPhone Live Activity
+robot and mixed-session lights, including the compact Dynamic Island where the
+robot carries the state. Computer names and supporting text stay neutral.
+The header brand mark and controls keep the theme accent. Stale content stays
+muted. The custom watch keeps the same state expressions, using its theme accent
+for Working and Finished and amber/red for Needs input and Failed. Its clock and
+supporting content keep the theme palette. Ayu Light uses a
+warmer amber for its large brand mark; its small controls keep the darker amber
+needed for text contrast.
+The single status shows what matters most to the user about that agent or group:
+a pending request takes priority over a failed turn, then work, then a finished
+result. Mixed-state supporting text still reports the other states.
+
+The status-color review used iPhone 17 Pro simulator previews for the mixed
+three-session Home screen in all six themes with the earlier palette. The final
+four-state palette was checked on Ayu's full Home screen in single Working,
+Needs input, Failed, Finished, four-session mixed, empty, and disconnected
+historical states, plus mixed Miasma and Monochrome screens. The iOS simulator build passed.
+The compact Dynamic Island was exercised with running ActivityKit activities in
+all four states on the iPhone 17 Pro simulator. The expanded Live Activity and
+Lock Screen layouts compiled but were not visually exercised; physical-phone
+appearance remains to be checked.
+
 Background transport registration and alert permission are not home-screen setup steps.
 The Live Activities tile reports how many paired computers have the feature
 enabled, or points to iPhone Settings when ActivityKit permission is off. It

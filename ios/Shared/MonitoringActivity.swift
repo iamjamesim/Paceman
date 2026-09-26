@@ -11,6 +11,8 @@ struct MonitoringActivity: ActivityAttributes {
         var working: Int
         var needsInput: Int
         var finished: Int
+        // Optional for Live Activities created by a previous app version.
+        var failed: Int? = nil
         var observedAt: Double
         var freshUntil: Double
         // Optional so an activity created by an earlier build still decodes.
@@ -23,21 +25,24 @@ struct MonitoringActivity: ActivityAttributes {
         var providers: [String]? = nil
         // One shared, path-free workspace label when it describes every active session.
         var workspaceLabel: String? = nil
-        var sessionCount: Int { working + needsInput + finished }
+        var failedCount: Int { failed ?? 0 }
+        var sessionCount: Int { working + needsInput + finished + failedCount }
         // Keep fresh input prominent, but a newer working activity can overtake
         // an old one once its five-minute freshness lease has expired.
         var relevanceScore: Double {
-            let attention = needsInput > 0 ? 240.0 : working > 0 ? 60.0 : 0.0
+            let attention = needsInput > 0 || failedCount > 0 ? 240.0 : working > 0 ? 60.0 : 0.0
             return (observedAt + attention) / 10_000_000
         }
         var dominantState: String {
             if needsInput > 0 { return "needs_input" }
+            if failedCount > 0 { return "failed" }
             if working > 0 { return "working" }
             if finished > 0 { return "finished" }
             return "idle"
         }
         var title: String {
             if needsInput > 0 { return needsInput == 1 ? "Needs input" : "\(needsInput) need input" }
+            if failedCount > 0 { return failedCount == 1 ? "Failed" : "\(failedCount) failed" }
             if working > 0 { return working == 1 ? "Working" : "\(working) working" }
             if finished > 0 { return finished == 1 ? "Finished" : "\(finished) finished" }
             return "No active sessions"
@@ -45,13 +50,14 @@ struct MonitoringActivity: ActivityAttributes {
         var headline: String {
             switch dominantState {
             case "needs_input": "Needs input"
+            case "failed": "Failed"
             case "working": "Working"
             case "finished": "Finished"
             default: "No active sessions"
             }
         }
         var hasMixedStates: Bool {
-            [needsInput, working, finished].filter { $0 > 0 }.count > 1
+            [needsInput, failedCount, working, finished].filter { $0 > 0 }.count > 1
         }
         var agentSummary: String? {
             Self.agentSummary(for: providers)
@@ -84,6 +90,7 @@ struct MonitoringActivity: ActivityAttributes {
         }
         var sessionSummary: String {
             [(needsInput, needsInput == 1 ? "needs input" : "need input"),
+             (failedCount, "failed"),
              (working, "working"), (finished, "finished")]
                 .filter { $0.0 > 0 }
                 .map { "\($0.0) \($0.1)" }

@@ -45,7 +45,7 @@ every active session on that computer reports the same path-free label. It never
 includes task names, full project paths, prompts or transcripts. The Mac hook
 derives that label from the repository root or working directory; Omarchy still
 supplies only agent type and state. The Lock Screen does not invent a task title.
-Completed session rows retire from the source presentation after ten minutes
+Completed and failed session rows retire from the source presentation after ten minutes
 if a session-end event has not removed them sooner. The Linux source keeps a
 verified process binding so a later turn can reappear without treating a quiet
 running process as closed. Working and Needs input remain until lifecycle
@@ -54,15 +54,17 @@ evidence changes them.
 When an older source sender omits the provider, the phone can reuse one it fetched for the
 same source generation and revision. A newer unseen state gets no inferred
 provider. The Live Activity uses the phone-selected family's dark glance
-surface and ink. Its
-prominent robot and active headline use that family's accent, matching the
-custom watch's active focal points. Finished robots soften, finished headlines
-use ink, and stale content is muted. Small session lights retain separate state
-colors. The header names the
+surface and ink. On iPhone, the robot, active headline, and small session lights
+share one color per state: green for Working, orange amber for Needs input, red
+for Failed, and blue for Finished. That mapping also appears on Home, so the
+compact Dynamic Island robot carries the state without supporting text. The
+failure face has crossed eyes; stale content is muted.
+The Apple Watch Smart Stack tile retains its existing theme palette. The header names the
 computer using the phone's display name (the source-reported name unless renamed
 on the phone) and shows a count only when there is
 more than one session. The headline names the dominant state without repeating
-the count. A fresh activity names its known agent type and, when unambiguous,
+the count, giving pending user input priority over a failed turn, then work. A fresh
+activity names its known agent type and, when unambiguous,
 the workspace below the headline. A mixed-state activity also shows its
 distribution as lights and counts. Stale
 activity instead shows its last update
@@ -78,7 +80,7 @@ ActivityKit animates state changes briefly but does not run the
 is idle. Tapping opens the
 matching computer card on Home, where current agent rows are already shown;
 the computer detail remains for connection management. Tapping does not silently
-acknowledge a result. The source ends a settled finished Live Activity automatically;
+acknowledge a result. The source ends a settled finished or failed Live Activity automatically;
 the Home card continues to show its current source snapshot until activity changes.
 A later revision can appear normally. A stale date
 makes old content visibly historical without an app callback. The source worker
@@ -92,7 +94,15 @@ source are suspended. Dismissal is not
 immediately reversed for the same source revision.
 After APNs accepts a remote start, the source waits for that activity's update
 token and does not start another copy for each subsequent revision of the run.
-An idle or settled finished state opens the next run for a new start.
+An idle or settled finished or failed state opens the next run for a new start.
+
+The Mac source checks Codex's metadata-only App Server turn listing for a
+matching terminal `completed` or `failed` outcome. It does not request task
+items, prompts, or tool output. This corrects a `Stop` hook that appeared to
+finish a failed turn and detects terminal failures that emitted no `Stop`.
+Individual failed tool calls do not mark the turn Failed, since the agent can
+recover. If the local Codex runtime cannot provide the turn listing, the hook
+state remains the available evidence; Paceman does not guess from error text.
 
 ActivityKit limits active duration to eight hours. The source registration is
 bounded to that duration and the worker sends an end event on expiry. New work

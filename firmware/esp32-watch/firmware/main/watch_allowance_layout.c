@@ -47,7 +47,7 @@ void watch_face_layout_set_allowance(watch_face_layout_t *layout, int remaining,
         lv_obj_set_style_line_opa(layout->allowance_track, LV_OPA_40, 0);
     }
     lv_obj_add_flag(layout->location, LV_OBJ_FLAG_HIDDEN);
-    lv_color_t accent = lv_obj_get_style_text_color(layout->agent, 0);
+    lv_color_t accent = layout->accent_color;
     lv_obj_set_style_line_color(layout->allowance_track, accent, 0);
     lv_obj_set_style_line_color(layout->allowance_fill, accent, 0);
     lv_obj_set_style_text_color(layout->allowance_reset, lv_obj_get_style_text_color(layout->date, 0), 0);

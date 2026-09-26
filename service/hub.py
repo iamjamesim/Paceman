@@ -22,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 import uuid
 
-STATES = {"idle", "working", "needs_input", "finished"}
+STATES = {"idle", "working", "needs_input", "finished", "failed"}
 
 
 class PairingConflict(ValueError):
