@@ -16,6 +16,7 @@ enum {
     BUFFER_SAMPLES = 128,
     ATTACK_SAMPLES = SAMPLE_RATE / 500,
     RELEASE_SAMPLES = SAMPLE_RATE / 40,
+    OUTPUT_DRAIN_MS = 150,
 };
 
 static const char *TAG = "watch_sound";
@@ -127,6 +128,10 @@ static void play_chime(watch_sound_kind_t kind)
 
     if (!write_chime(kind)) {
         ESP_LOGE(TAG, "Could not write agent chime");
+    } else {
+        /* I2S write returns once samples are queued, before the final DMA
+         * buffers reach the speaker. Closing now mutes the end of the cue. */
+        vTaskDelay(pdMS_TO_TICKS(OUTPUT_DRAIN_MS));
     }
     esp_codec_dev_close(speaker);
 }
