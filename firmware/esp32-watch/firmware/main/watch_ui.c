@@ -50,7 +50,6 @@ enum {
     DISPLAY_IDLE_TASK_SLEEP_MS = 10000,
     DISPLAY_FLUSH_TIMEOUT_MS = 2000,
     TOUCH_READ_FAILURE_LIMIT = 3,
-    SOUND_PREVIEW_INTERVAL_MS = 800,
 };
 
 static watch_face_layout_t face_layout;
@@ -66,8 +65,6 @@ static bool battery_percentage_available;
 static bool ble_connected;
 static uint8_t agent_activity_state;
 static uint32_t agent_tap_allowed_after;
-static uint32_t sound_preview_allowed_after;
-static uint8_t next_sound_preview;
 static int16_t utc_offset_minutes;
 static uint8_t hour_cycle = 24;
 static uint8_t active_brightness_percent = DEFAULT_BRIGHTNESS_PERCENT;
@@ -731,38 +728,6 @@ static void on_allowance_tap(lv_event_t *event)
     update_allowance();
 }
 
-/* Temporary hardware check: tap the time to hear each status cue in turn. */
-static void on_sound_preview_tap(lv_event_t *event)
-{
-    (void)event;
-    const uint32_t now = lv_tick_get();
-    if (!face_visible || !display_awake ||
-        (int32_t)(agent_tap_allowed_after - now) > 0 ||
-        (int32_t)(sound_preview_allowed_after - now) > 0) {
-        return;
-    }
-    switch (next_sound_preview) {
-    case 0:
-        ESP_LOGI("watch_ui", "Sound preview: working");
-        watch_sound_working();
-        break;
-    case 1:
-        ESP_LOGI("watch_ui", "Sound preview: needs input");
-        watch_sound_attention();
-        break;
-    case 2:
-        ESP_LOGI("watch_ui", "Sound preview: finished");
-        watch_sound_completion();
-        break;
-    default:
-        ESP_LOGI("watch_ui", "Sound preview: failed");
-        watch_sound_failure();
-        break;
-    }
-    next_sound_preview = (next_sound_preview + 1) % 4;
-    sound_preview_allowed_after = now + SOUND_PREVIEW_INTERVAL_MS;
-}
-
 void watch_ui_show_face(void)
 {
     bsp_display_lock(0);
@@ -775,8 +740,6 @@ void watch_ui_show_face(void)
     lv_obj_add_event_cb(
         face_layout.agent_touch, on_agent_tap, LV_EVENT_CLICKED, NULL
     );
-    lv_obj_add_flag(face_layout.clock, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(face_layout.clock, on_sound_preview_tap, LV_EVENT_CLICKED, NULL);
 
     update_clock(NULL);
     update_battery(NULL);
