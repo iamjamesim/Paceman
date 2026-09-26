@@ -93,11 +93,13 @@ class Store:
                     client_id TEXT PRIMARY KEY, activity_id TEXT NOT NULL, token TEXT NOT NULL,
                     environment TEXT NOT NULL, cursor INTEGER NOT NULL DEFAULT 0,
                     expires REAL NOT NULL, next_attempt REAL NOT NULL DEFAULT 0,
-                    attempts INTEGER NOT NULL DEFAULT 0);
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    alert_cursor INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS live_activity_starts(
                     client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
                     cursor INTEGER NOT NULL DEFAULT 0, next_attempt REAL NOT NULL DEFAULT 0,
-                    attempts INTEGER NOT NULL DEFAULT 0);
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    alert_cursor INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS push_devices(
                     client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
                     mode TEXT NOT NULL, cursor INTEGER NOT NULL, next_attempt REAL NOT NULL DEFAULT 0,
@@ -105,6 +107,9 @@ class Store:
             """)
             if "display_name" not in {row[1] for row in db.execute("PRAGMA table_info(clients)")}:
                 db.execute("ALTER TABLE clients ADD COLUMN display_name TEXT")
+            for table in ("live_activities", "live_activity_starts"):
+                if "alert_cursor" not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN alert_cursor INTEGER NOT NULL DEFAULT 0")
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM clients c LEFT JOIN client_devices d ON d.client_id=c.id "
                           "WHERE d.client_id IS NULL LIMIT 1").fetchone():
@@ -304,8 +309,12 @@ class Store:
                 values = (payload["activityID"], payload["deviceToken"], payload["environment"])
                 if old is None or tuple(old[k] for k in ("activity_id", "token", "environment")) != values:
                     expiry = old["expires"] if old and old["activity_id"] == payload["activityID"] else time.time() + 8 * 3600
-                    db.execute("INSERT OR REPLACE INTO live_activities(client_id,activity_id,token,environment,expires) VALUES (?,?,?,?,?)",
-                               (client[0], *values, expiry))
+                    start = db.execute("SELECT alert_cursor FROM live_activity_starts WHERE client_id=?",
+                                       (client[0],)).fetchone()
+                    alert_cursor = max(old["alert_cursor"] if old and old["activity_id"] == payload["activityID"] else 0,
+                                       start["alert_cursor"] if start else 0)
+                    db.execute("INSERT OR REPLACE INTO live_activities(client_id,activity_id,token,environment,expires,alert_cursor) VALUES (?,?,?,?,?,?)",
+                               (client[0], *values, expiry, alert_cursor))
         return {"registered": not remove}
 
     def emit(self, state: str, label: str = "Manual synthetic event") -> int:

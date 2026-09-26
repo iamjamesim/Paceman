@@ -136,8 +136,9 @@ to paste a signing key into chat.
 The agent verifies `dev.paceman.source` is running with `launchctl print`, checks
 the destination's `last_result` and `push-delivery.jsonl` for a recent
 `apns_accepted` with status 200, then asks the user to look in iPhone
-Notification Center. Working/Idle are quiet, passive entries; Needs input and
-Finished request an alert and sound, subject to iOS notification settings.
+Notification Center. Working/Idle are passive entries there; Needs input and
+Finished request an ordinary alert and sound when no Live Activity alert was
+accepted. Live Activity alerts use the Paceman state sounds, including Working.
 Apple's status 200 means it accepted the send, not that iOS displayed it. See
 [direct push delivery](direct-push-test.md) for device and watch validation.
 The phone registers its ActivityKit remote-start token automatically after

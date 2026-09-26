@@ -1,12 +1,13 @@
 import json
 from pathlib import Path
+import sqlite3
 import tempfile
 import time
 import unittest
 
 from tests.identity import device
 from service.hub import Store
-from service.push import Worker, live_notification, live_start_notification
+from service.push import Result, Worker, live_notification, live_start_notification
 from tests.test_push import FakeSender
 
 
@@ -23,6 +24,25 @@ class MonitoringTests(unittest.TestCase):
 
     def register(self):
         return self.store.live_activity(self.credential, self.payload)
+
+    def test_existing_live_activity_tables_gain_alert_cursor(self):
+        path = Path(self.tmp.name) / 'old-live.sqlite3'
+        with sqlite3.connect(path) as db:
+            db.execute('CREATE TABLE live_activities (client_id TEXT PRIMARY KEY, activity_id TEXT, '
+                       'token TEXT, environment TEXT, cursor INTEGER, expires REAL, '
+                       'next_attempt REAL, attempts INTEGER)')
+            db.execute('CREATE TABLE live_activity_starts (client_id TEXT PRIMARY KEY, token TEXT, '
+                       'environment TEXT, cursor INTEGER, next_attempt REAL, attempts INTEGER)')
+            db.execute("INSERT INTO live_activities VALUES ('paired-phone', 'activity-1', 'token', "
+                       "'development', 7, 1000, 0, 0)")
+        Store(path)
+        with sqlite3.connect(path) as db:
+            for table in ('live_activities', 'live_activity_starts'):
+                self.assertIn('alert_cursor',
+                              {row[1] for row in db.execute(f'PRAGMA table_info({table})')})
+            self.assertEqual(db.execute("SELECT activity_id,cursor,alert_cursor FROM live_activities "
+                                        "WHERE client_id='paired-phone'").fetchone(),
+                             ('activity-1', 7, 0))
 
     def test_registration_is_independent_and_removal_is_scoped(self):
         self.store.push_device(self.credential, {'deviceToken': 'cd'*32, 'environment': 'development', 'mode': 'alert'})
@@ -53,14 +73,15 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(len(self.sender.calls), 2)
         self.assertEqual(self.sender.calls[-1][0]['token'], 'ef'*32)
 
-    def test_coalesces_intermediate_revisions(self):
+    def test_attention_update_bypasses_regular_live_cadence(self):
         now = time.time()
         self.store.emit('working')
         self.register()
         self.worker.step(now)
         latest = self.store.emit('needs_input')
         self.worker.step(now + 1)
-        self.assertEqual(len(self.sender.calls), 1)
+        self.assertEqual(len(self.sender.calls), 2)
+        self.assertEqual(self.sender.calls[-1][1]['aps']['alert']['sound'], 'PacemanInput.wav')
         self.worker.step(now + 16)
         self.assertEqual(len(self.sender.calls), 2)
         state = self.sender.calls[-1][1]['aps']['content-state']
@@ -113,6 +134,62 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(headers['apns-priority'], '5')
         self.assertEqual(payload['aps']['content-state']['working'], 1)
         self.assertEqual(payload['aps']['content-state']['providers'], ['other'])
+
+    def test_live_attention_owns_one_phone_sound_and_watch_entry_stays_passive(self):
+        now = time.time()
+        self.store.push_device(self.credential, {'deviceToken': 'cd' * 32,
+            'environment': 'development', 'mode': 'alert'})
+        self.store.emit('working')
+        self.register()
+        self.worker.step(now)
+        self.assertEqual(self.sender.calls[0][1]['aps']['alert']['sound'], 'PacemanWorking.wav')
+        event = self.store.emit('needs_input')
+        self.worker.step(now + 1)
+        self.assertEqual(self.sender.calls[-1][1]['aps']['alert']['sound'], 'PacemanInput.wav')
+        self.worker.step(now + 16)
+        live, ordinary = self.sender.calls[-2:]
+        self.assertEqual(live[1]['aps']['alert']['sound'], 'PacemanInput.wav')
+        self.assertEqual(live[2]['apns-priority'], '10')
+        self.assertEqual(ordinary[1]['aps']['interruption-level'], 'passive')
+        self.assertNotIn('sound', ordinary[1]['aps'])
+        self.assertEqual(ordinary[1]['companion']['revision'], event)
+        self.worker.step(now + 257)
+        self.assertNotIn('alert', self.sender.calls[-1][1]['aps'])
+
+    def test_failed_live_send_leaves_ordinary_attention_active(self):
+        class LiveFailureSender(FakeSender):
+            def send(self, device, payload, headers, now):
+                self.calls.append((device, payload, headers, now))
+                return (Result(503, 'ServiceUnavailable', 'failed') if device['mode'] == 'liveactivity'
+                        else Result(200, 'Accepted', 'ordinary'))
+
+        now = time.time()
+        self.store.push_device(self.credential, {'deviceToken': 'cd' * 32,
+            'environment': 'development', 'mode': 'alert'})
+        self.register()
+        self.store.emit('needs_input')
+        sender = LiveFailureSender()
+        worker = Worker(self.store, sender, Path(self.tmp.name) / 'failure.jsonl')
+        worker.step(now + 1)
+        self.assertEqual(sender.calls[0][1]['aps']['alert']['sound'], 'PacemanInput.wav')
+        self.assertEqual(sender.calls[1][1]['aps']['sound'], 'default')
+        worker.step(now + 17)
+        self.assertNotIn('alert', sender.calls[-1][1]['aps'])
+
+    def test_remote_start_sound_is_not_replayed_when_update_token_arrives(self):
+        now = time.time()
+        self.store.push_device(self.credential, {'deviceToken': 'ef' * 32,
+            'environment': 'development', 'mode': 'alert'})
+        self.store.live_activity(self.credential, {'action': 'register-start',
+            'deviceToken': 'cd' * 32, 'environment': 'development'})
+        self.store.emit('failed')
+        self.worker.step(now + 1)
+        start, ordinary = self.sender.calls
+        self.assertEqual(start[1]['aps']['alert']['sound'], 'PacemanFailed.wav')
+        self.assertNotIn('sound', ordinary[1]['aps'])
+        self.register()
+        self.worker.step(now + 2)
+        self.assertNotIn('alert', self.sender.calls[-1][1]['aps'])
 
     def test_live_activity_names_only_known_agent_types(self):
         snapshot = self.store.snapshot()
@@ -252,7 +329,9 @@ class MonitoringTests(unittest.TestCase):
         self.store.emit('working')
         self.worker.step(now + 1)
         start = next(call[1] for call in self.sender.calls if call[1]['aps'].get('event') == 'start')
-        self.assertEqual(start['aps']['alert']['title'], 'Paceman is following Studio Mac')
+        self.assertEqual(start['aps']['alert']['title'], 'Agent is working')
+        self.assertEqual(start['aps']['alert']['body'], 'Studio Mac')
+        self.assertEqual(start['aps']['alert']['sound'], 'PacemanWorking.wav')
         self.assertEqual(start['aps']['attributes']['sourceName'], 'Studio Mac')
 
     def test_invalid_start_token_and_unauthorized_registration(self):

@@ -59,9 +59,10 @@ receipt and registers again when the source is reachable.
 
 Working and Idle always use passive presentation: Apple adds them to the
 notification list without lighting the screen or playing a sound. Needs input,
-Failed, and Finished request active presentation and the default sound. Active still
-obeys Focus and iOS Settings. The sender never changes this classification based
-on a transient accessory connection.
+Failed, and Finished request active presentation and the default sound when an
+accepted Live Activity alert is not carrying that event. Active still obeys
+Focus and iOS Settings. The sender never changes this classification based on
+a transient accessory connection.
 
 For a watch-first setup, recommend Notification Center on and Lock Screen,
 Banners, Sounds and Show on Mac off. This preserves ANCS delivery without cluttering
@@ -78,7 +79,14 @@ notification controls. Pairing and notification-setup actions remain anchored at
 the bottom. Both contexts link to iPhone Settings in the guidance; the setup step
 also presents it as a quiet secondary button above its primary Done button. Do not
 show version or transient sync notices.
-Live Activity alert routing remains follow-up work.
+When an ActivityKit alert is accepted for Working, Needs input, Failed, or Finished,
+the matching Notification Center entry stays passive for custom-watch delivery.
+The Live Activity alert uses a short Paceman sound matched to the watch cue.
+Idle remains quiet. If ActivityKit cannot accept the alert, the
+ordinary Needs input, Failed, or Finished notification retains active presentation
+and the default sound; Working remains passive in Notification Center.
+APNs acceptance does not prove that the phone played a sound; iOS settings and
+Focus still govern presentation.
 
 ## Notification content
 

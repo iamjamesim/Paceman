@@ -2,8 +2,9 @@
 
 September 21, 2026. Design recommendation, not a claim of hardware acceptance.
 State-based notification presentation and conditional recovery are implemented locally. Provisional
-authorization, Live Activity alert routing and the hardware matrix below remain
-unimplemented or unverified as indicated.
+authorization and the hardware matrix below remain unimplemented or unverified
+as indicated. Live Activity alert routing was implemented in the source on
+September 25; its phone sound and haptic behavior still needs physical testing.
 
 ## Current implementation scope
 
@@ -57,9 +58,11 @@ Retries reuse identity; distinct transitions retain distinct notification entrie
 Reject older snapshots. Coalesce state snapshots without replaying old attention
 alerts after reconnection. Scope alert deduplication by source/session/transition.
 
-Working/Idle are passive. Needs input/Failed/Finished request active presentation and
-sound. Lock Screen, banners, sound and Mac mirroring remain authoritative in iOS
-Settings. Keep watch Status sounds as a per-watch preference. Do not automatically
+Working/Idle ordinary notifications are passive. Needs input/Failed/Finished
+ordinary notifications request active presentation and sound. Lock Screen,
+banners, sound and Mac mirroring for ordinary notifications remain configured in
+iOS Settings. Live Activity alerts use their own custom sounds for Working,
+Needs input, Failed, and Finished. Keep watch Status sounds as a per-watch preference. Do not automatically
 mute the phone because a watch happens to be connected: connection does not prove
 the person received an alert.
 

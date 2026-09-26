@@ -132,10 +132,16 @@ The direct sender adds a `companion` hint alongside `aps`, with `schema: 1`,
 the hint against its pairing, then fetches `/v1/snapshot` from its stored source.
 The push does not control the fetch URL, credentials, or resulting watch state.
 In `alert` mode, working and idle updates use passive notification presentation;
-needs-input and finished request active presentation and sound. These are alert-type pushes and omit
+needs-input, failed, and finished request active presentation and sound. These are alert-type pushes and omit
 `content-available`; ANCS, rather than a background callback, initiates custom-watch
 synchronization. Passive entries remain visible in the notification list. The
 retired `background` mode is rejected. No watch polling is used.
+When the same paired phone has an accepted Live Activity alert for that event,
+the ordinary entry is passive to avoid a second phone sound. Live Activity
+Working, Needs input, Finished, and Failed Live Activity alerts request
+`PacemanWorking.wav`, `PacemanInput.wav`, `PacemanFinished.wav`, and
+`PacemanFailed.wav` respectively. Idle remains silent. The named files ship
+in the iPhone app bundle.
 See [direct push delivery](direct-push-test.md) for validation and limitations.
 
 `POST /v1/live-activity` accepts a paired client's ActivityKit destinations:

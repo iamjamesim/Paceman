@@ -88,11 +88,11 @@ def notification_copy(event: dict, phone_name: str | None = None) -> dict:
 
 
 def notification(source_id: str, generation: str, event: dict, now: float,
-                 phone_name: str | None = None) -> tuple[dict, dict]:
+                 phone_name: str | None = None, quiet: bool = False) -> tuple[dict, dict]:
     """Push contains a hint only. The paired HTTPS source remains authoritative."""
     if event["state"] not in ("working", "idle", "needs_input", "finished", "failed"):
         raise ValueError("Unknown activity state")
-    passive = event["state"] in ("working", "idle")
+    passive = quiet or event["state"] in ("working", "idle")
     aps = {"alert": notification_copy(event, phone_name), "thread-id": source_id}
     if passive:
         aps["interruption-level"] = "passive"
@@ -110,7 +110,16 @@ def notification(source_id: str, generation: str, event: dict, now: float,
     return payload, headers
 
 
-def live_notification(snapshot: dict, now: float, ending=False) -> tuple[dict, dict]:
+LIVE_ALERT_SOUNDS = {"working": "PacemanWorking.wav", "needs_input": "PacemanInput.wav", "finished": "PacemanFinished.wav",
+                     "failed": "PacemanFailed.wav"}
+
+
+def live_alert(event: dict, phone_name: str | None = None) -> dict:
+    return {**notification_copy(event, phone_name), "sound": LIVE_ALERT_SOUNDS[event["state"]]}
+
+
+def live_notification(snapshot: dict, now: float, ending=False,
+                      alert: dict | None = None) -> tuple[dict, dict]:
     """Display-only envelope shared with MonitoringActivity.ContentState."""
     sessions = snapshot.get("sessions") or []
     counts = {state: sum(s.get("state") == state for s in sessions) for state in ("working", "needs_input", "finished", "failed")}
@@ -143,20 +152,25 @@ def live_notification(snapshot: dict, now: float, ending=False) -> tuple[dict, d
            "stale-date": int(fresh_until), "relevance-score": (observed + attention) / 10_000_000}
     if ending:
         aps["dismissal-date"] = int(now)
+    elif alert:
+        aps["alert"] = alert
     return {"aps": aps}, {"apns-push-type": "liveactivity", "apns-priority": "5",
         "apns-expiration": str(int(now + 60)), "apns-id": str(uuid.uuid4())}
 
 
 def live_start_notification(snapshot: dict, now: float,
-                            phone_name: str | None = None) -> tuple[dict, dict]:
+                            phone_name: str | None = None,
+                            alert_event: dict | None = None) -> tuple[dict, dict]:
     """Start one computer's activity; Apple requires a visible start alert."""
     payload, headers = live_notification(snapshot, now)
     source = source_display_name(snapshot.get("sourceName"), phone_name)
+    start_alert = (live_alert(alert_event, phone_name) if alert_event else
+                   {"title": "Paceman is following " + source,
+                    "body": "Live agent activity is available on your Lock Screen."})
     payload["aps"].update({"event": "start", "attributes-type": "MonitoringActivity",
         "attributes": {"sourceID": snapshot["sourceID"], "sourceName": source},
         "input-push-token": 1,
-        "alert": {"title": "Paceman is following " + source,
-                  "body": "Live agent activity is available on your Lock Screen."}})
+        "alert": start_alert})
     headers["apns-priority"] = "10"
     return payload, headers
 
@@ -232,9 +246,14 @@ class Worker:
             with self.store.connect() as db:
                 current = db.execute("SELECT * FROM push_devices WHERE client_id=?", (device["client_id"],)).fetchone()
                 owner = db.execute("SELECT display_name FROM clients WHERE id=?", (device["client_id"],)).fetchone()
+                live_alerted = db.execute(
+                    "SELECT 1 FROM live_activities WHERE client_id=? AND alert_cursor>=? "
+                    "UNION SELECT 1 FROM live_activity_starts WHERE client_id=? AND alert_cursor>=?",
+                    (device["client_id"], event["seq"], device["client_id"], event["seq"])).fetchone()
             if current is None or dict(current) != device or owner is None:
                 continue
-            payload, headers = notification(source_id, generation, event, now, owner["display_name"])
+            payload, headers = notification(source_id, generation, event, now,
+                                            owner["display_name"], quiet=bool(live_alerted))
             result = self.sender.send(device, payload, headers, now)
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             retry = result.status in (0, 429, 500, 503) or result.reason == "ExpiredProviderToken"
@@ -261,7 +280,9 @@ class Worker:
 
     def step_live_activities(self, now):
         snapshot = self.store.snapshot()
-        self.step_live_starts(snapshot, now)
+        with self.store.connect() as db:
+            event = dict(db.execute("SELECT * FROM events WHERE kind='activity' ORDER BY seq DESC LIMIT 1").fetchone())
+        self.step_live_starts(snapshot, now, event)
         with self.store.connect() as db:
             devices = [dict(row) for row in db.execute(
                 "SELECT l.* FROM live_activities l JOIN clients c ON l.client_id=c.id")]
@@ -269,7 +290,16 @@ class Worker:
             ending = (now >= device["expires"] or snapshot["state"] == "idle"
                       or (snapshot["state"] in ("finished", "failed") and now - snapshot["changedAt"] >= 90))
             changed = device["cursor"] < snapshot["revision"]
-            due = now >= device["next_attempt"]
+            # A new attention event must not wait behind the ordinary update
+            # cadence. Otherwise the Notification Center fallback can arrive
+            # first and consume the event's custom Live Activity sound.
+            attention_due = (not ending and device["attempts"] == 0
+                             and event["state"] in LIVE_ALERT_SOUNDS
+                             and snapshot["state"] == event["state"]
+                             and device["cursor"] < event["seq"]
+                             and device["alert_cursor"] < event["seq"]
+                             and now - event["at"] <= 300)
+            due = now >= device["next_attempt"] or attention_due
             heartbeat = not changed and due and now >= device["next_attempt"] + 225
             if not ending and not (due and (changed or heartbeat)):
                 continue
@@ -278,10 +308,21 @@ class Worker:
             # A rotated token, replacement activity or revoked pairing invalidates this send.
             with self.store.connect() as db:
                 current = db.execute("SELECT * FROM live_activities WHERE client_id=?", (device["client_id"],)).fetchone()
-                authorized = db.execute("SELECT 1 FROM clients WHERE id=?", (device["client_id"],)).fetchone()
-            if not authorized or current is None or dict(current) != device:
+                owner = db.execute("SELECT display_name FROM clients WHERE id=?", (device["client_id"],)).fetchone()
+                ordinary = db.execute("SELECT cursor,last_result FROM push_devices WHERE client_id=?",
+                                      (device["client_id"],)).fetchone()
+            if not owner or current is None or dict(current) != device:
                 continue
-            payload, headers = live_notification(snapshot, now, ending=ending)
+            ordinary_alerted = (ordinary is not None and ordinary["cursor"] >= event["seq"]
+                                and ordinary["last_result"] == "Accepted")
+            alert_event = (event if not ending and event["state"] in LIVE_ALERT_SOUNDS
+                           and snapshot["state"] == event["state"] and device["alert_cursor"] < event["seq"]
+                           and device["cursor"] < event["seq"] and now - event["at"] <= 300
+                           and not ordinary_alerted else None)
+            payload, headers = live_notification(snapshot, now, ending=ending,
+                alert=live_alert(alert_event, owner["display_name"]) if alert_event else None)
+            if alert_event:
+                headers["apns-priority"] = "10"
             result = self.sender.send({**device, "mode": "liveactivity"}, payload, headers, now)
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             accepted = result.status == 200
@@ -295,13 +336,15 @@ class Worker:
                 else:
                     delay = 15 if accepted else min(300, 15 * 2 ** min(device["attempts"], 5))
                     retry_cursor = min(device["cursor"], snapshot["revision"] - 1)
-                    db.execute("UPDATE live_activities SET cursor=?,next_attempt=?,attempts=? WHERE client_id=? AND token=? AND activity_id=?",
+                    db.execute("UPDATE live_activities SET cursor=?,next_attempt=?,attempts=?,alert_cursor=? WHERE client_id=? AND token=? AND activity_id=?",
                                (snapshot["revision"] if accepted else retry_cursor, now + delay,
-                                0 if accepted else device["attempts"] + 1, device["client_id"], device["token"], device["activity_id"]))
+                                0 if accepted else device["attempts"] + 1,
+                                event["seq"] if accepted and alert_event else device["alert_cursor"],
+                                device["client_id"], device["token"], device["activity_id"]))
             self.log({"at": now, "stage": "live_activity_apns_accepted" if accepted else "live_activity_apns_failed",
                       "revision": snapshot["revision"], "status": result.status, "reason": result.reason})
 
-    def step_live_starts(self, snapshot, now):
+    def step_live_starts(self, snapshot, now, event):
         if snapshot["state"] == "idle" or (snapshot["state"] in ("finished", "failed")
                 and now - snapshot["changedAt"] >= 90):
             # A successful remote start reserves this source for one active run.
@@ -324,9 +367,16 @@ class Worker:
                 current = db.execute("SELECT * FROM live_activity_starts WHERE client_id=?", (device["client_id"],)).fetchone()
                 active = db.execute("SELECT 1 FROM live_activities WHERE client_id=?", (device["client_id"],)).fetchone()
                 owner = db.execute("SELECT display_name FROM clients WHERE id=?", (device["client_id"],)).fetchone()
+                ordinary = db.execute("SELECT cursor,last_result FROM push_devices WHERE client_id=?",
+                                      (device["client_id"],)).fetchone()
             if active or current is None or dict(current) != device or owner is None:
                 continue
-            payload, headers = live_start_notification(snapshot, now, owner["display_name"])
+            ordinary_alerted = (ordinary is not None and ordinary["cursor"] >= event["seq"]
+                                and ordinary["last_result"] == "Accepted")
+            alert_event = (event if event["state"] in LIVE_ALERT_SOUNDS
+                           and snapshot["state"] == event["state"] and now - event["at"] <= 300
+                           and device["alert_cursor"] < event["seq"] and not ordinary_alerted else None)
+            payload, headers = live_start_notification(snapshot, now, owner["display_name"], alert_event)
             result = self.sender.send({**device, "mode": "liveactivity"}, payload, headers, now)
             accepted = result.status == 200
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
@@ -336,10 +386,11 @@ class Worker:
                                (device["client_id"], device["token"]))
                 else:
                     delay = 8 * 3600 if accepted else min(300, 15 * 2 ** min(device["attempts"], 5))
-                    db.execute("UPDATE live_activity_starts SET cursor=?,next_attempt=?,attempts=? "
+                    db.execute("UPDATE live_activity_starts SET cursor=?,next_attempt=?,attempts=?,alert_cursor=? "
                                "WHERE client_id=? AND token=?",
                                (snapshot["revision"] if accepted else device["cursor"], now + delay,
                                 0 if accepted else device["attempts"] + 1,
+                                event["seq"] if accepted and alert_event else device["alert_cursor"],
                                 device["client_id"], device["token"]))
             self.log({"at": now, "stage": "live_activity_start_accepted" if accepted else "live_activity_start_failed",
                       "revision": snapshot["revision"], "status": result.status, "reason": result.reason})
