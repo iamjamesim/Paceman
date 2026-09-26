@@ -56,7 +56,7 @@ static uint16_t activity_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t activity_attr_handle;
 static uint16_t sync_attr_handle;
 static uint32_t sync_sequence;
-static uint32_t last_alerted_activity_revision;
+static uint32_t last_cued_activity_revision;
 static esp_pm_lock_handle_t work_pm_lock;
 static QueueHandle_t profile_queue;
 static QueueHandle_t ui_queue;
@@ -400,14 +400,8 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
                      (unsigned long)incoming.revision, (unsigned long)activity.revision);
             return 0;
         }
-        const bool alert = (incoming.state == OMARCHY_ACTIVITY_ATTENTION ||
-                            incoming.state == OMARCHY_ACTIVITY_FINISHED ||
-                            incoming.state == OMARCHY_ACTIVITY_FAILED) &&
-                           (incoming.flags & OMARCHY_ACTIVITY_ALERT) != 0 &&
-                           incoming.revision > last_alerted_activity_revision &&
-                           incoming.revision > activity.acknowledged_revision;
-        const bool sound = alert &&
-                           (incoming.flags & OMARCHY_ACTIVITY_SOUND) != 0;
+        const omarchy_activity_cue_t cue = omarchy_activity_cue(
+            &incoming, last_cued_activity_revision, activity.acknowledged_revision);
         const uint8_t state = incoming.revision <= activity.acknowledged_revision
             ? OMARCHY_ACTIVITY_NONE : incoming.state;
         const pending_ui_event_t pending = {
@@ -415,8 +409,8 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
             .data.activity = {
                 .state = state,
                 .revision = incoming.revision,
-                .alert = alert,
-                .sound = sound,
+                .alert = cue.alert,
+                .sound = cue.sound,
             },
         };
         if (ui_queue == NULL || xQueueSend(ui_queue, &pending, 0) != pdPASS) {
@@ -431,8 +425,8 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
         ESP_LOGI(TAG, "Activity queued incoming=%u applied=%u revision=%lu ack=%lu",
                  incoming.state, state, (unsigned long)incoming.revision,
                  (unsigned long)activity.acknowledged_revision);
-        if (alert) {
-            last_alerted_activity_revision = incoming.revision;
+        if (cue.alert || cue.sound) {
+            last_cued_activity_revision = incoming.revision;
         }
         return 0;
     }
@@ -732,7 +726,8 @@ esp_err_t watch_ble_start(uint32_t pairing_passkey, bool owned)
                         OMARCHY_CAP_RTC | OMARCHY_CAP_THEME | OMARCHY_CAP_WEATHER |
                         OMARCHY_CAP_DISPLAY_BRIGHTNESS | OMARCHY_CAP_AGENT_ACTIVITY |
                         OMARCHY_CAP_COMPLETION_SOUND | OMARCHY_CAP_ACTIVITY_FINISHED |
-                        OMARCHY_CAP_NOTIFICATION_SYNC | OMARCHY_CAP_ACTIVITY_FAILED,
+                        OMARCHY_CAP_NOTIFICATION_SYNC | OMARCHY_CAP_ACTIVITY_FAILED |
+                        OMARCHY_CAP_WORKING_SOUND,
         .firmware_major = OMARCHY_FIRMWARE_VERSION_MAJOR,
         .firmware_minor = OMARCHY_FIRMWARE_VERSION_MINOR,
         .firmware_patch = OMARCHY_FIRMWARE_VERSION_PATCH,

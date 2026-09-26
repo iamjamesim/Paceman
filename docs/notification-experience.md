@@ -13,7 +13,7 @@ are separate facts. Never label configuration as proof of end-to-end delivery.
 ## Ownership and placement
 
 Settings → Notifications owns permission and the recommended
-iPhone system configuration. Watch detail keeps Alert sound with the watch controls
+iPhone system configuration. Watch detail keeps Status sounds with the watch controls
 and one standard navigation row for watch-update troubleshooting. Global iPhone
 notification settings do not remain among the normal per-watch controls. The
 troubleshooting screen links to notification setup in context. Desktop registration remains automatic delivery
@@ -58,15 +58,16 @@ receipt and registers again when the source is reachable.
 ## Phone presentation and watch sound
 
 Working and Idle always use passive presentation: Apple adds them to the
-notification list without lighting the screen or playing a sound. Needs input and
-Finished always request active presentation and the default sound. Active still
+notification list without lighting the screen or playing a sound. Needs input,
+Failed, and Finished request active presentation and the default sound. Active still
 obeys Focus and iOS Settings. The sender never changes this classification based
 on a transient accessory connection.
 
 For a watch-first setup, recommend Notification Center on and Lock Screen,
 Banners, Sounds and Show on Mac off. This preserves ANCS delivery without cluttering
 the phone. Users who want phone alerts can leave their preferred system surfaces
-enabled. The watch's Alert sound remains an independent per-watch preference.
+enabled. The watch's Status sounds remain an independent per-watch preference;
+its Working cue is sound-only and does not wake or vibrate the watch.
 The permission request remains standard authorization; provisional authorization
 is not enabled pending device validation.
 

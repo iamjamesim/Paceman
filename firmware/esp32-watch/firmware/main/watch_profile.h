@@ -24,6 +24,7 @@ enum {
     OMARCHY_CAP_ACTIVITY_FINISHED = 1 << 8,
     OMARCHY_CAP_NOTIFICATION_SYNC = 1 << 9,
     OMARCHY_CAP_ACTIVITY_FAILED = 1 << 10,
+    OMARCHY_CAP_WORKING_SOUND = 1 << 11,
     OMARCHY_PROFILE_WEATHER_VALID = 1 << 0,
     OMARCHY_PROFILE_WEATHER_FAHRENHEIT = 1 << 1,
     OMARCHY_PROFILE_WEATHER_NIGHT = 1 << 2,
@@ -176,6 +177,28 @@ static inline bool omarchy_activity_v1_is_valid(const omarchy_activity_v1_t *act
            activity->state <= OMARCHY_ACTIVITY_FAILED &&
            (activity->flags & ~(OMARCHY_ACTIVITY_ALERT | OMARCHY_ACTIVITY_SOUND)) == 0 &&
            activity->revision != 0;
+}
+
+typedef struct {
+    bool alert;
+    bool sound;
+} omarchy_activity_cue_t;
+
+static inline omarchy_activity_cue_t omarchy_activity_cue(
+    const omarchy_activity_v1_t *activity, uint32_t last_cued, uint32_t acknowledged)
+{
+    const bool fresh = activity->revision > last_cued && activity->revision > acknowledged;
+    const bool attention = activity->state == OMARCHY_ACTIVITY_ATTENTION ||
+                           activity->state == OMARCHY_ACTIVITY_FINISHED ||
+                           activity->state == OMARCHY_ACTIVITY_FAILED;
+    const bool alert = fresh && attention && (activity->flags & OMARCHY_ACTIVITY_ALERT) != 0;
+    const bool working_sound = fresh && activity->state == OMARCHY_ACTIVITY_WORKING &&
+                               (activity->flags & OMARCHY_ACTIVITY_ALERT) == 0 &&
+                               (activity->flags & OMARCHY_ACTIVITY_SOUND) != 0;
+    return (omarchy_activity_cue_t){
+        .alert = alert,
+        .sound = (alert || working_sound) && (activity->flags & OMARCHY_ACTIVITY_SOUND) != 0,
+    };
 }
 
 static inline bool omarchy_profile_v1_is_valid(const omarchy_profile_v1_t *profile)

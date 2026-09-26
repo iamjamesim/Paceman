@@ -9,6 +9,23 @@ int main(int argc, char **argv)
         .state = OMARCHY_ACTIVITY_FAILED, .revision = 1
     };
     assert(omarchy_activity_v1_is_valid(&activity));
+    activity.state = OMARCHY_ACTIVITY_WORKING;
+    activity.flags = OMARCHY_ACTIVITY_SOUND;
+    omarchy_activity_cue_t cue = omarchy_activity_cue(&activity, 0, 0);
+    assert(cue.sound && !cue.alert);
+    cue = omarchy_activity_cue(&activity, 1, 0);
+    assert(!cue.sound && !cue.alert);  /* repeat of a cued revision */
+    activity.revision = 2;
+    activity.state = OMARCHY_ACTIVITY_FAILED;
+    activity.flags = OMARCHY_ACTIVITY_SOUND | OMARCHY_ACTIVITY_ALERT;
+    cue = omarchy_activity_cue(&activity, 1, 0);
+    assert(cue.sound && cue.alert);
+    activity.flags = OMARCHY_ACTIVITY_SOUND;
+    cue = omarchy_activity_cue(&activity, 1, 0);
+    assert(!cue.sound && !cue.alert);  /* no sound-only failure */
+    activity.flags = OMARCHY_ACTIVITY_SOUND | OMARCHY_ACTIVITY_ALERT;
+    cue = omarchy_activity_cue(&activity, 1, 2);
+    assert(!cue.sound && !cue.alert);  /* acknowledged revision */
     activity.state = OMARCHY_ACTIVITY_FAILED + 1;
     assert(!omarchy_activity_v1_is_valid(&activity));
     omarchy_profile_v4_t p = {0};

@@ -127,10 +127,12 @@ idle is hidden.
 The timing and cross-surface rules are in the
 [shared motion spec](../../../docs/agent-state-motion.md).
 Animations run only while the screen is awake, and repeated snapshots do not
-restart them. Input requests and failures use two equal notes; completion uses
-a descending pair. The panel's shared Sound toggle controls these alerts. Fresh alerts wake the face
-for five seconds, except on battery at 15% or less; that cutoff suppresses the
-wake, not the sound or optional GPIO18 haptic pulse.
+restart them. New Working turns use one softer note without waking or vibrating
+the watch. Needs input keeps the two matching high notes, Finished keeps the
+descending pair, and Failed uses two matching lower notes. The phone's Status
+sounds toggle controls all four. Fresh input, completion, and failure alerts
+wake the face for five seconds, except on battery at 15% or less; that cutoff
+suppresses the wake, not the sound or optional GPIO18 haptic pulse.
 An alert still fires when an earlier completion remains unacknowledged;
 retransmission and reconnect do not repeat it.
 The normal display timeout remains independent of semantic attention.

@@ -323,9 +323,9 @@ struct WatchDetail: View {
             }
             CompanionRule(theme: theme)
             VStack(alignment: .leading, spacing: 8) {
-                Toggle("Alert sound", isOn: Binding(get: { preview ? true : model.watch.soundEnabled }, set: { model.watch.setSoundEnabled($0) }))
+                Toggle("Status sounds", isOn: Binding(get: { preview ? true : model.watch.soundEnabled }, set: { model.watch.setSoundEnabled($0) }))
                     .tint(theme.tint).allowsHitTesting(!preview)
-                Text("When an agent needs input or finishes a turn.")
+                Text("For new work, input requests, failures, and completed turns.")
                     .font(.footnote).foregroundStyle(theme.secondaryInk)
             }
             CompanionRule(theme: theme)

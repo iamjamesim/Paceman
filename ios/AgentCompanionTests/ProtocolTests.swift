@@ -348,6 +348,18 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(Array(packet), [79,65,1,2,3,0,4,3,2,1,8,7,6,5])
         XCTAssertEqual(WatchWire.activity(state: .finished, revision: 1,
             alert: false, sound: true, acknowledged: 0)[4], 0)
+        XCTAssertEqual(WatchWire.activity(state: .working, revision: 1,
+            alert: false, sound: true, acknowledged: 0)[4], 2)
+        XCTAssertEqual(WatchWire.activity(state: .working, revision: 1,
+            alert: false, sound: false, acknowledged: 0)[4], 0)
+        XCTAssertTrue(WatchWire.shouldPlayWorkingSound(state: .working, previousState: .finished,
+            freshNewEvent: true, capabilities: 1 << 11))
+        XCTAssertFalse(WatchWire.shouldPlayWorkingSound(state: .working, previousState: .needsInput,
+            freshNewEvent: true, capabilities: 1 << 11))
+        XCTAssertFalse(WatchWire.shouldPlayWorkingSound(state: .working, previousState: .finished,
+            freshNewEvent: false, capabilities: 1 << 11))
+        XCTAssertFalse(WatchWire.shouldPlayWorkingSound(state: .working, previousState: .finished,
+            freshNewEvent: true, capabilities: 0))
         XCTAssertEqual(WatchWire.activity(state: .failed, revision: 1,
             alert: true, sound: true, acknowledged: 0)[3], 4)
         XCTAssertEqual(WatchWire.compatibleActivityState(.failed, capabilities: (1 << 10) | (1 << 8)), .failed)

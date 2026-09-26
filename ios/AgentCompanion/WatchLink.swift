@@ -373,6 +373,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         WatchPreferences.remove(receipt.watchID)
         WatchDeliveryHistory.remove(receipt.watchID)
         UserDefaults.standard.removeObject(forKey: "delivered-event-history")
+        UserDefaults.standard.removeObject(forKey: "delivered-state")
         WeatherPreferences.remove(receipt.watchID)
         weather = nil
         pairingReceipt = nil
@@ -887,6 +888,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 defaults.set(Array(history.suffix(32)), forKey: "delivered-event-history")
                 UserDefaults.standard.set(sentEvent, forKey: "delivered-event")
                 UserDefaults.standard.set(Int(sentRevision), forKey: "delivered-revision")
+                UserDefaults.standard.set(sentState?.rawValue, forKey: "delivered-state")
                 Diagnostics.shared.record("ble_write_accepted", event: sentEvent, state: sentState, revision: sentRevision)
             }
             writeProfileIfNeeded()
@@ -943,11 +945,16 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         let revision = same ? previous : nextRevision()
         guard revision > 0 else { return }
         let freshEvent = abs(Date().timeIntervalSince1970 - snapshot.changedAt) < 120
-        let alert = !same && !deliveredBefore && freshEvent &&
+        let freshNewEvent = !same && !deliveredBefore && freshEvent
+        let alert = freshNewEvent &&
             (snapshot.state == .needsInput || snapshot.state == .failed || snapshot.state == .finished)
+        let previousState = defaults.string(forKey: "delivered-state").flatMap(ActivityState.init(rawValue:))
+        let workingSound = WatchWire.shouldPlayWorkingSound(
+            state: snapshot.state, previousState: previousState,
+            freshNewEvent: freshNewEvent, capabilities: capabilities)
         let state = WatchWire.compatibleActivityState(snapshot.state, capabilities: capabilities)
         let packet = WatchWire.activity(state: state, revision: revision, alert: alert,
-            sound: soundEnabled && capabilities & (1 << 7) != 0,
+            sound: soundEnabled && capabilities & (1 << 7) != 0 && (alert || workingSound),
             acknowledged: acknowledged)
         writePending = true
         sentEvent = snapshot.identity

@@ -157,6 +157,12 @@ enum HubError: LocalizedError {
 }
 
 enum WatchWire {
+    static func shouldPlayWorkingSound(state: ActivityState, previousState: ActivityState?,
+                                       freshNewEvent: Bool, capabilities: UInt32) -> Bool {
+        state == .working && previousState != .needsInput && freshNewEvent &&
+            capabilities & (1 << 11) != 0
+    }
+
     static func compatibleActivityState(_ state: ActivityState, capabilities: UInt32) -> ActivityState {
         // Earlier watch firmware rejects state 4. Keep its existing terminal
         // representation until it advertises distinct failure support.
@@ -186,7 +192,8 @@ enum WatchWire {
 
     static func activity(state: ActivityState, revision: UInt32, alert: Bool,
                          sound: Bool, acknowledged: UInt32) -> Data {
-        var data = Data([79, 65, 1, state.wire, (alert ? 1 : 0) | (alert && sound ? 2 : 0), 0])
+        let soundFlag = sound && (alert || state == .working)
+        var data = Data([79, 65, 1, state.wire, (alert ? 1 : 0) | (soundFlag ? 2 : 0), 0])
         data.appendLE(revision)
         data.appendLE(acknowledged)
         return data

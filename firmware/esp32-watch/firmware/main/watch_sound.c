@@ -20,8 +20,10 @@ enum {
 
 static const char *TAG = "watch_sound";
 static atomic_bool sound_running = ATOMIC_VAR_INIT(false);
-static atomic_uint pending_sounds = ATOMIC_VAR_INIT(0);
+static atomic_uint pending_working = ATOMIC_VAR_INIT(0);
 static atomic_uint pending_attention = ATOMIC_VAR_INIT(0);
+static atomic_uint pending_completion = ATOMIC_VAR_INIT(0);
+static atomic_uint pending_failure = ATOMIC_VAR_INIT(0);
 static esp_codec_dev_handle_t speaker;
 
 static const int16_t sine_table[32] = {
@@ -64,11 +66,12 @@ static int32_t note_sample(const alert_note_t *note, uint32_t sample)
     return mixed;
 }
 
-static bool write_chime(bool attention)
+static bool write_chime(watch_sound_kind_t kind)
 {
-    const uint32_t total = SAMPLE_RATE * 380 / 1000;
+    const uint32_t total = SAMPLE_RATE * watch_sound_duration_ms(kind) / 1000;
     int16_t samples[BUFFER_SAMPLES];
-    const alert_note_t notes[] = {watch_sound_note(attention, 0), watch_sound_note(attention, 1)};
+    const alert_note_t notes[] = {watch_sound_note(kind, 0), watch_sound_note(kind, 1)};
+    const unsigned note_count = watch_sound_note_count(kind);
 
     for (uint32_t written = 0; written < total;) {
         uint32_t count = total - written;
@@ -77,8 +80,7 @@ static bool write_chime(bool attention)
         }
         for (uint32_t index = 0; index < count; ++index) {
             int32_t mixed = 0;
-            for (unsigned note = 0;
-                    note < sizeof(notes) / sizeof(notes[0]); ++note) {
+            for (unsigned note = 0; note < note_count; ++note) {
                 mixed += note_sample(&notes[note], written + index);
             }
             if (mixed > INT16_MAX) {
@@ -96,7 +98,7 @@ static bool write_chime(bool attention)
     return true;
 }
 
-static void play_chime(bool attention)
+static void play_chime(watch_sound_kind_t kind)
 {
     if (speaker == NULL) {
         speaker = bsp_audio_codec_speaker_init();
@@ -123,7 +125,7 @@ static void play_chime(bool attention)
     /* Give the codec and amplifier time to leave mute before a short alert. */
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    if (!write_chime(attention)) {
+    if (!write_chime(kind)) {
         ESP_LOGE(TAG, "Could not write agent chime");
     }
     esp_codec_dev_close(speaker);
@@ -133,19 +135,30 @@ static void sound_worker(void *argument)
 {
     (void)argument;
     for (;;) {
-        /* Preserve each pending sound's kind; prioritize attention within a
-         * batch rather than letting the latest state overwrite queued alerts. */
+        /* An urgent outcome takes precedence over a queued start cue. */
+        unsigned failure_count = atomic_exchange(&pending_failure, 0);
         unsigned attention_count = atomic_exchange(&pending_attention, 0);
-        unsigned count = atomic_exchange(&pending_sounds, 0);
-        while (attention_count-- > 0) {
-            play_chime(true);
+        unsigned completion_count = atomic_exchange(&pending_completion, 0);
+        unsigned working_count = atomic_exchange(&pending_working, 0);
+        const bool urgent = failure_count || attention_count || completion_count;
+        for (unsigned i = 0; i < failure_count; ++i) {
+            play_chime(WATCH_SOUND_FAILURE);
         }
-        while (count-- > 0) {
-            play_chime(false);
+        for (unsigned i = 0; i < attention_count; ++i) {
+            play_chime(WATCH_SOUND_ATTENTION);
+        }
+        for (unsigned i = 0; i < completion_count; ++i) {
+            play_chime(WATCH_SOUND_COMPLETION);
+        }
+        if (!urgent) {
+            for (unsigned i = 0; i < working_count; ++i) {
+                play_chime(WATCH_SOUND_WORKING);
+            }
         }
 
         atomic_store(&sound_running, false);
-        if ((atomic_load(&pending_sounds) == 0 && atomic_load(&pending_attention) == 0) ||
+        if ((atomic_load(&pending_working) == 0 && atomic_load(&pending_attention) == 0 &&
+                atomic_load(&pending_completion) == 0 && atomic_load(&pending_failure) == 0) ||
                 atomic_exchange(&sound_running, true)) {
             break;
         }
@@ -153,26 +166,41 @@ static void sound_worker(void *argument)
     vTaskDelete(NULL);
 }
 
-static void enqueue_sound(bool attention)
+static void enqueue_sound(watch_sound_kind_t kind)
 {
-    atomic_fetch_add(attention ? &pending_attention : &pending_sounds, 1);
+    atomic_uint *counter = kind == WATCH_SOUND_WORKING ? &pending_working :
+                           kind == WATCH_SOUND_ATTENTION ? &pending_attention :
+                           kind == WATCH_SOUND_COMPLETION ? &pending_completion : &pending_failure;
+    atomic_fetch_add(counter, 1);
     if (atomic_exchange(&sound_running, true)) {
         return;
     }
     if (xTaskCreate(sound_worker, "watch_sound", 4096, NULL, 4, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Could not create agent sound task");
-        atomic_store(&pending_sounds, 0);
+        atomic_store(&pending_working, 0);
         atomic_store(&pending_attention, 0);
+        atomic_store(&pending_completion, 0);
+        atomic_store(&pending_failure, 0);
         atomic_store(&sound_running, false);
     }
 }
 
+void watch_sound_working(void)
+{
+    enqueue_sound(WATCH_SOUND_WORKING);
+}
+
 void watch_sound_completion(void)
 {
-    enqueue_sound(false);
+    enqueue_sound(WATCH_SOUND_COMPLETION);
 }
 
 void watch_sound_attention(void)
 {
-    enqueue_sound(true);
+    enqueue_sound(WATCH_SOUND_ATTENTION);
+}
+
+void watch_sound_failure(void)
+{
+    enqueue_sound(WATCH_SOUND_FAILURE);
 }

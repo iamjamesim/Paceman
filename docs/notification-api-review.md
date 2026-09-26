@@ -57,9 +57,9 @@ Retries reuse identity; distinct transitions retain distinct notification entrie
 Reject older snapshots. Coalesce state snapshots without replaying old attention
 alerts after reconnection. Scope alert deduplication by source/session/transition.
 
-Working/Idle are passive. Needs input/Finished request active presentation and
+Working/Idle are passive. Needs input/Failed/Finished request active presentation and
 sound. Lock Screen, banners, sound and Mac mirroring remain authoritative in iOS
-Settings. Keep watch Alert sound as a per-watch preference. Do not automatically
+Settings. Keep watch Status sounds as a per-watch preference. Do not automatically
 mute the phone because a watch happens to be connected: connection does not prove
 the person received an alert.
 

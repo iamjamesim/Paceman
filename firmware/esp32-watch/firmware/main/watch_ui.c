@@ -869,8 +869,12 @@ void watch_ui_apply_activity(uint8_t state, bool alert, bool sound)
         watch_haptics_completion();
     }
     if (sound) {
-        if (state == OMARCHY_ACTIVITY_FINISHED) {
+        if (state == OMARCHY_ACTIVITY_WORKING) {
+            watch_sound_working();
+        } else if (state == OMARCHY_ACTIVITY_FINISHED) {
             watch_sound_completion();
+        } else if (state == OMARCHY_ACTIVITY_FAILED) {
+            watch_sound_failure();
         } else {
             watch_sound_attention();
         }
