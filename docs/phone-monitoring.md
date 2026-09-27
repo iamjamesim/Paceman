@@ -128,8 +128,9 @@ from its SwiftUI view at the 40 mm tile dimensions
 for working, needs input, failed, finished, empty, two working, mixed, large-count
 mixed, stale, and long-name states. Accessibility 2 and Accessibility 5 (capped
 for display) were also checked, including a long name. The iOS widget build
-passed. These are local Mac harness renders; real Smart Stack appearance and
-delivery on a paired Apple Watch still need confirmation.
+passed. These are local Mac harness renders. The user confirmed the final tile
+was visible and looked good on Watch. Mixed/stale updates and alert sound were
+not separately checked on Watch.
 
 ## Direct APNs alpha
 
