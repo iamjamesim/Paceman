@@ -37,27 +37,40 @@ private struct AllowanceProvider: TimelineProvider {
         var dates = [now]
         if let value, value.available(at: now) {
             let reset = Date(timeIntervalSince1970: value.resetsAt)
-            // The combined center complication needs the same countdown updates as Reset.
+            // Entries update the ring and compact day/hour text; native date text updates on its own.
             for _ in 0..<70 {
                 let remaining = reset.timeIntervalSince(dates.last!)
-                let step: TimeInterval = remaining > 86_400 ? 3_600 : remaining > 3_600 ? 900 : 60
-                let next = dates.last!.addingTimeInterval(step)
+                let next: Date
+                if remaining > 86_400 {
+                    // Compact day/hour text changes on reset-relative hour boundaries.
+                    let wholeHours = Int(remaining / 3_600)
+                    next = reset.addingTimeInterval(-Double(wholeHours) * 3_600 + 1)
+                } else if remaining > 3_600 {
+                    next = dates.last!.addingTimeInterval(900)
+                } else {
+                    next = dates.last!.addingTimeInterval(300)
+                }
                 if next >= reset { break }
                 dates.append(next)
             }
-            if dates.last! < reset && dates.count < 71 { dates.append(reset) }
+            let lastRingUpdate = dates.last!
             let cached = Date(timeIntervalSince1970: value.updatedAt + 1_801)
-            if cached > now && cached < dates.last! { dates.append(cached) }
+            if cached > now && cached < reset { dates.append(cached) }
+            let oneDayBeforeReset = reset.addingTimeInterval(-86_400)
+            if oneDayBeforeReset > now && !dates.contains(oneDayBeforeReset) {
+                dates.append(oneDayBeforeReset)
+            }
+            // The reset state must be present even when the ring's 70-entry batch ends early.
+            dates.append(reset)
             dates.sort()
-        }
-        let policy: TimelineReloadPolicy
-        if let value, value.available(at: now), dates.last! < Date(timeIntervalSince1970: value.resetsAt) {
-            policy = .after(dates.last!.addingTimeInterval(60))
-        } else {
-            policy = .never
+            let policy: TimelineReloadPolicy = lastRingUpdate < reset.addingTimeInterval(-300)
+                ? .after(lastRingUpdate.addingTimeInterval(300)) : .never
+            completion(Timeline(entries: dates.map { AllowanceEntry(date: $0, allowance: value) },
+                                policy: policy))
+            return
         }
         completion(Timeline(entries: dates.map { AllowanceEntry(date: $0, allowance: value) },
-                            policy: policy))
+                            policy: .never))
     }
 }
 
@@ -114,6 +127,48 @@ private struct AllowanceView: View {
         entry.allowance?.limitTitle ?? "Weekly limit"
     }
 
+    @available(watchOS 11, *)
+    private func positiveNarrowStyle(_ fields: Set<Date.ComponentsFormatStyle.Field>) -> Date.ComponentsFormatStyle {
+        var style = Date.ComponentsFormatStyle(style: .narrow, fields: fields)
+        style.isPositive = true
+        return style
+    }
+
+    private func resetCountdown(_ allowance: WatchAllowanceSnapshot) -> some View {
+        let reset = Date(timeIntervalSince1970: allowance.resetsAt)
+        let remaining = reset.timeIntervalSince(entry.date)
+        return Group {
+            if remaining > 86_400 {
+                let hours = Int(remaining / 3_600)
+                Text("\(hours / 24)d \(hours % 24)h")
+            } else if #available(watchOS 11, *) {
+                Text(.dateRange(endingAt: reset), format: positiveNarrowStyle([.hour, .minute]))
+            } else {
+                Text(reset, style: .relative)
+            }
+        }
+        .monospacedDigit()
+    }
+
+    private func circularResetCountdown(_ allowance: WatchAllowanceSnapshot) -> some View {
+        let reset = Date(timeIntervalSince1970: allowance.resetsAt)
+        let remaining = reset.timeIntervalSince(entry.date)
+        return Group {
+            if remaining > 86_400 {
+                let hours = Int(remaining / 3_600)
+                Text("\(hours / 24)d\n\(hours % 24)h")
+            } else if #available(watchOS 11, *) {
+                // Keep the original stacked layout while the system updates both units.
+                Text(.dateRange(endingAt: reset), format: positiveNarrowStyle([.hour, .minute]))
+                    .frame(width: 32)
+            } else {
+                Text(allowance.resetCountdownDetailed(at: entry.date)
+                    .replacingOccurrences(of: " ", with: "\n"))
+            }
+        }
+        .monospacedDigit()
+    }
+
     var body: some View {
         Group {
             switch family {
@@ -159,14 +214,16 @@ private struct AllowanceView: View {
                 .overlay {
                     // The system gauge renders its value on one line, so place the
                     // detailed countdown over the native ring instead.
-                    Text(value?.resetCountdownDetailed(at: entry.date)
-                        .replacingOccurrences(of: " ", with: "\n") ?? "—")
-                        .font(.caption2)
-                        .monospacedDigit()
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
-                        .offset(y: -2)
+                    if let value {
+                        circularResetCountdown(value)
+                            .font(.caption2)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+                            .offset(y: -2)
+                    } else {
+                        Text("—")
+                    }
                 }
             }
         }
@@ -179,15 +236,27 @@ private struct AllowanceView: View {
                 Text(limitReading)
                     .font(.caption)
                     .widgetCurvesContent()
+            } else if let value {
+                Group {
+                    if value.resetsAt - entry.date.timeIntervalSince1970 > 86_400 {
+                        resetCountdown(value)
+                    } else {
+                        Text(Date(timeIntervalSince1970: value.resetsAt), style: .relative)
+                    }
+                }
+                .font(.caption2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .widgetCurvesContent()
             } else {
-                Text(value?.resetCountdownDetailed(at: entry.date) ?? "—")
+                Text("—")
                     .font(.caption2)
                     .lineLimit(1)
                     .widgetCurvesContent()
             }
         }
         .monospacedDigit()
-        .minimumScaleFactor(0.7)
+        .minimumScaleFactor(0.55)
         .widgetAccentable()
         .widgetLabel {
             if metric == .limit {
@@ -229,10 +298,13 @@ private struct AllowanceView: View {
                 .lineLimit(1)
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 if let value {
-                    Text("Reset \(value.resetCountdownDetailed(at: entry.date))")
-                        .font(.body)
-                        .monospacedDigit()
-                        .lineLimit(1)
+                    HStack(spacing: 3) {
+                        Text("Reset")
+                        resetCountdown(value)
+                    }
+                    .font(.body)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.55)
                     Spacer(minLength: 0)
                     Text("\(value.remaining)%")
                         .font(.body)
@@ -274,7 +346,7 @@ private struct AllowanceView: View {
         if metric == .limit {
             return "Codex limit, \(value.remaining) percent remaining, \(freshness), resets \(Date(timeIntervalSince1970: value.resetsAt).formatted())"
         }
-        return "Codex reset in \(value.resetCountdownDetailedSpoken(at: entry.date)), \(freshness), at \(Date(timeIntervalSince1970: value.resetsAt).formatted())"
+        return "Codex reset at \(Date(timeIntervalSince1970: value.resetsAt).formatted()), \(freshness)"
     }
 }
 
