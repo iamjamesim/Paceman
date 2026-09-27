@@ -26,6 +26,8 @@ class Config:
     topic: str
     environment: str
     private_key: bytes
+    watch_key_id: str | None = None
+    watch_private_key: bytes | None = None
 
     @classmethod
     def load(cls, path: Path):
@@ -40,12 +42,23 @@ class Config:
                 or value.get("environment") not in ("development", "production")
                 or not isinstance(value.get("keyPath"), str)):
             raise ValueError("Specify topic, environment, and keyPath")
-        key_path = Path(value["keyPath"]).expanduser()
-        if not key_path.is_absolute():
-            key_path = path.parent / key_path
-        if key_path.stat().st_mode & 0o077:
-            raise ValueError("APNs key must be private: chmod 600 its .p8 file")
-        return cls(value["teamID"], value["keyID"], value["topic"], value["environment"], key_path.read_bytes())
+        def private_key(name: str) -> bytes:
+            key_path = Path(value[name]).expanduser()
+            if not key_path.is_absolute():
+                key_path = path.parent / key_path
+            if key_path.stat().st_mode & 0o077:
+                raise ValueError("APNs key must be private: chmod 600 its .p8 file")
+            return key_path.read_bytes()
+
+        watch_id, watch_path = value.get("watchKeyID"), value.get("watchKeyPath")
+        if (watch_id is None) != (watch_path is None):
+            raise ValueError("Specify both watchKeyID and watchKeyPath")
+        if watch_id is not None and (not isinstance(watch_id, str)
+                                     or not re.fullmatch(r"[A-Z0-9]{10}", watch_id)
+                                     or not isinstance(watch_path, str)):
+            raise ValueError("Invalid Watch APNs key")
+        return cls(value["teamID"], value["keyID"], value["topic"], value["environment"],
+                   private_key("keyPath"), watch_id, private_key("watchKeyPath") if watch_id else None)
 
 
 @dataclass(frozen=True)
@@ -192,31 +205,42 @@ class APNs:
         import httpx
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import ec
-        key = serialization.load_pem_private_key(config.private_key, password=None)
-        if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(key.curve, ec.SECP256R1):
-            raise ValueError("APNs requires an ES256/P-256 private key")
-        self.config, self.key = config, key
+        def load_key(data):
+            key = serialization.load_pem_private_key(data, password=None)
+            if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(key.curve, ec.SECP256R1):
+                raise ValueError("APNs requires an ES256/P-256 private key")
+            return key
+        self.config = config
+        self.keys = {"phone": load_key(config.private_key),
+                     "watch": load_key(config.watch_private_key) if config.watch_private_key else None}
         self.client = client or httpx.Client(http2=True, timeout=10, follow_redirects=False, trust_env=False)
-        self.jwt = None
-        self.issued_at = 0
+        # APNs binds topics to a connection; the Watch topic gets its own pool.
+        self.watch_client = client or httpx.Client(http2=True, timeout=10, follow_redirects=False, trust_env=False)
+        self.jwt: dict[str, str] = {}
+        self.issued_at: dict[str, float] = {}
 
     def send(self, device: dict, payload: dict, headers: dict, now: float) -> Result:
         import httpx
         import jwt
         if device["environment"] != self.config.environment:
             return Result(0, "EnvironmentMismatch", "")
-        if self.jwt is None or now - self.issued_at >= 3000 or now < self.issued_at:
-            self.jwt = jwt.encode({"iss": self.config.team_id, "iat": int(now)}, self.key,
-                                  algorithm="ES256", headers={"kid": self.config.key_id})
-            self.issued_at = now
+        watch = device.get("mode") == "watch"
+        credential = "watch" if watch and self.keys["watch"] is not None else "phone"
+        if (credential not in self.jwt or now - self.issued_at[credential] >= 3000
+                or now < self.issued_at[credential]):
+            self.jwt[credential] = jwt.encode({"iss": self.config.team_id, "iat": int(now)},
+                self.keys[credential], algorithm="ES256",
+                headers={"kid": self.config.watch_key_id if credential == "watch" else self.config.key_id})
+            self.issued_at[credential] = now
         host = "api.sandbox.push.apple.com" if self.config.environment == "development" else "api.push.apple.com"
         topic = (self.config.topic + ".watchkitapp" if device.get("mode") == "watch"
                  else self.config.topic + ".push-type.liveactivity" if device.get("mode") == "liveactivity"
                  else self.config.topic)
         try:
-            response = self.client.post("https://" + host + "/3/device/" + device["token"],
+            response = (self.watch_client if watch else self.client).post(
+                "https://" + host + "/3/device/" + device["token"],
                 json=payload, headers={**headers, "apns-topic": topic,
-                                      "authorization": "bearer " + self.jwt})
+                                      "authorization": "bearer " + self.jwt[credential]})
         except httpx.HTTPError:
             return Result(0, "TransportError", headers["apns-id"])
         # Record bounded APNs codes only, never response bodies, URLs or destination tokens.
@@ -231,6 +255,8 @@ class APNs:
 
     def close(self):
         self.client.close()
+        if self.watch_client is not self.client:
+            self.watch_client.close()
 
 
 class Worker:

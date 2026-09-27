@@ -352,6 +352,46 @@ class APNsProtocolTests(unittest.TestCase):
         sender.send({"token": "ab" * 32, "environment": "development", "mode": "watch"}, payload, headers, 100)
         self.assertEqual(calls[0].headers["apns-topic"], self.config.topic + ".watchkitapp")
 
+    def test_watch_key_is_separate_from_phone_key(self):
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives import serialization
+        watch_key = ec.generate_private_key(ec.SECP256R1())
+        watch_pem = watch_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                            serialization.NoEncryption())
+        config = Config(self.config.team_id, self.config.key_id, self.config.topic,
+                        self.config.environment, self.pem, "ZYXWVUTSRQ", watch_pem)
+        calls = []
+        sender = APNs(config, self.httpx.Client(transport=self.httpx.MockTransport(
+            lambda request: (calls.append(request), self.httpx.Response(200))[1])))
+        self.addCleanup(sender.close)
+        device = {"token": "ab" * 32, "environment": "development"}
+        sender.send(device, {}, {"apns-id": "phone"}, 100)
+        sender.send({**device, "mode": "watch"}, {}, {"apns-id": "watch"}, 100)
+        phone_jwt, watch_jwt = (request.headers["authorization"].removeprefix("bearer ") for request in calls)
+        self.assertEqual(self.jwt.get_unverified_header(phone_jwt)["kid"], config.key_id)
+        self.assertEqual(self.jwt.get_unverified_header(watch_jwt)["kid"], config.watch_key_id)
+        self.jwt.decode(phone_jwt, self.key.public_key(), algorithms=["ES256"])
+        self.jwt.decode(watch_jwt, watch_key.public_key(), algorithms=["ES256"])
+
+    def test_optional_watch_key_configuration(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        (root / "phone.p8").write_bytes(self.pem)
+        (root / "watch.p8").write_bytes(self.pem)
+        (root / "phone.p8").chmod(0o600)
+        (root / "watch.p8").chmod(0o600)
+        config_file = root / "apns.json"
+        value = {"teamID": self.config.team_id, "keyID": self.config.key_id,
+                 "topic": self.config.topic, "environment": "development", "keyPath": "phone.p8",
+                 "watchKeyID": "ZYXWVUTSRQ", "watchKeyPath": "watch.p8"}
+        config_file.write_text(json.dumps(value))
+        self.assertEqual(Config.load(config_file).watch_key_id, "ZYXWVUTSRQ")
+        del value["watchKeyPath"]
+        config_file.write_text(json.dumps(value))
+        with self.assertRaisesRegex(ValueError, "both watchKeyID and watchKeyPath"):
+            Config.load(config_file)
+
     def test_environment_mismatch_never_contacts_apple(self):
         def forbidden(_):
             self.fail("Must not send a production token to sandbox")

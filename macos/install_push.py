@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import plistlib
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -21,6 +22,7 @@ PLIST = Path.home() / "Library/LaunchAgents/dev.paceman.push.plist"
 PRIVATE = ROOT / "private"
 KEY = PRIVATE / "apns-key.p8"
 CONFIG = PRIVATE / "apns.json"
+WATCH_KEY = PRIVATE / "apns-watch-key.p8"
 VENV = ROOT / "push-venv"
 
 
@@ -44,9 +46,18 @@ def install(config_path: Path):
     if source_key != KEY:
         shutil.copyfile(source_key, KEY)
     KEY.chmod(0o600)
+    if validated.watch_key_id:
+        watch_source = Path(raw["watchKeyPath"]).expanduser()
+        if not watch_source.is_absolute():
+            watch_source = config_path.parent / watch_source
+        if watch_source.resolve() != WATCH_KEY:
+            shutil.copyfile(watch_source, WATCH_KEY)
+        WATCH_KEY.chmod(0o600)
     value = {"teamID": validated.team_id, "keyID": validated.key_id,
              "topic": validated.topic, "environment": validated.environment,
              "keyPath": str(KEY)}
+    if validated.watch_key_id:
+        value.update(watchKeyID=validated.watch_key_id, watchKeyPath=str(WATCH_KEY))
     descriptor, name = tempfile.mkstemp(prefix=".apns-", dir=PRIVATE)
     temporary = Path(name)
     try:
@@ -67,6 +78,10 @@ def install(config_path: Path):
                     "from pathlib import Path; from service.push import APNs, Config; "
                     "APNs(Config.load(Path('private/apns.json'))).close()"],
                    cwd=ROOT, env={**os.environ, "PYTHONPATH": str(ROOT / "lib")}, check=True)
+
+    if validated.watch_key_id:
+        with sqlite3.connect(ROOT / "data/hub.sqlite3") as db:
+            db.execute("UPDATE watch_push_devices SET next_attempt=0,attempts=0")
 
     if PLIST.is_file():
         if plistlib.loads(PLIST.read_bytes()).get("Label") != LABEL:
