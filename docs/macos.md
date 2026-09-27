@@ -19,7 +19,7 @@ unidentified `python3` login items.
 On the Mac that runs Codex, ask a Codex session to install this checkout:
 
 ```sh
-/opt/homebrew/bin/python3 macos/install.py
+/opt/homebrew/bin/python3 -m macos.install
 ```
 
 Use any Python 3.11+ interpreter installed outside the checkout. This Mac's

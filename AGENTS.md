@@ -45,7 +45,7 @@ review and a real Codex event check. Running `macos/install.py` and pairing the
 phone do not complete session monitoring. Show the user the exact Paceman hook
 command and what data it sends. For an app user, direct them specifically to
 Codex **Settings → Hooks → User config (All projects)**; for a CLI user, use
-`/hooks` or **Review hooks** at startup. Name the seven Paceman event rows and
+`/hooks` or **Review hooks** at startup. Name the eight Paceman event rows and
 their plain-language purposes from `docs/macos.md`, explain that Codex calls
 each row **Hook 1**, and show how to expand one to verify the Paceman command.
 Stay with the user while they review the entries. Do not trust hooks on the
