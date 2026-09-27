@@ -40,6 +40,11 @@ class AllowanceTests(unittest.TestCase):
         self.assertEqual((value["remaining"], value["window"], value["resetsAt"]),
                          (10, 2, self.now + 600))
 
+    def test_equal_usage_prefers_weekly_window(self):
+        self.record["limits"].insert(0, {"label": "5h window", "percent": .21,
+                                          "resetsAt": self.iso(self.now + 600)})
+        self.assertEqual(self.read()["window"], 1)
+
     def test_zero_and_full_are_valid(self):
         for used, left in ((0, 100), (1, 0)):
             self.record["limits"][0]["percent"] = used

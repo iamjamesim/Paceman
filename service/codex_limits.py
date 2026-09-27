@@ -95,12 +95,14 @@ def parse_codex_allowance(result: dict, observed_at: int) -> dict | None:
                 or type(minutes) is not int or not 0 < minutes <= 10080
                 or type(reset) is not int or not observed_at < reset <= 3155759999):
             return None
-        windows.append((used, 1 if minutes == 10080 else 2, reset))
+        windows.append((used, 1 if minutes == 10080 else 2, reset, minutes))
     if not windows:
         return None
-    used, window, reset = max(windows, key=lambda item: item[0])
+    # A tie does not make the shorter window more useful to show.
+    used, window, reset, minutes = max(windows, key=lambda item: (item[0], item[1] == 1))
     return {"provider": "codex", "remaining": int(math.floor(100 - used + 0.5)),
-            "window": window, "updatedAt": observed_at, "resetsAt": reset}
+            "window": window, "windowDurationMins": minutes,
+            "updatedAt": observed_at, "resetsAt": reset}
 
 
 def read_codex_allowance() -> dict | None:

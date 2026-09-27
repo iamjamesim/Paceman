@@ -5,6 +5,7 @@ __pycache__/
 *.xcuserstate
 xcuserdata/
 DerivedData/
+ios/build/
 .DS_Store
 *.zip
 *.p8

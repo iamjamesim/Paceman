@@ -133,6 +133,9 @@ class MacSourceTests(unittest.TestCase):
                          {"provider": "codex", "remaining": 39, "window": 1,
                           "windowDurationMins": 10080,
                           "updatedAt": now, "resetsAt": now + 5000})
+        limits["rateLimitsByLimitId"]["codex"]["primary"]["usedPercent"] = 61
+        self.assertEqual(parse_codex_allowance(limits, now)["window"], 1)
+        limits["rateLimitsByLimitId"]["codex"]["primary"]["usedPercent"] = 25
         limits["rateLimitsByLimitId"]["codex"]["secondary"]["usedPercent"] = 101
         self.assertIsNone(parse_codex_allowance(limits, now))
         limits["rateLimitsByLimitId"]["codex"]["secondary"]["usedPercent"] = 61

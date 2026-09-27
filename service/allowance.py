@@ -63,7 +63,8 @@ def read_codex_allowance(path: Path, epoch: int, *, allow_stale: bool = False) -
             if reset <= updated or (not allow_stale and reset <= epoch):
                 raise ValueError("window reset; waiting for fresh limits")
             candidates.append((used, window, reset))
-        used, window, reset = max(candidates, key=lambda item: item[0])
+        # Prefer the weekly reading when both windows are equally depleted.
+        used, window, reset = max(candidates, key=lambda item: (item[0], item[1] == 1))
         return {"remaining": int(math.floor(100 * (1 - used) + 0.5)),
                 "window": window, "updatedAt": updated, "resetsAt": reset}
     except (OSError, ValueError, TypeError, OverflowError, RecursionError) as error:

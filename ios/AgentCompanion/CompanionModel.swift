@@ -132,8 +132,10 @@ final class CompanionModel: ObservableObject {
     }
 
     private func forwardWatchAggregate() {
-        if let value = watchAggregate { watch.forward(value) }
+        let value = watchAggregate
+        if let value { watch.forward(value) }
         else { watch.clearSourceProfile() }
+        if !designPreview { AppleWatchAllowanceBridge.shared.update(value?.allowance) }
     }
 
     @discardableResult

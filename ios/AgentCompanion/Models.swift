@@ -261,9 +261,11 @@ struct CodexAllowance: Codable, Equatable {
     let window: Int
     let updatedAt: Int64
     let resetsAt: Int64
+    var windowDurationMins: Int? = nil
     var valid: Bool {
         provider == "codex" && (0...100).contains(remaining) && [1, 2].contains(window)
             && updatedAt >= 1704067200 && resetsAt > updatedAt && resetsAt <= 3155759999
+            && (windowDurationMins == nil || (1...10080).contains(windowDurationMins!))
     }
 }
 
