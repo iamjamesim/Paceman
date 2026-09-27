@@ -6,7 +6,7 @@ import unittest
 
 from tests.identity import device
 from service.hub import Store
-from service.push import APNs, Config, Result, Worker, notification
+from service.push import APNs, Config, Result, Worker, notification, watch_allowance_notification
 
 
 class FakeSender:
@@ -264,6 +264,45 @@ class PushWorkerTests(unittest.TestCase):
         self.worker.step(100)
         self.assertTrue(self.store.push_device(self.client["credential"])["registered"])
 
+    def test_watch_allowance_push_uses_current_reading_and_respects_budget(self):
+        now = 1_800_000_000
+        token = "ef" * 32
+        self.assertEqual(self.store.watch_push_device(self.client["credential"], {
+            "deviceToken": token, "environment": "development"}), {"registered": True})
+        allowance = {"provider": "codex", "remaining": 64, "window": 1,
+                     "windowDurationMins": 10080, "updatedAt": now, "resetsAt": now + 500000}
+        with self.store.connect() as db:
+            db.execute("UPDATE events SET payload=? WHERE seq=(SELECT MAX(seq) FROM events)",
+                       (json.dumps({"allowance": allowance}),))
+        self.worker.step(now)
+        watch = [call for call in self.sender.calls if call[0].get("mode") == "watch"]
+        self.assertEqual(len(watch), 1)
+        self.assertEqual(watch[0][0]["token"], token)
+        self.assertEqual(watch[0][1]["allowance"], allowance)
+        self.assertEqual(watch[0][1]["aps"], {"content-available": 1})
+        self.assertEqual(watch[0][2]["apns-push-type"], "background")
+        self.assertEqual(watch[0][2]["apns-priority"], "5")
+        self.worker.step(now + 1201)
+        self.assertEqual(len([call for call in self.sender.calls if call[0].get("mode") == "watch"]), 1)
+        allowance["remaining"] = 61
+        allowance["updatedAt"] = now + 1201
+        with self.store.connect() as db:
+            db.execute("UPDATE events SET payload=? WHERE seq=(SELECT MAX(seq) FROM events)",
+                       (json.dumps({"allowance": allowance}),))
+        self.worker.step(now + 1201)
+        self.assertEqual(len([call for call in self.sender.calls if call[0].get("mode") == "watch"]), 2)
+        self.assertEqual(watch[0][1]["allowance"]["remaining"], 64)
+
+    def test_watch_registration_is_separate_and_revocation_clears_it(self):
+        token = "ef" * 32
+        self.store.watch_push_device(self.client["credential"], {
+            "deviceToken": token, "environment": "development"})
+        self.assertTrue(self.store.push_device(self.client["credential"])["registered"])
+        self.store.revoke(self.client["clientID"])
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM watch_push_devices").fetchone()[0], 0)
+        self.assertIsNone(self.store.watch_push_device(self.client["credential"]))
+
 
 class APNsProtocolTests(unittest.TestCase):
     def setUp(self):
@@ -301,6 +340,17 @@ class APNsProtocolTests(unittest.TestCase):
         self.assertEqual(request.headers["authorization"], calls[-1].headers["authorization"])
         sender.send(device, payload, headers, 3200)
         self.assertNotEqual(request.headers["authorization"], calls[-1].headers["authorization"])
+
+    def test_watch_push_uses_watch_topic(self):
+        calls = []
+        sender = APNs(self.config, self.httpx.Client(transport=self.httpx.MockTransport(
+            lambda request: (calls.append(request), self.httpx.Response(200))[1])))
+        self.addCleanup(sender.close)
+        payload, headers = watch_allowance_notification("source", {
+            "provider": "codex", "remaining": 64, "window": 1,
+            "windowDurationMins": 10080, "updatedAt": 100, "resetsAt": 200}, 100)
+        sender.send({"token": "ab" * 32, "environment": "development", "mode": "watch"}, payload, headers, 100)
+        self.assertEqual(calls[0].headers["apns-topic"], self.config.topic + ".watchkitapp")
 
     def test_environment_mismatch_never_contacts_apple(self):
         def forbidden(_):

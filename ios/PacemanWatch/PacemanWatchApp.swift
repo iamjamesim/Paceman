@@ -1,11 +1,12 @@
 import SwiftUI
 import WatchConnectivity
+import WatchKit
 import WidgetKit
 
 @main
 struct PacemanWatchApp: App {
-    @StateObject private var store = WatchAllowanceStore()
-    @Environment(\.scenePhase) private var scenePhase
+    @WKApplicationDelegateAdaptor(WatchPushDelegate.self) private var pushDelegate
+    @StateObject private var store = WatchAllowanceStore.shared
     // Ayu dark is the iPhone app's default glance palette.
     private let accent = Color(red: 1, green: 0.8, blue: 0.4)
 
@@ -27,9 +28,6 @@ struct PacemanWatchApp: App {
                     .padding(.vertical, 4)
                 }
                 .id(store.allowance.map { $0.available(at: context.date) ? "reading" : "expired" } ?? "setup")
-            }
-            .onChange(of: scenePhase, initial: true) { _, phase in
-                if phase == .active { store.requestRefreshIfNeeded() }
             }
         }
     }
@@ -100,10 +98,31 @@ struct PacemanWatchApp: App {
     }
 }
 
+final class WatchPushDelegate: NSObject, WKApplicationDelegate {
+    func applicationDidFinishLaunching() {
+        WKApplication.shared().registerForRemoteNotifications()
+    }
+
+    func didRegisterForRemoteNotifications(withDeviceToken deviceToken: Data) {
+        WatchAllowanceStore.shared.publishPushToken(deviceToken)
+    }
+
+    func didReceiveRemoteNotification(_ userInfo: [AnyHashable: Any],
+                                      fetchCompletionHandler completionHandler: @escaping (WKBackgroundFetchResult) -> Void) {
+        guard userInfo["schema"] as? Int == 1,
+              let message = userInfo["allowance"] as? [String: Any] else {
+            completionHandler(.noData)
+            return
+        }
+        let accepted = WatchAllowanceStore.shared.receive(["schema": 1].merging(message) { _, new in new })
+        completionHandler(accepted ? .newData : .noData)
+    }
+}
+
 final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
+    static let shared = WatchAllowanceStore()
     @Published private(set) var allowance = WatchAllowanceSnapshot.load()
-    private var refreshPending = false
-    private var lastRefreshRequest: Date?
+    private var pushTokenMessage: [String: Any]?
 
     override init() {
         super.init()
@@ -112,51 +131,65 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
         WCSession.default.activate()
     }
 
-    func requestRefreshIfNeeded() {
-        let now = Date()
-        guard allowance.map({ now.timeIntervalSince1970 - $0.updatedAt > 300 }) ?? true,
-              lastRefreshRequest.map({ now.timeIntervalSince($0) > 60 }) ?? true else { return }
-        refreshPending = true
-        sendRefreshRequest()
+    func publishPushToken(_ data: Data) {
+        guard let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
+              ["development", "production"].contains(environment) else { return }
+        pushTokenMessage = ["schema": 1, "watchPushToken": data.map { String(format: "%02x", $0) }.joined(),
+                            "environment": environment]
+        sendPushToken()
     }
 
-    private func sendRefreshRequest() {
-        guard refreshPending, WCSession.isSupported() else { return }
+    private func sendPushToken() {
+        guard let message = pushTokenMessage, WCSession.isSupported() else { return }
         let session = WCSession.default
-        guard session.activationState == .activated, session.isReachable else { return }
-        refreshPending = false
-        lastRefreshRequest = Date()
-        session.sendMessage(["schema": 1, "request": "refreshAllowance"], replyHandler: { _ in }) { [weak self] _ in
-            DispatchQueue.main.async { self?.refreshPending = true }
+        guard session.activationState == .activated else { return }
+        if !NSDictionary(dictionary: session.applicationContext).isEqual(to: message) {
+            try? session.updateApplicationContext(message)
         }
+        if session.isReachable { session.sendMessage(message, replyHandler: nil, errorHandler: nil) }
     }
 
-    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
-        guard applicationContext["schema"] as? Int == 1 else { return }
+    @discardableResult
+    func receive(_ message: [String: Any]) -> Bool {
+        guard message["schema"] as? Int == 1 else { return false }
+        if message["clear"] as? Bool == true {
+            guard WatchAllowanceSnapshot.load() != nil else { return false }
+            WatchAllowanceSnapshot.save(nil)
+            WidgetCenter.shared.reloadTimelines(ofKind: "PacemanAllowance")
+            WidgetCenter.shared.reloadTimelines(ofKind: "PacemanReset")
+            DispatchQueue.main.async { self.allowance = nil }
+            return true
+        }
         let value: WatchAllowanceSnapshot?
-        if let provider = applicationContext["provider"] as? String,
-           let remaining = applicationContext["remaining"] as? Int,
-           let window = applicationContext["window"] as? Int,
-           let updatedAt = applicationContext["updatedAt"] as? Double,
-           let resetsAt = applicationContext["resetsAt"] as? Double {
+        if let provider = message["provider"] as? String,
+           let remaining = message["remaining"] as? Int,
+           let window = message["window"] as? Int,
+           let updatedAt = message["updatedAt"] as? Double,
+           let resetsAt = message["resetsAt"] as? Double {
             value = WatchAllowanceSnapshot(provider: provider, remaining: remaining, window: window,
                                            updatedAt: updatedAt, resetsAt: resetsAt,
-                                           windowDurationMins: applicationContext["windowDurationMins"] as? Int)
+                                           windowDurationMins: message["windowDurationMins"] as? Int)
         } else {
             value = nil
         }
+        if value == nil { return false }
         let accepted = value?.valid == true ? value : nil
+        if value != nil && accepted == nil { return false }
+        if let accepted, accepted.updatedAt > Date().timeIntervalSince1970 + 60 { return false }
         if let accepted, let previous = WatchAllowanceSnapshot.load(),
-           accepted.updatedAt < previous.updatedAt { return }
+           accepted.updatedAt < previous.updatedAt { return false }
+        if accepted == WatchAllowanceSnapshot.load() { return false }
         WatchAllowanceSnapshot.save(accepted)
         WidgetCenter.shared.reloadTimelines(ofKind: "PacemanAllowance")
         WidgetCenter.shared.reloadTimelines(ofKind: "PacemanReset")
         DispatchQueue.main.async {
             self.allowance = accepted
-            if let accepted, (0...300).contains(Date().timeIntervalSince1970 - accepted.updatedAt) {
-                self.refreshPending = false
-            }
         }
+        return true
+    }
+
+    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
+        _ = receive(applicationContext)
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
@@ -167,11 +200,11 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
                  error: Error?) {
         if activationState == .activated {
             self.session(session, didReceiveApplicationContext: session.receivedApplicationContext)
-            DispatchQueue.main.async { self.sendRefreshRequest() }
+            DispatchQueue.main.async { self.sendPushToken() }
         }
     }
 
     func sessionReachabilityDidChange(_ session: WCSession) {
-        DispatchQueue.main.async { self.sendRefreshRequest() }
+        DispatchQueue.main.async { self.sendPushToken() }
     }
 }

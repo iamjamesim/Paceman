@@ -110,6 +110,18 @@ def notification(source_id: str, generation: str, event: dict, now: float,
     return payload, headers
 
 
+def watch_allowance_notification(source_id: str, allowance: dict, now: float) -> tuple[dict, dict]:
+    """Quiet, bounded Watch data; the source snapshot is the same one the phone pulls."""
+    fields = ("provider", "remaining", "window", "windowDurationMins", "updatedAt", "resetsAt")
+    reading = {key: allowance[key] for key in fields if key in allowance}
+    return ({"aps": {"content-available": 1}, "schema": 1,
+             "allowance": reading},
+            {"apns-push-type": "background", "apns-priority": "5",
+             "apns-expiration": str(int(now + 3600)),
+             "apns-collapse-id": hashlib.sha256((source_id + "/allowance").encode()).hexdigest(),
+             "apns-id": str(uuid.uuid4())})
+
+
 LIVE_ALERT_SOUNDS = {"working": "PacemanWorking.wav", "needs_input": "PacemanInput.wav", "finished": "PacemanFinished.wav",
                      "failed": "PacemanFailed.wav"}
 
@@ -198,9 +210,12 @@ class APNs:
                                   algorithm="ES256", headers={"kid": self.config.key_id})
             self.issued_at = now
         host = "api.sandbox.push.apple.com" if self.config.environment == "development" else "api.push.apple.com"
+        topic = (self.config.topic + ".watchkitapp" if device.get("mode") == "watch"
+                 else self.config.topic + ".push-type.liveactivity" if device.get("mode") == "liveactivity"
+                 else self.config.topic)
         try:
             response = self.client.post("https://" + host + "/3/device/" + device["token"],
-                json=payload, headers={**headers, "apns-topic": self.config.topic + (".push-type.liveactivity" if device.get("mode") == "liveactivity" else ""),
+                json=payload, headers={**headers, "apns-topic": topic,
                                       "authorization": "bearer " + self.jwt})
         except httpx.HTTPError:
             return Result(0, "TransportError", headers["apns-id"])
@@ -225,7 +240,9 @@ class Worker:
     def step(self, now=None):
         now = time.time() if now is None else now
         self.store.tick(now)
-        self.step_live_activities(now)
+        snapshot = self.store.snapshot()
+        self.step_live_activities(now, snapshot)
+        self.step_watch_allowance(now, snapshot)
         source_id, generation = self.store.metadata("source_id"), self.store.metadata("generation")
         with self.store.connect() as db:
             # Appearance revisions must not generate activity alerts or hide pending activity.
@@ -278,8 +295,59 @@ class Worker:
                       "stage": "apns_accepted" if result.status == 200 else "apns_failed",
                       "status": result.status, "reason": result.reason, "apnsID": result.apns_id})
 
-    def step_live_activities(self, now):
-        snapshot = self.store.snapshot()
+    def step_watch_allowance(self, now, snapshot):
+        allowance = snapshot.get("allowance")
+        if (not isinstance(allowance, dict) or allowance.get("provider") != "codex"
+                or type(allowance.get("remaining")) is not int or not 0 <= allowance["remaining"] <= 100
+                or allowance.get("window") not in (1, 2)
+                or type(allowance.get("updatedAt")) is not int
+                or not 0 <= now - allowance["updatedAt"] <= 1800
+                or type(allowance.get("resetsAt")) is not int or allowance["resetsAt"] <= now
+                or type(allowance.get("windowDurationMins")) is not int
+                or not 1 <= allowance["windowDurationMins"] <= 10080):
+            return
+        fingerprint = json.dumps([allowance[key] for key in
+                                  ("provider", "remaining", "window", "windowDurationMins", "resetsAt")],
+                                 separators=(",", ":"))
+        with self.store.connect() as db:
+            devices = [dict(row) for row in db.execute(
+                "SELECT w.* FROM watch_push_devices w JOIN clients c ON w.client_id=c.id")]
+        for device in devices:
+            changed = fingerprint != device["last_fingerprint"]
+            # Stay within Apple's suggested two to three background pushes per hour.
+            # Re-send an unchanged reading so a throttled delivery can recover.
+            if now < device["next_attempt"] or (not changed and now - device["last_sent"] < 1500):
+                continue
+            with self.store.connect() as db:
+                current = db.execute("SELECT * FROM watch_push_devices WHERE client_id=?",
+                                     (device["client_id"],)).fetchone()
+            if current is None or dict(current) != device:
+                continue
+            payload, headers = watch_allowance_notification(snapshot["sourceID"], allowance, now)
+            result = self.sender.send({**device, "mode": "watch"}, payload, headers, now)
+            invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
+            accepted = result.status == 200
+            retryable = result.status in (0, 429, 500, 503) or result.reason in (
+                "ExpiredProviderToken", "EnvironmentMismatch") or result.status in (401, 403)
+            delay = (1200 if accepted else min(3600, 30 * 2 ** min(device["attempts"], 6))
+                     if retryable else 3600)
+            with self.store.connect() as db:
+                if invalid:
+                    db.execute("DELETE FROM watch_push_devices WHERE client_id=? AND token=?",
+                               (device["client_id"], device["token"]))
+                else:
+                    db.execute("UPDATE watch_push_devices SET last_fingerprint=?,last_sent=?,next_attempt=?,"
+                               "attempts=?,last_result=?,last_apns_id=? WHERE client_id=? AND token=?",
+                               (fingerprint if accepted else device["last_fingerprint"],
+                                now if accepted else device["last_sent"], now + delay,
+                                0 if accepted else device["attempts"] + 1, result.reason, result.apns_id,
+                                device["client_id"], device["token"]))
+            self.log({"at": now, "stage": "watch_allowance_accepted" if accepted else "watch_allowance_failed",
+                      "clientID": device["client_id"], "status": result.status, "reason": result.reason,
+                      "apnsID": result.apns_id})
+
+    def step_live_activities(self, now, snapshot=None):
+        snapshot = self.store.snapshot() if snapshot is None else snapshot
         with self.store.connect() as db:
             event = dict(db.execute("SELECT * FROM events WHERE kind='activity' ORDER BY seq DESC LIMIT 1").fetchone())
         self.step_live_starts(snapshot, now, event)

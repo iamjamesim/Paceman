@@ -188,6 +188,20 @@ final class SourceClient {
         }
     }
 
+    func registerWatchPush(_ source: PairedSource, token: String, environment: String) async throws {
+        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/watch-push"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token,
+                                                                      "environment": environment])
+        let data = try await response(request)
+        struct Registration: Decodable { let registered: Bool }
+        guard try JSONDecoder().decode(Registration.self, from: data).registered else {
+            throw HubError.message("The computer did not confirm Watch delivery")
+        }
+    }
+
     func registerLiveActivity(_ source: PairedSource, id: String, token: String, environment: String) async throws {
         try await liveActivityRequest(source, payload: ["activityID": id, "deviceToken": token, "environment": environment])
     }

@@ -51,6 +51,7 @@ class PairingTests(unittest.TestCase):
     def test_authenticated_repair_rotates_in_place_and_requires_new_push_registration(self):
         original = self.pair(self.device)
         self.store.push_device(original['credential'], {'deviceToken': 'ab' * 32, 'environment': 'development', 'mode': 'alert'})
+        self.store.watch_push_device(original['credential'], {'deviceToken': 'cd' * 32, 'environment': 'development'})
         renamed = {**self.device, 'name': 'My phone'}
         again = self.pair(renamed, original['credential'])
         self.assertEqual(original['clientID'], again['clientID'])
@@ -58,8 +59,22 @@ class PairingTests(unittest.TestCase):
         self.assertFalse(self.store.authorized(original['credential']))
         self.assertTrue(self.store.authorized(again['credential']))
         self.assertEqual(self.store.push_device(again['credential']), {'registered': False})
+        self.assertEqual(self.store.watch_push_device(again['credential']), {'registered': False})
         self.assertEqual(len(self.store.clients()), 1)
         self.assertEqual(self.store.clients()[0]['name'], 'My phone')
+
+    def test_watch_push_registration_requires_pairing_and_is_idempotent(self):
+        paired = self.pair(self.device)
+        payload = {'deviceToken': 'ab' * 32, 'environment': 'development'}
+        self.assertEqual(self.request('POST', '/v1/watch-push', payload)[0], 401)
+        self.assertEqual(self.request('POST', '/v1/watch-push', payload, paired['credential']),
+                         (200, {'registered': True}))
+        self.assertEqual(self.request('POST', '/v1/watch-push', payload, paired['credential']),
+                         (200, {'registered': True}))
+        self.assertEqual(self.request('POST', '/v1/watch-push',
+                                      {**payload, 'deviceToken': 'not-a-token'}, paired['credential'])[0], 400)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM watch_push_devices').fetchone()[0], 1)
 
     def test_claiming_an_installation_cannot_take_over_its_pairing_or_consume_code(self):
         first, attacker = self.pair(self.device), self.pair()

@@ -104,6 +104,11 @@ class Store:
                     client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
                     mode TEXT NOT NULL, cursor INTEGER NOT NULL, next_attempt REAL NOT NULL DEFAULT 0,
                     attempts INTEGER NOT NULL DEFAULT 0, last_result TEXT, last_apns_id TEXT);
+                CREATE TABLE IF NOT EXISTS watch_push_devices(
+                    client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
+                    last_fingerprint TEXT, last_sent REAL NOT NULL DEFAULT 0,
+                    next_attempt REAL NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
+                    last_result TEXT, last_apns_id TEXT);
             """)
             if "display_name" not in {row[1] for row in db.execute("PRAGMA table_info(clients)")}:
                 db.execute("ALTER TABLE clients ADD COLUMN display_name TEXT")
@@ -164,6 +169,7 @@ class Store:
                 client_id = previous[0]
                 db.execute("UPDATE clients SET hash=?,last_seen=0 WHERE id=?", (digest(credential), client_id))
                 db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
+                db.execute("DELETE FROM watch_push_devices WHERE client_id=?", (client_id,))
                 db.execute("DELETE FROM live_activities WHERE client_id=?", (client_id,))
                 db.execute("DELETE FROM live_activity_starts WHERE client_id=?", (client_id,))
             else:
@@ -199,6 +205,7 @@ class Store:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
+            db.execute("DELETE FROM watch_push_devices WHERE client_id=?", (client_id,))
             db.execute("DELETE FROM live_activities WHERE client_id=?", (client_id,))
             db.execute("DELETE FROM live_activity_starts WHERE client_id=?", (client_id,))
             db.execute("DELETE FROM client_devices WHERE client_id=?", (client_id,))
@@ -211,6 +218,7 @@ class Store:
             if client is None:
                 return False
             db.execute("DELETE FROM push_devices WHERE client_id=?", (client[0],))
+            db.execute("DELETE FROM watch_push_devices WHERE client_id=?", (client[0],))
             db.execute("DELETE FROM live_activities WHERE client_id=?", (client[0],))
             db.execute("DELETE FROM live_activity_starts WHERE client_id=?", (client[0],))
             db.execute("DELETE FROM client_devices WHERE client_id=?", (client[0],))
@@ -250,6 +258,29 @@ class Store:
             return {"registered": False}
         return {"registered": True, "environment": row["environment"], "mode": row["mode"],
                 "lastResult": row["last_result"], "lastAPNsID": row["last_apns_id"]}
+
+    def watch_push_device(self, credential: str, payload: dict | None = None) -> dict | None:
+        """A paired phone registers its companion Watch's silent push destination."""
+        if payload is not None and (not isinstance(payload, dict)
+                or not isinstance(payload.get("deviceToken"), str)
+                or not re.fullmatch(r"[0-9a-f]{32,512}", payload["deviceToken"])
+                or len(payload["deviceToken"]) % 2
+                or payload.get("environment") not in ("development", "production")):
+            raise ValueError("Invalid Watch push registration")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            client = db.execute("SELECT id FROM clients WHERE hash=?", (digest(credential),)).fetchone()
+            if not client:
+                return None
+            client_id = client[0]
+            if payload is not None:
+                old = db.execute("SELECT token,environment FROM watch_push_devices WHERE client_id=?",
+                                 (client_id,)).fetchone()
+                if old is None or (old["token"], old["environment"]) != (payload["deviceToken"], payload["environment"]):
+                    db.execute("INSERT OR REPLACE INTO watch_push_devices(client_id,token,environment) VALUES (?,?,?)",
+                               (client_id, payload["deviceToken"], payload["environment"]))
+            row = db.execute("SELECT * FROM watch_push_devices WHERE client_id=?", (client_id,)).fetchone()
+        return {"registered": row is not None}
 
     def live_activity(self, credential: str, payload: dict) -> dict | None:
         if not isinstance(payload, dict):
@@ -422,7 +453,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200 if value else 401, value or {"error": "unauthorized"})
             return
     def do_POST(self):
-        if self.path in ("/v1/push", "/v1/live-activity"):
+        if self.path in ("/v1/push", "/v1/live-activity", "/v1/watch-push"):
             prefix, _, token = self.headers.get("Authorization", "").partition(" ")
             if prefix != "Bearer" or not self.server.store.authorized(token):
                 self.reply(401, {"error": "unauthorized"})
@@ -433,6 +464,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError()
                 payload = json.loads(self.rfile.read(length))
                 value = (self.server.store.live_activity(token, payload) if self.path == "/v1/live-activity"
+                         else self.server.store.watch_push_device(token, payload) if self.path == "/v1/watch-push"
                          else self.server.store.push_device(token, payload))
                 self.reply(200 if value else 401, value or {"error": "unauthorized"})
             except (ValueError, AttributeError, TimeoutError):

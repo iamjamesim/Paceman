@@ -679,6 +679,23 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
+    func testWatchPushRegistrationIsIndependentOfPhoneNotificationChoice() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "source",
+                                  clientID: "client", credential: "secret")
+        let client = stubClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/v1/watch-push")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
+            let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
+            XCTAssertEqual(body["deviceToken"] as? String, String(repeating: "ab", count: 32))
+            XCTAssertEqual(body["environment"] as? String, "development")
+            XCTAssertNil(body["mode"])
+            return (200, Data(#"{"registered":true}"#.utf8))
+        }
+        try await client.registerWatchPush(source, token: String(repeating: "ab", count: 32),
+                                           environment: "development")
+    }
+
     func testRemovalIsSelfScopedAndAlreadyRevokedIsSuccess() async throws {
         let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "source", clientID: "client", credential: "secret")
         for code in [200, 401] {

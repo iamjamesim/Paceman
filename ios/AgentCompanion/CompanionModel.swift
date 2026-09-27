@@ -22,6 +22,8 @@ final class CompanionModel: ObservableObject {
     private var foreground = false
     private var watchRefreshPending = false
     private var watchRefreshScheduled = false
+    private var watchPushSyncing = false
+    private var watchPushSyncPending = false
     private var watchBackgroundTask = UIBackgroundTaskIdentifier.invalid
     private var fetchedUptimes: [String: TimeInterval] = [:]
     private var changeObserver: AnyCancellable?
@@ -85,12 +87,13 @@ final class CompanionModel: ObservableObject {
             Task { @MainActor in await self?.refreshAll(fromWatch: true) }
         }
         if !preview {
-            AppleWatchAllowanceBridge.shared.onRefreshRequested = { [weak self] in
-                Task { @MainActor in
-                    guard let self else { return }
-                    await self.refreshAll(fromWatch: true)
-                    AppleWatchAllowanceBridge.shared.resendCurrent()
-                }
+            AppleWatchAllowanceBridge.shared.onWatchPushToken = { [weak self] token, environment in
+                guard let self,
+                      Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String == environment else { return }
+                do {
+                    try Vault.save(token, key: "watch-apns-device-token")
+                    Task { await self.syncWatchPush() }
+                } catch { Diagnostics.shared.record("watch_push_token_store_failed") }
             }
         }
         weather.onChange = { [weak self] value, fahrenheit in self?.watch.setWeather(value, fahrenheit: fahrenheit) }
@@ -144,7 +147,10 @@ final class CompanionModel: ObservableObject {
         let value = watchAggregate
         if let value { watch.forward(value) }
         else { watch.clearSourceProfile() }
-        if !designPreview { AppleWatchAllowanceBridge.shared.update(value?.allowance) }
+        if !designPreview {
+            AppleWatchAllowanceBridge.shared.update(value?.allowance,
+                clear: pairedSources.allSatisfy { isRevoked($0.sourceID) })
+        }
     }
 
     @discardableResult
@@ -172,6 +178,7 @@ final class CompanionModel: ObservableObject {
             Diagnostics.shared.record("source_paired")
             monitoring.configure(sources: values)
             Task { await PushCoordinator.shared.sync() }
+            Task { await syncWatchPush() }
             return true
         } catch { status = error.localizedDescription; return false }
     }
@@ -205,6 +212,7 @@ final class CompanionModel: ObservableObject {
             MonitoringComputerName.remove(paired.sourceID)
             pairedSources = remaining
             PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
+            Task { await syncWatchPush() }
             forwardWatchAggregate()
             status = "Computer removed."
             return true
@@ -254,7 +262,28 @@ final class CompanionModel: ObservableObject {
                     catch { break }
                 }
             }
+            Task { await syncWatchPush() }
         }
+    }
+
+    private func syncWatchPush() async {
+        if watchPushSyncing { watchPushSyncPending = true; return }
+        guard let token = Vault.load(String.self, key: "watch-apns-device-token"),
+              let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
+              let source = pairedSources.first, !isRevoked(source.sourceID) else { return }
+        watchPushSyncing = true
+        defer {
+            watchPushSyncing = false
+            if watchPushSyncPending {
+                watchPushSyncPending = false
+                Task { await syncWatchPush() }
+            }
+        }
+        do {
+            // Pairing order is the allowance preference; only its first source pushes.
+            try await client.registerWatchPush(source, token: token, environment: environment)
+            Diagnostics.shared.record("watch_push_destination_registered")
+        } catch { Diagnostics.shared.record("watch_push_registration_failed") }
     }
 
     @discardableResult

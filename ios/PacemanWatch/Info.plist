@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
+    <key>APNSEnvironment</key><string>$(APNS_ENVIRONMENT)</string>
     <key>CFBundleDisplayName</key><string>Paceman</string>
     <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
@@ -10,6 +11,7 @@
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>4</string>
     <key>WKApplication</key><true/>
+    <key>UIBackgroundModes</key><array><string>remote-notification</string></array>
     <key>WKCompanionAppBundleIdentifier</key><string>com.apselabs.agentcompanion.prototype</string>
     <key>WKRunsIndependentlyOfCompanionApp</key><false/>
 </dict></plist>
