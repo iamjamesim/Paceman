@@ -21,7 +21,7 @@ struct MonitoringLiveActivity: Widget {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } compactLeading: {
-                PhoneMonitoringRobot(state: context.state.dominantState, animate: !context.isStale)
+                MonitoringRobot(state: context.state.dominantState, animate: !context.isStale)
                     .frame(width: 18, height: 18)
                     .foregroundStyle(context.isStale ? palette.muted : PhoneMonitoringStatusColor.color(for: context.state.dominantState, onDark: true, fallback: palette.muted))
             } compactTrailing: {
@@ -44,7 +44,7 @@ struct MonitoringLiveActivity: Widget {
                         .accessibilityLabel(context.state.title)
                 }
             } minimal: {
-                PhoneMonitoringRobot(state: context.state.dominantState, animate: !context.isStale)
+                MonitoringRobot(state: context.state.dominantState, animate: !context.isStale)
                     .frame(width: 18, height: 18)
                     .foregroundStyle(context.isStale ? palette.muted : PhoneMonitoringStatusColor.color(for: context.state.dominantState, onDark: true, fallback: palette.muted))
             }
@@ -58,21 +58,6 @@ struct MonitoringLiveActivity: Widget {
     }
 }
 
-/// The iPhone Live Activity uses the shared failure face; the custom watch
-/// renders the matching expression from its own font glyph.
-private struct PhoneMonitoringRobot: View {
-    let state: String
-    let animate: Bool
-
-    var body: some View {
-        if state == "failed" {
-            PacemanMark(expression: .failed)
-        } else {
-            MonitoringRobot(state: state, animate: animate)
-        }
-    }
-}
-
 private struct MonitoringLockScreen: View {
     let context: ActivityViewContext<MonitoringActivity>
     @Environment(\.activityFamily) private var activityFamily
@@ -81,6 +66,7 @@ private struct MonitoringLockScreen: View {
         Group {
             if activityFamily == .small {
                 MonitoringWatchCard(
+                    sourceID: context.attributes.sourceID,
                     name: MonitoringComputerName.displayName(sourceID: context.attributes.sourceID,
                         fallback: context.attributes.sourceName),
                     state: context.state, stale: context.isStale)
@@ -150,7 +136,7 @@ private struct MonitoringStateLine: View {
 
     var body: some View {
         HStack(spacing: compact ? 9 : 11) {
-            PhoneMonitoringRobot(state: state.dominantState, animate: !stale)
+            MonitoringRobot(state: state.dominantState, animate: !stale)
                 .frame(width: compact ? 25 : 31, height: compact ? 25 : 31)
                 .foregroundStyle(stale ? palette.muted : PhoneMonitoringStatusColor.color(for: state.dominantState, onDark: true, fallback: palette.muted))
                 .accessibilityHidden(true)

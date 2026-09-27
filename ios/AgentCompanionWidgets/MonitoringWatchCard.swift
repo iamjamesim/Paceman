@@ -1,48 +1,97 @@
 import SwiftUI
 
 /// The small ActivityKit family is the Apple Watch Smart Stack tile. Keep the
-/// computer and its current state readable in the 40 mm tile (152 × 69.5 pt).
+/// computer, current state, and one useful detail readable at 40 mm (152 × 69.5 pt).
 struct MonitoringWatchCard: View {
+    let sourceID: String
     let name: String
     let state: MonitoringActivity.ContentState
     let stale: Bool
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var palette: MonitoringPalette { ThemePreference.current.activity }
-    private var status: String { stale ? "Last known: \(state.title)" : state.title }
+    private var status: String {
+        guard stale else { return state.headline }
+        return state.sessionCount == 0 ? "Last: No activity" : "Last: \(state.headline)"
+    }
+    private var contextLabel: String? {
+        let providers = state.providers ?? MonitoringProviderCache.codes(
+            sourceID: sourceID, generation: state.generation, revision: state.revision)
+        let parts = [MonitoringActivity.ContentState.agentSummary(for: providers),
+                     state.workspaceLabel].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+    private var detail: String? {
+        if state.hasMixedStates { return compactSessionSummary }
+        let parts = [state.sessionCount > 1 ? "\(state.sessionCount) sessions" : nil,
+                     contextLabel].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+    private var compactSessionSummary: String {
+        let parts = [(state.needsInput, "input"), (state.failedCount, "failed"),
+                     (state.working, "working"), (state.finished, "finished")]
+            .filter { $0.0 > 0 }
+        let visible = parts.prefix(2).map { "\($0.0) \($0.1)" }.joined(separator: " · ")
+        let remaining = parts.dropFirst(2).reduce(0) { $0 + $1.0 }
+        return remaining > 0 ? "\(visible) +\(remaining)" : visible
+    }
+    private var accessibilityDescription: String {
+        let suffix = stale
+            ? ", last updated \(Date(timeIntervalSince1970: state.observedAt).formatted())"
+            : (state.hasMixedStates ? state.sessionSummary : detail).map { ", \($0)" } ?? ""
+        let spokenStatus = stale ? "Last known: \(state.headline)" : status
+        return "\(name), \(spokenStatus)\(suffix)"
+    }
 
     var body: some View {
-        HStack(spacing: 7) {
-            if !dynamicTypeSize.isAccessibilitySize {
-                MonitoringRobot(state: state.dominantState, animate: !stale)
-                    .frame(width: 23, height: 23)
-                    .foregroundStyle(stale ? palette.muted : palette.robotColor(for: state.dominantState))
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(.system(.caption2, design: .rounded, weight: .medium))
-                    .foregroundStyle(palette.ink.opacity(0.82))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(name.replacingOccurrences(of: "-", with: " "))
+                .font(.system(.caption2, design: .rounded, weight: .medium))
+                .foregroundStyle(palette.ink.opacity(0.82))
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            HStack(spacing: 6) {
+                if !dynamicTypeSize.isAccessibilitySize {
+                    MonitoringRobot(state: state.dominantState, animate: !stale)
+                        .frame(width: 20, height: 20)
+                        .foregroundStyle(stale ? palette.muted : PhoneMonitoringStatusColor.color(
+                            for: state.dominantState, onDark: true, fallback: palette.muted))
+                }
                 Text(status)
-                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                    .foregroundStyle(stale ? palette.muted : palette.headlineColor(for: state.dominantState))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-                if !stale && state.hasMixedStates {
-                    Text("\(state.sessionCount) sessions")
-                        .font(.system(.caption2, design: .rounded, weight: .medium))
+                    .font(.system(.headline, design: .rounded, weight: .semibold))
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                    .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.75)
+                    .foregroundStyle(stale ? palette.muted : PhoneMonitoringStatusColor.color(
+                        for: state.dominantState, onDark: true, fallback: palette.ink))
+            }
+
+            if !dynamicTypeSize.isAccessibilitySize {
+                if stale {
+                    HStack(spacing: 3) {
+                        Text("Updated")
+                        Text(Date(timeIntervalSince1970: state.observedAt), style: .relative)
+                    }
+                    .lineLimit(1)
+                    .font(.system(.caption2, design: .rounded, weight: .regular))
+                    .foregroundStyle(palette.muted)
+                } else if let detail {
+                    Text(detail)
+                        .font(.system(.caption2, design: .rounded, weight: .regular))
                         .foregroundStyle(palette.muted)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.leading, 8)
         .padding(.trailing, 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(name), \(status)\(!stale && state.hasMixedStates ? ", \(state.sessionCount) sessions" : "")")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
+        // The fixed-height small family cannot display AX3+ text; VoiceOver
+        // still announces the full name, state, and detail.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
     }
 }
 
@@ -71,11 +120,20 @@ struct MonitoringRobot: View {
     var body: some View {
         Group {
             if state == "idle" { Image(systemName: "minus").resizable().scaledToFit() }
-            else { PacemanMark(expression: state == "finished" ? .finished : state == "needs_input" ? .needsInput : .neutral) }
+            else { PacemanMark(expression: expression) }
         }
         .id(state)
         .transition(stateTransition)
         .accessibilityHidden(true)
+    }
+
+    private var expression: PacemanExpression {
+        switch state {
+        case "needs_input": .needsInput
+        case "finished": .finished
+        case "failed": .failed
+        default: .neutral
+        }
     }
 }
 
@@ -117,7 +175,7 @@ private struct MonitoringRobotMotion: ViewModifier, Animatable {
 
 #if DEBUG
 #Preview("Stale 40 mm Watch tile") {
-    MonitoringWatchCard(name: "MacBook Pro",
+    MonitoringWatchCard(sourceID: "preview", name: "MacBook Pro",
         state: MonitoringActivity.ContentState(generation: "preview", revision: 1, state: "preview",
             working: 1, needsInput: 0, finished: 0,
             observedAt: Date().addingTimeInterval(-600).timeIntervalSince1970,

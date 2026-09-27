@@ -59,16 +59,20 @@ share one color per state: green for Working, orange amber for Needs input, red
 for Failed, and blue for Finished. That mapping also appears on Home, so the
 compact Dynamic Island robot carries the state without supporting text. The
 failure face has crossed eyes; stale content is muted.
-The Apple Watch Smart Stack tile retains its existing theme palette. The header names the
-computer using the phone's display name (the source-reported name unless renamed
-on the phone) and shows a count only when there is
-more than one session. The headline names the dominant state without repeating
-the count, giving pending user input priority over a failed turn, then work. A fresh
-activity names its known agent type and, when unambiguous,
-the workspace below the headline. A mixed-state activity also shows its
-distribution as lights and counts. Stale
-activity instead shows its last update
-time. The expanded Island uses
+The Apple Watch Smart Stack tile uses the selected dark theme surface and the
+same state-colored robot and headline as the iPhone Live Activity. The computer
+name sits above the robot and dominant state. The name is Caption 2 medium, the
+status Headline semibold beside a 20-point robot, and the supporting line Caption 2
+regular. The third line names the known agent/workspace, gives the session count,
+or summarizes a mixed distribution. When more than two state categories exist, it
+shows the two highest-priority counts and the number of other sessions; the
+accessibility label reads the complete distribution. Indicator lights are omitted
+because they would displace the written counts in the smallest tile. Stale
+activity uses the short `Last:` prefix and shows its last update time; VoiceOver
+says "Last known." At accessibility text sizes the tile keeps computer and status
+visible, omits the third line and
+robot, and caps the rendered font at Accessibility 2 to fit its fixed height;
+VoiceOver retains the complete details. The expanded Island uses
 its full-width bottom region for that same hierarchy so ordinary computer
 names do not get confined beside the camera. When content is stale, the compact
 Island shows a muted robot and a clock; expanded and Lock Screen views say Last known and show the
@@ -118,15 +122,14 @@ authorization. Keep duplicate attention behavior under review: ordinary
 needs-input/finished notifications currently coexist with quiet ActivityKit
 updates, while a remote start necessarily includes an alert.
 
-The Smart Stack Live Activity uses the small ActivityKit family to show the
-computer name and current state; mixed activity also shows the total session
-count. A stale tile says `Last known`. A layout review rendered working,
-needs-input, finished, empty, mixed, large-count, stale, and long-name states
-at the 40, 41, 44, 45, and 49 mm widget dimensions, with the accessibility
-layout branch checked at the smallest and largest dimensions. The iOS
-widget build passed. These renders use the same SwiftUI card in a local Mac
-harness; a watchOS simulator runtime was not installed, so real Smart Stack
-appearance and delivery on a paired Apple Watch still need confirmation.
+The Smart Stack Live Activity uses the small ActivityKit family. The revised
+[three-line card](../reviews/watch-live-activity-2026-09-26.png) was rendered
+from its SwiftUI view at the 40 mm tile dimensions
+for working, needs input, failed, finished, empty, two working, mixed, large-count
+mixed, stale, and long-name states. Accessibility 2 and Accessibility 5 (capped
+for display) were also checked, including a long name. The iOS widget build
+passed. These are local Mac harness renders; real Smart Stack appearance and
+delivery on a paired Apple Watch still need confirmation.
 
 ## Direct APNs alpha
 

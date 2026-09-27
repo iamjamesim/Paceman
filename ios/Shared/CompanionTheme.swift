@@ -189,8 +189,8 @@ struct MonitoringPalette {
     }
 }
 
-/// Phone and iPhone Live Activity status colors. The Watch Smart Stack tile
-/// continues to use the theme's activity palette.
+/// Shared iPhone and Apple Watch Live Activity state colors. Supporting text
+/// and the tile surface continue to use the selected theme's activity palette.
 enum PhoneMonitoringStatusColor {
     // Brighter marks sit on the dark Live Activity; deeper tones keep status
     // text legible on light Home themes without changing the state hue.
