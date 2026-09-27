@@ -84,6 +84,15 @@ final class CompanionModel: ObservableObject {
         watch.onWatchEvent = { [weak self] in
             Task { @MainActor in await self?.refreshAll(fromWatch: true) }
         }
+        if !preview {
+            AppleWatchAllowanceBridge.shared.onRefreshRequested = { [weak self] in
+                Task { @MainActor in
+                    guard let self else { return }
+                    await self.refreshAll(fromWatch: true)
+                    AppleWatchAllowanceBridge.shared.resendCurrent()
+                }
+            }
+        }
         weather.onChange = { [weak self] value, fahrenheit in self?.watch.setWeather(value, fahrenheit: fahrenheit) }
         if !preview { weather.bind(watchID: watch.preferenceID, updates: watch.updatesEnabled) }
         forwardWatchAggregate()

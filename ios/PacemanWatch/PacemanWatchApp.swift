@@ -5,6 +5,7 @@ import WidgetKit
 @main
 struct PacemanWatchApp: App {
     @StateObject private var store = WatchAllowanceStore()
+    @Environment(\.scenePhase) private var scenePhase
     // Ayu dark is the iPhone app's default glance palette.
     private let accent = Color(red: 1, green: 0.8, blue: 0.4)
 
@@ -26,6 +27,9 @@ struct PacemanWatchApp: App {
                     .padding(.vertical, 4)
                 }
                 .id(store.allowance.map { $0.available(at: context.date) ? "reading" : "expired" } ?? "setup")
+            }
+            .onChange(of: scenePhase, initial: true) { _, phase in
+                if phase == .active { store.requestRefreshIfNeeded() }
             }
         }
     }
@@ -98,12 +102,33 @@ struct PacemanWatchApp: App {
 
 final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var allowance = WatchAllowanceSnapshot.load()
+    private var refreshPending = false
+    private var lastRefreshRequest: Date?
 
     override init() {
         super.init()
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
         WCSession.default.activate()
+    }
+
+    func requestRefreshIfNeeded() {
+        let now = Date()
+        guard allowance.map({ now.timeIntervalSince1970 - $0.updatedAt > 300 }) ?? true,
+              lastRefreshRequest.map({ now.timeIntervalSince($0) > 60 }) ?? true else { return }
+        refreshPending = true
+        sendRefreshRequest()
+    }
+
+    private func sendRefreshRequest() {
+        guard refreshPending, WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isReachable else { return }
+        refreshPending = false
+        lastRefreshRequest = Date()
+        session.sendMessage(["schema": 1, "request": "refreshAllowance"], replyHandler: { _ in }) { [weak self] _ in
+            DispatchQueue.main.async { self?.refreshPending = true }
+        }
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
@@ -121,16 +146,32 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
             value = nil
         }
         let accepted = value?.valid == true ? value : nil
+        if let accepted, let previous = WatchAllowanceSnapshot.load(),
+           accepted.updatedAt < previous.updatedAt { return }
         WatchAllowanceSnapshot.save(accepted)
         WidgetCenter.shared.reloadTimelines(ofKind: "PacemanAllowance")
         WidgetCenter.shared.reloadTimelines(ofKind: "PacemanReset")
-        DispatchQueue.main.async { self.allowance = accepted }
+        DispatchQueue.main.async {
+            self.allowance = accepted
+            if let accepted, (0...300).contains(Date().timeIntervalSince1970 - accepted.updatedAt) {
+                self.refreshPending = false
+            }
+        }
+    }
+
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        self.session(session, didReceiveApplicationContext: message)
     }
 
     func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState,
                  error: Error?) {
         if activationState == .activated {
             self.session(session, didReceiveApplicationContext: session.receivedApplicationContext)
+            DispatchQueue.main.async { self.sendRefreshRequest() }
         }
+    }
+
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        DispatchQueue.main.async { self.sendRefreshRequest() }
     }
 }
