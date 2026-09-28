@@ -682,7 +682,7 @@ void watch_ui_show_pairing(uint32_t passkey)
     lv_obj_set_style_text_letter_space(pin, 2, 0);
     lv_obj_set_pos(pin, SAFE_INLINE, 205);
 
-    lv_obj_t *hint = make_label(screen, "ENTER CODE ON DESKTOP", &jetbrains_mono_27);
+    lv_obj_t *hint = make_label(screen, "ENTER CODE ON PHONE", &jetbrains_mono_27);
     lv_obj_set_style_text_letter_space(hint, 1, 0);
     lv_obj_set_pos(hint, SAFE_INLINE, 283);
     present_screen_locked();
@@ -705,7 +705,7 @@ void watch_ui_show_time_unavailable(void)
     lv_obj_set_size(clock, 310, 114);
     lv_obj_set_pos(clock, SAFE_INLINE - 8, 174);
 
-    lv_obj_t *hint = make_label(screen, "CONNECT TO OMARCHY", &jetbrains_mono_27);
+    lv_obj_t *hint = make_label(screen, "WAITING FOR PHONE", &jetbrains_mono_27);
     lv_obj_set_style_text_letter_space(hint, 1, 0);
     lv_obj_set_pos(hint, SAFE_INLINE, 318);
     present_screen_locked();

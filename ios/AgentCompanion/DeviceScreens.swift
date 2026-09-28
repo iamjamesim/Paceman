@@ -276,7 +276,7 @@ struct WatchDetail: View {
             }
             if !inProgress {
                 DisclosureGroup("Watch paired elsewhere?") {
-                    Text("Remove or forget the watch on that device. Then ask your agent to erase its flash and install the Paceman firmware again. An ordinary reflash keeps the old pairing.")
+                    Text("Ask your agent to erase the watch’s flash and reinstall the Paceman Watch firmware. The watch will then show a new setup code.")
                         .font(.footnote).foregroundStyle(theme.secondaryInk).padding(.top, 8)
                 }.font(.footnote).padding(.top, 12)
             }
