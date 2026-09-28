@@ -172,7 +172,7 @@ class OmarchyTests(unittest.TestCase):
     def test_allowance_update_does_not_repeat_pending_push(self):
         import datetime as dt
         pair = self.store.redeem(self.store.invite('https://test.example')['invitation'], device=device())
-        self.store.push_device(pair['credential'], dict(deviceToken='ab'*32, environment='development', mode='alert'))
+        self.store.push_device(pair['credential'], dict(deviceToken='ab'*32, environment='development'))
         event = self.event('needs-input')
         sender = FakeSender()
         worker = Worker(self.store, sender, self.root / 'push.jsonl')

@@ -10,7 +10,7 @@ private Tailscale HTTPS to a service bound to `127.0.0.1`.
 
 | Route | What it does |
 | --- | --- |
-| `POST /v1/pair` | Redeems a five-minute, single-use invitation. Returns `schema`, `sourceID`, `clientID`, `credential`, and `clientManagement: 1`. |
+| `POST /v1/pair` | Redeems a five-minute, single-use invitation. Returns `schema`, `sourceID`, `clientID`, and `credential`. |
 | `GET /v1/snapshot` | Returns the current snapshot with `Authorization: Bearer CREDENTIAL`. Reading it does not acknowledge activity. |
 | `DELETE /v1/client` | Revokes the caller's credential and push destinations. The caller cannot name another client. |
 
@@ -61,9 +61,10 @@ idle. See [Mac, Omarchy, and APNs payload examples](protocol-examples.md).
 
 ## Notifications and watch
 
-`POST /v1/push` registers one alert destination for a paired client; `GET` reports
-registration without exposing its token, and `DELETE` removes it. Registration
-currently requires `mode: "alert"`.
+`POST /v1/push` takes an APNs `deviceToken`, `environment` (`development` or
+`production`), and optional `displayName`. It registers one alert destination
+for a paired client; `GET` reports registration without exposing its token, and
+`DELETE` removes it.
 `POST /v1/live-activity` registers that client's ActivityKit destinations.
 These direct APNs routes are private alpha endpoints; a public release needs a
 key-safe relay.

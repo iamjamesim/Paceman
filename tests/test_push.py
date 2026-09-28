@@ -44,9 +44,18 @@ class PushWorkerTests(unittest.TestCase):
             columns = {row[1] for row in db.execute("PRAGMA table_info(clients)")}
         self.assertIn("display_name", columns)
 
-    def register(self, mode="alert"):
+    def test_existing_push_registration_survives_mode_column_removal(self):
+        with self.store.connect() as db:
+            db.execute("ALTER TABLE push_devices ADD COLUMN mode TEXT NOT NULL DEFAULT 'alert'")
+        reopened = Store(self.store.path)
+        with reopened.connect() as db:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(push_devices)")}
+        self.assertNotIn("mode", columns)
+        self.assertTrue(reopened.push_device(self.client["credential"])["registered"])
+
+    def register(self):
         return self.store.push_device(self.client["credential"], {
-            "deviceToken": self.device_token, "environment": "development", "mode": mode})
+            "deviceToken": self.device_token, "environment": "development"})
 
     def emit(self, state, at=100):
         revision = self.store.emit(state)
@@ -89,9 +98,9 @@ class PushWorkerTests(unittest.TestCase):
     def test_phone_names_are_scoped_to_each_push_destination(self):
         other = self.pair()
         self.store.push_device(self.client["credential"], {"deviceToken": self.device_token,
-            "environment": "development", "mode": "alert", "displayName": "Studio Mac"})
+            "environment": "development", "displayName": "Studio Mac"})
         self.store.push_device(other["credential"], {"deviceToken": "cd" * 32,
-            "environment": "development", "mode": "alert", "displayName": "Travel Mac"})
+            "environment": "development", "displayName": "Travel Mac"})
         revision = self.emit("needs_input")
         with self.store.connect() as db:
             db.execute("UPDATE events SET payload=? WHERE seq=?",
@@ -100,7 +109,7 @@ class PushWorkerTests(unittest.TestCase):
         bodies = {call[0]["token"]: call[1]["aps"]["alert"]["body"] for call in self.sender.calls}
         self.assertEqual(bodies, {self.device_token: "Studio Mac", "cd" * 32: "Travel Mac"})
         self.store.push_device(self.client["credential"], {"deviceToken": self.device_token,
-            "environment": "development", "mode": "alert", "displayName": ""})
+            "environment": "development", "displayName": ""})
         self.assertEqual(self.store.push_device(other["credential"])["registered"], True)
         with self.store.connect() as db:
             names = dict(db.execute("SELECT id,display_name FROM clients"))
@@ -231,10 +240,6 @@ class PushWorkerTests(unittest.TestCase):
                                        ("source-a", "generation-b"))
         }
         self.assertEqual(len(identities), 3)
-
-    def test_background_registration_is_rejected(self):
-        with self.assertRaises(ValueError):
-            self.register("background")
 
     def test_expired_progress_is_dropped(self):
         self.emit("working", 100)

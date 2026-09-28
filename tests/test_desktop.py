@@ -85,7 +85,7 @@ class DesktopStatusTests(unittest.TestCase):
 
     def test_remove_access_works_while_paused_and_preserves_other_clients(self):
         first, second = [self.store.redeem(self.store.invite('https://test.example')['invitation'], device=device()) for _ in range(2)]
-        self.store.push_device(first['credential'], {'deviceToken': 'ab' * 32, 'environment': 'development', 'mode': 'alert'})
+        self.store.push_device(first['credential'], {'deviceToken': 'ab' * 32, 'environment': 'development'})
         (self.root / 'sharing-paused').write_text('{}')
         with patch('desktop.control.state_directory', return_value=self.root), patch('desktop.control.status_path', return_value=self.root / 'absent'):
             status = remove_access(first['clientID'])

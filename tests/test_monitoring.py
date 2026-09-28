@@ -45,7 +45,7 @@ class MonitoringTests(unittest.TestCase):
                              ('activity-1', 7, 0))
 
     def test_registration_is_independent_and_removal_is_scoped(self):
-        self.store.push_device(self.credential, {'deviceToken': 'cd'*32, 'environment': 'development', 'mode': 'alert'})
+        self.store.push_device(self.credential, {'deviceToken': 'cd'*32, 'environment': 'development'})
         self.register()
         self.store.live_activity(self.credential, {'activityID': 'older-activity', 'action': 'remove'})
         self.worker.step()
@@ -138,7 +138,7 @@ class MonitoringTests(unittest.TestCase):
     def test_live_attention_owns_one_phone_sound_and_watch_entry_stays_passive(self):
         now = time.time()
         self.store.push_device(self.credential, {'deviceToken': 'cd' * 32,
-            'environment': 'development', 'mode': 'alert'})
+            'environment': 'development'})
         self.store.emit('working')
         self.register()
         self.worker.step(now)
@@ -160,12 +160,12 @@ class MonitoringTests(unittest.TestCase):
         class LiveFailureSender(FakeSender):
             def send(self, device, payload, headers, now):
                 self.calls.append((device, payload, headers, now))
-                return (Result(503, 'ServiceUnavailable', 'failed') if device['mode'] == 'liveactivity'
+                return (Result(503, 'ServiceUnavailable', 'failed') if device.get('mode') == 'liveactivity'
                         else Result(200, 'Accepted', 'ordinary'))
 
         now = time.time()
         self.store.push_device(self.credential, {'deviceToken': 'cd' * 32,
-            'environment': 'development', 'mode': 'alert'})
+            'environment': 'development'})
         self.register()
         self.store.emit('needs_input')
         sender = LiveFailureSender()
@@ -179,7 +179,7 @@ class MonitoringTests(unittest.TestCase):
     def test_remote_start_sound_is_not_replayed_when_update_token_arrives(self):
         now = time.time()
         self.store.push_device(self.credential, {'deviceToken': 'ef' * 32,
-            'environment': 'development', 'mode': 'alert'})
+            'environment': 'development'})
         self.store.live_activity(self.credential, {'action': 'register-start',
             'deviceToken': 'cd' * 32, 'environment': 'development'})
         self.store.emit('failed')

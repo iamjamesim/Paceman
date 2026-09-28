@@ -50,7 +50,7 @@ class PairingTests(unittest.TestCase):
 
     def test_authenticated_repair_rotates_in_place_and_requires_new_push_registration(self):
         original = self.pair(self.device)
-        self.store.push_device(original['credential'], {'deviceToken': 'ab' * 32, 'environment': 'development', 'mode': 'alert'})
+        self.store.push_device(original['credential'], {'deviceToken': 'ab' * 32, 'environment': 'development'})
         self.store.watch_push_device(original['credential'], {'deviceToken': 'cd' * 32, 'environment': 'development'})
         renamed = {**self.device, 'name': 'My phone'}
         again = self.pair(renamed, original['credential'])
@@ -119,7 +119,7 @@ class PairingTests(unittest.TestCase):
     def test_self_removal_only_revokes_caller_and_clears_push_and_identity(self):
         own, other = self.pair(self.device), self.pair()
         for pair in (own, other):
-            self.store.push_device(pair['credential'], {'deviceToken': 'ab' * 32, 'environment': 'development', 'mode': 'alert'})
+            self.store.push_device(pair['credential'], {'deviceToken': 'ab' * 32, 'environment': 'development'})
         self.assertEqual(self.request('DELETE', '/v1/client')[0], 401)
         self.assertEqual(self.request('DELETE', '/v1/client', {'clientID': other['clientID']}, own['credential'])[0], 200)
         self.assertEqual(self.request('DELETE', '/v1/client', token=own['credential'])[0], 401)

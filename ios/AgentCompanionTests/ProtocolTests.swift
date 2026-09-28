@@ -319,9 +319,6 @@ final class ProtocolTests: XCTestCase {
         let receipt = PushRegistrationReceipt(sourceID: "source", clientID: "client",
                                               token: "token", environment: "development")
         XCTAssertTrue(receipt.matches(source: source, token: "token", environment: "development"))
-        var phoneReceipt = receipt
-        phoneReceipt.mode = "attention"
-        XCTAssertFalse(phoneReceipt.matches(source: source, token: "token", environment: "development"))
         XCTAssertFalse(receipt.matches(source: source, token: "new-token", environment: "development"))
         XCTAssertFalse(receipt.matches(source: source, token: "token", environment: "production"))
         XCTAssertFalse(receipt.matches(source: source, token: "token", environment: "development",
@@ -625,22 +622,21 @@ final class ProtocolTests: XCTestCase {
                 let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
                 XCTAssertEqual((body["device"] as? [String: String])?["installationID"], device.installationID)
                 return (200, try JSONSerialization.data(withJSONObject: ["schema": 1, "sourceID": id, "clientID": "client",
-                    "credential": "new-secret", "clientManagement": 1]))
+                    "credential": "new-secret"]))
             }
             let paired = try await client.pair(invitation, device: device, previous: previous)
             XCTAssertEqual(paired.credential, "new-secret")
         }
     }
 
-    func testPairingRejectsMissingOrUnsupportedClientManagement() async throws {
+    func testPairingRejectsUnsupportedSchema() async throws {
         let id = UUID().uuidString
         let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: id,
                                     invitation: String(repeating: "x", count: 43), expiresAt: Date().timeIntervalSince1970 + 300)
         let device = ClientDevice(installationID: UUID().uuidString, name: "Phone", platform: "ios")
-        for version in [nil, 0, 2] as [Int?] {
+        for version in [0, 2] {
             let client = stubClient { _ in
-                var response: [String: Any] = ["schema": 1, "sourceID": id, "clientID": "client", "credential": "secret"]
-                response["clientManagement"] = version
+                let response: [String: Any] = ["schema": version, "sourceID": id, "clientID": "client", "credential": "secret"]
                 return (200, try JSONSerialization.data(withJSONObject: response))
             }
             do {
@@ -659,7 +655,7 @@ final class ProtocolTests: XCTestCase {
                 XCTAssertEqual(request.url?.path, "/v1/push")
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
                 let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
-                XCTAssertEqual(body["mode"] as? String, "alert")
+                XCTAssertNil(body["mode"])
                 XCTAssertEqual(body["displayName"] as? String, "Studio Mac")
                 XCTAssertNil(body["presentation"])
                 return (200, try JSONSerialization.data(withJSONObject: ["registered": confirmed]))
@@ -682,7 +678,7 @@ final class ProtocolTests: XCTestCase {
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
             if request.httpMethod == "POST" {
                 let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
-                XCTAssertEqual(body["mode"] as? String, "alert")
+                XCTAssertNil(body["mode"])
                 return (200, Data(#"{"registered":true}"#.utf8))
             }
             XCTAssertEqual(request.httpMethod, "DELETE")

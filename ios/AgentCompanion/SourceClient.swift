@@ -129,10 +129,10 @@ final class SourceClient {
             request.setValue("Bearer \(previous.credential)", forHTTPHeaderField: "Authorization")
         }
         let data = try await response(request)
-        struct Redemption: Decodable { let schema: Int; let sourceID: String; let clientID: String; let credential: String; let clientManagement: Int? }
+        struct Redemption: Decodable { let schema: Int; let sourceID: String; let clientID: String; let credential: String }
         let result = try JSONDecoder().decode(Redemption.self, from: data)
         guard result.schema == 1, result.sourceID == invitation.sourceID,
-              !result.credential.isEmpty, result.clientManagement == 1 else {
+              !result.credential.isEmpty else {
             throw HubError.message("Unsupported pairing response. Update Paceman on this computer.")
         }
         return PairedSource(endpoint: origin, sourceID: result.sourceID,
@@ -179,7 +179,7 @@ final class SourceClient {
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token,
-            "environment": environment, "mode": "alert", "displayName": displayName ?? ""])
+            "environment": environment, "displayName": displayName ?? ""])
         let data = try await response(request)
         struct Registration: Decodable { let registered: Bool }
         let registration = try JSONDecoder().decode(Registration.self, from: data)
