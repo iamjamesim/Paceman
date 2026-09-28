@@ -144,8 +144,11 @@ struct WatchIntroduction: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("A purpose-built watch for agentic engineering")
                         .font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
-                    Text("See agent status and Codex usage limits at a glance, without the usual smartwatch distractions. Its open-source firmware is fully hackable, so you can ask your agent to customize the watch to your liking.")
-                        .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
+                    VStack(alignment: .leading, spacing: 8) {
+                        introBullet("See agent status and Codex usage limits at a glance.")
+                        introBullet("Avoid the usual smartwatch distractions.")
+                        introBullet("Ask your agent to customize its open-source, fully hackable firmware.")
+                    }
                     Text("Getting started")
                         .font(.title3.weight(.semibold)).padding(.top, 10)
                     Text("Get the Waveshare ESP32-S3 Touch AMOLED 2.06 board, then ask your agent to build and flash the Paceman Watch firmware.")
@@ -166,6 +169,14 @@ struct WatchIntroduction: View {
 
     private var boardLink: some View {
         resourceLink("ESP32-S3 board at Waveshare", url: "https://www.waveshare.com/product/esp32-s3-touch-amoled-2.06.htm")
+    }
+
+    private func introBullet(_ title: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("•").foregroundStyle(theme.tint)
+            Text(title).foregroundStyle(theme.secondaryInk)
+        }
+        .font(.body).lineSpacing(4)
     }
 
     private var firmwareLink: some View {
