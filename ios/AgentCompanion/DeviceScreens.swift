@@ -150,13 +150,8 @@ struct WatchIntroduction: View {
                         .font(.title3.weight(.semibold)).padding(.top, 10)
                     Text("Get the Waveshare ESP32-S3 Touch AMOLED 2.06 board, then ask your agent to build and flash the Paceman Watch firmware.")
                         .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
-                    Group {
-                        if typeSize.isAccessibilitySize {
-                            VStack(alignment: .leading, spacing: 2) { boardLink; firmwareLink }
-                        } else {
-                            HStack(spacing: 20) { boardLink; firmwareLink }
-                        }
-                    }.foregroundStyle(theme.tint)
+                    VStack(alignment: .leading, spacing: 2) { boardLink; firmwareLink }
+                        .foregroundStyle(theme.tint)
                     Text("Got a similar ESP32-S3 board? Your agent can adapt the firmware while preserving Paceman’s Bluetooth protocol.")
                         .font(.footnote).lineSpacing(3).foregroundStyle(theme.secondaryInk)
                 }
