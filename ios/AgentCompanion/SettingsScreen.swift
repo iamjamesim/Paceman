@@ -87,7 +87,7 @@ struct CompanionSettings: View {
             if !model.watch.paired {
                 Section {
                     NavigationLink(value: FeedDestination.watch) {
-                        Label("Paceman Watch", systemImage: "applewatch")
+                        Label("Paceman Watch", systemImage: "watch.analog")
                     }
                 } header: {
                     Text("Experimental")

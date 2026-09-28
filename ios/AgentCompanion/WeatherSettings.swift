@@ -93,7 +93,8 @@ struct WeatherSettings: View {
                     if weather.preferences.enabled { weather.choose(enabled: false) }
                     finishSetup?()
                 }
-                    .font(.subheadline).frame(maxWidth: .infinity, minHeight: 44)
+                    .font(.subheadline).foregroundStyle(theme.ink)
+                    .frame(maxWidth: .infinity, minHeight: 44)
             }
             .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
             .background(theme.canvas)
