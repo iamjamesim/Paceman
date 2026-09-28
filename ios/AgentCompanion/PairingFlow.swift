@@ -24,7 +24,7 @@ struct PairingFlow: View {
                     if reconnecting {
                         Text("Scanning a fresh QR code renews this phone’s access. Your watch stays paired.").font(.subheadline).foregroundStyle(theme.secondaryInk)
                     }
-                    Text("Keep Tailscale connected on both devices.").font(.subheadline).foregroundStyle(theme.secondaryInk)
+                    Text("Keep Tailscale connected on your phone and computer.").font(.subheadline).foregroundStyle(theme.secondaryInk)
                 }
                 if let parsed {
                     VStack(alignment: .leading, spacing: 16) {

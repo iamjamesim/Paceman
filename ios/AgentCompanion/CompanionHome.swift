@@ -75,15 +75,19 @@ struct CompanionHome: View {
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 3)) : AnyLayout(HStackLayout())
         return layout {
             if typeSize.isAccessibilitySize {
-                Text("Computers").font(.headline)
+                Text("Computers").font(.headline).accessibilityAddTraits(.isHeader)
             } else {
-                Eyebrow(text: "Computers", theme: theme)
+                Text("COMPUTERS")
+                    .font(.system(size: 12, weight: .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(theme.secondaryInk)
+                    .accessibilityAddTraits(.isHeader)
                 Spacer()
             }
             Button { open(.pairing) } label: {
-                Label("Connect", systemImage: "plus")
-                    .font(.subheadline.weight(.medium))
-                    .frame(minHeight: 44)
+                Image(systemName: "plus")
+                    .font(.system(size: 20, weight: .regular))
+                    .frame(width: 44, height: 44)
             }.buttonStyle(.plain).accessibilityLabel("Connect computer")
         }
     }
