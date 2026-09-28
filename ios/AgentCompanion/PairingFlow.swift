@@ -72,6 +72,7 @@ struct NotificationSetup: View {
     let theme: CompanionTheme
     var preview = false
     var done: (() -> Void)? = nil
+    var continueSetup: (() -> Void)? = nil
     @Environment(\.scenePhase) private var phase
     var body: some View {
         ScrollView {
@@ -115,7 +116,8 @@ struct NotificationSetup: View {
                     push.openSettings()
                 }
                     .allowsHitTesting(!preview)
-                CompanionButton(title: "Done", theme: theme, action: done)
+                CompanionButton(title: continueSetup == nil ? "Done" : "Continue", theme: theme,
+                                action: continueSetup ?? done)
                     .allowsHitTesting(!preview)
             }
         } else {

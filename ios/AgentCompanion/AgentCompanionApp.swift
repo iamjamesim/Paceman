@@ -29,7 +29,7 @@ struct AgentCompanionApp: App {
     }
 }
 
-enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, watchPairing, pairing, notifications, watchNotifications, watchTroubleshooting, settings, appearance, weather, diagnostics }
+enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, watchPairing, pairing, notifications, watchNotifications, watchWeatherSetup, watchTroubleshooting, settings, appearance, weather, diagnostics }
 
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
@@ -64,7 +64,11 @@ struct CompanionRoot: View {
                         }
                     case .pairing: PairingFlow(model: model, theme: theme, preview: presentation.preview)
                     case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview)
-                    case .watchNotifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview) { path = [] }
+                    case .watchNotifications:
+                        NotificationSetup(model: model, theme: theme, preview: presentation.preview,
+                                          done: { path = [] }, continueSetup: { path.append(.watchWeatherSetup) })
+                    case .watchWeatherSetup:
+                        WeatherSettings(weather: model.weather, theme: theme, finishSetup: { path = [] })
                     case .watchTroubleshooting: WatchUpdateTroubleshooting(model: model, theme: theme, preview: presentation.preview)
                     case .settings: CompanionSettings(model: model, presentation: presentation, theme: theme)
                     case .appearance: AppearanceSettings(model: model, presentation: presentation, theme: theme)
@@ -99,6 +103,12 @@ struct CompanionRoot: View {
             case "live-activities", "multi-live-activities", "live-activities-setup", "live-activities-off": path = [.liveActivities]
             case "pairing", "reconnect": path = [.pairing]
             case "watch-notifications": path = [.watchNotifications]
+            case "watch-weather-setup": path = [.watchWeatherSetup]
+            case "watch-weather-setup-current", "watch-weather-setup-place", "watch-weather-setup-denied":
+                #if DEBUG
+                model.weather.showPreview(presentation.previewScreen.replacingOccurrences(of: "watch-weather-setup-", with: "weather-"))
+                #endif
+                path = [.watchWeatherSetup]
             case "watch-troubleshooting": path = [.watchTroubleshooting]
             case "watch", "watch-setup": path = [.watch]
             case "watch-pairing": path = [.watch, .watchPairing]

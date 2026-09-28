@@ -5,6 +5,7 @@ import Combine
 struct WeatherSettings: View {
     @ObservedObject var weather: PhoneWeather
     let theme: CompanionTheme
+    var finishSetup: (() -> Void)? = nil
     @State private var choosingPlace = false
 
     private var location: String {
@@ -14,6 +15,10 @@ struct WeatherSettings: View {
     var body: some View {
         Form {
             Section {
+                if finishSetup != nil {
+                    Text("Choose your current location or a place to show weather on your watch.")
+                        .foregroundStyle(theme.secondaryInk)
+                }
                 Menu {
                     Button { weather.choose(enabled: false) } label: {
                         choice("Off", selected: !weather.preferences.enabled)
@@ -75,7 +80,16 @@ struct WeatherSettings: View {
             }
         }
         .scrollContentBackground(.hidden).background(theme.canvas).foregroundStyle(theme.ink)
-        .navigationTitle("Weather").navigationBarTitleDisplayMode(.inline).tint(theme.tint)
+        .navigationTitle(finishSetup == nil ? "Weather" : "Watch weather")
+        .navigationBarTitleDisplayMode(.inline).tint(theme.tint)
+        .safeAreaInset(edge: .bottom) {
+            if let finishSetup {
+                CompanionButton(title: weather.preferences.enabled ? "Finish setup" : "Skip weather",
+                                theme: theme, action: finishSetup)
+                    .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
+                    .background(theme.canvas)
+            }
+        }
         .sheet(isPresented: $choosingPlace) {
             WeatherPlaceSearch(weather: weather, theme: theme)
         }
