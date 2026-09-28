@@ -155,6 +155,43 @@ enum WatchConnectionPresentation: String {
 
 final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     static let service = CBUUID(string: "7f510001-1b15-4f0d-b7a5-4cf3a2c98ee1")
+    private static let pickerProductImage: UIImage = {
+        // AccessorySetupKit presents this artwork at up to 180 × 120 points.
+        // Render our own watch at 3× so the system sheet stays sharp.
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        format.scale = 3
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 180, height: 120), format: format).image { _ in
+            func rounded(_ rect: CGRect, radius: CGFloat, color: UIColor) {
+                color.setFill()
+                UIBezierPath(roundedRect: rect, cornerRadius: radius).fill()
+            }
+            let accent = UIColor(red: 1, green: 0.77, blue: 0.36, alpha: 1)
+            let muted = UIColor(red: 0.65, green: 0.66, blue: 0.65, alpha: 1)
+            rounded(CGRect(x: 75, y: 0, width: 30, height: 120), radius: 10,
+                    color: UIColor(red: 0.19, green: 0.21, blue: 0.20, alpha: 1))
+            rounded(CGRect(x: 50, y: 13, width: 80, height: 94), radius: 24,
+                    color: UIColor(red: 0.34, green: 0.37, blue: 0.34, alpha: 1))
+            rounded(CGRect(x: 55, y: 18, width: 70, height: 84), radius: 20,
+                    color: UIColor(red: 0.08, green: 0.10, blue: 0.14, alpha: 1))
+            let small = UIFont.monospacedSystemFont(ofSize: 6, weight: .medium)
+            ("MON 28 SEP" as NSString).draw(at: CGPoint(x: 65, y: 27),
+                withAttributes: [.font: small, .foregroundColor: muted])
+            ("10:08" as NSString).draw(at: CGPoint(x: 64, y: 44),
+                withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 17, weight: .regular),
+                                 .foregroundColor: accent])
+            rounded(CGRect(x: 64, y: 72, width: 52, height: 0.7), radius: 0.35,
+                    color: muted.withAlphaComponent(0.4))
+            rounded(CGRect(x: 65, y: 81, width: 9, height: 7), radius: 3, color: accent)
+            rounded(CGRect(x: 67, y: 83, width: 1, height: 1), radius: 0.5,
+                    color: UIColor(red: 0.08, green: 0.10, blue: 0.14, alpha: 1))
+            rounded(CGRect(x: 71, y: 83, width: 1, height: 1), radius: 0.5,
+                    color: UIColor(red: 0.08, green: 0.10, blue: 0.14, alpha: 1))
+            ("WORKING" as NSString).draw(at: CGPoint(x: 82, y: 80),
+                withAttributes: [.font: small, .foregroundColor: muted])
+        }
+        return image.withRenderingMode(.alwaysOriginal)
+    }()
     private let profileUUID = CBUUID(string: "7f510002-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private let identityUUID = CBUUID(string: "7f510003-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private let activityUUID = CBUUID(string: "7f510004-1b15-4f0d-b7a5-4cf3a2c98ee1")
@@ -183,6 +220,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private var central: CBCentralManager!
     private let setupSession = ASAccessorySession()
     private var setupSessionActive = false
+    private var accessoryWaitingForPickerDismissal: UUID?
     private var peripheral: CBPeripheral?
     private var activity: CBCharacteristic?
     private var profile: CBCharacteristic?
@@ -277,19 +315,33 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                     self.connect(identifier)
                 }
             case .accessoryAdded:
+                Diagnostics.shared.record("watch_picker_accessory_added")
                 self.configured = true
                 if let identifier = event.accessory?.bluetoothIdentifier {
                     self.paired = self.pairingReceipt?.bluetoothID == identifier && self.paired
                     self.pendingIdentifier = identifier
+                    self.accessoryWaitingForPickerDismissal = identifier
                     self.setupPhase = .connecting
-                    self.startPairingTimeout()
+                    self.status = "Finish setup in the iPhone sheet."
                     self.enabled = true
                     self.updatesEnabled = true
-                    self.connect(identifier)
                 }
             case .pickerDidDismiss:
-                if self.setupPhase == .selecting { self.setupPhase = .idle }
+                Diagnostics.shared.record("watch_picker_dismissed")
+                if let identifier = self.accessoryWaitingForPickerDismissal {
+                    self.accessoryWaitingForPickerDismissal = nil
+                    self.setupPhase = .connecting
+                    if self.central?.state == .poweredOff {
+                        self.status = "Waiting for Bluetooth access. Check that Bluetooth is on in iPhone Settings."
+                    } else {
+                        self.status = "Connecting to your watch…"
+                        self.startPairingTimeout()
+                    }
+                    self.connect(identifier)
+                } else if self.setupPhase == .selecting { self.setupPhase = .idle }
             case .pickerSetupFailed:
+                Diagnostics.shared.record("watch_picker_setup_failed")
+                self.setEnabled(false, userInitiated: true)
                 self.status = "Pairing did not finish. Keep your watch nearby and try again."
                 self.setupPhase = .failed
             case .accessoryRemoved:
@@ -298,6 +350,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                     self.finishRemoval(identifier)
                 }
             case .invalidated:
+                self.accessoryWaitingForPickerDismissal = nil
                 self.setupResolved = true
                 self.pickerReady = false
                 self.status = "Watch setup is unavailable. Reopen the app and try again."
@@ -348,6 +401,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     func addWatch() {
         guard pickerReady, !setupPhase.inProgress else { return }
+        accessoryWaitingForPickerDismissal = nil
         setupPhase = .selecting
         status = "Select your watch in the nearby-devices picker."
         let descriptor = ASDiscoveryDescriptor()
@@ -355,12 +409,13 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         // The shared suffix discovers watches with either the original or current BLE name.
         descriptor.bluetoothNameSubstring = "Watch"
         let item = ASPickerDisplayItem(name: "Paceman Watch",
-            productImage: UIImage(systemName: "applewatch")!, descriptor: descriptor)
+            productImage: Self.pickerProductImage, descriptor: descriptor)
         setupSession.showPicker(for: [item]) { [weak self] error in
             if error != nil {
                 DispatchQueue.main.async {
-                    self?.status = "Watch setup did not finish. Try again."
-                    self?.setupPhase = .failed
+                    guard let self, self.setupPhase == .selecting else { return }
+                    self.status = "Watch setup did not finish. Try again."
+                    self.setupPhase = .failed
                 }
             }
         }
@@ -440,6 +495,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         }
         if !value {
             pairingTimeout?.cancel()
+            accessoryWaitingForPickerDismissal = nil
             if setupPhase.inProgress { setupPhase = .idle }
             ready = false
             preparing = false
@@ -479,6 +535,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     private func connect(_ identifier: UUID) {
         pendingIdentifier = identifier
+        // AccessorySetupKit still owns setup until its sheet is dismissed.
+        guard accessoryWaitingForPickerDismissal == nil else { return }
         if central == nil { startBluetooth(); return }
         guard enabled, central.state == .poweredOn else { return }
         // A restored pending connection belongs to Core Bluetooth. Keep it alive:
@@ -562,13 +620,26 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             if central.state == .unknown || central.state == .resetting {
                 status = "Starting Bluetooth…"
             } else if !paired && setupPhase.inProgress {
-                stopForTerminalFailure(central.state == .unauthorized ? "Allow Bluetooth access for Paceman in iOS Settings, then try again." : "Turn on Bluetooth on your iPhone, then try again.")
+                if accessoryWaitingForPickerDismissal != nil || setupPhase == .selecting {
+                    status = "Finish setup in the iPhone sheet."
+                } else if central.state == .poweredOff {
+                    pairingTimeout?.cancel()
+                    pairingTimeout = nil
+                    status = "Waiting for Bluetooth access. Check that Bluetooth is on in iPhone Settings."
+                } else if central.state == .unauthorized {
+                    stopForTerminalFailure("Allow Bluetooth access for Paceman in iOS Settings, then try again.")
+                } else {
+                    stopForTerminalFailure("Bluetooth is unavailable on this iPhone.")
+                }
             } else {
                 status = central.state == .poweredOff ? "Turn on Bluetooth on your iPhone. Your watch pairing is saved."
                     : central.state == .unauthorized ? "Allow Bluetooth access for Paceman in iOS Settings."
                     : "Bluetooth is unavailable. Your watch pairing is saved."
             }
             return
+        }
+        if !paired && setupPhase == .connecting && pairingTimeout == nil {
+            startPairingTimeout()
         }
         if let identifier = pendingIdentifier ?? preferredAccessoryID { connect(identifier) }
     }

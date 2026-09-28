@@ -296,7 +296,7 @@ struct WatchDetail: View {
         switch phase {
         case .idle: return "Keep your Paceman Watch close to your iPhone. We'll look for it over Bluetooth."
         case .selecting: return "Choose Paceman Watch in the nearby-devices picker."
-        case .connecting: return "Connecting to your watch…"
+        case .connecting: return preview ? "Connecting to your watch…" : model.watch.status
         case .confirming: return "Enter the code shown on your watch if asked. Allow notification sharing so your watch can receive updates while the phone is locked."
         case .checking: return "Checking the connection…"
         case .failed: return preview ? "Keep your watch nearby with Bluetooth on, then try again." : model.watch.status
