@@ -45,18 +45,19 @@ A minimal Mac response looks like this (example IDs and times):
 
 | Field | Rule |
 | --- | --- |
-| `sourceID`, `generation` | Stable for one source database. Replacing the database requires new pairing; a process restart does not. |
+| `sourceID`, `generation` | Pairing identity and revision-sequence identity, respectively. Both persist for this database; replacing it requires new pairing, but a process restart does not. |
 | `state` | One of `idle`, `working`, `needs_input`, `finished`, `failed`. |
 | `revision` | Advances when activity or presentation data changes. The phone rejects an older revision within a generation. |
-| `eventID`, `changedAt` | Change only for a new activity event. An allowance or appearance update may raise `revision` without sending another alert. |
-| `observedAt`, `freshFor` | Observation time and freshness lease. Stale activity stays historical and cannot outrank fresh activity from another source. |
+| `eventID`, `changedAt` | Change only for a new activity event; `changedAt` is Unix seconds. An allowance or appearance update may raise `revision` without sending another alert. |
+| `observedAt`, `freshFor` | Source response time (Unix seconds) and freshness lease (seconds). They show service recency, not proof that an agent is alive. Stale activity cannot outrank fresh activity from another source. |
 | `mode` | Adapter label, 1–64 UTF-8 bytes. The phone accepts new labels; only `synthetic` has special test-source behavior. |
 | `sessions` | Optional agent rows. IDs are opaque; providers and states describe activity without exporting prompts or transcripts. |
 
 Mac uses hook-observed session liveness and clears sessions on restart. Omarchy
 verifies owning processes locally. A source may report this as optional
 `sessionLiveness: "hook"` or `"process"`; process identity is not sent to the
-phone. See [Omarchy recovery limits](omarchy-routing.md).
+phone. The phone does not interpret this marker; each adapter is responsible
+for its own session-liveness checks. See [Omarchy recovery limits](omarchy-routing.md).
 
 The phone presents sources independently. Its single custom-watch view chooses
 from **fresh** sources in this order: needs input, failed, working, finished,
