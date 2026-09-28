@@ -92,7 +92,7 @@ struct CompanionSettings: View {
                 } header: {
                     Text("Experimental")
                 } footer: {
-                    Text("Try Paceman on our custom watch. Setup is optional.")
+                    Text("A fully hackable concept watch built for agentic engineering.")
                 }.listRowBackground(theme.panel)
             }
             Section {
