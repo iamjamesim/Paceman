@@ -68,7 +68,8 @@ struct CompanionRoot: View {
                         NotificationSetup(model: model, theme: theme, preview: presentation.preview,
                                           done: { path = [] }, continueSetup: { path.append(.watchWeatherSetup) })
                     case .watchWeatherSetup:
-                        WeatherSettings(weather: model.weather, theme: theme, finishSetup: { path = [] })
+                        WeatherSettings(weather: model.weather, theme: theme,
+                                        finishSetup: { path = [] }, preview: presentation.preview)
                     case .watchTroubleshooting: WatchUpdateTroubleshooting(model: model, theme: theme, preview: presentation.preview)
                     case .settings: CompanionSettings(model: model, presentation: presentation, theme: theme)
                     case .appearance: AppearanceSettings(model: model, presentation: presentation, theme: theme)

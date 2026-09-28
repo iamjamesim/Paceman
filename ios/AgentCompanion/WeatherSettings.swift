@@ -6,19 +6,110 @@ struct WeatherSettings: View {
     @ObservedObject var weather: PhoneWeather
     let theme: CompanionTheme
     var finishSetup: (() -> Void)? = nil
+    var preview = false
     @State private var choosingPlace = false
+    @State private var finishingSetup = false
 
     private var location: String {
         weather.preferences.enabled ? weather.preferences.place?.name ?? "Current location" : "Off"
     }
 
     var body: some View {
+        Group {
+            if finishSetup != nil {
+                setupChoices
+            } else {
+                settingsForm
+            }
+        }
+        .navigationTitle(finishSetup == nil ? "Weather" : "Watch weather")
+        .navigationBarTitleDisplayMode(.inline).tint(theme.tint)
+        .sheet(isPresented: $choosingPlace) {
+            WeatherPlaceSearch(weather: weather, theme: theme)
+        }
+        .onAppear { finishIfReady() }
+        .onChange(of: weather.weather) { _, _ in finishIfReady() }
+    }
+
+    private var setupChoices: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Choose a location").font(.title2.weight(.semibold))
+                if weather.preferences.enabled {
+                    if let issue = weather.locationIssue {
+                        Text(issue.guidance).font(.body).lineSpacing(3).foregroundStyle(theme.secondaryInk)
+                    } else if let message = weather.message {
+                        Text(message).font(.body).lineSpacing(3).foregroundStyle(theme.secondaryInk)
+                    } else {
+                        HStack(alignment: .top, spacing: 12) {
+                            ProgressView().tint(theme.tint).padding(.top, 3)
+                            Text(weather.preferences.place.map { "Getting weather for \($0.name)…" } ?? "Getting local weather…")
+                                .font(.body).lineSpacing(3).foregroundStyle(theme.secondaryInk)
+                        }
+                    }
+                } else {
+                    Text("Use your current location for local weather, or pick a place that stays fixed.")
+                        .font(.body).lineSpacing(3).foregroundStyle(theme.secondaryInk)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 26).padding(.top, 28)
+        }
+        .foregroundStyle(theme.ink).background(theme.canvas)
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 8) {
+                if !weather.preferences.enabled {
+                    CompanionButton(title: "Use current location", theme: theme) {
+                        weather.choose(enabled: true)
+                    }
+                    CompanionSecondaryButton(title: "Choose a place", theme: theme) {
+                        choosingPlace = true
+                    }
+                } else {
+                    if weather.locationIssue == .permissionNeeded {
+                        CompanionButton(title: "Allow location access", theme: theme) {
+                            weather.requestLocationAccess()
+                        }
+                    } else if weather.locationIssue == .denied {
+                        CompanionButton(title: "Open iPhone Settings", theme: theme) {
+                            UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
+                        }
+                    } else if weather.message != nil || weather.locationIssue == .unavailable {
+                        CompanionButton(title: "Try again", theme: theme) {
+                            weather.retryForDiagnostics()
+                        }
+                    }
+                    if weather.preferences.place == nil {
+                        CompanionSecondaryButton(title: "Choose a place", theme: theme) {
+                            choosingPlace = true
+                        }
+                    } else {
+                        CompanionSecondaryButton(title: "Use current location", theme: theme) {
+                            weather.choose(enabled: true)
+                        }
+                    }
+                }
+                Button("Skip weather") {
+                    if weather.preferences.enabled { weather.choose(enabled: false) }
+                    finishSetup?()
+                }
+                    .font(.subheadline).frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
+            .background(theme.canvas)
+        }
+    }
+
+    private func finishIfReady() {
+        guard !preview, !finishingSetup, finishSetup != nil, weather.preferences.enabled,
+              weather.weather?.usable(at: Date()) == true else { return }
+        finishingSetup = true
+        finishSetup?()
+    }
+
+    private var settingsForm: some View {
         Form {
             Section {
-                if finishSetup != nil {
-                    Text("Choose your current location or a place to show weather on your watch.")
-                        .foregroundStyle(theme.secondaryInk)
-                }
                 Menu {
                     Button { weather.choose(enabled: false) } label: {
                         choice("Off", selected: !weather.preferences.enabled)
@@ -80,19 +171,6 @@ struct WeatherSettings: View {
             }
         }
         .scrollContentBackground(.hidden).background(theme.canvas).foregroundStyle(theme.ink)
-        .navigationTitle(finishSetup == nil ? "Weather" : "Watch weather")
-        .navigationBarTitleDisplayMode(.inline).tint(theme.tint)
-        .safeAreaInset(edge: .bottom) {
-            if let finishSetup {
-                CompanionButton(title: weather.preferences.enabled ? "Finish setup" : "Skip weather",
-                                theme: theme, action: finishSetup)
-                    .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
-                    .background(theme.canvas)
-            }
-        }
-        .sheet(isPresented: $choosingPlace) {
-            WeatherPlaceSearch(weather: weather, theme: theme)
-        }
     }
 
     private var settingsGuidance: AttributedString {
