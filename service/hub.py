@@ -361,7 +361,7 @@ class Store:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
-            if mode and mode[0] in ("omarchy", "macos"):
+            if mode and mode[0] != "synthetic":
                 return
             rows = db.execute("SELECT * FROM schedule WHERE fired=0 AND due<=? ORDER BY due,id", (now,)).fetchall()
             for row in rows:
@@ -387,7 +387,7 @@ class Store:
     @staticmethod
     def require_synthetic(db):
         mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
-        if mode and mode[0] in ("omarchy", "macos"):
+        if mode and mode[0] != "synthetic":
             raise ValueError("Synthetic controls are disabled for a live source; use a separate data directory")
 
 

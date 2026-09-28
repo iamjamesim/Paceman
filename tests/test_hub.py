@@ -66,6 +66,17 @@ class StoreTests(unittest.TestCase):
             rows = db.execute("SELECT state FROM events ORDER BY seq").fetchall()
         self.assertEqual([row[0] for row in rows], ["idle", "working", "finished"])
 
+    def test_new_live_adapter_does_not_enable_synthetic_controls(self):
+        with self.store.connect() as db:
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('mode','nixos')")
+            db.execute("INSERT INTO schedule(due,state) VALUES (0,'working')")
+        with self.assertRaises(ValueError):
+            self.store.emit("working")
+        self.store.tick(now=1)
+        with self.store.connect() as db:
+            states = [row[0] for row in db.execute("SELECT state FROM events ORDER BY seq")]
+        self.assertEqual(states, ["idle"])
+
     def test_endpoint_rejects_plaintext_and_credentials(self):
         for value in ["http://test", "https://user:pass@test", "https://test/path", "https://test?secret=x", "https://test#x"]:
             with self.subTest(value=value), self.assertRaises(ValueError):

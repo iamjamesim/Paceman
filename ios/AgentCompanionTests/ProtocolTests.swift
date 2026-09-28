@@ -562,16 +562,17 @@ final class ProtocolTests: XCTestCase {
         XCTAssertFalse(receipt.canRestore(authorizedIDs: [bluetoothID], ownedWatchID: "different-watch", hasOwner: true))
     }
 
-    func testSourceClientAcceptsSupportedModesAndRejectsUnknownModesOrOtherSources() throws {
+    func testSourceClientAcceptsNewSourceModesButRejectsInvalidOrOtherSources() throws {
         let id = UUID().uuidString
         let source = PairedSource(endpoint: URL(string: "https://test.example")!,
                                   sourceID: id, clientID: "test", credential: "test")
         let client = SourceClient()
-        for mode in ["synthetic", "omarchy", "macos"] {
+        for mode in ["synthetic", "omarchy", "macos", "nixos", "remote-workspace"] {
             let data = try sourceFixture(["sourceID": id, "mode": mode])
             XCTAssertEqual(try client.decodeSnapshot(data, source: source).mode, mode)
         }
-        XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "mode": "unknown"]), source: source))
+        XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "mode": ""]), source: source))
+        XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "mode": String(repeating: "x", count: 65)]), source: source))
         XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["mode": "omarchy"]), source: source))
     }
 
