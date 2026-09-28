@@ -29,7 +29,7 @@ struct AgentCompanionApp: App {
     }
 }
 
-enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, pairing, notifications, watchNotifications, watchTroubleshooting, settings, appearance, weather, diagnostics }
+enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, watchPairing, pairing, notifications, watchNotifications, watchTroubleshooting, settings, appearance, weather, diagnostics }
 
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
@@ -47,7 +47,21 @@ struct CompanionRoot: View {
                     case .otherComputer(let id): ComputerDetail(model: model, presentation: presentation, theme: theme, sourceID: id)
                     case .liveActivities: LiveActivitiesDetail(model: model, monitoring: model.monitoring,
                         presentation: presentation, theme: theme)
-                    case .watch: WatchDetail(model: model, theme: theme, watchTheme: presentation.themeFamily.glance, preview: presentation.preview, previewConnected: presentation.previewHasWatch, previewPhase: presentation.previewWatchPhase, previewComplete: presentation.previewScreen == "watch-complete", previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen) ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") { path.append(.watchNotifications) }
+                    case .watch, .watchPairing:
+                        if destination == .watch && !(presentation.preview ? presentation.previewHasWatch : model.watch.paired) {
+                            WatchIntroduction(theme: theme, watchTheme: presentation.themeFamily.glance) {
+                                path.append(.watchPairing)
+                            }
+                        } else {
+                            WatchDetail(model: model, theme: theme, watchTheme: presentation.themeFamily.glance,
+                                preview: presentation.preview, previewConnected: presentation.previewHasWatch,
+                                previewPhase: presentation.previewWatchPhase,
+                                previewComplete: presentation.previewScreen == "watch-complete",
+                                previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen)
+                                    ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") {
+                                path.append(.watchNotifications)
+                            }
+                        }
                     case .pairing: PairingFlow(model: model, theme: theme, preview: presentation.preview)
                     case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview)
                     case .watchNotifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview) { path = [] }
@@ -86,7 +100,10 @@ struct CompanionRoot: View {
             case "pairing", "reconnect": path = [.pairing]
             case "watch-notifications": path = [.watchNotifications]
             case "watch-troubleshooting": path = [.watchTroubleshooting]
-            case "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off", "watch", "watch-setup", "watch-paired", "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error", "watch-complete": path = [.watch]
+            case "watch", "watch-setup": path = [.watch]
+            case "watch-pairing": path = [.watch, .watchPairing]
+            case "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error": path = [.watchPairing]
+            case "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off", "watch-paired", "watch-complete": path = [.watch]
             case "computer", "computer-offline", "computer-revoked", "computer-stale", "computer-waiting", "computer-long": path = [.computer]
             default: break
             }

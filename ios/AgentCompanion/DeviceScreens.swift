@@ -127,6 +127,42 @@ struct ComputerReceiptLabel: View {
     }
 }
 
+struct WatchIntroduction: View {
+    let theme: CompanionTheme
+    let watchTheme: CompanionTheme
+    let continueSetup: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                if !typeSize.isAccessibilitySize {
+                    WatchIllustration(theme: watchTheme, paired: false, timeFormat: .system, state: .working)
+                        .frame(width: 90, height: 133)
+                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                }
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("A custom watch for agent activity")
+                        .font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
+                    Text("Paceman Watch is editable firmware for the Waveshare ESP32-S3 Touch AMOLED 2.06.")
+                        .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
+                    Text("Before pairing")
+                        .font(.headline).padding(.top, 10)
+                    Text("Get the board and ask your agent to build and flash the Paceman Watch firmware. When the watch is ready, continue here to pair it.")
+                        .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
+                    Text("Your agent can adapt it to similar ESP32-S3 hardware if it preserves Paceman’s Bluetooth service, pairing identity, and payload format.")
+                        .font(.footnote).lineSpacing(3).foregroundStyle(theme.secondaryInk)
+                }
+            }.padding(.horizontal, 26).padding(.bottom, 30)
+        }.safeAreaInset(edge: .bottom) {
+            CompanionButton(title: "Continue to pairing", theme: theme, action: continueSetup)
+                .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
+                .background(theme.canvas)
+        }.foregroundStyle(theme.ink).background(theme.canvas)
+            .navigationTitle("Paceman Watch").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 struct WatchDetail: View {
     @ObservedObject private var push = PushCoordinator.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -158,7 +194,7 @@ struct WatchDetail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                if !paired || justPaired || previewComplete {
+                if (!paired || justPaired || previewComplete) && !typeSize.isAccessibilitySize {
                     WatchIllustration(theme: watchTheme, paired: paired, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
@@ -213,16 +249,14 @@ struct WatchDetail: View {
     }
     private var pairingGuide: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Experimental custom watch")
-                .font(.subheadline.weight(.semibold)).foregroundStyle(theme.secondaryInk)
             Text(instructionTitle).font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
             HStack(alignment: .top, spacing: 12) {
                 if inProgress { ProgressView().tint(theme.tint).padding(.top, 3) }
                 Text(instructionDetail).font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
             }
             if !inProgress {
-                DisclosureGroup("Already paired to another device?") {
-                    Text("A watch can be paired to one phone or computer at a time. Transferring it to this phone isn't supported yet. Disconnecting Bluetooth on the other device won't make it available.")
+                DisclosureGroup("Watch paired elsewhere?") {
+                    Text("Remove or forget the watch on that device. Then ask your agent to erase its flash and install the Paceman firmware again. An ordinary reflash keeps the old pairing.")
                         .font(.footnote).foregroundStyle(theme.secondaryInk).padding(.top, 8)
                 }.font(.footnote).padding(.top, 12)
             }
