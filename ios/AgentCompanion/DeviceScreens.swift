@@ -178,7 +178,7 @@ struct WatchIntroduction: View {
                 Text(title)
                 Image(systemName: "arrow.up.right").accessibilityHidden(true)
             }.font(.subheadline.weight(.medium))
-                .frame(minHeight: typeSize.isAccessibilitySize ? 44 : 40, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: typeSize.isAccessibilitySize ? 44 : 28, alignment: .leading)
         }
     }
 }
