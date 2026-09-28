@@ -27,15 +27,19 @@ class DesktopStatus:
         session_counts = {state: sum(session["state"] == state for session in snapshot["sessions"])
                           for state in ("needs_input", "failed", "working", "finished", "idle")}
         clients = self.store.clients()
+        with self.store.connect() as db:
+            row = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
+        local_mode = row[0] if row else "synthetic"
+        local_liveness = "process" if local_mode == "omarchy" else "hook" if local_mode == "macos" else None
         with self.lock:
             phone_seen = self.phone_seen
         value = {
             "schema": 1, "running": not stopped, "updatedAt": time.time(),
-            "startedAt": self.started, "mode": snapshot["mode"],
+            "startedAt": self.started, "mode": local_mode,
             "computerName": socket.gethostname(),
             "activity": snapshot["state"], "sessions": len(snapshot["sessions"]),
             "sessionCounts": session_counts,
-            "sessionLiveness": snapshot.get("sessionLiveness"),
+            "sessionLiveness": local_liveness,
             "lastAgentEventAt": getattr(adapter, "last_event_at", 0),
             "clients": clients,
             "pairedPhones": len(clients), "lastPhoneFetchAt": phone_seen,

@@ -15,13 +15,11 @@ An allowance update raised `revision` to 12; activity `eventID` stayed 11.
   "generation": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "revision": 12,
   "sourceName": "Studio Mac",
-  "mode": "macos",
   "observedAt": 1790000004,
   "changedAt": 1790000000,
   "freshFor": 30,
   "state": "needs_input",
   "eventID": "11",
-  "sessionLiveness": "hook",
   "sessions": [{"id": "opaque-session-a", "provider": "codex", "state": "needs_input", "workspaceLabel": "paceman"}],
   "allowance": {"provider": "codex", "remaining": 42, "window": 2, "updatedAt": 1790000003, "resetsAt": 1790003600}
 }
@@ -38,13 +36,11 @@ This source has its own identity, revision sequence, and freshness lease.
   "generation": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   "revision": 7,
   "sourceName": "Build Station",
-  "mode": "omarchy",
   "observedAt": 1790000004,
   "changedAt": 1790000002,
   "freshFor": 30,
   "state": "working",
   "eventID": "7",
-  "sessionLiveness": "process",
   "sessions": [{"id": "opaque-session-b", "provider": "codex", "state": "working"}]
 }
 ```

@@ -22,16 +22,14 @@ struct Snapshot: Codable {
     let generation: String
     let revision: UInt64
     let sourceName: String
-    let mode: String
     let observedAt: Double
     let changedAt: Double
     let freshFor: Double
     let state: ActivityState
     let eventID: String
-    var appearance: CompanionTheme?
     var allowance: CodexAllowance?
     var sessions: [AgentSession]?
-    enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, mode, observedAt, changedAt, freshFor, state, eventID, appearance, sessions, allowance }
+    enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, observedAt, changedAt, freshFor, state, eventID, sessions, allowance }
     var identity: String { "\(sourceID)/\(generation)/\(eventID)" }
 }
 
@@ -51,19 +49,18 @@ enum WatchAggregate {
             ?? profiles.compactMap(\.allowance).first { $0.valid }
     }
 
-    static func make(current: [Snapshot], appearance: CompanionTheme?,
-                     allowance: CodexAllowance?, now: Double) -> Snapshot {
+    static func make(current: [Snapshot], allowance: CodexAllowance?, now: Double) -> Snapshot {
         let priority: [ActivityState: Int] = [.needsInput: 0, .failed: 1, .working: 2, .finished: 3, .idle: 4]
         let selected = current.sorted {
             let a = priority[$0.state] ?? 4, b = priority[$1.state] ?? 4
             return a == b ? $0.changedAt > $1.changedAt : a < b
         }.first
         return Snapshot(schema: 1, sourceID: "aggregate", generation: "phone", revision: 1,
-                        sourceName: "Paceman", mode: "aggregate", observedAt: now,
+                        sourceName: "Paceman", observedAt: now,
                         changedAt: selected?.changedAt ?? 0, freshFor: 30,
                         state: selected?.state ?? .idle,
                         eventID: selected?.identity ?? "no-current-source",
-                        appearance: appearance, allowance: allowance, sessions: nil)
+                        allowance: allowance, sessions: nil)
     }
 }
 
@@ -290,15 +287,12 @@ extension Snapshot {
         generation = try c.decode(String.self, forKey: .generation)
         revision = try c.decode(UInt64.self, forKey: .revision)
         sourceName = try c.decode(String.self, forKey: .sourceName)
-        mode = try c.decode(String.self, forKey: .mode)
         observedAt = try c.decode(Double.self, forKey: .observedAt)
         changedAt = try c.decode(Double.self, forKey: .changedAt)
         freshFor = try c.decode(Double.self, forKey: .freshFor)
         state = try c.decode(ActivityState.self, forKey: .state)
         eventID = try c.decode(String.self, forKey: .eventID)
-        // An optional appearance or richer session list cannot invalidate core activity.
-        let candidate = try? c.decode(CompanionTheme.self, forKey: .appearance)
-        appearance = candidate?.valid == true ? candidate : nil
+        // A richer session list cannot invalidate core activity.
         sessions = try? c.decode([AgentSession].self, forKey: .sessions)
         let limits = try? c.decode(CodexAllowance.self, forKey: .allowance)
         allowance = limits?.valid == true ? limits : nil

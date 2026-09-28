@@ -1,8 +1,7 @@
-"""Omarchy event receiver and resolved theme collector, without Bluetooth ownership.
+"""Omarchy event receiver without Bluetooth ownership.
 
 Accepts the existing omarchy-watch-codex agent-event protocol. Only opaque IDs and
 lifecycle states are retained; hook arguments and conversation content are ignored.
-Palette resolution is adapted from Omarchy Watch v0.6.1 (MIT; see notices).
 """
 from __future__ import annotations
 
@@ -18,7 +17,6 @@ import stat
 import struct
 import threading
 import time
-import tomllib
 
 from service.allowance import allowance_snapshot
 from service.processes import CodexProcesses, ProcessIdentity
@@ -32,39 +30,6 @@ EVENTS = {"working": "working", "needs-input": "needs_input", "completed": "fini
 
 def default_socket() -> Path:
     return Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "omarchy-watch.sock"
-
-
-def appearance(state_dir: Path) -> dict | None:
-    """Use the same bar overrides and accent contrast threshold as the desktop."""
-    current = state_dir / "current"
-    try:
-        colors = tomllib.loads((current / "theme/colors.toml").read_text())
-        palette = {key: colors.get(key) for key in ("background", "foreground", "accent")}
-        try:
-            bar = tomllib.loads((current / "theme/shell.toml").read_text()).get("bar", {})
-            for key, role in (("background", "background"), ("foreground", "text")):
-                if isinstance(bar, dict) and re.fullmatch(r"#[0-9a-fA-F]{6}", str(bar.get(role, ""))):
-                    palette[key] = bar[role]
-        except (OSError, ValueError):
-            pass
-        if not all(isinstance(color, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", color)
-                   for color in palette.values()):
-            return None
-        def luminance(color):
-            channels = [channel / 255 for channel in bytes.fromhex(color[1:])]
-            linear = [v / 12.92 if v <= .04045 else ((v + .055) / 1.055) ** 2.4 for v in channels]
-            return sum(v * weight for v, weight in zip(linear, (.2126, .7152, .0722)))
-        low, high = sorted(luminance(palette[key]) for key in ("background", "accent"))
-        if (high + .05) / (low + .05) < 3:
-            palette["accent"] = palette["foreground"]
-        try:
-            name = (current / "theme.name").read_text().strip()[:80]
-        except OSError:
-            name = "Omarchy"
-        return {"id": "omarchy-current", "name": name or "Omarchy", "monospaced": True,
-                **{key: value[1:].upper() for key, value in palette.items()}}
-    except (OSError, ValueError):
-        return None
 
 
 class EventHandler(socketserver.StreamRequestHandler):
@@ -265,13 +230,9 @@ class OmarchySource:
         sessions_changed = previous_key is None or previous_key[0] != activity_key
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         old = json.loads(last["payload"]) if last["payload"] else {}
-        # Theme and allowance are durable last-known profile values. A source
-        # file being temporarily unavailable during restart must not erase them.
-        current_appearance = appearance(self.state_dir)
+        # A temporarily unavailable allowance file must not erase the last reading.
         current_allowance = allowance_snapshot(self.state_dir / "agents/usage/codex.json", int(time.time()))
-        payload = {"sourceName": self.computer_name, "mode": "omarchy", "state": state, "sessions": sessions,
-                   "sessionLiveness": "process",
-                   "appearance": current_appearance if current_appearance is not None else old.get("appearance"),
+        payload = {"sourceName": self.computer_name, "state": state, "sessions": sessions,
                    "allowance": current_allowance if current_allowance is not None else old.get("allowance")}
         # Membership-only cleanup isn't a new alert. An aggregate state change
         # still needs a new event identity so an acknowledged watch state clears.

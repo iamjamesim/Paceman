@@ -35,6 +35,8 @@ class DesktopStatusTests(unittest.TestCase):
         value = read_status(self.path)
         self.assertTrue(value["running"])
         self.assertFalse(value["phoneRecent"])
+        self.assertEqual(value["mode"], "synthetic")
+        self.assertNotIn("mode", self.store.snapshot())
         self.assertEqual(value["pairedPhones"], 1)
         self.assertNotIn(client["credential"], self.path.read_text())
         self.assertEqual(value["clients"][0]["id"], client["clientID"])

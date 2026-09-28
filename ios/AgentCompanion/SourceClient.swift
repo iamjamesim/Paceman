@@ -165,7 +165,6 @@ final class SourceClient {
         guard data.count <= 65536 else { throw HubError.message("Status response too large") }
         let value = try JSONDecoder().decode(Snapshot.self, from: data)
         guard value.schema == 1, value.sourceID == source.sourceID,
-              !value.mode.isEmpty, value.mode.utf8.count <= 64,
               value.freshFor > 0, value.freshFor <= 60,
               value.observedAt.isFinite, value.changedAt.isFinite else {
             throw HubError.message("Unsupported or mismatched status response")
@@ -180,7 +179,7 @@ final class SourceClient {
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token,
-            "environment": environment, "mode": "alert", "displayName": displayName ?? ""])
+            "environment": environment, "displayName": displayName ?? ""])
         let data = try await response(request)
         struct Registration: Decodable { let registered: Bool }
         let registration = try JSONDecoder().decode(Registration.self, from: data)

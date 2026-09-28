@@ -271,7 +271,7 @@ class Worker:
         self.step_watch_allowance(now, snapshot)
         source_id, generation = self.store.metadata("source_id"), self.store.metadata("generation")
         with self.store.connect() as db:
-            # Appearance revisions must not generate activity alerts or hide pending activity.
+            # Presentation revisions must not generate activity alerts or hide pending activity.
             event = dict(db.execute("SELECT * FROM events WHERE kind='activity' ORDER BY seq DESC LIMIT 1").fetchone())
             devices = [dict(row) for row in db.execute(
                 "SELECT p.* FROM push_devices p JOIN clients c ON p.client_id=c.id WHERE p.cursor<?",

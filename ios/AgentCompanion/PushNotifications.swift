@@ -53,6 +53,7 @@ struct PushRegistrationReceipt: Codable, Equatable {
     let token: String
     let environment: String
     var displayName: String? = nil
+    // Retained only to re-register older "attention" destinations as alerts.
     var mode: String? = nil
 
     func matches(source: PairedSource, token: String, environment: String,
@@ -221,7 +222,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
                 guard model?.pairedSources.contains(where: { $0.sourceID == source.sourceID && $0.credential == source.credential }) == true else { continue }
                 try Vault.save(PushRegistrationReceipt(sourceID: source.sourceID, clientID: source.clientID,
                                                         token: token, environment: environment,
-                                                        displayName: displayName, mode: "alert"), key: receiptKey)
+                                                        displayName: displayName), key: receiptKey)
                 completed += 1
                 Diagnostics.shared.record("push_destination_registered")
             } catch {

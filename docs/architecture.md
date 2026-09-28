@@ -22,11 +22,11 @@ and authenticated phone removal delete the credential, identity and push destina
 together. Installation claims alone cannot replace another credential.
 It listens only on loopback. Tailscale Serve supplies private HTTPS.
 `service/omarchy.py` receives the existing desktop companion's local `agent-event`
-protocol and collects resolved Omarchy theme colors without starting a Bluetooth
-owner. Synthetic mode remains the default for isolated tests. See the
+protocol without starting a Bluetooth owner. Synthetic mode remains the default
+for isolated tests. See the
 [routing runbook](omarchy-routing.md) for live event routing and limits.
-Activity and appearance both advance snapshot revisions; appearance-only changes
-retain the activity event ID and are excluded from APNs activity notifications.
+Activity and allowance changes both advance snapshot revisions; allowance-only
+changes retain the activity event ID and do not send activity alerts.
 `service/macos.py` receives reduced Codex lifecycle events from a trusted local
 hook script. It shares the source API and credentials but uses hook-derived
 session state rather than Linux process verification.

@@ -101,9 +101,8 @@ separately from what is visibly rendered on the watch. A receipt alone does not
 prove rendering.
 
 Repeat with two sessions: input wins over working, and working wins over finished.
-Resolve/end one session and check that the other remains visible. Change the
-Omarchy theme normally and check phone palette continuity; appearance
-changes must not trigger a new activity alert. Watch theme forwarding is still a separate milestone.
+Resolve/end one session and check that the other remains visible. The phone owns
+its theme choice; changing the Omarchy theme does not alter source activity.
 
 Disconnect/reconnect the source and Bluetooth without re-pairing. Snapshots expire
 on the phone after 30 seconds without source contact. The legacy watch packet
@@ -133,8 +132,8 @@ replaces its current session rather than counting the process twice.
 Unowned session records do not enter the current summary. An existing session
 registers on its next state-changing hook. A newly opened
 CLI that has not emitted any activity is not discovered by scanning processes.
-The snapshot marks verified lists with `sessionLiveness: "process"`; only opaque
-session IDs and activity states leave the machine, never process identities.
+The local desktop status marks process-verified lists; only opaque session IDs
+and activity states leave the machine, never process identities.
 The desktop's five-second heartbeat adds up to five seconds of display delay
 after the source detects an exit.
 

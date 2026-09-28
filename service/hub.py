@@ -233,7 +233,7 @@ class Store:
                     or not re.fullmatch(r"[0-9a-f]{32,512}", payload["deviceToken"])
                     or len(payload["deviceToken"]) % 2
                     or payload.get("environment") not in ("development", "production")
-                    or payload.get("mode") != "alert"):
+                    or payload.get("mode", "alert") != "alert"):
                 raise ValueError("Invalid push registration")
             display_name = registered_display_name(payload)
         with self.connect() as db:
@@ -248,7 +248,7 @@ class Store:
                 if display_name is not None:
                     db.execute("UPDATE clients SET display_name=? WHERE id=?", (display_name or None, client_id))
                 old = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
-                values = (payload["deviceToken"], payload["environment"], payload["mode"])
+                values = (payload["deviceToken"], payload["environment"], "alert")
                 if old is None or tuple(old[k] for k in ("token", "environment", "mode")) != values:
                     revision = db.execute("SELECT MAX(seq) FROM events").fetchone()[0]
                     db.execute("INSERT OR REPLACE INTO push_devices(client_id,token,environment,mode,cursor) "
@@ -256,7 +256,7 @@ class Store:
             row = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
         if not row:
             return {"registered": False}
-        return {"registered": True, "environment": row["environment"], "mode": row["mode"],
+        return {"registered": True, "environment": row["environment"],
                 "lastResult": row["last_result"], "lastAPNsID": row["last_apns_id"]}
 
     def watch_push_device(self, credential: str, payload: dict | None = None) -> dict | None:
@@ -375,13 +375,15 @@ class Store:
             row = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         value = {"schema": 1, "sourceID": self.metadata("source_id"),
                 "generation": self.metadata("generation"), "revision": row["seq"],
-                "sourceName": "Transport test", "mode": "synthetic",
+                "sourceName": "Transport test",
                 "observedAt": time.time(), "changedAt": row["at"], "freshFor": 30,
                 "state": row["state"], "eventID": str(row["seq"]),
                 "sessions": [] if row["state"] == "idle" else [{
                     "id": "test-session", "provider": "fixture", "state": row["state"]}]}
         if row["payload"]:
             value.update(json.loads(row["payload"]))
+        for old_field in ("mode", "appearance", "sessionLiveness"):
+            value.pop(old_field, None)  # Old persisted events may still contain these.
         return value
 
     @staticmethod

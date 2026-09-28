@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 from tests.identity import device
 from service.hub import Server, Store
-from service.omarchy import FINISHED_RETENTION, OmarchySource, appearance
+from service.omarchy import FINISHED_RETENTION, OmarchySource
 from service.push import Worker
 from service.status import DesktopStatus
 from service.processes import CodexProcesses, ProcessIdentity
@@ -26,9 +26,6 @@ class OmarchyTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.store = Store(self.root / 'hub.sqlite3')
-        self.theme = self.root / 'omarchy/current/theme'
-        self.theme.mkdir(parents=True)
-        self.write_theme()
         self.owners = {}
         self.processes = Mock(spec=CodexProcesses)
         self.processes.identify.return_value = ProcessIdentity(100, '1', 'test-boot')
@@ -40,7 +37,7 @@ class OmarchyTests(unittest.TestCase):
     def test_source_reports_computer_identity(self):
         snapshot = self.store.snapshot()
         self.assertEqual(snapshot['sourceName'], 'build-station')
-        self.assertEqual(snapshot['mode'], 'omarchy')
+        self.assertNotIn('mode', snapshot)
 
     def test_allowance_changes_do_not_generate_activity_or_export_other_fields(self):
         import datetime as dt
@@ -67,7 +64,7 @@ class OmarchyTests(unittest.TestCase):
         self.assertEqual(self.store.snapshot()['allowance'], after['allowance'])
         self.assertEqual(self.store.snapshot()['eventID'], before['eventID'])
 
-    def test_transient_profile_file_loss_keeps_last_known_values(self):
+    def test_transient_allowance_file_loss_keeps_last_known_value(self):
         import datetime as dt
         allowance = self.root / 'omarchy/agents/usage/codex.json'
         allowance.parent.mkdir(parents=True)
@@ -77,16 +74,10 @@ class OmarchyTests(unittest.TestCase):
             "limits": [{"label": "5h window", "percent": 0.25, "resetsAt": stamp(now + 3600)}]}))
         self.source.tick(force=True)
         before = self.store.snapshot()
-        (self.theme / 'colors.toml').unlink()
         allowance.unlink()
         self.source.tick(force=True)
         after = self.store.snapshot()
-        self.assertEqual(after['appearance'], before['appearance'])
         self.assertEqual(after['allowance'], before['allowance'])
-
-    def write_theme(self, accent='#FF88AA'):
-        (self.theme / 'colors.toml').write_text(f'background="#101010"\nforeground="#FFFFFF"\naccent="{accent}"\n')
-        (self.theme.parent / 'theme.name').write_text('Test theme')
 
     def event(self, event, session='one', turn='turn-1', **extra):
         self.owners.setdefault(session, ProcessIdentity(100 + len(self.owners), '1', 'test-boot'))
@@ -105,7 +96,7 @@ class OmarchyTests(unittest.TestCase):
                              ('working', 'working'), ('completed', 'finished'), ('ended', 'idle')]:
             value = self.event(event, prompt='PRIVATE PROMPT', arguments='PRIVATE ARGS')
             self.assertEqual(value['state'], state)
-            self.assertEqual(value['mode'], 'omarchy')
+            self.assertNotIn('mode', value)
             self.assertNotIn('PRIVATE', json.dumps(value))
         self.assertEqual(value['sessions'], [])
         self.assertEqual(self.source.socket_path.stat().st_mode & 0o777, 0o600)
@@ -178,36 +169,21 @@ class OmarchyTests(unittest.TestCase):
         resumed = self.event('working', session='old', turn='turn-2')
         self.assertEqual(len(resumed['sessions']), 2)
 
-    def test_theme_updates_revision_without_realerting(self):
-        first = self.event('needs-input')
-        self.write_theme('#88FFAA')
-        self.source.tick(force=True)
-        second = self.store.snapshot()
-        self.assertGreater(second['revision'], first['revision'])
-        self.assertEqual(second['eventID'], first['eventID'])
-        self.assertEqual(second['changedAt'], first['changedAt'])
-        self.assertEqual(second['appearance']['accent'], '88FFAA')
-
-    def test_theme_fallback_and_bar_resolution(self):
-        (self.theme / 'shell.toml').write_text('[bar]\nbackground="#202020"\ntext="#EEEEEE"\n')
-        self.write_theme('#202020')
-        value = appearance(self.root / 'omarchy')
-        self.assertEqual(value['background'], '202020')
-        self.assertEqual(value['accent'], 'EEEEEE')
-        (self.theme / 'colors.toml').write_text('invalid toml')
-        self.assertIsNone(appearance(self.root / 'omarchy'))
-
-    def test_appearance_cannot_hide_or_repeat_pending_push(self):
+    def test_allowance_update_does_not_repeat_pending_push(self):
+        import datetime as dt
         pair = self.store.redeem(self.store.invite('https://test.example')['invitation'], device=device())
         self.store.push_device(pair['credential'], dict(deviceToken='ab'*32, environment='development', mode='alert'))
         event = self.event('needs-input')
-        self.write_theme('#88FFAA')
-        self.source.tick(force=True)
         sender = FakeSender()
         worker = Worker(self.store, sender, self.root / 'push.jsonl')
         worker.step()
         self.assertEqual(sender.calls[0][1]['companion']['eventID'], event['eventID'])
-        self.write_theme('#FFFFFF')
+        now = int(time.time())
+        stamp = lambda epoch: dt.datetime.fromtimestamp(epoch, dt.timezone.utc).isoformat()
+        allowance = self.root / 'omarchy/agents/usage/codex.json'
+        allowance.parent.mkdir(parents=True)
+        allowance.write_text(json.dumps({"schemaVersion": 1, "id": "codex", "updatedAt": stamp(now),
+            "limits": [{"label": "5h window", "percent": 0.5, "resetsAt": stamp(now + 3600)}]}))
         self.source.tick(force=True)
         worker.step(now=time.time() + 20)
         self.assertEqual(len(sender.calls), 1)
@@ -279,7 +255,7 @@ class OmarchyTests(unittest.TestCase):
                 headers = {'Authorization': 'Bearer ' + pair['credential']}
                 conn.request('GET', '/v1/snapshot', headers=headers)
                 initial = json.loads(conn.getresponse().read())
-                self.assertEqual(initial['mode'], 'omarchy')
+                self.assertNotIn('mode', initial)
                 expected = self.event('needs-input')
                 conn.request('GET', '/v1/snapshot', headers=headers)
                 received = json.loads(conn.getresponse().read())

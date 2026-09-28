@@ -33,7 +33,6 @@ A minimal Mac response looks like this (example IDs and times):
   "generation": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   "revision": 12,
   "sourceName": "Studio Mac",
-  "mode": "macos",
   "observedAt": 1790000004,
   "changedAt": 1790000000,
   "freshFor": 30,
@@ -48,16 +47,13 @@ A minimal Mac response looks like this (example IDs and times):
 | `sourceID`, `generation` | Pairing identity and revision-sequence identity, respectively. Both persist for this database; replacing it requires new pairing, but a process restart does not. |
 | `state` | One of `idle`, `working`, `needs_input`, `finished`, `failed`. |
 | `revision` | Advances when activity or presentation data changes. The phone rejects an older revision within a generation. |
-| `eventID`, `changedAt` | Change only for a new activity event; `changedAt` is Unix seconds. An allowance or appearance update may raise `revision` without sending another alert. |
+| `eventID`, `changedAt` | Change only for a new activity event; `changedAt` is Unix seconds. An allowance update may raise `revision` without sending another alert. |
 | `observedAt`, `freshFor` | Source response time (Unix seconds) and freshness lease (seconds). They show service recency, not proof that an agent is alive. Stale activity cannot outrank fresh activity from another source. |
-| `mode` | Adapter label, 1–64 UTF-8 bytes. The phone accepts new labels; only `synthetic` has special test-source behavior. |
 | `sessions` | Optional agent rows. IDs are opaque; providers and states describe activity without exporting prompts or transcripts. |
 
 Mac uses hook-observed session liveness and clears sessions on restart. Omarchy
-verifies owning processes locally. A source may report this as optional
-`sessionLiveness: "hook"` or `"process"`; process identity is not sent to the
-phone. The phone does not interpret this marker; each adapter is responsible
-for its own session-liveness checks. See [Omarchy recovery limits](omarchy-routing.md).
+verifies owning processes locally. Neither exports process identity; the
+adapters own these checks. See [Omarchy recovery limits](omarchy-routing.md).
 
 The phone presents sources independently. Its single custom-watch view chooses
 from **fresh** sources in this order: needs input, failed, working, finished,
@@ -66,9 +62,8 @@ idle. See [Mac, Omarchy, and APNs payload examples](protocol-examples.md).
 ## Notifications and watch
 
 `POST /v1/push` registers one alert destination for a paired client; `GET` reports
-registration without exposing its token, and `DELETE` removes it. The `mode:
-"alert"` in this request means notification delivery, not the snapshot's adapter
-mode. `POST /v1/live-activity` registers that client's ActivityKit destinations.
+registration without exposing its token, and `DELETE` removes it.
+`POST /v1/live-activity` registers that client's ActivityKit destinations.
 These direct APNs routes are private alpha endpoints; a public release needs a
 key-safe relay.
 
@@ -86,8 +81,8 @@ lease. See [watch connectivity](../firmware/esp32-watch/docs/connectivity.md).
 ## Changing v1
 
 - A new adapter can use the same protocol if it maps local events to the five
-  states and preserves source identity, ordering, and freshness. New `mode` and
-  provider labels and optional snapshot fields are compatible additions.
+  states and preserves source identity, ordering, and freshness. New provider
+  labels and optional snapshot fields are compatible additions.
 - Keep required fields and their meanings stable. A new state, changed event
   identity, or required client behavior needs a new schema or endpoint with
   explicit capability handling. Watch packet versions evolve separately.

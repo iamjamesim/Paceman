@@ -11,8 +11,8 @@ final class ProtocolTests: XCTestCase {
         let now = 1_790_000_000.0
         func source(_ id: String, updated: Int64, reset: Int64, remaining: Int) -> Snapshot {
             Snapshot(schema: 1, sourceID: id, generation: "generation", revision: 1,
-                     sourceName: id, mode: "macos", observedAt: now, changedAt: now,
-                     freshFor: 30, state: .idle, eventID: "1", appearance: nil,
+                     sourceName: id, observedAt: now, changedAt: now,
+                     freshFor: 30, state: .idle, eventID: "1",
                      allowance: CodexAllowance(provider: "codex", remaining: remaining, window: 1,
                                                updatedAt: updated, resetsAt: reset), sessions: nil)
         }
@@ -26,20 +26,20 @@ final class ProtocolTests: XCTestCase {
     func testWatchAggregateChoosesFreshAttentionAcrossComputers() {
         func source(_ id: String, _ state: ActivityState, _ changed: Double) -> Snapshot {
             Snapshot(schema: 1, sourceID: id, generation: "generation", revision: 1,
-                     sourceName: id, mode: "macos", observedAt: changed, changedAt: changed,
-                     freshFor: 30, state: state, eventID: "1", appearance: nil,
+                     sourceName: id, observedAt: changed, changedAt: changed,
+                     freshFor: 30, state: state, eventID: "1",
                      allowance: nil, sessions: nil)
         }
         let working = source("mac", .working, 100)
         let attention = source("linux", .needsInput, 90)
         let failed = source("studio", .failed, 95)
-        let combined = WatchAggregate.make(current: [working, attention], appearance: nil, allowance: nil, now: 110)
+        let combined = WatchAggregate.make(current: [working, attention], allowance: nil, now: 110)
         XCTAssertEqual(combined.state, .needsInput)
         XCTAssertEqual(combined.eventID, attention.identity)
-        XCTAssertEqual(WatchAggregate.make(current: [working, failed], appearance: nil,
+        XCTAssertEqual(WatchAggregate.make(current: [working, failed],
                                            allowance: nil, now: 110).state, .failed)
-        XCTAssertEqual(WatchAggregate.make(current: [working], appearance: nil, allowance: nil, now: 110).state, .working)
-        let unavailable = WatchAggregate.make(current: [], appearance: nil, allowance: nil, now: 150)
+        XCTAssertEqual(WatchAggregate.make(current: [working], allowance: nil, now: 110).state, .working)
+        let unavailable = WatchAggregate.make(current: [], allowance: nil, now: 150)
         XCTAssertEqual(unavailable.state, .idle)
         XCTAssertEqual(unavailable.changedAt, 0)
     }
@@ -108,9 +108,9 @@ final class ProtocolTests: XCTestCase {
     func testLiveActivityStatesRemainScopedToTheirComputersAndRenewFreshness() {
         func snapshot(_ id: String, _ sessions: [AgentSession]) -> Snapshot {
             Snapshot(schema: 1, sourceID: id, generation: id, revision: 7,
-                     sourceName: id, mode: "macos", observedAt: 100, changedAt: 100,
+                     sourceName: id, observedAt: 100, changedAt: 100,
                      freshFor: 30, state: sessions.first?.state ?? .idle, eventID: "7",
-                     appearance: nil, allowance: nil, sessions: sessions)
+                     allowance: nil, sessions: sessions)
         }
         let mac = MonitoringActivity.ContentState(snapshot: snapshot("mac", [
             AgentSession(id: "m1", provider: "codex", state: .working),
@@ -430,31 +430,26 @@ final class ProtocolTests: XCTestCase {
         }
         XCTAssertNil(PushHint.decode([:], for: source))
     }
-    func testOldSourceWithoutAppearanceOrSessionsStillDecodes() throws {
+    func testSourceWithoutSessionsStillDecodes() throws {
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture())
         XCTAssertEqual(snapshot.state, .working)
-        XCTAssertNil(snapshot.appearance)
         XCTAssertNil(snapshot.sessions)
     }
 
-    func testInvalidOptionalAppearanceDoesNotDiscardAgentActivity() throws {
+    func testLegacyOrMalformedOptionalMetadataDoesNotDiscardAgentActivity() throws {
         for extra: [String: Any] in [
-            ["appearance": "unsupported"],
-            ["appearance": ["id":"bad", "name":"Bad theme", "background":"invalid", "foreground":"FFFFFF", "accent":"123456", "monospaced":true]],
+            ["mode": "macos", "appearance": "legacy"],
             ["sessions": [["provider": "new-agent-schema"]]]
         ] {
             let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(extra))
             XCTAssertEqual(snapshot.state, .working)
             XCTAssertEqual(snapshot.revision, 7)
-            XCTAssertNil(snapshot.appearance)
         }
     }
 
-    func testSourceAppearanceAndSessionMetadataDecodeTogether() throws {
-        let theme: [String: Any] = ["id":"desktop", "name":"My desktop", "background":"#101315", "foreground":"CACCCC", "accent":"798186", "monospaced":true]
+    func testSessionMetadataDecodes() throws {
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture([
-            "appearance":theme, "sessions":[["id":"task", "provider":"codex", "state":"working", "name":"Theme sync", "project":"companion"]]]))
-        XCTAssertEqual(snapshot.appearance?.name, "My desktop")
+            "sessions":[["id":"task", "provider":"codex", "state":"working", "name":"Theme sync", "project":"companion"]]]))
         XCTAssertEqual(snapshot.sessions?.first?.displayName, "Theme sync")
         XCTAssertEqual(snapshot.sessions?.first?.state, .working)
     }
@@ -562,18 +557,14 @@ final class ProtocolTests: XCTestCase {
         XCTAssertFalse(receipt.canRestore(authorizedIDs: [bluetoothID], ownedWatchID: "different-watch", hasOwner: true))
     }
 
-    func testSourceClientAcceptsNewSourceModesButRejectsInvalidOrOtherSources() throws {
+    func testSourceClientDoesNotRequireAdapterModeButRejectsOtherSources() throws {
         let id = UUID().uuidString
         let source = PairedSource(endpoint: URL(string: "https://test.example")!,
                                   sourceID: id, clientID: "test", credential: "test")
         let client = SourceClient()
-        for mode in ["synthetic", "omarchy", "macos", "nixos", "remote-workspace"] {
-            let data = try sourceFixture(["sourceID": id, "mode": mode])
-            XCTAssertEqual(try client.decodeSnapshot(data, source: source).mode, mode)
-        }
-        XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "mode": ""]), source: source))
-        XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "mode": String(repeating: "x", count: 65)]), source: source))
-        XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["mode": "omarchy"]), source: source))
+        XCTAssertEqual(try client.decodeSnapshot(sourceFixture(["sourceID": id]), source: source).sourceID, id)
+        XCTAssertEqual(try client.decodeSnapshot(sourceFixture(["sourceID": id, "mode": "macos"]), source: source).sourceID, id)
+        XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(), source: source))
     }
 
     func testEveryComputerKeepsItsPositionWhenRepairedOrAnotherIsRemoved() {
@@ -668,7 +659,7 @@ final class ProtocolTests: XCTestCase {
                 XCTAssertEqual(request.url?.path, "/v1/push")
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
                 let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
-                XCTAssertEqual(body["mode"] as? String, "alert")
+                XCTAssertNil(body["mode"])
                 XCTAssertEqual(body["displayName"] as? String, "Studio Mac")
                 XCTAssertNil(body["presentation"])
                 return (200, try JSONSerialization.data(withJSONObject: ["registered": confirmed]))
@@ -691,7 +682,7 @@ final class ProtocolTests: XCTestCase {
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
             if request.httpMethod == "POST" {
                 let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
-                XCTAssertEqual(body["mode"] as? String, "alert")
+                XCTAssertNil(body["mode"])
                 return (200, Data(#"{"registered":true}"#.utf8))
             }
             XCTAssertEqual(request.httpMethod, "DELETE")
@@ -1053,8 +1044,6 @@ final class ProtocolTests: XCTestCase {
         let sourceID = UUID().uuidString
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture([
             "sourceID": sourceID,
-            "appearance": ["id":"theme", "name":"Theme", "background":"101315",
-                "foreground":"CACCCC", "accent":"FF3388", "monospaced":true],
             "allowance": ["provider":"codex", "remaining":62, "window":2,
                 "updatedAt":1800000000, "resetsAt":1800003600]
         ]))
@@ -1062,7 +1051,6 @@ final class ProtocolTests: XCTestCase {
         try SourceSnapshotCache.save(snapshot, receivedAt: receivedAt, to: url)
         let restored = try XCTUnwrap(SourceSnapshotCache.load(sourceID: sourceID, from: url))
         XCTAssertEqual(restored.0.identity, snapshot.identity)
-        XCTAssertEqual(restored.0.appearance?.accent, "FF3388")
         XCTAssertEqual(restored.0.allowance?.remaining, 62)
         XCTAssertEqual(restored.1, receivedAt)
         XCTAssertNil(SourceSnapshotCache.load(sourceID: UUID().uuidString, from: url))
@@ -1079,7 +1067,7 @@ final class ProtocolTests: XCTestCase {
 
     private func sourceFixture(_ extra: [String: Any] = [:]) throws -> Data {
         var value: [String: Any] = ["schema":1, "sourceID":UUID().uuidString, "generation":UUID().uuidString,
-            "revision":7, "sourceName":"Desktop", "mode":"synthetic", "observedAt":100, "changedAt":90,
+            "revision":7, "sourceName":"Desktop", "observedAt":100, "changedAt":90,
             "freshFor":30, "state":"working", "eventID":"7"]
         value.merge(extra) { _, new in new }
         return try JSONSerialization.data(withJSONObject: value)
