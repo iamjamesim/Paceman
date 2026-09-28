@@ -150,7 +150,7 @@ struct WatchIntroduction: View {
                         .font(.title3.weight(.semibold)).padding(.top, 10)
                     Text("Get the Waveshare ESP32-S3 Touch AMOLED 2.06 board, then ask your agent to build and flash the Paceman Watch firmware.")
                         .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
-                    VStack(alignment: .leading, spacing: 2) { boardLink; firmwareLink }
+                    VStack(alignment: .leading, spacing: 0) { boardLink; firmwareLink }
                         .foregroundStyle(theme.tint)
                     Text("Got a similar ESP32-S3 board? Your agent can adapt the firmware while preserving Paceman’s Bluetooth protocol.")
                         .font(.footnote).lineSpacing(3).foregroundStyle(theme.secondaryInk)
@@ -165,11 +165,11 @@ struct WatchIntroduction: View {
     }
 
     private var boardLink: some View {
-        resourceLink("Waveshare board", url: "https://www.waveshare.com/product/esp32-s3-touch-amoled-2.06.htm")
+        resourceLink("ESP32-S3 board at Waveshare", url: "https://www.waveshare.com/product/esp32-s3-touch-amoled-2.06.htm")
     }
 
     private var firmwareLink: some View {
-        resourceLink("Firmware on GitHub", url: "https://github.com/iamjamesim/paceman/tree/main/firmware/esp32-watch")
+        resourceLink("Paceman Watch firmware on GitHub", url: "https://github.com/iamjamesim/paceman/tree/main/firmware/esp32-watch")
     }
 
     private func resourceLink(_ title: String, url: String) -> some View {
@@ -177,7 +177,8 @@ struct WatchIntroduction: View {
             HStack(spacing: 6) {
                 Text(title)
                 Image(systemName: "arrow.up.right").accessibilityHidden(true)
-            }.font(.subheadline.weight(.medium)).frame(minHeight: 44, alignment: .leading)
+            }.font(.subheadline.weight(.medium))
+                .frame(minHeight: typeSize.isAccessibilitySize ? 44 : 40, alignment: .leading)
         }
     }
 }
