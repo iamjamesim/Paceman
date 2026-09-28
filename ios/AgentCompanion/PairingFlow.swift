@@ -77,17 +77,18 @@ struct NotificationSetup: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 if deliveryStep == .ready {
-                    if model.watch.paired && model.watch.updatesEnabled && watchNeedsGuidance {
+                    if watchNeedsGuidance {
                         WatchSharingGuidance(watch: model.watch, theme: theme)
                         CompanionRule(theme: theme)
                     }
                     RecommendedNotificationSettings(theme: theme, preview: preview)
                 } else {
-                    NotificationDeliveryControls(model: model, theme: theme, preview: preview, forWatch: done != nil)
+                    NotificationDeliveryControls(theme: theme, preview: preview)
                 }
             }.padding(26)
         }.foregroundStyle(theme.ink).background(theme.canvas)
-            .navigationTitle("Notifications").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Watch notifications")
+            .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
                 if let done {
                     completionActions(done)
@@ -126,18 +127,16 @@ struct NotificationSetup: View {
 }
 
 struct NotificationDeliveryControls: View {
-    @ObservedObject var model: CompanionModel
     @ObservedObject private var push = PushCoordinator.shared
     let theme: CompanionTheme
     var preview = false
-    var forWatch = false
     private var step: NotificationDeliveryStep {
         .displayed(preview: preview, current: push.deliveryStep)
     }
     private var title: String {
         switch step {
         case .checking: return "Checking notifications…"
-        case .permission, .enable: return forWatch ? "Keep your watch updated" : "Enable notifications"
+        case .permission, .enable: return "Keep your watch updated"
         case .denied: return "Notifications are off"
         case .notificationCenter: return "Enable Notification Center"
         case .ready: return "Notifications enabled"
@@ -145,13 +144,9 @@ struct NotificationDeliveryControls: View {
     }
     private var detail: String {
         switch step {
-        case .permission, .enable:
-            return forWatch ? "Paceman notifications carry agent updates to your watch while your phone is locked." : "Follow agent activity without opening Paceman. Progress updates are quiet."
-        case .denied:
-            return forWatch || model.watch.paired
-                ? "Allow Paceman notifications in Settings to update your watch while your phone is locked."
-                : "Allow Paceman notifications in Settings."
-        case .notificationCenter: return "Turn on Notification Center in Settings."
+        case .permission, .enable: return "Paceman notifications carry agent updates to your watch while your phone is locked."
+        case .denied: return "Allow Paceman notifications in Settings to update your watch while your phone is locked."
+        case .notificationCenter: return "Turn on Notification Center in Settings so updates can reach your watch."
         case .ready: return ""
         case .checking: return ""
         }
@@ -170,16 +165,12 @@ struct NotificationDeliveryControls: View {
                 }
             case .denied, .notificationCenter:
                 action("Open Settings") { push.openSettingsForNotifications() }
-            default: EmptyView()
+            case .ready, .checking: EmptyView()
             }
         }.tint(theme.tint)
     }
     @ViewBuilder private func action(_ title: String, perform: @escaping () -> Void) -> some View {
-        if forWatch {
-            CompanionButton(title: title, theme: theme, action: perform).allowsHitTesting(!preview)
-        } else {
-            Button(title, action: perform).frame(minHeight: 44).allowsHitTesting(!preview)
-        }
+        CompanionButton(title: title, theme: theme, action: perform).allowsHitTesting(!preview)
     }
 }
 

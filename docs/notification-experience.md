@@ -12,10 +12,21 @@ are separate facts. Never label configuration as proof of end-to-end delivery.
 
 ## Ownership and placement
 
-Settings → Notifications owns permission and the recommended
-iPhone system configuration. Watch detail keeps Status sounds with the watch controls
-and one standard navigation row for watch-update troubleshooting. Global iPhone
-notification settings do not remain among the normal per-watch controls. The
+Without a custom watch, Paceman has no ordinary notification setup or push
+registration. Live Activities carry phone activity and attention. The custom-watch
+relay registers only while a paired watch has Watch updates enabled. Turning
+updates off or removing the watch retires its source registration. An unreachable
+source is retried later; the phone ignores incoming hints once watch relay is off.
+
+The recommended Notification Center/Lock Screen/Banners/Sounds setup is shown
+only for an enabled paired custom watch. Current-location weather is separately
+off by default and requests location only after the user selects it in watch
+settings. Disabling updates or removing the watch cancels its weather monitoring
+and scheduled refresh.
+
+The watch setup flow owns notification permission and the recommended iPhone
+system configuration. Watch detail keeps Status sounds with the watch controls
+and one standard navigation row for watch-update troubleshooting. The
 troubleshooting screen links to notification setup in context. Desktop registration remains automatic delivery
 plumbing and never replaces the phone configuration with a source-availability error.
 Paceman classifies progress and attention;
@@ -40,7 +51,7 @@ permission must lead to Settings, never another ineffective permission prompt.
   settings; returning re-reads settings and synchronizes the existing preference.
 - Authorized but Notification Center disabled: enable Notification Center in
   Settings. Banners, Lock Screen placement, and sound are not required.
-- Notification mode not selected: Enable notifications, an explicit opt-in.
+- Watch updates paused: re-enable them on Watch detail before delivery setup.
 - Watch disconnected: sharing permission is unknown until connected; never call
   it denied using an old cached value. Reconnect before assessing sharing.
 - Watch connected with sharing reported disabled by an authorization-change callback: Settings → Bluetooth → the paired watch → Share
@@ -57,7 +68,7 @@ receipt and registers again when the source is reachable.
 
 ## Phone presentation and watch sound
 
-Working and Idle always use passive presentation: Apple adds them to the
+With a custom-watch relay, Working and Idle use passive presentation: Apple adds them to the
 notification list without lighting the screen or playing a sound. Needs input,
 Failed, and Finished request active presentation and the default sound when an
 accepted Live Activity alert is not carrying that event. Active still obeys
@@ -72,8 +83,8 @@ its Working cue is sound-only and does not wake or vibrate the watch.
 The permission request remains standard authorization; provisional authorization
 is not enabled pending device validation.
 
-The Notifications step presents one missing requirement at a time. Once delivery
-is ready, it shows the same recommended system configuration as Settings, without
+The watch notification step presents one missing requirement at a time. Once delivery
+is ready, it shows the recommended system configuration without
 a second Paceman presentation preference. The pairing confirmation does not repeat
 notification controls. Pairing and notification-setup actions remain anchored at
 the bottom. Both contexts link to iPhone Settings in the guidance; the setup step
@@ -102,9 +113,8 @@ Retain per-event notification identity and per-source grouping.
 ## Troubleshooting
 
 Watch detail includes one standard Troubleshoot updates navigation row. Its destination
-contains the accessory-specific checks. It links to iPhone notification setup only
-when permission or Notification Center actually needs attention. The general
-Notifications page does not repeat accessory troubleshooting.
+contains the accessory-specific checks. It links to watch notification setup only
+when permission or Notification Center actually needs attention.
 Check notification permission/Notification Center, watch sharing, Focus/Scheduled
 Summary, Bluetooth, and the phone's connection to the computer.
 Tell users not to swipe Paceman away from the app switcher because force-quitting can

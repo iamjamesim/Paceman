@@ -91,18 +91,22 @@ struct CompanionHome: View {
     private var destinations: some View {
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))
         return layout {
-            Button { open(.liveActivities) } label: {
-                destinationContent(
-                    icon: AnyView(LiveActivityGlyph(theme: presentation.themeFamily.glance).frame(width: 37, height: 43)),
-                    name: "Live Activities",
-                    state: liveActivitiesStatus)
-            }.buttonStyle(.plain).accessibilityLabel("Live Activities, \(liveActivitiesStatus)")
-            Button { open(.watch) } label: {
-                destinationContent(
-                    icon: AnyView(WatchGlyph(theme: presentation.themeFamily.glance, timeFormat: model.watch.timeFormat)),
-                    name: "Paceman Watch",
-                    state: hasWatch ? (presentation.preview ? "Connected" : model.watch.connectionPresentation.rawValue) : "Connect watch")
-            }.buttonStyle(.plain)
+            if paired {
+                Button { open(.liveActivities) } label: {
+                    destinationContent(
+                        icon: AnyView(LiveActivityGlyph(theme: presentation.themeFamily.glance).frame(width: 37, height: 43)),
+                        name: "Live Activities",
+                        state: liveActivitiesStatus)
+                }.buttonStyle(.plain).accessibilityLabel("Live Activities, \(liveActivitiesStatus)")
+            }
+            if hasWatch {
+                Button { open(.watch) } label: {
+                    destinationContent(
+                        icon: AnyView(WatchGlyph(theme: presentation.themeFamily.glance, timeFormat: model.watch.timeFormat)),
+                        name: "Paceman Watch",
+                        state: presentation.preview ? "Connected" : model.watch.connectionPresentation.rawValue)
+                }.buttonStyle(.plain)
+            }
         }
     }
 

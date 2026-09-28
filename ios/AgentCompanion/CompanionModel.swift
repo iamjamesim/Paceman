@@ -28,11 +28,13 @@ final class CompanionModel: ObservableObject {
     private var fetchedUptimes: [String: TimeInterval] = [:]
     private var changeObserver: AnyCancellable?
     private var weatherObserver: AnyCancellable?
+    private var lastWatchRelayRequested = false
 
     init(preview: Bool = false) {
         designPreview = preview
         watch = WatchLink(preview: preview)
         weather = PhoneWeather()
+        lastWatchRelayRequested = watch.relayRequested
         if preview {
             #if DEBUG
             let args = ProcessInfo.processInfo.arguments
@@ -97,7 +99,7 @@ final class CompanionModel: ObservableObject {
             }
         }
         weather.onChange = { [weak self] value, fahrenheit in self?.watch.setWeather(value, fahrenheit: fahrenheit) }
-        if !preview { weather.bind(watchID: watch.preferenceID, updates: watch.updatesEnabled) }
+        if !preview { weather.bind(watchID: watch.preferenceID, updates: watch.paired && watch.updatesEnabled) }
         forwardWatchAggregate()
         if !preview { monitoring.configure(sources: pairedSources) }
         weatherObserver = weather.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
@@ -105,7 +107,13 @@ final class CompanionModel: ObservableObject {
             self?.objectWillChange.send()
             Task { @MainActor [weak self] in
                 guard let self, !self.designPreview else { return }
-                self.weather.bind(watchID: self.watch.preferenceID, updates: self.watch.updatesEnabled)
+                self.weather.bind(watchID: self.watch.preferenceID,
+                                  updates: self.watch.paired && self.watch.updatesEnabled)
+                let requested = self.watch.relayRequested
+                if requested != self.lastWatchRelayRequested {
+                    self.lastWatchRelayRequested = requested
+                    await PushCoordinator.shared.sync()
+                }
             }
         }
         if !preview { Diagnostics.shared.record("app_launched") }

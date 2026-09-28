@@ -83,8 +83,18 @@ struct CompanionSettings: View {
                         Text(presentation.themeFamily.name).foregroundStyle(theme.secondaryInk)
                     }
                 }
-                NavigationLink(value: FeedDestination.notifications) { Label("Notifications", systemImage: "bell") }
             }.listRowBackground(theme.panel)
+            if !model.watch.paired {
+                Section {
+                    NavigationLink(value: FeedDestination.watch) {
+                        Label("Paceman Watch", systemImage: "applewatch")
+                    }
+                } header: {
+                    Text("Experimental")
+                } footer: {
+                    Text("Try Paceman on our custom watch. Setup is optional.")
+                }.listRowBackground(theme.panel)
+            }
             Section {
                 NavigationLink(value: FeedDestination.diagnostics) {
                     Label("Developer tools", systemImage: "wrench.and.screwdriver")

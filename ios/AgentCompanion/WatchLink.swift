@@ -174,6 +174,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     @Published private(set) var timeFormat = WatchTimeFormat.system
     @Published private(set) var supportsBrightness = false
     @Published var pickerReady = false
+    @Published private(set) var setupResolved = false
     @Published var configured = false
     @Published private(set) var paired = false
     @Published private(set) var setupPhase = WatchSetupPhase.idle
@@ -181,6 +182,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     var onWatchEvent: (() -> Void)?
     private var central: CBCentralManager!
     private let setupSession = ASAccessorySession()
+    private var setupSessionActive = false
     private var peripheral: CBPeripheral?
     private var activity: CBCharacteristic?
     private var profile: CBCharacteristic?
@@ -204,6 +206,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private var weather: WatchWeather?
     private var weatherFahrenheit = false
     var preferenceID: String? { pairingReceipt?.watchID }
+    var relayRequested: Bool {
+        updatesEnabled && (paired || (!setupResolved && pairingReceipt != nil))
+    }
     func setTheme(_ value: CompanionTheme) {
         guard selectedTheme != value else { return }
         selectedTheme = value
@@ -252,10 +257,19 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             lastDelivered = WatchDeliveryHistory.load(receipt.watchID)
         }
         if enabled { startBluetooth() }
+        if pairingReceipt != nil { activateSetupSession() }
+    }
+
+    func prepareForSetup() { activateSetupSession() }
+
+    private func activateSetupSession() {
+        guard !setupSessionActive else { return }
+        setupSessionActive = true
         setupSession.activate(on: .main) { [weak self] event in
             guard let self else { return }
             switch event.eventType {
             case .activated:
+                self.setupResolved = true
                 self.pickerReady = true
                 self.configured = !self.setupSession.accessories.isEmpty
                 self.restorePairingState()
@@ -284,6 +298,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                     self.finishRemoval(identifier)
                 }
             case .invalidated:
+                self.setupResolved = true
                 self.pickerReady = false
                 self.status = "Watch setup is unavailable. Reopen the app and try again."
                 self.setupPhase = .failed

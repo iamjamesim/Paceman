@@ -1,5 +1,15 @@
 # Alpha feature completion
 
+## Launch scope
+
+The iPhone and Apple Watch experience is the main launch path. The ESP32
+Paceman Watch is an optional experimental example of another Paceman display.
+Discovery lives in Settings; after pairing, it receives a normal Home status
+and focused recovery guidance. Its notification relay and weather/location work
+run only while that watch and the relevant options are enabled. Physical
+reconnection and freshness acceptance remain important for people who use it,
+but they do not gate the main phone and Apple Watch release.
+
 First milestone: one Omarchy workstation, one iPhone, one Paceman Watch that is
 useful for daily alpha testing. Public distribution is a separate milestone.
 Keep collecting practical delivery evidence while implementing features; do not

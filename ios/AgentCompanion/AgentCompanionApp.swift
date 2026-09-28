@@ -84,7 +84,6 @@ struct CompanionRoot: View {
             case "appearance": path = [.settings, .appearance]
             case "live-activities", "multi-live-activities", "live-activities-setup", "live-activities-off": path = [.liveActivities]
             case "pairing", "reconnect": path = [.pairing]
-            case "notifications": path = [.notifications]
             case "watch-notifications": path = [.watchNotifications]
             case "watch-troubleshooting": path = [.watchTroubleshooting]
             case "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off", "watch", "watch-setup", "watch-paired", "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error", "watch-complete": path = [.watch]

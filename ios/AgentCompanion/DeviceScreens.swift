@@ -195,7 +195,12 @@ struct WatchDetail: View {
             } message: {
                 Text("Stop sending activity to this watch and remove this phone’s access. Your computer stays connected.")
             }
-            .task { if !preview { await push.sync() } }
+            .task {
+                if !preview {
+                    model.watch.prepareForSetup()
+                    await push.sync()
+                }
+            }
             .onChange(of: scenePhase) { _, value in
                 if value == .active && !preview { Task { await push.sync() } }
             }
@@ -208,6 +213,8 @@ struct WatchDetail: View {
     }
     private var pairingGuide: some View {
         VStack(alignment: .leading, spacing: 16) {
+            Text("Experimental custom watch")
+                .font(.subheadline.weight(.semibold)).foregroundStyle(theme.secondaryInk)
             Text(instructionTitle).font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
             HStack(alignment: .top, spacing: 12) {
                 if inProgress { ProgressView().tint(theme.tint).padding(.top, 3) }

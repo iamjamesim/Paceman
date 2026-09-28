@@ -1,13 +1,14 @@
 # Phone home design
 
 The home screen answers, in order:
-1. Are Live Activities and Paceman Watch available to show updates?
+1. Are my configured destinations available to show updates?
 2. Which computers are connected, and is their activity current?
 3. What are the agents doing; does anything need input?
 
 Keep computer identity and connection freshness above the activity divider.
-Activity belongs below it; the custom watch is a separate destination beside
-Live Activities above the computer cards. Preserve the
+Activity belongs below it. Live Activities sits above the computer cards when a
+computer is connected. A paired custom watch sits beside it; an unpaired watch
+has no Home placeholder. Preserve the
 solid Paceman brand mark with open eyes and the bold italic `PACEMAN` header.
 Use the theme's prominent accent for the mark and foreground color for the
 wordmark. The mark supplies one restrained color point in the header.
@@ -218,6 +219,16 @@ with computer detail. Both require confirmation; removal errors preserve pairing
 See pairing-and-removal.md for the watch ownership distinction and validation limits.
 
 ## Daily-use state contract
+
+The custom Paceman Watch is optional experimental hardware. Discovery and pairing
+live under Settings → Experimental → Paceman Watch. That label sets expectations
+before setup; a paired watch uses its ordinary name and connection state on Home.
+With no computer and no watch, Home shows the computer setup action only. A
+paired watch without a computer shows its own tile above that action. With a
+computer and no watch, the single Live Activities tile fills the available width.
+With both destinations, the tiles share a row and stack at accessibility text
+sizes. The top section shows configured destinations, not a catalog of future
+devices.
 
 Appearance is selected once in Settings and applies across every computer card.
 The app uses each family's dark phone palette regardless of iPhone appearance.

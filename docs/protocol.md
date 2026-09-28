@@ -121,7 +121,9 @@ another client ID. These are private Tailscale endpoints, not a public relay API
   push copy. An empty string clears its override; an omitted field preserves the
   previous value for older clients. Without an override, push uses the source's
   reported computer name with hyphens shown as spaces.
-  The wire field `mode` remains fixed at `alert`; background-only registrations are rejected.
+  The wire field `mode` remains fixed at `alert`; background-only and
+  `attention` registrations are rejected. The iPhone registers this destination
+  only for an enabled paired custom watch.
 - `GET`: returns `registered`, and when present `environment`, `mode`,
   `lastResult`, `lastAPNsID`. POST returns the same registration status. Neither response returns a destination token.
 - `DELETE`: removes only this client's push destination. Revoking the client also
@@ -136,6 +138,9 @@ needs-input, failed, and finished request active presentation and sound. These a
 `content-available`; ANCS, rather than a background callback, initiates custom-watch
 synchronization. Passive entries remain visible in the notification list. The
 retired `background` mode is rejected. No watch polling is used.
+Disabling custom-watch updates or removing the watch deletes the phone's
+`/v1/push` destination. Registration resumes at the current event after setup
+is enabled again; it does not replay history.
 When the same paired phone has an accepted Live Activity alert for that event,
 the ordinary entry is passive to avoid a second phone sound. Live Activity
 Working, Needs input, Finished, and Failed Live Activity alerts request

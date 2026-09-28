@@ -164,7 +164,7 @@ final class PhoneWeather: NSObject, ObservableObject, @preconcurrency CLLocation
     private var previewing = false
     private var watchID: String?
     private let locationManager = CLLocationManager()
-    private let network = NWPathMonitor()
+    private var network: NWPathMonitor?
     private var online = true
     private var latestLocation: CLLocation?
     private var lastLocationAttempt: Date?
@@ -200,16 +200,6 @@ final class PhoneWeather: NSObject, ObservableObject, @preconcurrency CLLocation
         authorization = locationManager.authorizationStatus
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
-        network.pathUpdateHandler = { [weak self] path in
-            let available = path.status == .satisfied
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                let recovered = !self.online && available
-                self.online = available
-                if recovered { self.retryAfter = nil; self.refreshIfNeeded(priority: true) }
-            }
-        }
-        network.start(queue: DispatchQueue(label: "paceman.weather.network"))
         if let data = try? Data(contentsOf: cacheURL), let value = try? JSONDecoder().decode(WeatherCache.self, from: data), value.weather.valid { cache = value }
     }
 
@@ -240,7 +230,7 @@ final class PhoneWeather: NSObject, ObservableObject, @preconcurrency CLLocation
         } else if !value { scheduleBackgroundRefresh() }
     }
 
-    deinit { network.cancel() }
+    deinit { network?.cancel() }
 
     var backgroundLocationAvailable: Bool { authorization == .authorizedAlways }
     func requestBackgroundLocation() {
@@ -258,6 +248,24 @@ final class PhoneWeather: NSObject, ObservableObject, @preconcurrency CLLocation
     private var enabled: Bool { watchID != nil && preferences.enabled && updatesEnabled && !previewing }
 
     private func reconcileMonitoring() {
+        if enabled && network == nil {
+            let monitor = NWPathMonitor()
+            monitor.pathUpdateHandler = { [weak self] path in
+                let available = path.status == .satisfied
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    let recovered = !self.online && available
+                    self.online = available
+                    if recovered { self.retryAfter = nil; self.refreshIfNeeded(priority: true) }
+                }
+            }
+            monitor.start(queue: DispatchQueue(label: "paceman.weather.network"))
+            network = monitor
+        } else if !enabled {
+            network?.cancel()
+            network = nil
+            online = true
+        }
         let shouldMonitor = enabled && preferences.place == nil && authorization == .authorizedAlways
         if shouldMonitor != monitoring {
             monitoring = shouldMonitor

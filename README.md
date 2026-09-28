@@ -80,6 +80,11 @@ events through iOS notification sharing, so notification permission and sharing
 must remain enabled. iOS controls notification delivery and background execution.
 Long-duration disruption and upgrade testing is still in progress.
 
+The ESP32 Paceman Watch is optional experimental hardware. Without it, Paceman
+does not request notification or location permission for watch delivery, or send
+passive progress entries for ANCS. The phone uses Live Activities; the Apple
+Watch experience uses the Watch app and complications.
+
 Keep runtime state and credentials in ignored `.runtime/`. Never distribute an
 APNs private key in the app or repository. Direct APNs is a personal prototype
 arrangement, not a shared-key distribution design. The private source is intended

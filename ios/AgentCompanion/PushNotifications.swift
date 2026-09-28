@@ -53,11 +53,13 @@ struct PushRegistrationReceipt: Codable, Equatable {
     let token: String
     let environment: String
     var displayName: String? = nil
+    var mode: String? = nil
 
     func matches(source: PairedSource, token: String, environment: String,
                  displayName: String? = nil) -> Bool {
         sourceID == source.sourceID && clientID == source.clientID &&
-        self.token == token && self.environment == environment && self.displayName == displayName
+        self.token == token && self.environment == environment &&
+        self.displayName == displayName && (self.mode ?? "alert") == "alert"
     }
 }
 
@@ -66,26 +68,20 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     static let shared = PushCoordinator()
     weak var model: CompanionModel?
     @Published var status = "Push is off"
-    @Published var enabled = UserDefaults.standard.bool(forKey: "push-enabled")
     @Published var busy = false
     @Published var registered = false
     @Published private(set) var authorization: UNAuthorizationStatus?
     @Published private(set) var awaitingToken = false
     @Published private(set) var notificationCenterSetting: UNNotificationSetting?
 
+    var enabled: Bool { model?.watch.relayRequested == true }
     var deliveryStep: NotificationDeliveryStep {
         .resolve(authorization: authorization, center: notificationCenterSetting, enabled: enabled)
     }
-    private func selectNotifications() {
-        enabled = true
-        UserDefaults.standard.set(true, forKey: "push-enabled")
-    }
     func openSettingsForNotifications() {
-        selectNotifications()
         openSettings()
     }
     func enableNotifications() async {
-        selectNotifications()
         await refreshAuthorization()
         if authorization == .denied { openSettings(); return }
         if authorization == .notDetermined {
@@ -97,24 +93,38 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     }
     private let client = SourceClient()
     private var syncPending = false
+    private var remoteRegistrationRequested = false
+
+    private func requestRemoteRegistrationIfNeeded() {
+        guard enabled, !remoteRegistrationRequested else { return }
+        remoteRegistrationRequested = true
+        awaitingToken = true
+        status = "Registering with Apple"
+        UIApplication.shared.registerForRemoteNotifications()
+    }
+
+    private func unregisterRemoteNotificationsIfUnused() {
+        guard !enabled else { return }
+        UIApplication.shared.unregisterForRemoteNotifications()
+        remoteRegistrationRequested = false
+    }
 
     func configure() {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--design-preview") { return }
         #endif
-        // Retire silent-only opt-in without converting it into notification consent.
-        if UserDefaults.standard.string(forKey: "push-mode") == "background" {
-            enabled = false
-            UserDefaults.standard.set(false, forKey: "push-enabled")
-        }
+        // Retire the old standalone phone-alert preference. The ordinary push
+        // destination now exists only to relay updates to a paired custom watch.
+        UserDefaults.standard.removeObject(forKey: "phone-alerts-enabled")
+        UserDefaults.standard.removeObject(forKey: "push-enabled")
         UserDefaults.standard.removeObject(forKey: "push-mode")
         UserDefaults.standard.removeObject(forKey: "silent-transport-v1")
         UserDefaults.standard.removeObject(forKey: "phone-notification-presentation")
         UNUserNotificationCenter.current().delegate = self
         if enabled {
-            awaitingToken = true
-            status = "Registering with Apple"
-            UIApplication.shared.registerForRemoteNotifications()
+            requestRemoteRegistrationIfNeeded()
+        } else {
+            Task { await sync() }
         }
     }
 
@@ -142,6 +152,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     }
 
     func registrationFailed() {
+        remoteRegistrationRequested = false
         registered = false
         awaitingToken = false
         status = "Apple registration failed. Check Push Notifications signing and network."
@@ -149,6 +160,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     }
 
     func receivedToken(_ token: Data) {
+        remoteRegistrationRequested = true
         awaitingToken = false
         let encoded = token.map { String(format: "%02x", $0) }.joined()
         do {
@@ -166,13 +178,18 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         busy = true
         defer { finishOperation() }
         await refreshAuthorization()
-        guard enabled else { return }
         let sources = model?.pairedSources.filter { model?.isRevoked($0.sourceID) != true } ?? []
+        guard enabled,
+              authorization == .authorized || authorization == .provisional || authorization == .ephemeral,
+              notificationCenterSetting != .disabled else {
+            await removeRegistrations(sources)
+            return
+        }
+        requestRemoteRegistrationIfNeeded()
         guard !sources.isEmpty else { status = "Connect your computer to finish setup"; return }
         guard let token = Vault.load(String.self, key: "apns-device-token") else {
             status = "Waiting for Apple push registration"
             awaitingToken = true
-            UIApplication.shared.registerForRemoteNotifications()
             return
         }
         guard let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
@@ -195,10 +212,16 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             do {
                 try await client.registerPush(source, token: token, environment: environment,
                                               displayName: displayName)
-                guard enabled, model?.pairedSources.contains(where: { $0.sourceID == source.sourceID && $0.credential == source.credential }) == true else { continue }
+                guard enabled else {
+                    // Setup may have been turned off while this request was in
+                    // flight. Remove the destination before the pending sync.
+                    try? await client.removePush(source)
+                    continue
+                }
+                guard model?.pairedSources.contains(where: { $0.sourceID == source.sourceID && $0.credential == source.credential }) == true else { continue }
                 try Vault.save(PushRegistrationReceipt(sourceID: source.sourceID, clientID: source.clientID,
                                                         token: token, environment: environment,
-                                                        displayName: displayName), key: receiptKey)
+                                                        displayName: displayName, mode: "alert"), key: receiptKey)
                 completed += 1
                 Diagnostics.shared.record("push_destination_registered")
             } catch {
@@ -208,6 +231,25 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         registered = completed == sources.count
         awaitingToken = false
         status = registered ? "Registered on computers · \(environment)" : "Could not register on every computer. Check their connections."
+    }
+
+    private func removeRegistrations(_ sources: [PairedSource]) async {
+        registered = false
+        awaitingToken = false
+        status = "Push is off"
+        for source in sources {
+            let key = "push-registration-receipt.\(source.sourceID)"
+            guard Vault.load(PushRegistrationReceipt.self, key: key) != nil ||
+                    Vault.load(PushRegistrationReceipt.self, key: "push-registration-receipt")?.sourceID == source.sourceID else { continue }
+            do {
+                try await client.removePush(source)
+                try? Vault.remove(key: key)
+                if Vault.load(PushRegistrationReceipt.self, key: "push-registration-receipt")?.sourceID == source.sourceID {
+                    try? Vault.remove(key: "push-registration-receipt")
+                }
+            } catch { Diagnostics.shared.record("push_removal_failed") }
+        }
+        unregisterRemoteNotificationsIfUnused()
     }
 
     // Server-side client revocation has already removed the push destination.
@@ -221,9 +263,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             try? Vault.remove(key: "push-registration-receipt")
         }
         if (model?.pairedSources.filter({ $0.sourceID != sourceID }).isEmpty ?? true) {
-            enabled = false
-            UserDefaults.standard.set(false, forKey: "push-enabled")
-            UIApplication.shared.unregisterForRemoteNotifications()
+            unregisterRemoteNotificationsIfUnused()
             UNUserNotificationCenter.current().removeAllDeliveredNotifications()
             status = "Push is off"
         } else { Task { await sync() } }

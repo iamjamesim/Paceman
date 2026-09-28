@@ -91,8 +91,8 @@ No public inbound port or hosted relay is required for this personal setup.
    allowed and a computer is paired; this label does not prove remote-start
    registration. Check registration on the source separately. This setup does
    not require notification permission.
-   Enable notifications separately in **Settings → Notifications** for the
-   custom-watch path.
+   Enable notifications during custom-watch setup, or from the paired watch's
+   recovery guidance when a delivery requirement is off.
 2. Leave **Watch updates** on in Paceman Watch details. Disconnect the debugger.
    Use firmware 0.6.2 or later and the matching phone app. Accept notification
    sharing for the watch, or enable **Share System Notifications** in Settings →

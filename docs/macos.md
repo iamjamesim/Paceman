@@ -115,10 +115,10 @@ claim to know trust state.
 ## iPhone notifications and Live Activities from the Mac
 
 Pairing and receiving Codex events do not start APNs delivery. The installing
-agent must also set up the Mac APNs worker for iPhone alerts and automatic
-Live Activity starts/updates.
-First, check that the phone has enabled Paceman notifications and registered a
-push destination with this Mac. Locate the user's existing private APNs JSON
+agent must also set up the Mac APNs worker for automatic Live Activity
+starts/updates and, when paired, custom-watch relay notifications.
+For custom-watch delivery, check that the phone has enabled Paceman notifications
+and registered a push destination with this Mac. Locate the user's existing private APNs JSON
 config and `.p8` key on the Mac without printing or pasting the key. The config's
 team, topic, and environment must match the signed iPhone build. Then run:
 

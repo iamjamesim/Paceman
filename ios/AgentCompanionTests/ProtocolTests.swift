@@ -308,7 +308,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(state(.authorized, enabled: false), .enable)
         XCTAssertEqual(state(.authorized), .ready)
         XCTAssertEqual(state(.provisional), .ready)
-        // Re-enabling permission recovers the saved preference; no second opt-in.
+        // Re-enabling permission recovers while watch updates remain on.
         XCTAssertEqual(state(.denied), .denied)
         XCTAssertEqual(state(.authorized), .ready)
     }
@@ -319,6 +319,9 @@ final class ProtocolTests: XCTestCase {
         let receipt = PushRegistrationReceipt(sourceID: "source", clientID: "client",
                                               token: "token", environment: "development")
         XCTAssertTrue(receipt.matches(source: source, token: "token", environment: "development"))
+        var phoneReceipt = receipt
+        phoneReceipt.mode = "attention"
+        XCTAssertFalse(phoneReceipt.matches(source: source, token: "token", environment: "development"))
         XCTAssertFalse(receipt.matches(source: source, token: "new-token", environment: "development"))
         XCTAssertFalse(receipt.matches(source: source, token: "token", environment: "production"))
         XCTAssertFalse(receipt.matches(source: source, token: "token", environment: "development",
@@ -677,6 +680,25 @@ final class ProtocolTests: XCTestCase {
                 XCTAssertFalse(confirmed, "Confirmed registration must succeed")
             }
         }
+    }
+
+    func testWatchRelayRegistrationAndRemovalUsePairedSource() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://test.example")!,
+                                  sourceID: "source", clientID: "client", credential: "secret")
+        let client = stubClient { request in
+            XCTAssertEqual(request.url?.path, "/v1/push")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
+            if request.httpMethod == "POST" {
+                let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
+                XCTAssertEqual(body["mode"] as? String, "alert")
+                return (200, Data(#"{"registered":true}"#.utf8))
+            }
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            return (200, Data(#"{"registered":false}"#.utf8))
+        }
+        try await client.registerPush(source, token: String(repeating: "ab", count: 32),
+                                      environment: "development")
+        try await client.removePush(source)
     }
 
     func testWatchPushRegistrationIsIndependentOfPhoneNotificationChoice() async throws {

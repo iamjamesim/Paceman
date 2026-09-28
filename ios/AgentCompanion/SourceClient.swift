@@ -188,6 +188,13 @@ final class SourceClient {
         }
     }
 
+    func removePush(_ source: PairedSource) async throws {
+        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/push"))
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
+        _ = try await response(request)
+    }
+
     func registerWatchPush(_ source: PairedSource, token: String, environment: String) async throws {
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/watch-push"))
         request.httpMethod = "POST"
