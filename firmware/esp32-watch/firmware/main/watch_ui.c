@@ -673,7 +673,7 @@ void watch_ui_show_pairing(uint32_t passkey)
     lv_obj_t *screen = reset_screen();
     pairing_visible = true;
 
-    lv_obj_t *eyebrow = make_label(screen, "PAIR WITH OMARCHY", &jetbrains_mono_27);
+    lv_obj_t *eyebrow = make_label(screen, "PAIR WITH PACEMAN", &jetbrains_mono_27);
     lv_obj_set_style_text_letter_space(eyebrow, 1, 0);
     lv_obj_set_pos(eyebrow, SAFE_INLINE, 146);
 

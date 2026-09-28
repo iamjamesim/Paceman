@@ -20,9 +20,9 @@ reconnects. The watch applies expiry rules locally; see
 [data freshness](../docs/data-freshness.md) for the v5 display policy and legacy behavior.
 
 Agent indicators distinguish working, needs input, and completion. Sound is
-enabled by default and toggleable from the Omarchy panel. Tapping an input or
+enabled by default and toggleable in the Paceman iPhone app. Tapping an input or
 finished indicator persists an acknowledgement revision in NVS and notifies
-the desktop when connected. See [agent attention](../docs/design.md#agent-attention)
+the connected phone. See [agent attention](../docs/design.md#agent-attention)
 for animations, sound patterns, and wake behavior.
 
 While the native serial/JTAG interface is connected to a USB host, ESP-IDF
@@ -32,7 +32,7 @@ reliable. A charger without a data connection does not keep the watch awake.
 The RTC is powered from the board battery through its power-management circuit.
 A normal reboot therefore keeps time. A complete battery loss can set the RTC's
 oscillator-stop flag; firmware then shows `TIME NOT SET` instead of displaying a
-plausible but wrong clock, and the bonded desktop repairs it on reconnect.
+plausible but wrong clock, and the bonded phone repairs it on reconnect.
 
 ## Toolchain
 
@@ -86,20 +86,20 @@ idf.py -p /dev/ttyACM0 flash monitor
 Exit the monitor with `Ctrl+]`.
 
 `erase-flash` is a factory reset, not a routine development step. It deletes
-ownership and bonding state on the watch. BlueZ still retains the laptop's
-copy of the old bond, so merely disconnecting is not enough: remove or forget
-the corresponding device from the general Bluetooth settings (or use
-`bluetoothctl remove <watch-address>`) before pairing it again.
+ownership and bonding state on the watch. If the watch was previously connected,
+remove it from the old device as well: use **Remove watch** in the Paceman iPhone
+app, or forget it in the old device's Bluetooth settings. Disconnecting alone
+does not remove the old bond.
 
 ## Boot behavior
 
 | Ownership | RTC | Initial screen | Recovery |
 | --- | --- | --- | --- |
-| none | any | six-digit pairing code | pair from the Omarchy panel |
+| none | any | six-digit pairing code | connect from Settings → Experimental → Paceman Watch in the iPhone app |
 | owned | valid | watch face immediately | background sync refreshes it |
-| owned | invalid/unavailable | `TIME NOT SET` | bonded desktop reconnects and syncs |
+| owned | invalid/unavailable | `TIME NOT SET` | bonded phone reconnects and syncs |
 
 The RTC stores UTC. The cached profile supplies the display offset, hour cycle,
-palette, brightness, and forecast. The offset is refreshed whenever the desktop syncs;
+palette, brightness, and forecast. The offset is refreshed whenever the phone syncs;
 automatic seasonal timezone transitions while fully offline are future profile
 work.
