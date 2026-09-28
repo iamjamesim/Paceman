@@ -37,7 +37,14 @@ private struct AllowanceProvider: TimelineProvider {
         var dates = [now]
         if let value, value.available(at: now) {
             let reset = Date(timeIntervalSince1970: value.resetsAt)
-            // Entries update the ring and compact day/hour text; native date text updates on its own.
+            let shortStep: TimeInterval
+            if #available(watchOS 11, *) {
+                shortStep = 300
+            } else {
+                // The circular countdown is static on watchOS 10.
+                shortStep = 60
+            }
+            // Entries update the ring and static text; native date text updates on its own.
             for _ in 0..<70 {
                 let remaining = reset.timeIntervalSince(dates.last!)
                 let next: Date
@@ -48,7 +55,7 @@ private struct AllowanceProvider: TimelineProvider {
                 } else if remaining > 3_600 {
                     next = dates.last!.addingTimeInterval(900)
                 } else {
-                    next = dates.last!.addingTimeInterval(300)
+                    next = dates.last!.addingTimeInterval(shortStep)
                 }
                 if next >= reset { break }
                 dates.append(next)
@@ -63,8 +70,8 @@ private struct AllowanceProvider: TimelineProvider {
             // The reset state must be present even when the ring's 70-entry batch ends early.
             dates.append(reset)
             dates.sort()
-            let policy: TimelineReloadPolicy = lastRingUpdate < reset.addingTimeInterval(-300)
-                ? .after(lastRingUpdate.addingTimeInterval(300)) : .never
+            let policy: TimelineReloadPolicy = lastRingUpdate < reset.addingTimeInterval(-shortStep)
+                ? .after(lastRingUpdate.addingTimeInterval(shortStep)) : .never
             completion(Timeline(entries: dates.map { AllowanceEntry(date: $0, allowance: value) },
                                 policy: policy))
             return
