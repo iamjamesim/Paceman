@@ -950,7 +950,7 @@
 "isa" = "XCBuildConfiguration";
 "buildSettings" = {
 "APNS_ENVIRONMENT" = "development";
-"WATCHOS_DEPLOYMENT_TARGET" = "10.0";
+"WATCHOS_DEPLOYMENT_TARGET" = "11.0";
 "SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
 "DEVELOPMENT_TEAM" = "CF5Q5833P7";
 "TARGETED_DEVICE_FAMILY" = "4";
@@ -974,7 +974,7 @@
 "isa" = "XCBuildConfiguration";
 "buildSettings" = {
 "APNS_ENVIRONMENT" = "production";
-"WATCHOS_DEPLOYMENT_TARGET" = "10.0";
+"WATCHOS_DEPLOYMENT_TARGET" = "11.0";
 "DEVELOPMENT_TEAM" = "CF5Q5833P7";
 "TARGETED_DEVICE_FAMILY" = "4";
 "INFOPLIST_FILE" = "PacemanWatch/Info.plist";
@@ -1018,7 +1018,7 @@
 "PRODUCT_NAME" = "$(TARGET_NAME)";
 "PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype.watchkitapp.widgets";
 "SWIFT_VERSION" = "5.0";
-"WATCHOS_DEPLOYMENT_TARGET" = "10.0";
+"WATCHOS_DEPLOYMENT_TARGET" = "11.0";
 };
 "name" = "Debug";
 };
@@ -1040,7 +1040,7 @@
 "PRODUCT_NAME" = "$(TARGET_NAME)";
 "PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype.watchkitapp.widgets";
 "SWIFT_VERSION" = "5.0";
-"WATCHOS_DEPLOYMENT_TARGET" = "10.0";
+"WATCHOS_DEPLOYMENT_TARGET" = "11.0";
 };
 "name" = "Release";
 };

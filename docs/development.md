@@ -82,6 +82,8 @@ Fixtures disable real networking/Bluetooth; release builds ignore these argument
 
 ## Watch
 
+The Apple Watch app and complications require watchOS 11+.
+
 The supported board is Waveshare ESP32-S3-Touch-AMOLED-2.06. The development watch
 already pairs with the phone. Open Connect your watch for a fresh unowned device;
 follow the current instruction and the system Bluetooth pairing prompt.

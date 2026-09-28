@@ -37,13 +37,7 @@ private struct AllowanceProvider: TimelineProvider {
         var dates = [now]
         if let value, value.available(at: now) {
             let reset = Date(timeIntervalSince1970: value.resetsAt)
-            let shortStep: TimeInterval
-            if #available(watchOS 11, *) {
-                shortStep = 300
-            } else {
-                // The circular countdown is static on watchOS 10.
-                shortStep = 60
-            }
+            let shortStep: TimeInterval = 300
             // Entries update the ring and static text; native date text updates on its own.
             for _ in 0..<70 {
                 let remaining = reset.timeIntervalSince(dates.last!)
@@ -134,7 +128,6 @@ private struct AllowanceView: View {
         entry.allowance?.limitTitle ?? "Weekly limit"
     }
 
-    @available(watchOS 11, *)
     private func positiveNarrowStyle(_ fields: Set<Date.ComponentsFormatStyle.Field>) -> Date.ComponentsFormatStyle {
         var style = Date.ComponentsFormatStyle(style: .narrow, fields: fields)
         style.isPositive = true
@@ -148,10 +141,8 @@ private struct AllowanceView: View {
             if remaining > 86_400 {
                 let hours = Int(remaining / 3_600)
                 Text("\(hours / 24)d \(hours % 24)h")
-            } else if #available(watchOS 11, *) {
-                Text(.dateRange(endingAt: reset), format: positiveNarrowStyle([.hour, .minute]))
             } else {
-                Text(reset, style: .relative)
+                Text(.dateRange(endingAt: reset), format: positiveNarrowStyle([.hour, .minute]))
             }
         }
         .monospacedDigit()
@@ -164,13 +155,10 @@ private struct AllowanceView: View {
             if remaining > 86_400 {
                 let hours = Int(remaining / 3_600)
                 Text("\(hours / 24)d\n\(hours % 24)h")
-            } else if #available(watchOS 11, *) {
+            } else {
                 // Keep the original stacked layout while the system updates both units.
                 Text(.dateRange(endingAt: reset), format: positiveNarrowStyle([.hour, .minute]))
                     .frame(width: 32)
-            } else {
-                Text(allowance.resetCountdownDetailed(at: entry.date)
-                    .replacingOccurrences(of: " ", with: "\n"))
             }
         }
         .monospacedDigit()
@@ -204,15 +192,9 @@ private struct AllowanceView: View {
                 .tint(fullColorAccent)
             } else {
                 Gauge(value: fraction, in: 0...1) {
-                    if #available(watchOS 11, *) {
-                        Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                            .foregroundStyle(fullColorAccent ?? Color.primary)
-                            .widgetAccentable()
-                    } else {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .foregroundStyle(fullColorAccent ?? Color.primary)
-                            .widgetAccentable()
-                    }
+                    Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                        .foregroundStyle(fullColorAccent ?? Color.primary)
+                        .widgetAccentable()
                 } currentValueLabel: {
                     EmptyView()
                 }
