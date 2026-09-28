@@ -223,8 +223,9 @@ See pairing-and-removal.md for the watch ownership distinction and validation li
 The custom Paceman Watch is optional experimental hardware. Discovery and pairing
 live under Settings → Experimental → Paceman Watch. That label sets expectations
 before setup; a paired watch uses its ordinary name and connection state on Home.
-The unpaired watch detail first identifies the supported Waveshare ESP32-S3 board,
-explains how to flash the editable firmware, and then advances to pairing. Help
+The unpaired watch detail introduces the focused watch experience, links to the
+supported Waveshare ESP32-S3 board, explains how to flash and adapt the open-source
+firmware, and then advances to pairing. Help
 for a watch owned by another device gives the erase-flash recovery step; a normal
 firmware update preserves its old pairing.
 With no computer and no watch, Home shows the computer setup action only. A

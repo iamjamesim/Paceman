@@ -137,25 +137,31 @@ struct WatchIntroduction: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 if !typeSize.isAccessibilitySize {
-                    WatchIllustration(theme: watchTheme, paired: false, timeFormat: .system, state: .working)
+                    WatchIllustration(theme: watchTheme, paired: true, timeFormat: .system, state: .working)
                         .frame(width: 90, height: 133)
                         .frame(maxWidth: .infinity).padding(.vertical, 14)
                 }
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("A custom watch for agent activity")
+                    Text("A purpose-built watch for agentic engineering")
                         .font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
-                    Text("Paceman Watch is editable firmware for the Waveshare ESP32-S3 Touch AMOLED 2.06.")
+                    Text("See agent status and Codex usage limits at a glance, without the usual smartwatch distractions. Its open-source firmware is fully hackable, so you can ask your agent to customize the watch to your liking.")
                         .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
-                    Text("Before pairing")
+                    Text("Getting started")
                         .font(.headline).padding(.top, 10)
-                    Text("Get the board and ask your agent to build and flash the Paceman Watch firmware. When the watch is ready, continue here to pair it.")
+                    Text("Get the Waveshare ESP32-S3 Touch AMOLED 2.06 board, then ask your agent to build and flash the Paceman Watch firmware.")
                         .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
-                    Text("Your agent can adapt it to similar ESP32-S3 hardware if it preserves Paceman’s Bluetooth service, pairing identity, and payload format.")
+                    Link(destination: URL(string: "https://www.waveshare.com/product/esp32-s3-touch-amoled-2.06.htm")!) {
+                        HStack(spacing: 8) {
+                            Text("View the board at Waveshare")
+                            Image(systemName: "arrow.up.right").accessibilityHidden(true)
+                        }.font(.subheadline.weight(.medium)).frame(minHeight: 44, alignment: .leading)
+                    }.foregroundStyle(theme.tint)
+                    Text("Similar ESP32-S3 board? Your agent can adapt the firmware while preserving Paceman’s Bluetooth protocol.")
                         .font(.footnote).lineSpacing(3).foregroundStyle(theme.secondaryInk)
                 }
             }.padding(.horizontal, 26).padding(.bottom, 30)
         }.safeAreaInset(edge: .bottom) {
-            CompanionButton(title: "Continue to pairing", theme: theme, action: continueSetup)
+            CompanionButton(title: "Connect your watch", theme: theme, action: continueSetup)
                 .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
                 .background(theme.canvas)
         }.foregroundStyle(theme.ink).background(theme.canvas)
