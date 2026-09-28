@@ -1,6 +1,7 @@
 import AccessorySetupKit
 import Combine
 import CoreBluetooth
+import SwiftUI
 import UIKit
 
 enum WatchNotificationSharing {
@@ -155,43 +156,18 @@ enum WatchConnectionPresentation: String {
 
 final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     static let service = CBUUID(string: "7f510001-1b15-4f0d-b7a5-4cf3a2c98ee1")
-    private static let pickerProductImage: UIImage = {
-        // AccessorySetupKit presents this artwork at up to 180 × 120 points.
-        // Render our own watch at 3× so the system sheet stays sharp.
-        let format = UIGraphicsImageRendererFormat()
-        format.opaque = false
-        format.scale = 3
-        let image = UIGraphicsImageRenderer(size: CGSize(width: 180, height: 120), format: format).image { _ in
-            func rounded(_ rect: CGRect, radius: CGFloat, color: UIColor) {
-                color.setFill()
-                UIBezierPath(roundedRect: rect, cornerRadius: radius).fill()
-            }
-            let accent = UIColor(red: 1, green: 0.77, blue: 0.36, alpha: 1)
-            let muted = UIColor(red: 0.65, green: 0.66, blue: 0.65, alpha: 1)
-            rounded(CGRect(x: 75, y: 0, width: 30, height: 120), radius: 10,
-                    color: UIColor(red: 0.19, green: 0.21, blue: 0.20, alpha: 1))
-            rounded(CGRect(x: 50, y: 13, width: 80, height: 94), radius: 24,
-                    color: UIColor(red: 0.34, green: 0.37, blue: 0.34, alpha: 1))
-            rounded(CGRect(x: 55, y: 18, width: 70, height: 84), radius: 20,
-                    color: UIColor(red: 0.08, green: 0.10, blue: 0.14, alpha: 1))
-            let small = UIFont.monospacedSystemFont(ofSize: 6, weight: .medium)
-            ("MON 28 SEP" as NSString).draw(at: CGPoint(x: 65, y: 27),
-                withAttributes: [.font: small, .foregroundColor: muted])
-            ("10:08" as NSString).draw(at: CGPoint(x: 64, y: 44),
-                withAttributes: [.font: UIFont.monospacedSystemFont(ofSize: 17, weight: .regular),
-                                 .foregroundColor: accent])
-            rounded(CGRect(x: 64, y: 72, width: 52, height: 0.7), radius: 0.35,
-                    color: muted.withAlphaComponent(0.4))
-            rounded(CGRect(x: 65, y: 81, width: 9, height: 7), radius: 3, color: accent)
-            rounded(CGRect(x: 67, y: 83, width: 1, height: 1), radius: 0.5,
-                    color: UIColor(red: 0.08, green: 0.10, blue: 0.14, alpha: 1))
-            rounded(CGRect(x: 71, y: 83, width: 1, height: 1), radius: 0.5,
-                    color: UIColor(red: 0.08, green: 0.10, blue: 0.14, alpha: 1))
-            ("WORKING" as NSString).draw(at: CGPoint(x: 82, y: 80),
-                withAttributes: [.font: small, .foregroundColor: muted])
-        }
-        return image.withRenderingMode(.alwaysOriginal)
-    }()
+    @MainActor private static func pickerProductImage() -> UIImage? {
+        // Use the same illustration as the watch screens. The system picker
+        // displays the transparent image in a 180 × 120 point container.
+        let artwork = WatchIllustration(theme: ThemeFamily.ayu.phone(dark: true),
+                                         paired: true, state: .working)
+            .frame(width: 80, height: 118)
+            .frame(width: 180, height: 120)
+        let renderer = ImageRenderer(content: artwork)
+        renderer.scale = 3
+        renderer.isOpaque = false
+        return renderer.uiImage?.withRenderingMode(.alwaysOriginal)
+    }
     private let profileUUID = CBUUID(string: "7f510002-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private let identityUUID = CBUUID(string: "7f510003-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private let activityUUID = CBUUID(string: "7f510004-1b15-4f0d-b7a5-4cf3a2c98ee1")
@@ -385,7 +361,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: timeout)
     }
 
-    func resumePairing() {
+    @MainActor func resumePairing() {
         guard !setupPhase.inProgress else { return }
         guard preferredAccessoryID != nil else { addWatch(); return }
         setupPhase = .connecting
@@ -399,7 +375,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         status = "Pairing paused. You can continue when your watch is nearby."
     }
 
-    func addWatch() {
+    @MainActor func addWatch() {
         guard pickerReady, !setupPhase.inProgress else { return }
         accessoryWaitingForPickerDismissal = nil
         setupPhase = .selecting
@@ -408,8 +384,13 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         descriptor.bluetoothServiceUUID = Self.service
         // The shared suffix discovers watches with either the original or current BLE name.
         descriptor.bluetoothNameSubstring = "Watch"
-        let item = ASPickerDisplayItem(name: "Paceman Watch",
-            productImage: Self.pickerProductImage, descriptor: descriptor)
+        guard let productImage = Self.pickerProductImage() else {
+            status = "Watch setup is unavailable. Try again."
+            setupPhase = .failed
+            return
+        }
+        let item = ASPickerDisplayItem(name: "Paceman",
+            productImage: productImage, descriptor: descriptor)
         setupSession.showPicker(for: [item]) { [weak self] error in
             if error != nil {
                 DispatchQueue.main.async {
