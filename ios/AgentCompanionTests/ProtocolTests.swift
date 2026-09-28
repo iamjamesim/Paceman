@@ -659,7 +659,7 @@ final class ProtocolTests: XCTestCase {
                 XCTAssertEqual(request.url?.path, "/v1/push")
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
                 let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
-                XCTAssertNil(body["mode"])
+                XCTAssertEqual(body["mode"] as? String, "alert")
                 XCTAssertEqual(body["displayName"] as? String, "Studio Mac")
                 XCTAssertNil(body["presentation"])
                 return (200, try JSONSerialization.data(withJSONObject: ["registered": confirmed]))
@@ -682,7 +682,7 @@ final class ProtocolTests: XCTestCase {
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
             if request.httpMethod == "POST" {
                 let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
-                XCTAssertNil(body["mode"])
+                XCTAssertEqual(body["mode"] as? String, "alert")
                 return (200, Data(#"{"registered":true}"#.utf8))
             }
             XCTAssertEqual(request.httpMethod, "DELETE")

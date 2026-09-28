@@ -179,16 +179,13 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/v1/pair", {"invitation": "x" * 43})[0], 429)
 
     def test_push_registration_requires_pairing_and_can_only_remove_own_destination(self):
-        payload = {"deviceToken": "ab" * 32, "environment": "development"}
+        payload = {"deviceToken": "ab" * 32, "environment": "development", "mode": "alert"}
         self.assertEqual(self.request("POST", "/v1/push", payload)[0], 401)
         first, second = self.paired(), self.paired()
         status, value = self.request("POST", "/v1/push", payload, first["credential"])
         self.assertEqual(status, 200)
         self.assertTrue(value["registered"])
         self.assertNotIn("deviceToken", value)
-        self.assertNotIn("mode", value)
-        # Existing phones may still send the old, single-valued field.
-        self.assertEqual(self.request("POST", "/v1/push", {**payload, "mode": "alert"}, first["credential"])[0], 200)
         self.assertEqual(self.request("GET", "/v1/push", token=second["credential"])[1], {"registered": False})
         self.request("DELETE", "/v1/push", token=second["credential"])
         self.assertTrue(self.request("GET", "/v1/push", token=first["credential"])[1]["registered"])

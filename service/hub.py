@@ -233,7 +233,7 @@ class Store:
                     or not re.fullmatch(r"[0-9a-f]{32,512}", payload["deviceToken"])
                     or len(payload["deviceToken"]) % 2
                     or payload.get("environment") not in ("development", "production")
-                    or payload.get("mode", "alert") != "alert"):
+                    or payload.get("mode") != "alert"):
                 raise ValueError("Invalid push registration")
             display_name = registered_display_name(payload)
         with self.connect() as db:
@@ -248,7 +248,7 @@ class Store:
                 if display_name is not None:
                     db.execute("UPDATE clients SET display_name=? WHERE id=?", (display_name or None, client_id))
                 old = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
-                values = (payload["deviceToken"], payload["environment"], "alert")
+                values = (payload["deviceToken"], payload["environment"], payload["mode"])
                 if old is None or tuple(old[k] for k in ("token", "environment", "mode")) != values:
                     revision = db.execute("SELECT MAX(seq) FROM events").fetchone()[0]
                     db.execute("INSERT OR REPLACE INTO push_devices(client_id,token,environment,mode,cursor) "
@@ -256,7 +256,7 @@ class Store:
             row = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
         if not row:
             return {"registered": False}
-        return {"registered": True, "environment": row["environment"],
+        return {"registered": True, "environment": row["environment"], "mode": row["mode"],
                 "lastResult": row["last_result"], "lastAPNsID": row["last_apns_id"]}
 
     def watch_push_device(self, credential: str, payload: dict | None = None) -> dict | None:

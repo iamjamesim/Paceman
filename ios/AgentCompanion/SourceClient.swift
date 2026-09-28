@@ -179,7 +179,7 @@ final class SourceClient {
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token,
-            "environment": environment, "displayName": displayName ?? ""])
+            "environment": environment, "mode": "alert", "displayName": displayName ?? ""])
         let data = try await response(request)
         struct Registration: Decodable { let registered: Bool }
         let registration = try JSONDecoder().decode(Registration.self, from: data)

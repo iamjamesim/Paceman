@@ -62,7 +62,8 @@ idle. See [Mac, Omarchy, and APNs payload examples](protocol-examples.md).
 ## Notifications and watch
 
 `POST /v1/push` registers one alert destination for a paired client; `GET` reports
-registration without exposing its token, and `DELETE` removes it.
+registration without exposing its token, and `DELETE` removes it. Registration
+currently requires `mode: "alert"`.
 `POST /v1/live-activity` registers that client's ActivityKit destinations.
 These direct APNs routes are private alpha endpoints; a public release needs a
 key-safe relay.
