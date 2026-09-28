@@ -132,9 +132,9 @@ private final class PanelModel: ObservableObject {
     }
 }
 
-private struct PairingSheet: View {
+private struct PairingView: View {
     let code: PairingCode
-    @Environment(\.dismiss) private var dismiss
+    let onDone: () -> Void
 
     private var qr: NSImage? {
         let filter = CIFilter.qrCodeGenerator()
@@ -161,14 +161,15 @@ private struct PairingSheet: View {
                     .frame(width: 230, height: 230)
             }
             Text("Code expires in five minutes").font(.caption).foregroundStyle(.secondary)
-            Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
-        }.padding(28).frame(width: 340)
+            Button("Done", action: onDone).keyboardShortcut(.defaultAction)
+        }
+        .padding(28).frame(width: 340)
+        .onExitCommand(perform: onDone)
     }
 }
 
-private struct ManagementSheet: View {
+private struct ManagementView: View {
     @ObservedObject var model: PanelModel
-    @Environment(\.dismiss) private var dismiss
     @State private var confirmingUninstall = false
 
     var body: some View {
@@ -191,7 +192,7 @@ private struct ManagementSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button("Done") { model.showingManagement = false }.keyboardShortcut(.defaultAction)
                 Spacer()
                 Button("Uninstall Paceman…", role: .destructive) { confirmingUninstall = true }
                     .disabled(model.busy)
@@ -199,6 +200,7 @@ private struct ManagementSheet: View {
         }
         .padding(24).frame(width: 390)
         .onAppear { model.loginStatus = SMAppService.mainApp.status }
+        .onExitCommand { model.showingManagement = false }
         .confirmationDialog("Remove Paceman from this Mac?", isPresented: $confirmingUninstall) {
             Button("Uninstall Paceman", role: .destructive) { model.uninstall() }
             Button("Cancel", role: .cancel) {}
@@ -269,6 +271,24 @@ private struct Panel: View {
     }
 
     var body: some View {
+        ZStack {
+            if let code = model.pairingCode {
+                PairingView(code: code) { model.pairingCode = nil }
+            } else if model.showingManagement {
+                ManagementView(model: model)
+            } else {
+                summary
+            }
+        }
+        .onAppear { model.refresh() }
+        .onDisappear {
+            model.pairingCode = nil
+            model.showingManagement = false
+        }
+        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in model.refresh() }
+    }
+
+    private var summary: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .center, spacing: 12) {
                 PacemanMark().frame(width: 40, height: 40)
@@ -285,7 +305,7 @@ private struct Panel: View {
                     .help("Connect a phone").disabled(!model.status.running || model.busy)
                 Toggle("Sharing", isOn: Binding(get: { model.status.sharingEnabled },
                                                 set: { model.setSharing($0) }))
-                    .labelsHidden().disabled(model.busy)
+                    .labelsHidden().toggleStyle(.switch).disabled(model.busy)
             }
             Divider()
             VStack(alignment: .leading, spacing: 10) {
@@ -330,10 +350,6 @@ private struct Panel: View {
             }
         }
         .padding(20).frame(width: 380)
-        .sheet(item: $model.pairingCode) { PairingSheet(code: $0) }
-        .sheet(isPresented: $model.showingManagement) { ManagementSheet(model: model) }
-        .onAppear { model.refresh() }
-        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in model.refresh() }
     }
 
     private func connectionRows(_ clients: [Connection]) -> some View {

@@ -166,10 +166,13 @@ and stopped layouts were compared in the full panel, including long phone names
 and an accessibility text-size preview.
 
 The Mac panel now has a quiet **Manage Paceman…** action after Activity. Its
-sheet answers what the one background item does, how the Sharing switch pauses
+in-menu view answers what the one background item does, how the Sharing switch pauses
 both the source and optional notification sender, and what complete uninstall
 removes. The destructive action has a second confirmation and explains that the
 phone retains its computer card until removed there. No service process names or
 per-request diagnostics appear in the main panel. The full first-run, paired,
 multiple/stale connection, and sharing-off layouts were checked with this action;
-the sheet and confirmation were checked at normal and accessibility text sizes.
+the original sheet and confirmation were checked at normal and accessibility text sizes.
+Pairing and management now appear inside the menu window because native sheets
+closed the menu while retaining the view. Both Done paths returned to the summary
+in a normal-size window preview and in a hands-on check of the installed menu-bar app.
