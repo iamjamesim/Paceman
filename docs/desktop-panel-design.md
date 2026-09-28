@@ -41,16 +41,16 @@ troubleshooting buttons. Normal content width is 380 logical style units.
    choice, honored across login and upgrades. Off disables login startup and
    stops the service; On restores both. A service condition also prevents an
    accidental manual start from overriding the saved Off choice.
-2. **Phone contact.** A phone icon, understandable connection text and last-contact
-   time. Names and platforms come from the paired app. A recent authenticated fetch supports
-   “Receiving updates”; it does not support a watch-delivered claim.
+2. **Phone contact.** A phone icon and time since the last authenticated fetch.
+   Names and platforms come from the paired app. The contact time does not
+   establish delivery to the watch.
 3. **What this computer contributes.** One compact adapter/activity summary:
    Codex working, needs input, finished or no active work. It remains useful
    while the phone is away. A full session feed duplicates the phone and does
    not belong in the default desktop view. Adapter/workspace selection belongs
    here when those controls exist; do not imply scope controls are implemented.
-4. **Details, inline.** Clicking a connection row expands its own last contact, pairing date,
-   contextual reconnect guidance and a secondary “Remove access…” action. Keep the header
+4. **Details, inline.** The row keeps its last-contact time visible. Clicking it reveals
+   the pairing date, contextual guidance and a secondary “Remove access…” action. Keep the header
    and activity visible. No desktop diagnostics, credential counts, duplicate
    pairing action or routine restart action belong here. Restart appears only
    when the source is unavailable. The header QR is the single pairing action.
@@ -62,19 +62,19 @@ Example information layout (sample data, not a live status report):
                  SHARING ACTIVITY
 -----------------------------------------------------
 PHONE
-[phone]          Alex’s iPhone                  Just now
-                 Receiving updates                   >
+[phone]          Alex’s iPhone           Just now  >
+                 Last contact
 -----------------------------------------------------
 ACTIVITY
 Codex                                 Working [agent]
 ```
 
-The phone row changes independently of the local Codex summary. A recent
-authenticated fetch reads **Receiving updates**; older contact reads **Last
-contact** with its time, and a paired installation that has never fetched reads
-**No contact yet**. A sleeping phone may normally have no recent contact, so
-do not describe that state as waiting or disconnected. Keep the recovery hint
-in expanded details and never turn it into a fresh-pairing prompt.
+The phone row changes independently of the local Codex summary. Show **Last
+contact** with its relative time whenever that phone has fetched, regardless
+of how recent it was or whether Sharing is currently on. A paired installation
+that has never fetched reads **No contact yet**. The header reports Sharing;
+the phone row does not repeat it. Keep recovery guidance in expanded details
+and never turn older contact into a fresh-pairing prompt.
 
 Activity uses per-state session counts from the same snapshot as its aggregate:
 
@@ -101,7 +101,7 @@ useful task/project names before it can explain which task needs attention.
 | State | Main content | Primary action |
 | --- | --- | --- |
 | No phone paired | Connect your phone; brief setup instruction | Show pairing code |
-| Recent phone contact | Phone receiving updates; last contact | None needed |
+| Recent phone contact | Last contact, just now | None needed |
 | Paired, no recent contact | Last contact time; how to check for updates in details | Open the app on the phone when an update is needed |
 | Sharing switched off | Sharing off; activity paused | Turn sharing on |
 | Desktop stopped or heartbeat expired | Sharing unavailable; explain consequence | Restart Paceman |
@@ -136,7 +136,8 @@ proof of the current credential replaces that installation’s access in place.
 
 ## Evidence limits
 
-Contact expires after 30 seconds; the source heartbeat expires after 20 seconds.
+The 30-second recent-contact marker controls contextual guidance, not the
+phone-row label; the source heartbeat expires after 20 seconds.
 Contact is a successful authenticated snapshot response for
 that particular credential; diagnostic clients cannot refresh another row. Do not infer an always-connected phone,
 working APNs or Bluetooth status. No watch/weather placeholder row appears until

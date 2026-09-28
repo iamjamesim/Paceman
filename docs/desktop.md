@@ -97,7 +97,7 @@ events, multi-session behavior, and recovery limitations.
   choice survives login and upgrades; turning it back on restores both.
 - **Phone/connections:** the reported app name and its own last-contact time.
   An existing pairing is retained while the phone is away. Click its row for
-  contact details, pairing date, reconnect guidance and **Remove access…**.
+  pairing date, reconnect guidance and **Remove access…**.
   Removal requires confirmation and leaves the phone’s watch pairing intact.
 - **Activity:** the aggregate Codex state from this machine. This is a compact
   source summary, not a duplicate of the phone's activity feed. The watch's agent
@@ -107,8 +107,8 @@ events, multi-session behavior, and recovery limitations.
   after its turn ends. Process exit removes it even if its cleanup hook is missed.
 
 The source publishes a five-second heartbeat that expires after 20 seconds.
-“Receiving updates” means a successful authenticated snapshot response
-for that connection within 30 seconds. It does not acknowledge watch delivery.
+**Last contact** records the most recent successful authenticated snapshot
+response for that connection. It does not acknowledge watch delivery.
 Names/platforms are app-reported metadata, and names may be generic or duplicated.
 Pairing identifies app installations, not physical hardware.
 

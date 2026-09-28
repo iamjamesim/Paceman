@@ -43,7 +43,7 @@ PanelWindow {
           {label: "Open sessions with finished work", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3,
             activity: "needs_input", sessions: 6, sessionCounts: {needs_input: 2, working: 3, finished: 1, idle: 0}}
         ] : [
-          {label: "Receiving updates", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3, activity: "working"},
+          {label: "Recent contact", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 3, activity: "working"},
           {label: "Phone away", running: true, sharingEnabled: true, pairedPhones: 1, lastPhoneFetchAt: window.now - 900, activity: "needs_input"},
           {label: "First-time setup", running: true, sharingEnabled: true, pairedPhones: 0, lastPhoneFetchAt: 0, activity: "idle"},
           {label: "Sharing off", running: false, sharingEnabled: false, pairedPhones: 1, lastPhoneFetchAt: window.now - 300, activity: "idle"}

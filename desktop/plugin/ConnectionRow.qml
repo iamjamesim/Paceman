@@ -34,6 +34,7 @@ ColumnLayout {
     foreground: root.foreground
     hasCursor: root.cursor === "phone:" + root.connection.id
     Accessible.name: root.connection.title + ". " + root.connection.status
+      + (root.connection.lastContactAt > 0 ? ", " + Model.relativeTime(root.connection.lastContactAt, root.now) : "")
     Accessible.role: Accessible.Button
     Accessible.description: root.expanded ? "Collapse connection details" : "Expand connection details"
     RowLayout {
@@ -45,7 +46,7 @@ ColumnLayout {
       spacing: Style.space(14)
       Text {
         text: root.connection.phone ? "󰄜" : "󰌷"
-        color: root.connection.recent ? root.foreground : root.dim
+        color: root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.display
       }
@@ -97,15 +98,6 @@ ColumnLayout {
     Layout.leftMargin: Style.space(10)
     Layout.rightMargin: Style.space(10)
     spacing: Style.space(12)
-    RowLayout {
-      Layout.fillWidth: true
-      Text { text: "Last contact"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.body }
-      Item { Layout.fillWidth: true }
-      Text {
-        text: Model.relativeTime(root.connection.lastContactAt, root.now)
-        color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body
-      }
-    }
     Text {
       Layout.fillWidth: true
       visible: root.connection.pairedAt > 0

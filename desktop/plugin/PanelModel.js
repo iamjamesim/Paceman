@@ -55,8 +55,7 @@ function present(state, now) {
       phone: phone, recent: recent,
       lastContactAt: contact, pairedAt: Number(client.pairedAt || 0),
       canRemove: client.removable !== false && !!client.id,
-      status: !sharing ? "Updates paused" : !running ? "Updates unavailable"
-        : recent ? "Receiving updates" : contact > 0 ? "Last contact" : "No contact yet",
+      status: contact > 0 ? "Last contact" : "No contact yet",
       guidance: !sharing ? "Turn sharing on to resume updates."
         : !running ? "Restart Paceman to resume updates."
         : phone ? "Open Paceman on your phone to check for updates."

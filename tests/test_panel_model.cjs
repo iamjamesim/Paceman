@@ -125,19 +125,19 @@ test('sharing off preserves connection identity and removal without claiming con
     {id: 'a', name: '<b>My phone</b>', platform: 'ios', lastContactAt: now - 2}
   ]})
   assert.equal(value.connections[0].title, '<b>My phone</b>')
-  assert.equal(value.connections[0].status, 'Updates paused')
+  assert.equal(value.connections[0].status, 'Last contact')
   assert.equal(value.connections[0].recent, false)
   assert.equal(value.connections[0].canRemove, true)
 })
 
-test('connection copy separates recent, past, absent, and unavailable contact', () => {
+test('last-contact copy stays stable across recency and sharing states', () => {
   const client = {id: 'a', name: 'Alex’s iPhone', platform: 'ios'};
   const cases = [
-    [{lastContactAt: now - 2}, {}, 'Receiving updates'],
+    [{lastContactAt: now - 2}, {}, 'Last contact'],
     [{lastContactAt: now - 40}, {}, 'Last contact'],
     [{lastContactAt: 0}, {}, 'No contact yet'],
-    [{lastContactAt: now - 2}, {updatedAt: now - 20}, 'Updates unavailable'],
-    [{lastContactAt: now - 2}, {sharingEnabled: false}, 'Updates paused']
+    [{lastContactAt: now - 2}, {updatedAt: now - 20}, 'Last contact'],
+    [{lastContactAt: now - 2}, {sharingEnabled: false}, 'Last contact']
   ];
   for (const [contact, overrides, expected] of cases) {
     const value = present({}, {clients: [{...client, ...contact}], ...overrides});

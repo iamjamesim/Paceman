@@ -1,12 +1,13 @@
 # Desktop visual reference
 
-Canonical Omarchy desktop states for design review and macOS implementation.
-Captured 2026-09-18 from the production panel components in this revision.
+Omarchy desktop layout references for design review and macOS implementation.
+Captured 2026-09-18 from the production panel components. The contact copy now
+uses **Last contact** with its time, and expanded details no longer repeat it;
+recapture these images on Omarchy before using them as current copy references.
 These are **sample states**, not live phone/watch delivery evidence. Times are
 frozen, animation is paused, and the pairing QR is deliberately nonfunctional.
 
-The [panel design](desktop-panel-design.md) defines behavior; these images show
-its current implementation. Keep this small set current rather than collecting
+The [panel design](desktop-panel-design.md) defines behavior. Keep this small set current rather than collecting
 an archive of screenshots from design iterations.
 
 ## Overview
@@ -20,9 +21,9 @@ robot in a fixed trailing slot; Working gently pulses in the running app.
 
 ## Phone details expand inline
 
-<img src="images/desktop/phone-details.png" width="440" alt="Phone row expanded in place with last contact, pairing date, reconnect instructions, and removal action">
+<img src="images/desktop/phone-details.png" width="440" alt="Phone row expanded in place with pairing date, reconnect instructions, and removal action">
 
-Clicking a named connection reveals its own contact and pairing details directly
+Clicking a named connection keeps last contact visible and reveals pairing details directly
 below it. The header and local activity remain visible. A phone that has stopped fetching does not require a
 new pairing. Escape collapses the details before closing the panel.
 

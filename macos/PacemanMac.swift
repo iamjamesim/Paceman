@@ -250,20 +250,14 @@ private struct Panel: View {
     }
 
     private func contact(_ timestamp: Double) -> String {
-        guard timestamp > 0 else { return "No contact yet" }
         let age = Date().timeIntervalSince1970 - timestamp
         if age < 10 { return "Just now" }
         return RelativeDateTimeFormatter().localizedString(for: Date(timeIntervalSince1970: timestamp), relativeTo: Date())
     }
 
     private func connectionStatus(_ connection: Connection) -> String {
-        let hasContact = connection.lastContactAt > 0
-        let receipt = hasContact ? " · \(contact(connection.lastContactAt))" : ""
-        if !model.status.sharingEnabled { return "Updates paused\(receipt)" }
-        if !model.status.running { return "Updates unavailable\(receipt)" }
-        if !hasContact { return "No contact yet" }
-        let age = Date().timeIntervalSince1970 - connection.lastContactAt
-        return "\(age >= 0 && age < 30 ? "Receiving updates" : "Last contact")\(receipt)"
+        guard connection.lastContactAt > 0 else { return "No contact yet" }
+        return "Last contact · \(contact(connection.lastContactAt))"
     }
 
     private var connectionHeading: String {
