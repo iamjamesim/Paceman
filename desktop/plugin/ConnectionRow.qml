@@ -136,7 +136,9 @@ ColumnLayout {
       spacing: Style.space(10)
       Text {
         Layout.fillWidth: true
-        text: "Remove access for “" + root.connection.title + "”? Updates from this computer will stop. Your watch stays paired. A new code is needed to reconnect."
+        text: "Remove access for “" + root.connection.title + "”? Updates from this computer will stop. "
+          + (root.connection.platform === "ios" ? "Your watch stays paired. " : "")
+          + "A new code is needed to reconnect."
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
         color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body

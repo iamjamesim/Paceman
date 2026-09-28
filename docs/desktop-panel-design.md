@@ -69,9 +69,12 @@ ACTIVITY
 Codex                                 Working [agent]
 ```
 
-The phone row changes independently of the local Codex summary. If sharing is
-enabled but the phone is away, show waiting/last contact plus a recovery hint;
-never convert that into a fresh-pairing prompt.
+The phone row changes independently of the local Codex summary. A recent
+authenticated fetch reads **Receiving updates**; older contact reads **Last
+contact** with its time, and a paired installation that has never fetched reads
+**No contact yet**. A sleeping phone may normally have no recent contact, so
+do not describe that state as waiting or disconnected. Keep the recovery hint
+in expanded details and never turn it into a fresh-pairing prompt.
 
 Activity uses per-state session counts from the same snapshot as its aggregate:
 
@@ -99,7 +102,7 @@ useful task/project names before it can explain which task needs attention.
 | --- | --- | --- |
 | No phone paired | Connect your phone; brief setup instruction | Show pairing code |
 | Recent phone contact | Phone receiving updates; last contact | None needed |
-| Paired, no recent contact | Waiting for phone; last contact and how to resume | Open the app on the phone; do not ask to pair again |
+| Paired, no recent contact | Last contact time; how to check for updates in details | Open the app on the phone when an update is needed |
 | Sharing switched off | Sharing off; activity paused | Turn sharing on |
 | Desktop stopped or heartbeat expired | Sharing unavailable; explain consequence | Restart Paceman |
 | Pairing overlay | QR, where to scan, expiry; Escape or outside click to close | Generate a new code only when needed |
@@ -176,3 +179,6 @@ the original sheet and confirmation were checked at normal and accessibility tex
 Pairing and management now appear inside the menu window because native sheets
 closed the menu while retaining the view. Both Done paths returned to the summary
 in a normal-size window preview and in a hands-on check of the installed menu-bar app.
+The Mac pairing view still shows a fixed five-minute expiry caption; Omarchy
+shows the remaining time and offers a new code after expiry. That is pairing
+behavior work, separate from the contact-copy review.

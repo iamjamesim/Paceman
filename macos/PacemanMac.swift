@@ -153,7 +153,7 @@ private struct PairingView: View {
             PacemanMark().frame(width: 38, height: 38)
                 .foregroundStyle(Color(nsColor: .labelColor))
             Text("Connect your phone").font(.title2.weight(.semibold))
-            Text("On your iPhone, open Paceman, choose to connect a computer, and scan this code.")
+            Text("On your iPhone, open Paceman → Connect computer → Scan QR code.")
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if let qr {
@@ -232,7 +232,7 @@ private struct Panel: View {
         if model.status.missingHooks?.isEmpty == true,
            (model.status.lastAgentEventAt ?? 0) <= 0,
            (model.status.sessions ?? 0) == 0 {
-            return ("No activity yet", "Review and trust Paceman’s User config hooks in Codex Settings → Hooks (CLI: /hooks), then start a local task.")
+            return ("No activity yet", "Review Paceman’s hooks in Codex Settings → Hooks → User config (All projects), then start a local task.")
         }
         return nil
     }
@@ -244,7 +244,7 @@ private struct Panel: View {
                       ("finished", "finished"), ("idle", "idle")]
         let parts = labels.compactMap { key, label -> String? in
             guard let count = counts[key], count > 0 else { return nil }
-            return "\(count) \(label)"
+            return "\(count) \(key == "needs_input" && count == 1 ? "needs input" : label)"
         }
         return parts.count > 1 ? parts.joined(separator: " · ") : nil
     }
@@ -257,17 +257,19 @@ private struct Panel: View {
     }
 
     private func connectionStatus(_ connection: Connection) -> String {
-        let receipt = contact(connection.lastContactAt)
-        if !model.status.sharingEnabled { return "Updates paused · \(receipt)" }
-        if model.status.running && Date().timeIntervalSince1970 - connection.lastContactAt < 30 {
-            return "Receiving updates · \(receipt)"
-        }
-        return "Waiting for \(connection.platform == "ios" ? "phone" : "connection") · \(receipt)"
+        let hasContact = connection.lastContactAt > 0
+        let receipt = hasContact ? " · \(contact(connection.lastContactAt))" : ""
+        if !model.status.sharingEnabled { return "Updates paused\(receipt)" }
+        if !model.status.running { return "Updates unavailable\(receipt)" }
+        if !hasContact { return "No contact yet" }
+        let age = Date().timeIntervalSince1970 - connection.lastContactAt
+        return "\(age >= 0 && age < 30 ? "Receiving updates" : "Last contact")\(receipt)"
     }
 
     private var connectionHeading: String {
-        model.status.clients?.contains { $0.platform != "ios" } == true
-            ? "CONNECTIONS" : "PHONE"
+        guard let clients = model.status.clients else { return "PHONE" }
+        if clients.contains(where: { $0.platform != "ios" }) { return "CONNECTIONS" }
+        return clients.count > 1 ? "PHONES" : "PHONE"
     }
 
     var body: some View {
@@ -311,11 +313,13 @@ private struct Panel: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(connectionHeading).font(.system(size: 10, weight: .semibold)).tracking(1.6).foregroundStyle(.secondary)
                 if let clients = model.status.clients, !clients.isEmpty {
-                    if clients.count > 4 || typeSize.isAccessibilitySize {
+                    if clients.count > 4 || (typeSize.isAccessibilitySize && clients.count > 2) {
                         ScrollView { connectionRows(clients) }.frame(maxHeight: 320)
                     } else { connectionRows(clients) }
                 } else {
-                    Text("Connect your phone with the QR code above.")
+                    Text(!model.status.sharingEnabled ? "Turn on Sharing to connect your phone."
+                         : !model.status.running ? "Restart Paceman to connect your phone."
+                         : "Connect your phone with the QR code above.")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
             }
@@ -379,8 +383,8 @@ private struct Panel: View {
                                 .font(.caption).foregroundStyle(.secondary).padding(.leading, 29)
                         }
                         if model.confirming == connection.id {
-                            Text("Remove this phone’s access to this computer?")
-                                .font(.caption).padding(.leading, 29)
+                            Text("Remove access for “\(connection.name)”? Updates from this computer will stop. \(connection.platform == "ios" ? "Your watch stays paired. " : "")A new code is needed to reconnect.")
+                                .font(.caption).fixedSize(horizontal: false, vertical: true).padding(.leading, 29)
                             HStack {
                                 Button("Cancel") { model.confirming = nil }.keyboardShortcut(.defaultAction)
                                 Button("Remove access", role: .destructive) { model.remove(connection) }

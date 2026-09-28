@@ -78,7 +78,7 @@ PanelWindow {
         Text {
           Layout.fillWidth: true
           text: root.busy ? "Creating pairing code…" : root.error !== "" ? root.error
-            : root.codeValid ? "On your iPhone, open Paceman → Connect computer and scan this code."
+            : root.codeValid ? "On your iPhone, open Paceman → Connect computer → Scan QR code."
             : "This code has expired. Generate a new one to connect your phone."
           textFormat: Text.PlainText
           wrapMode: Text.WordWrap

@@ -9,7 +9,7 @@ function relativeTime(value, now) {
 }
 
 function activitySummary(state, available) {
-  var labels = {working: "Working", needs_input: "Needs your input", finished: "Finished", idle: "No active work"}
+  var labels = {working: "Working", needs_input: "Needs input", finished: "Finished", idle: "No active work"}
   var result = {title: "Codex", label: labels[state.activity] || "Waiting for activity", breakdown: ""}
   if (!available) return result
   var counts = state.sessionCounts || {}
@@ -51,15 +51,16 @@ function present(state, now) {
     var age = now - contact
     var recent = running && sharing && contact > 0 && age >= 0 && age < 30
     var phone = client.platform === "ios" || client.platform === "android"
-    return {id: client.id, title: client.name,
+    return {id: client.id, title: client.name, platform: client.platform,
       phone: phone, recent: recent,
       lastContactAt: contact, pairedAt: Number(client.pairedAt || 0),
       canRemove: client.removable !== false && !!client.id,
-      status: !sharing ? "Sharing is off" : !running ? "Desktop unavailable"
-        : recent ? "Receiving updates" : "Waiting for contact",
-      guidance: !sharing ? "Turn sharing on to send updates from this computer."
-        : !running ? "Restart Paceman to resume sharing."
-        : "Check Tailscale on both devices, then open Paceman" + (phone ? " on your phone." : " on this device.")}
+      status: !sharing ? "Updates paused" : !running ? "Updates unavailable"
+        : recent ? "Receiving updates" : contact > 0 ? "Last contact" : "No contact yet",
+      guidance: !sharing ? "Turn sharing on to resume updates."
+        : !running ? "Restart Paceman to resume updates."
+        : phone ? "Open Paceman on your phone to check for updates."
+        : "Open the paired app on this device to check for updates."}
   })
   return {
     connections: connections,
@@ -67,10 +68,9 @@ function present(state, now) {
       : connections.length > 1 ? "PHONES" : "PHONE",
     running: running, paired: paired, sharing: sharing,
     subtitle: !sharing ? "SHARING OFF" : !running ? "SHARING UNAVAILABLE" : "SHARING ACTIVITY",
-    guidance: !sharing ? "Turn sharing on to send updates from this computer."
-      : !running ? "Paceman isn't running. Restart it to resume sharing."
-      : !paired ? "Open Paceman on your iPhone and scan a pairing code."
-      : "Open Paceman on your iPhone to reconnect.",
+    guidance: !sharing ? "Turn on sharing to connect your phone."
+      : !running ? "Restart Paceman to connect your phone."
+      : "On your iPhone, open Paceman → Connect computer → Scan QR code.",
     activityTitle: activity.title,
     activityBreakdown: activity.breakdown,
     activity: !sharing ? "Paused" : !running ? "Unavailable" : activity.label

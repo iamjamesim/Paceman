@@ -67,7 +67,7 @@ test('legacy or inconsistent counts fall back to the known aggregate', () => {
   for (const overrides of [{ sessionCounts: undefined }, { sessions: 3 }]) {
     const value = present({ needs_input: 1, working: 1, finished: 0 }, overrides);
     assert.equal(value.activityTitle, 'Codex');
-    assert.equal(value.activity, 'Needs your input');
+    assert.equal(value.activity, 'Needs input');
     assert.equal(value.activityBreakdown, '');
   }
 });
@@ -125,7 +125,33 @@ test('sharing off preserves connection identity and removal without claiming con
     {id: 'a', name: '<b>My phone</b>', platform: 'ios', lastContactAt: now - 2}
   ]})
   assert.equal(value.connections[0].title, '<b>My phone</b>')
-  assert.equal(value.connections[0].status, 'Sharing is off')
+  assert.equal(value.connections[0].status, 'Updates paused')
   assert.equal(value.connections[0].recent, false)
   assert.equal(value.connections[0].canRemove, true)
 })
+
+test('connection copy separates recent, past, absent, and unavailable contact', () => {
+  const client = {id: 'a', name: 'Alex’s iPhone', platform: 'ios'};
+  const cases = [
+    [{lastContactAt: now - 2}, {}, 'Receiving updates'],
+    [{lastContactAt: now - 40}, {}, 'Last contact'],
+    [{lastContactAt: 0}, {}, 'No contact yet'],
+    [{lastContactAt: now - 2}, {updatedAt: now - 20}, 'Updates unavailable'],
+    [{lastContactAt: now - 2}, {sharingEnabled: false}, 'Updates paused']
+  ];
+  for (const [contact, overrides, expected] of cases) {
+    const value = present({}, {clients: [{...client, ...contact}], ...overrides});
+    assert.equal(value.connections[0].status, expected);
+  }
+});
+
+test('empty-panel guidance follows the available pairing action', () => {
+  const cases = [
+    [{}, 'On your iPhone, open Paceman → Connect computer → Scan QR code.'],
+    [{sharingEnabled: false}, 'Turn on sharing to connect your phone.'],
+    [{updatedAt: now - 20}, 'Restart Paceman to connect your phone.']
+  ];
+  for (const [overrides, expected] of cases) {
+    assert.equal(present({}, overrides).guidance, expected);
+  }
+});
