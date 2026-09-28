@@ -167,11 +167,12 @@ The direct APNs registration and sender below are prototype distribution
 contracts. Public delivery needs a key-safe relay, so its registration/auth
 boundary is not locked by the snapshot schema.
 
-Before calling v1 locked for a public release, run Mac and Omarchy together
-against a physical phone and watch: two active sources, one stale source,
-duplicate/out-of-order events, source restart, and removal. Check snapshot,
-push hint, phone presentation and watch delivery separately. Keep the example
-payloads above as compatibility fixtures when an adapter or client changes.
+Mac and Omarchy have already been exercised on physical devices, as confirmed
+by the product owner. The adapter-label compatibility change does not alter
+their event mapping or snapshot fields and does not require a reinstall.
+Treat the core v1 semantics above as the agreed baseline. Check any still
+unverified edge cases on release builds when those paths change; keep the
+example payloads above as compatibility fixtures for adapter or client changes.
 
 Watch encoding matches the existing Omarchy v0.6.1 protocol: 36-byte time/owner
 profile and 14-byte activity snapshot. Integers are little endian. The phone
