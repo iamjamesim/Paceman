@@ -1,14 +1,13 @@
 # Omarchy routing test
 
 The live path is the existing Codex companion → local Paceman event receiver →
-private HTTPS snapshot/SSE → iPhone → phone-owned watch. Paceman also reads the
-resolved Omarchy palette for the phone. It does not own Bluetooth,
-install agent hooks, read conversations, or forward themes to the watch yet.
+private HTTPS snapshot/SSE → iPhone → phone-owned watch. Paceman does not own
+Bluetooth, install agent hooks, or read conversations.
 
 ## Prepare the phone
 
-Build and install this revision of `AgentCompanion` on the Mac. Earlier builds
-explicitly accept only `mode: synthetic` and will reject live Omarchy snapshots.
+Build and install this revision of `AgentCompanion` on the Mac before updating
+desktop sources. Earlier phone builds require the removed snapshot `mode` field.
 Run the `AgentCompanion` scheme's tests before installing. Keep the existing
 bundle IDs, Keychain identity and watch pairing.
 
@@ -31,7 +30,7 @@ below are for foreground development; do not start a second source while the
 installed service is running. Installed data lives in `~/.local/state/paceman`,
 not the checkout's `.runtime/` directory.
 
-Python 3.11+ is required for the Omarchy TOML collector. The source itself has no
+Python 3.11+ is required. The source itself has no
 third-party dependencies. The optional APNs worker uses requirements-push.txt.
 The existing Omarchy Watch for Codex companion must already be installed and its
 hooks trusted. This setup does not install it or change its hook configuration.
@@ -156,7 +155,7 @@ OMARCHY_CODEX_HOOK=/absolute/path/to/omarchy-watch-codex/plugins/omarchy-watch-c
 
 This exercises the actual upstream companion script with fixture lifecycle/tool
 payloads, the Unix receiver, pairing, HTTP/SSE, revisions, multi-session ordering,
-restart behavior, theme updates and mocked APNs delivery. Without
+restart behavior, allowance updates and mocked APNs delivery. Without
 `OMARCHY_CODEX_HOOK`, only the optional upstream-script integration is skipped.
 It is desktop integration evidence, not a physical iPhone/watch test.
 
