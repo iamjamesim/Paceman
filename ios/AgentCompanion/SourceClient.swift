@@ -165,6 +165,9 @@ final class SourceClient {
         guard data.count <= 65536 else { throw HubError.message("Status response too large") }
         let value = try JSONDecoder().decode(Snapshot.self, from: data)
         guard value.schema == 1, value.sourceID == source.sourceID,
+              UUID(uuidString: value.generation) != nil, value.revision > 0,
+              !value.eventID.isEmpty, value.eventID.utf8.count <= 128,
+              !value.eventID.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
               value.freshFor > 0, value.freshFor <= 60,
               value.observedAt.isFinite, value.changedAt.isFinite else {
             throw HubError.message("Unsupported or mismatched status response")

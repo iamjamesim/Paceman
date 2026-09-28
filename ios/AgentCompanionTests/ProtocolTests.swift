@@ -400,7 +400,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertThrowsError(try expired.validatedURL(now: Date(timeIntervalSince1970: 100)))
     }
 
-    func testPushHintRequiresPairedSourceAndMatchingEventRevision() {
+    func testPushHintRequiresPairedSourceAndBoundedEventIdentity() {
         let sourceID = "00112233-4455-6677-8899-aabbccddeeff"
         let generation = "11223344-5566-7788-99aa-bbccddeeff00"
         let source = PairedSource(endpoint: URL(string: "https://source.example")!, sourceID: sourceID,
@@ -412,7 +412,13 @@ final class ProtocolTests: XCTestCase {
         hint["sourceID"] = UUID().uuidString
         XCTAssertNil(PushHint.decode(["companion": hint], for: source))
         hint["sourceID"] = sourceID
-        hint["eventID"] = "43"
+        hint["eventID"] = "opaque-event-43"
+        XCTAssertEqual(PushHint.decode(["companion": hint], for: source)?.eventID, "opaque-event-43")
+        hint["eventID"] = ""
+        XCTAssertNil(PushHint.decode(["companion": hint], for: source))
+        hint["eventID"] = String(repeating: "x", count: 129)
+        XCTAssertNil(PushHint.decode(["companion": hint], for: source))
+        hint["eventID"] = "line\nbreak"
         XCTAssertNil(PushHint.decode(["companion": hint], for: source))
         hint["eventID"] = "42"
         hint["generation"] = "invalid"
@@ -562,6 +568,10 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(try client.decodeSnapshot(sourceFixture(["sourceID": id]), source: source).sourceID, id)
         XCTAssertEqual(try client.decodeSnapshot(sourceFixture(["sourceID": id, "mode": "macos"]), source: source).sourceID, id)
         XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(), source: source))
+        XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "generation": "invalid"]), source: source))
+        XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "revision": 0]), source: source))
+        XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "eventID": ""]), source: source))
+        XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "eventID": String(repeating: "x", count: 129)]), source: source))
     }
 
     func testEveryComputerKeepsItsPositionWhenRepairedOrAnotherIsRemoved() {

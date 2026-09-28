@@ -17,7 +17,10 @@ struct PushHint: Decodable {
               let hint = try? JSONDecoder().decode(PushHint.self, from: data),
               hint.schema == 1, hint.sourceID == source.sourceID,
               UUID(uuidString: hint.generation) != nil,
-              hint.revision > 0, hint.eventID == String(hint.revision) else { return nil }
+              hint.revision > 0, !hint.eventID.isEmpty,
+              hint.eventID.utf8.count <= 128,
+              !hint.eventID.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+        else { return nil }
         return hint
     }
 

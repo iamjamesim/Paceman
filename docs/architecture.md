@@ -31,10 +31,11 @@ changes retain the activity event ID and do not send activity alerts.
 hook script. It shares the source API and credentials but uses hook-derived
 session state rather than Linux process verification.
 
-`service/push.py` is an optional process beside that source. It sends a minimal
-APNs hint; the phone fetches current data from its previously paired endpoint.
-The hint never provides a fetch URL or credentials. Apple decides whether to grant
-background runtime. Watch requests use Core Bluetooth; see the notification delivery contract.
+`service/push.py` is an optional process beside the source. Ordinary APNs alerts
+carry a minimal hint so the phone can fetch from its paired endpoint; ActivityKit
+pushes carry a separate display copy for Live Activities. Neither includes a
+source URL or credential. Apple controls background execution, and custom-watch
+requests use Core Bluetooth. See the [communication protocol](protocol.md).
 
 ## Desktop package
 
