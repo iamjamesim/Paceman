@@ -1,5 +1,7 @@
 # APNs relay for testers
 
+**Public TestFlight blocker:** The current relay is only suitable for a hand-enrolled internal pilot. It has no self-service source enrollment and does not independently bind an authenticated source to iPhone, Live Activity, or Watch tokens registered by that device. Do not deploy it as an open tester relay. Public enrollment needs authenticated phone registration, a persistent source-to-destination registry, automatic revocation, and send-time checks of both the source credential and its destination binding.
+
 The relay is a small Python HTTP service in `service/relay.py`. A hosting provider terminates HTTPS; the relay sends to APNs using the server-side `.p8` key. Source workers use only a separate, revocable credential per source. The same `Dockerfile.relay` runs on any container host. The service needs no database, queue, vendor API, or public source endpoint.
 
 ## Server secrets
