@@ -202,9 +202,11 @@ token from the first paired source. Its notification handler stores the
 reading and calls `WidgetCenter.reloadTimelines` for the complications.
 WidgetKit's [own push path](https://developer.apple.com/documentation/widgetkit/updating-widgets-with-widgetkit-push-notifications)
 uses a different token, `apns-push-type: widgets`, and
-`aps.content-changed`; Paceman does not use it. The phone can also forward
-a selected reading through WatchConnectivity. Neither path produces a
-verified cross-machine account total:
+`aps.content-changed`. It [starts on watchOS 26](https://developer.apple.com/videos/play/wwdc2025/334/), while Paceman targets
+watchOS 11. It requests a timeline reload; the current complication reads
+allowance data stored by the watch app, so a reload alone would not supply
+a new reading. The phone can also forward a selected reading through
+WatchConnectivity. Neither path produces a verified cross-machine account total:
 
 ```json
 {
