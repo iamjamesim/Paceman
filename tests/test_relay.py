@@ -152,6 +152,11 @@ class PublicRelayTests(unittest.TestCase):
         self.assertEqual(self.call()[0], 429)
         self.assertEqual(len(self.sender.calls), 120)
 
+    def test_global_send_limit_bounds_open_enrollment(self):
+        self.assertTrue(self.registry.take_send_slot(self.source, 100, global_per_minute=1))
+        self.assertFalse(self.registry.take_send_slot(self.other, 100, global_per_minute=1))
+        self.assertTrue(self.registry.take_send_slot(self.other, 160, global_per_minute=1))
+
     def test_mac_syncs_pairings_before_sending(self):
         import httpx
         temporary = tempfile.TemporaryDirectory()

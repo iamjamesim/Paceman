@@ -28,6 +28,8 @@ SCHEMA = (
     "CREATE TABLE IF NOT EXISTS relay_send_limits ("
     "source_id TEXT PRIMARY KEY REFERENCES relay_sources(id) ON DELETE CASCADE, "
     "window_start BIGINT NOT NULL, sent INTEGER NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS relay_global_send_limit ("
+    "id INTEGER PRIMARY KEY, window_start BIGINT NOT NULL, sent INTEGER NOT NULL)",
 )
 
 
@@ -76,6 +78,11 @@ class Registry:
         if not valid_uuid(source_id) or not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", credential):
             raise ValueError("Invalid source registration")
         with self.connection() as db:
+            existing = db.one("SELECT credential_hash FROM relay_sources WHERE id=?", (source_id,))
+            if existing:
+                return hmac.compare_digest(existing[0], digest(credential))
+            if db.one("SELECT COUNT(*) FROM relay_sources")[0] >= 10_000:
+                return False
             db.execute("INSERT INTO relay_sources VALUES (?,?,?) ON CONFLICT(id) DO NOTHING",
                        (source_id, digest(credential), time.time() if now is None else now))
             existing = db.one("SELECT credential_hash FROM relay_sources WHERE id=?", (source_id,))
@@ -154,7 +161,8 @@ class Registry:
         with self.connection() as db:
             db.execute("DELETE FROM relay_sources WHERE id=?", (source_id,))
 
-    def take_send_slot(self, source_id: str, now: float, per_minute: int = 120) -> bool:
+    def take_send_slot(self, source_id: str, now: float, per_minute: int = 120,
+                       global_per_minute: int = 3000) -> bool:
         window = int(now // 60)
         with self.connection() as db:
             db.execute("INSERT INTO relay_send_limits(source_id,window_start,sent) VALUES (?,?,1) "
@@ -163,7 +171,15 @@ class Registry:
                        "sent=CASE WHEN relay_send_limits.window_start=excluded.window_start "
                        "THEN relay_send_limits.sent+1 ELSE 1 END", (source_id, window))
             sent = db.one("SELECT sent FROM relay_send_limits WHERE source_id=?", (source_id,))[0]
-        return sent <= per_minute
+            if sent > per_minute:
+                return False
+            db.execute("INSERT INTO relay_global_send_limit(id,window_start,sent) VALUES (1,?,1) "
+                       "ON CONFLICT(id) DO UPDATE SET "
+                       "window_start=excluded.window_start, "
+                       "sent=CASE WHEN relay_global_send_limit.window_start=excluded.window_start "
+                       "THEN relay_global_send_limit.sent+1 ELSE 1 END", (window,))
+            total = db.one("SELECT sent FROM relay_global_send_limit WHERE id=1")[0]
+        return total <= global_per_minute
 
 
 class _Queries:

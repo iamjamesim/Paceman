@@ -19,4 +19,6 @@ The relay URL is part of the pairing response and stored with that source on the
 
 `POST /v1/sources` creates a source using its 256-bit bearer credential. `PUT /v1/clients` replaces that source's paired-client credential hashes; the worker calls it before sends and on client changes. The phone calls `PUT` or `DELETE /v1/destinations` for its own token bindings. `DELETE /v1/clients/self` removes the phone's relay record. Removing or re-pairing a client on the Mac also removes its relay bindings on the next successful sync. `DELETE /v1/sources` revokes a whole source; send checks require its current credential and a matching destination. The relay permits at most 120 sends per source per minute.
 
+The relay also caps total sends at 3,000 per minute and stores at most 10,000 source IDs, keeping accidental or abusive traffic bounded across self-enrolled sources. These limits can block legitimate testers during an attack; watch the host's request and APNs failure metrics before expanding invitations.
+
 The Mac's existing local direct-APNs sender remains only for owner-controlled development installs. Do not distribute a Mac installation containing the `.p8` key to testers.
