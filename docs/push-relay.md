@@ -1,24 +1,37 @@
-# APNs relay for public testers
+# APNs relay
 
-The relay is a Python WSGI service in `service/relay.py`, packaged by `Dockerfile.relay`. It holds the APNs signing key. A Mac source has one random relay credential; the iPhone has its separate, source-issued pairing credential. The relay stores hashes of those credentials and hashes of registered APNs tokens in PostgreSQL. It verifies the source, paired client, token, environment, and push mode before every send. A source can only send the bounded Paceman payload shapes in `service/relay.py`; prompts and transcripts are rejected.
+The relay keeps the APNs `.p8` key off tester Macs. Macs enroll with a source credential; paired iPhones use a separate credential to register their APNs tokens. The relay sends only to registered source/phone/token combinations. Mac payloads contain status and display metadata; the relay rejects prompt and transcript fields. See [push delivery](push-delivery.md) for the notification formats.
 
-**Staging status (2026-09-29):** The paid Render Web Service and Postgres deployment is live at `https://paceman-relay-dev.onrender.com`; `/healthz` returned 200. A locally signed debug iPhone renewed pairing and fetched from its Mac. The relay accepted its source enrollment, and the Mac recorded APNs 200 responses for subsequent Live Activity updates and a Watch allowance update. An isolated live authorization check enrolled two temporary sources, confirmed cross-source and unbound-token sends were denied (401/403), then deleted both sources; it sent no APNs push. An existing Live Activity was visible on the phone, but a newly displayed update has not been distinguished from that earlier activity. An ordinary notification token was not registered in this check. TestFlight delivery, per-source revocation on two real Macs, and abuse monitoring for the open source-enrollment endpoint remain release gates before broad invitation distribution. APNs acceptance alone does not prove visible phone delivery.
+## Deploy on Render
 
-## Render staging setup
+1. Deploy `Dockerfile.relay` as a paid Web Service. Set its health check to `/healthz`.
+2. Create paid Render Postgres in the same region. Set the Web Service's `DATABASE_URL` to its **internal** URL. The relay creates its tables on startup; no manual SQL or `sources.json` is needed.
+3. Add Secret Files named `apns.p8` and `apns.json`. The JSON file must contain the full object below, using your Apple team and key IDs:
 
-1. Keep the existing paid Web Service in Oregon. Connect the Paceman repository and deploy `Dockerfile.relay` from the reviewed branch. Its Docker command runs Gunicorn. Set the health check to `/healthz`. No custom domain is required for staging.
-2. Create a paid Render Postgres instance in the same Oregon region. Set the Web Service's `DATABASE_URL` environment variable to the database's **internal** connection URL. The relay creates its small schema at startup. Do not use a container filesystem, Render disk, or the 30-day free database for its registry.
-3. In the Web Service's Secret Files, add `apns.p8` and `apns.json`. The JSON must set `keyPath` to `/etc/secrets/apns.p8` and `environment` to `development` for a locally signed debug build, or `production` for TestFlight. Verify in Apple Developer that this key is authorized for the selected APNs environment; newer keys can be environment-specific. Add a separate Watch key file only if `watchKeyID` differs from the phone key. Do not add `sources.json`; source registration is automatic. Do not print the key in build logs or put it in Git.
-4. Deploy and confirm `/healthz` returns `{"ok":true}`. The web service should keep request-body logging disabled. Switch the APNs config to `production` before testing a production TestFlight build; development tokens cannot use that endpoint.
-5. Install the Mac source, then run `python3 -m macos.install_push --relay-url https://YOUR-RENDER-SERVICE.onrender.com`. The installer generates and stores a per-source credential in owner-only Paceman Application Support and removes any copied legacy `.p8` key. The worker enrolls the source and syncs the hashed credentials of paired phones. Pair the phone **after** enabling the relay so it receives the relay URL in its pairing response. If already paired, renew that pairing with a fresh QR code.
-6. On the physical TestFlight phone, register ordinary notifications, Live Activities, and Watch delivery as applicable. The phone registers each token directly with the relay using its paired-client credential. The Mac also stores the destination locally. Confirm a fresh source event yields APNs acceptance in `push-delivery.jsonl`, then confirm a new notification appears on the phone. Remove phone access and verify a subsequent send is denied. Test a second source to verify isolation.
+   ```json
+   {
+     "teamID": "TEAMID1234",
+     "keyID": "KEYID12345",
+     "topic": "com.apselabs.agentcompanion.prototype",
+     "environment": "development",
+     "keyPath": "/etc/secrets/apns.p8"
+   }
+   ```
 
-The relay URL is part of the pairing response and stored with that source on the phone. Moving providers requires updating the source relay URL and renewing pairing; a project domain can avoid that later if useful. Render's [Postgres guide](https://render.com/docs/postgresql-creating-connecting) explains internal URLs and same-region placement. See [pricing](https://render.com/pricing) for current service and database costs.
+   Use `development` for a debug iPhone build and `production` for TestFlight; the key must allow that environment. If the Watch uses a different key, add an `apns-watch.p8` Secret File and set `watchKeyID` and `watchKeyPath` (`/etc/secrets/apns-watch.p8`) in the JSON. Keep request bodies and keys out of logs and Git.
 
-## Registry and revocation
+## Connect a Mac
 
-`POST /v1/sources` creates a source using its 256-bit bearer credential. `PUT /v1/clients` replaces that source's paired-client credential hashes; the worker calls it before sends and on client changes. The phone calls `PUT` or `DELETE /v1/destinations` for its own token bindings. `DELETE /v1/clients/self` removes the phone's relay record. Removing or re-pairing a client on the Mac also removes its relay bindings on the next successful sync. `DELETE /v1/sources` revokes a whole source and retains its ID in a denylist so that the same Mac cannot silently re-enroll; send checks require its current credential and a matching destination. The relay permits at most 120 sends per source per minute.
+After [installing the Mac source](macos.md), run:
 
-The relay also caps total sends at 3,000 per minute and stores at most 10,000 active or revoked source IDs, keeping accidental or abusive traffic bounded across self-enrolled sources. These limits can block legitimate testers during an attack; watch the host's request and APNs failure metrics before expanding invitations.
+```sh
+python3 -m macos.install_push --relay-url https://paceman-relay-dev.onrender.com
+```
 
-The Mac's existing local direct-APNs sender remains only for owner-controlled development installs. Do not distribute a Mac installation containing the `.p8` key to testers.
+The installer creates a source credential and removes any active local APNs key copy. Pair the iPhone with a fresh QR code, even if it was paired before. Changing relay hosts also requires a fresh pairing.
+
+## Check and revoke
+
+`/healthz` should return `{"ok":true}`. After a fresh source event, check `~/Library/Application Support/Paceman/data/push-delivery.jsonl` for APNs `status: 200`, then confirm a **new** update on the physical phone. APNs acceptance alone does not prove display.
+
+Removing phone access deletes its local destinations and syncs revocation to the relay. Uninstalling a Mac requests source revocation; if the relay is unreachable, the uninstaller reports the source ID for manual cleanup. A revoked ID cannot re-enroll. Postgres stores hashes, never raw credentials or tokens. New source IDs can self-enroll, so monitor abuse before broad invitations. See [readiness gaps](readiness-gaps.md) for current validation and [protocol](protocol.md#phone-notifications-and-live-activities) for the wire contract.
