@@ -1,218 +1,284 @@
-# Prototype contract v1
+# Communication protocol
 
-All remote paths require TLS from Tailscale Serve. The Python listener binds
-only to 127.0.0.1. This is a private development service, not an internet-facing
-production server. Limit tailnet access to the devices participating in the test.
+Each Mac or Omarchy computer is an independent **source**. Its adapter turns
+local agent events into a snapshot. The iPhone pairs with sources separately,
+displays each one, and selects one fresh aggregate for the custom watch. The
+source service listens on `127.0.0.1`; the current phone connection uses
+private Tailscale HTTPS.
 
-`POST /v1/pair`: JSON `{ "invitation": "single-use secret", "device": {
-"installationID": "UUID", "name": "Alex’s iPhone", "platform": "ios" } }`.
-Returns schema, sourceID, clientID, credential, and `clientManagement: 1`.
-Invalid/expired/used invitations return 401; invalid bodies 400; excessive attempts
-429. Invitation expiry is five minutes. `device` is required. Pre-identity
-development pairings are outside this contract; start those tests with fresh
-source data and a new pairing code.
+| Sender → receiver | Wire format | Job |
+| --- | --- | --- |
+| Source service → Paceman iPhone app | Authenticated HTTPS snapshot | Authoritative agent state and freshness. |
+| Source push worker → iOS Notification Center | Ordinary APNs alert | Notification event and a hint for the phone app to fetch. |
+| iOS Notification Center → custom watch | Apple ANCS over BLE | Identifies a Paceman notification so the watch can request a fetch; does not forward APNs JSON. |
+| Source push worker → iPhone Live Activity | ActivityKit APNs | Expiring display copy for the Lock Screen and Dynamic Island. |
+| Source push worker → Paceman watchOS app | Background APNs | Optional Codex allowance reading; the app then reloads its WidgetKit complications. |
+| Paceman iPhone app ↔ custom watch | Encrypted BLE packets | Phone-selected profile and activity; watch acknowledgement and fetch requests. |
 
-Installation IDs are claims, not credentials. To re-pair an existing installation,
-include its current `Authorization: Bearer CREDENTIAL` and a fresh invitation.
-The source rotates the credential in place, keeps the client ID and pairing date,
-clears its old push registration and contact time.
-The phone must register push again. A claimed installation already owned by a
-different credential returns 409 without consuming the invitation. Matching device
-names never cause a merge. A revoked installation can pair afresh with a new code.
+## Pairing and access
 
-Names are plain text, 1–80 characters with control characters
-excluded; supported platforms are `ios`, `android`, `macos`, `linux`, `diagnostic`.
-The iPhone stores its installation UUID in its device-local Keychain. Reported names
-may be generic or duplicated; this is app identity, not hardware attestation.
+| Route | Purpose |
+| --- | --- |
+| `POST /v1/pair` | Redeem a five-minute, single-use invitation. |
+| `GET /v1/snapshot` | Read current state with `Authorization: Bearer CREDENTIAL`. Reading does not acknowledge activity. |
+| `DELETE /v1/client` | Revoke the caller's credential and push destinations. |
 
-`DELETE /v1/client`: authenticated removal of the caller's credential, identity
-record and push destination in one transaction. No target client ID is accepted.
-Returns `{ "revoked": true }`; an invalid or already removed credential returns 401.
-The iPhone treats 401 here as already removed. Network failures and other HTTP
-errors preserve the local pairing for retry. Desktop removal uses a local command,
-`pacemanctl remove-access --client-id UUID`, and works while sharing is off.
+The pairing request supplies an installation UUID, a name, and a platform:
 
-Last successful snapshot delivery is persisted per credential. Private local
-status exposes only client ID, reported name/platform, pairing time and contact
-time. Neither installation IDs, credential hashes nor secrets enter the panel's
-status or remote activity snapshots.
+```json
+{
+  "invitation": "example-single-use-token",
+  "device": {
+    "installationID": "33333333-3333-4333-8333-333333333333",
+    "name": "James's iPhone",
+    "platform": "ios"
+  }
+}
+```
 
-See [pairing and removal](pairing-and-removal.md) for physical acceptance.
-
-`GET /v1/snapshot`: `Authorization: Bearer CREDENTIAL`. Returns:
+The source responds with:
 
 ```json
 {
   "schema": 1,
-  "sourceID": "persistent UUID",
-  "generation": "persistent UUID for this database",
-  "revision": 2,
-  "sourceName": "Transport test",
-  "mode": "synthetic",
-  "observedAt": 1790000000.0,
-  "changedAt": 1789999998.0,
-  "freshFor": 30,
-  "state": "working",
-  "eventID": "2",
-  "sessions": [{"id": "test-session", "provider": "fixture", "state": "working"}]
+  "sourceID": "11111111-1111-4111-8111-111111111111",
+  "clientID": "44444444-4444-4444-8444-444444444444",
+  "credential": "example-private-credential"
 }
 ```
 
-States: idle, working, needs_input, finished. GET does not mutate event identity
-or acknowledge attention. `observedAt` is the source's successful snapshot time;
-`changedAt` stays fixed for the same event. Deleting/replacing the database creates
-a new source identity and requires new pairing. Simple process restart does not.
+The credential is never included in snapshots or pushes. An installation ID
+is a label, not proof of ownership. Re-pairing the same installation requires
+its current credential and a new invitation; it rotates the credential and
+requires push registration again. The phone stores each source's access and
+cache separately.
 
-`mode` is `synthetic`, `omarchy`, or `macos`. Live desktop snapshots use the same API and
-pairing contract. `revision` advances for activity or appearance changes; `eventID`
-and `changedAt` advance only for activity changes. They need not equal the latest
-snapshot revision. Appearance updates therefore cannot replay a watch alert.
-The source's `observedAt` establishes service liveness. Omarchy sources with
-`sessionLiveness: "process"` additionally verify each listed session's owning
-Codex process locally. Finished and Idle sessions can remain open. PID/start-time/
-boot metadata is never exported. Clients can ignore this optional marker.
-See [routing semantics and recovery limits](omarchy-routing.md).
-Mac snapshots use `sessionLiveness: "hook"`; their sessions are observed hook
-states and are cleared on source restart because open-process identity is not
-verified. The phone must keep each source's generation, revision, freshness,
-credential and cache separate.
+## Source snapshot
 
-Watch encoding matches the existing Omarchy v0.6.1 protocol: 36-byte time/owner
-profile and 14-byte activity snapshot. Integers are little endian. The phone
-assigns and persists monotonic watch revisions; source IDs and revisions do not
-become Bluetooth identities. Repeated source events reuse delivered revisions,
-and acknowledged events are not re-alerted. A crash between a physical write
-and saving its delivery result can still cause a duplicate; no exactly-once
-guarantee is made.
-
-The watch has no local upstream freshness lease in this protocol. Do not
-silently repurpose existing packet fields. Add negotiated protocol support
-before treating this as daily monitoring. Source session state and local watch
-acknowledgement remain separate in the Omarchy adapter.
-
-Firmware 0.6.2 adds notification synchronization capability bit 9 and an encrypted
-read/notify characteristic `7f510005-1b15-4f0d-b7a5-4cf3a2c98ee1`. Its eight bytes
-are `ON`, version 1, reserved zero, then a little-endian uint32 request sequence.
-The sequence increases when ANCS identifies a new/modified Paceman notification.
-It is a request for current source state, not an activity revision or a wearer
-acknowledgement. It resets on watch reboot; every new BLE handshake performs a
-current-state fetch regardless. Receivers coalesce duplicate sequences and queue
-one follow-up if a new request arrives during an existing fetch. Old firmware
-continues using the unchanged activity/profile formats.
-
-The ANCS client subscribes to iOS Service Changed, Data Source, and Notification
-Source on the existing encrypted connection. It requests AppIdentifier only,
-ignores notification removal and initial Added+PreExisting replay (but retains
-Modified events), and never parses human
-notification content as a data protocol. A bounded queue coalesces overflow into
-a current-state request. No periodic request or keepalive is emitted.
-# Direct push destination extension
-
-Direct APNs adds `/v1/push` and `/v1/live-activity` to each paired source. These
-methods require the same paired `Authorization: Bearer …` credential as snapshot
-reads. The server derives ownership from that credential; callers cannot select
-another client ID. These are private Tailscale endpoints, not a public relay API.
-
-- `POST`: `{ "deviceToken": "lowercase hex", "environment": "development" | "production", "mode": "alert", "displayName": "optional phone override" }`.
-  Validated payloads upsert that client's destination. Re-registering an unchanged
-  token preserves pending work and retry state. A changed token or environment starts
-  after the current event, avoiding historical alert replay.
-  The optional display name is scoped to the paired phone and used only for visible
-  push copy. An empty string clears its override; an omitted field preserves the
-  previous value for older clients. Without an override, push uses the source's
-  reported computer name with hyphens shown as spaces.
-  The wire field `mode` remains fixed at `alert`; background-only and
-  `attention` registrations are rejected. The iPhone registers this destination
-  only for an enabled paired custom watch.
-- `GET`: returns `registered`, and when present `environment`, `mode`,
-  `lastResult`, `lastAPNsID`. POST returns the same registration status. Neither response returns a destination token.
-- `DELETE`: removes only this client's push destination. Revoking the client also
-  removes its destination. Requests with invalid/revoked credentials return 401.
-
-The direct sender adds a `companion` hint alongside `aps`, with `schema: 1`,
-`sourceID`, `generation`, `eventID`, and integer `revision`. The phone validates
-the hint against its pairing, then fetches `/v1/snapshot` from its stored source.
-The push does not control the fetch URL, credentials, or resulting watch state.
-In `alert` mode, working and idle updates use passive notification presentation;
-needs-input, failed, and finished request active presentation and sound. These are alert-type pushes and omit
-`content-available`; ANCS, rather than a background callback, initiates custom-watch
-synchronization. Passive entries remain visible in the notification list. The
-retired `background` mode is rejected. No watch polling is used.
-Disabling custom-watch updates or removing the watch deletes the phone's
-`/v1/push` destination. Registration resumes at the current event after setup
-is enabled again; it does not replay history.
-When the same paired phone has an accepted Live Activity alert for that event,
-the ordinary entry is passive to avoid a second phone sound. Live Activity
-Working, Needs input, Finished, and Failed Live Activity alerts request
-`PacemanWorking.wav`, `PacemanInput.wav`, `PacemanFinished.wav`, and
-`PacemanFailed.wav` respectively. Idle remains silent. The named files ship
-in the iPhone app bundle.
-See [direct push delivery](direct-push-test.md) for validation and limitations.
-
-`POST /v1/live-activity` accepts a paired client's ActivityKit destinations:
-
-- `{ "action": "register-start", "deviceToken": "lowercase hex", "environment": "development" | "production", "displayName": "optional phone override" }`
-  registers the token that lets this computer start an activity while the app
-  is closed and updates the same per-phone name for the required start alert.
-  `remove-start` removes the token.
-- `{ "activityID": "ActivityKit ID", "deviceToken": "lowercase hex", "environment": "development" | "production" }`
-  registers this computer's update token. `{ "activityID": "...", "action": "remove" }`
-  removes only the matching activity.
-
-The worker starts at most one activity per client/source when work begins,
-then sends revisioned display-only updates to that activity's token. The
-source database and pairing credential scope registrations and revocation.
-
-## Optional phone snapshot metadata
-
-The iPhone can display `sessions` entries containing `id`, `provider`, and `state`,
-with optional `name` and `project` strings. Synthetic mode emits a fixture session;
-the Omarchy adapter emits opaque session IDs, providers and lifecycle states.
-It does not read task names, projects or conversation content from the companion.
-The Mac Codex hook may add a short repository or working-directory label as
-`workspaceLabel`. It sends no full path or prompt to the source. This field is
-separate from optional task `project` metadata so it does not change how the
-phone groups unnamed sessions. The Live Activity
-includes this label only if all active sessions share it; otherwise it keeps
-the existing agent-type summary.
-
-A snapshot may also carry a resolved appearance object:
+`GET /v1/snapshot` returns one source, never a combined machine view. For
+example, an allowance change raised `revision` to 12 without changing activity
+`eventID` 11:
 
 ```json
-"appearance": {
-  "id": "omarchy-current",
-  "name": "Solitude",
-  "background": "101315",
-  "foreground": "CACCCC",
-  "accent": "A4B4BB",
-  "monospaced": true
+{
+  "schema": 1,
+  "sourceID": "11111111-1111-4111-8111-111111111111",
+  "generation": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "revision": 12,
+  "sourceName": "Studio Mac",
+  "observedAt": 1790000004,
+  "changedAt": 1790000000,
+  "freshFor": 30,
+  "state": "needs_input",
+  "eventID": "11",
+  "sessions": [{
+    "id": "opaque-session-a",
+    "provider": "codex",
+    "state": "needs_input",
+    "workspaceLabel": "paceman"
+  }],
+  "allowance": {
+    "provider": "codex",
+    "remaining": 42,
+    "window": 2,
+    "windowDurationMins": 300,
+    "updatedAt": 1790000003,
+    "resetsAt": 1790003600
+  }
 }
 ```
 
-Colors are six-digit RGB hex, optionally prefixed with `#`. This legacy field
-remains decodable, but the iPhone does not use it to select a theme. Missing or
-invalid optional metadata never discards a valid core snapshot. The Omarchy
-collector may still supply appearance metadata, while the phone-selected family
-controls the app, watch profile, and Live Activities. Following a computer's
-theme would require a future explicit option. A source increments its revision
-when session content changes.
+| Field | Meaning |
+| --- | --- |
+| `schema` | Snapshot format version; currently 1. |
+| `sourceID` | Persistent UUID for the source database. Replacing the database requires new pairing. |
+| `generation` | UUID for that database's revision sequence; a process restart retains it. |
+| `revision` | Positive integer advancing for activity or presentation changes. The phone rejects older revisions within a generation. |
+| `sourceName` | Source-reported name; the phone may show its own name. |
+| `observedAt` | Source response time in Unix seconds, not proof of a live agent. |
+| `changedAt` | Latest activity event time; presentation-only changes leave it alone. |
+| `freshFor` | Seconds the observation may count as current; the phone accepts greater than 0 and at most 60. |
+| `state` | `idle`, `working`, `needs_input`, `finished`, or `failed`. |
+| `eventID` | Opaque activity identity, 1–128 UTF-8 bytes without control characters; stable across presentation-only revisions. |
+| `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded workspace labels; no prompts or transcripts. |
+| `allowance` | Optional source-reported Codex usage reading; may advance `revision` without a new activity event. |
 
-## Alpha watch profile restoration
+Omarchy has its own `sourceID`, `generation`, and revisions, using this same
+schema. Mac uses hook-observed session liveness and clears sessions on restart;
+Omarchy verifies owning processes locally. Neither sends process identity.
+The phone presents sources separately. For the custom watch it selects among
+**fresh** sources in this order: needs input, failed, working, finished, idle.
 
-The phone negotiates profile v1–v5 from the watch identity. v2+ profiles carry
-the phone-selected background and foreground; v3+ also carries its accent.
-Optional Codex allowance remains source-reported. Profile writes are serialized against activity writes and reconciled
-against the last successfully written content. Clock passage alone does not cause
-writes on every source poll; reconnect synchronizes time again. Original allowance
-observation/reset timestamps are never replaced by transmission time.
+## Phone notifications and Live Activities
 
-Omarchy and Mac snapshots may include `allowance` with provider `codex`, remaining (0–100),
-window (1 weekly, 2 session), updatedAt and resetsAt (Unix seconds). Missing/invalid
-records produce null. This is source-scoped, not verified account identity. The
-Mac source uses the read-only Codex App Server account limits API through a
-locally installed Codex desktop runtime or CLI; unavailable or unsupported data
-is `null`. The watch chooses a recent connected-source reading first and keeps last-known
-history if none is current.
-Allowance-only changes advance revision without changing activity eventID or
-triggering APNs activity alerts. Profile v4 receives unavailable after staleness or
-reset; v5 preserves historical values for the firmware's local expiry rules.
+Push registration is authenticated and scoped to the paired client:
+
+| Route | Destination |
+| --- | --- |
+| `POST/GET/DELETE /v1/push` | One iPhone ordinary-alert token. Registration sends `deviceToken`, `environment` (`development` or `production`), and optional `displayName`; status omits the token. |
+| `POST /v1/live-activity` | iPhone Live Activity start/update token, or its removal. |
+| `POST /v1/watch-push` | Optional watchOS app background-push token for allowance only. |
+
+An ordinary alert (`apns-push-type: alert`) contains user-visible `aps` text
+and a small `companion` **fetch hint**. Here the alert refers to activity
+event 11; a later fetch can return snapshot revision 12 without treating
+the allowance change as a new activity event:
+
+```json
+{
+  "aps": {
+    "alert": {"title": "Codex needs input", "body": "Studio Mac"},
+    "thread-id": "11111111-1111-4111-8111-111111111111",
+    "sound": "default"
+  },
+  "companion": {
+    "schema": 1,
+    "sourceID": "11111111-1111-4111-8111-111111111111",
+    "generation": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "eventID": "11",
+    "revision": 11
+  }
+}
+```
+
+The iPhone app checks the hint against an existing pairing and fetches its
+stored source URL. The push cannot supply a URL or credential or set watch
+state. `eventID` need not equal `revision`. iOS decides whether and when to
+run the app or display the alert. Working and idle alerts use passive
+presentation, but remain `alert` pushes that can appear in Notification
+Center and reach the custom watch through ANCS. They are not background pushes.
+
+**ANCS is a different wire format.** The custom watch receives an eight-byte
+iOS notification event (`event`, `flags`, `category`, `count`, and a
+session-local notification UID). For example, `00 00 00 01 2a 00 00 00`
+means an added notification with UID 42; it contains none of the APNs JSON.
+The watch asks iOS only for that notification's
+`AppIdentifier`. If it matches Paceman, the watch increments its own BLE
+notification-sync sequence. The phone then fetches current snapshots and
+sends a new activity packet. The watch does not receive the APNs `aps` or
+`companion` object, read notification text, or derive agent state from it.
+See [Apple's ANCS specification](https://developer.apple.com/library/archive/documentation/CoreBluetooth/Reference/AppleNotificationCenterServiceSpecification/Specification/Specification.html).
+
+ActivityKit receives a separate APNs payload (`apns-push-type: liveactivity`)
+with a revisioned, expiring **display copy**. It can update the Live Activity
+without running the app, but does not update the phone's paired snapshot or
+custom watch. An update for snapshot revision 12 looks like:
+
+```json
+{
+  "aps": {
+    "timestamp": 1790000005,
+    "event": "update",
+    "content-state": {
+      "schema": 1,
+      "generation": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "revision": 12,
+      "state": "needs_input",
+      "working": 0,
+      "needsInput": 1,
+      "finished": 0,
+      "failed": 0,
+      "observedAt": 1790000004,
+      "freshUntil": 1790000304,
+      "changedAt": 1790000000,
+      "providers": ["codex"],
+      "workspaceLabel": "paceman"
+    },
+    "stale-date": 1790000304,
+    "relevance-score": 179.0000244
+  }
+}
+```
+
+The `content-state` matches the iPhone's `MonitoringActivity.ContentState`:
+generation and revision identify the display update; state, counts and
+optional provider/workspace labels render it; `freshUntil` and `stale-date`
+bound freshness. A start push also carries `attributes` with the source ID
+and display name. An end push sets `event` to `end`.
+
+The separate watchOS app may receive an allowance-only background push
+(`apns-push-type: background`, `aps.content-available: 1`) at its own app
+token from the first paired source. Its notification handler stores the
+reading and calls `WidgetCenter.reloadTimelines` for the complications.
+WidgetKit's [own push path](https://developer.apple.com/documentation/widgetkit/updating-widgets-with-widgetkit-push-notifications)
+uses a different token, `apns-push-type: widgets`, and
+`aps.content-changed`. It [starts on watchOS 26](https://developer.apple.com/videos/play/wwdc2025/334/), while Paceman targets
+watchOS 11. It requests a timeline reload; the current complication reads
+allowance data stored by the watch app, so a reload alone would not supply
+a new reading. The phone can also forward a selected reading through
+WatchConnectivity. Neither path produces a verified cross-machine account total:
+
+```json
+{
+  "aps": {"content-available": 1},
+  "schema": 1,
+  "allowance": {
+    "provider": "codex",
+    "remaining": 42,
+    "window": 2,
+    "windowDurationMins": 300,
+    "updatedAt": 1790000003,
+    "resetsAt": 1790003600
+  }
+}
+```
+
+## iPhone and custom-watch BLE
+
+The iPhone owns watch pairing, aggregate selection, and watch revisions.
+Source IDs and revisions do not become Bluetooth identities or revisions.
+The encrypted link uses service
+`7f510001-1b15-4f0d-b7a5-4cf3a2c98ee1`:
+
+| Characteristic suffix | Packet | Purpose |
+| --- | --- | --- |
+| `03` identity | 32-byte `OW` read | Watch ID, ownership, supported profile versions and capabilities. |
+| `02` profile | v1–v5 write, 36–111 bytes | Owner, clock, palette, weather, preferences, optional allowance. |
+| `04` activity | 14-byte `OA` read/write/notify | State, alert/sound flags, phone revision, wearer acknowledgement. |
+| `05` notification sync | 8-byte `ON` read/notify | Watch sequence requesting a current phone fetch. |
+
+For example, the activity packet below means needs input (`2`), alert and
+sound requested (`03`), phone revision 42, acknowledgement 39. Integers are
+little-endian. The next packet requests a fetch with sequence 5; that number
+is neither a source nor an activity revision.
+
+```text
+4f 41 01 02 03 00 2a 00 00 00 27 00 00 00   OA v1; state 2; flags 3; revision 42; ack 39
+4f 4e 01 00 05 00 00 00                     ON v1; sequence 5
+```
+
+The profile layout is negotiated using the identity read:
+
+| Version / length | Fields added to the preceding version |
+| --- | --- |
+| v1 / 36 bytes | `OW`, version, kind, revision, time, UTC offset, hour cycle, flags, owner ID. |
+| v2 / 81 bytes | Palette RGB, weather time and temperatures, WMO code, 24-byte location. |
+| v3 / 85 bytes | Accent RGB and brightness. |
+| v4 / 103 bytes | Allowance remaining, window, observation and reset times. |
+| v5 / 111 bytes | Forecast-day expiry. |
+
+Profile flags mark valid weather, Fahrenheit, night mode and a transient
+preview. The location is null-terminated UTF-8 (at most 23 data bytes).
+Activity states are 0 idle, 1 working, 2 needs input, 3 finished, 4 failed.
+Finished and failed require their capability bits; the phone maps them to
+supported older states when needed. Acknowledgement records a wearer action,
+not a source change. The phone sends only fresh aggregate activity and resends
+current state on reconnect. The watch packet has no local source-freshness
+lease, so a watch without its phone link cannot expire upstream activity.
+
+## Evolving the protocol
+
+- New adapters can use snapshot schema 1 if they preserve source identity,
+  ordering, freshness and state meanings. Optional metadata can be added.
+- New states, changed event meanings or required phone behavior need a new
+  schema or endpoint with explicit capability handling. APNs display formats
+  and BLE packet versions evolve separately.
+- Published BLE layouts keep their sizes and meanings; new profile fields
+  require negotiation. Update examples, encoders, decoders and cross-version
+  tests together when changing a wire format.
+
+Implementations: [source API](../service/hub.py),
+[push encoders](../service/push.py),
+[iPhone source decoder](../ios/AgentCompanion/SourceClient.swift),
+[iPhone watch link](../ios/AgentCompanion/WatchLink.swift), and
+[watch ANCS client](../firmware/esp32-watch/firmware/main/watch_ancs.c).

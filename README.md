@@ -38,7 +38,7 @@ original watch package and wire protocol are documented in its
 - [Omarchy routing test](docs/omarchy-routing.md): connect existing desktop events to the phone.
 - [System lifecycle map](docs/system-lifecycle.md): state ownership, freshness and recovery.
 - [Architecture](docs/architecture.md): component boundaries and data flow.
-- [Protocol](docs/protocol.md): source API and phone-to-watch contract.
+- [Communication protocol](docs/protocol.md): pairing, snapshots, notifications, and watch packets.
 - [Pairing and removal](docs/pairing-and-removal.md): identified connections, upgrade behavior, and Mac acceptance.
 - [Prototype scope](docs/paceman-prototype.md): the experience we are finishing.
 - [Handoff](HANDOFF.md): next work and compatibility constraints.

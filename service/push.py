@@ -271,7 +271,7 @@ class Worker:
         self.step_watch_allowance(now, snapshot)
         source_id, generation = self.store.metadata("source_id"), self.store.metadata("generation")
         with self.store.connect() as db:
-            # Appearance revisions must not generate activity alerts or hide pending activity.
+            # Presentation revisions must not generate activity alerts or hide pending activity.
             event = dict(db.execute("SELECT * FROM events WHERE kind='activity' ORDER BY seq DESC LIMIT 1").fetchone())
             devices = [dict(row) for row in db.execute(
                 "SELECT p.* FROM push_devices p JOIN clients c ON p.client_id=c.id WHERE p.cursor<?",
@@ -280,8 +280,8 @@ class Worker:
             # Collapse obsolete intermediate states. Never replay a backlog on reconnect.
             if now - event["at"] > 300:
                 with self.store.connect() as db:
-                    db.execute("UPDATE push_devices SET cursor=?,attempts=0 WHERE client_id=? AND token=? AND mode=?",
-                               (event["seq"], device["client_id"], device["token"], device["mode"]))
+                    db.execute("UPDATE push_devices SET cursor=?,attempts=0 WHERE client_id=? AND token=?",
+                               (event["seq"], device["client_id"], device["token"]))
                 continue
             if now < device["next_attempt"]:
                 continue
@@ -311,12 +311,12 @@ class Worker:
                     db.execute("DELETE FROM push_devices WHERE client_id=? AND token=?", (device["client_id"], device["token"]))
                 else:
                     db.execute("UPDATE push_devices SET cursor=?,next_attempt=?,attempts=?,last_result=?,last_apns_id=? "
-                               "WHERE client_id=? AND token=? AND mode=?",
+                               "WHERE client_id=? AND token=?",
                                (device["cursor"] if retry else event["seq"], now + delay,
                                 device["attempts"] + 1 if retry else 0, result.reason, result.apns_id,
-                                device["client_id"], device["token"], device["mode"]))
+                                device["client_id"], device["token"]))
             self.log({"at": now, "event": f"{source_id}/{generation}/{event['seq']}",
-                      "clientID": device["client_id"], "mode": device["mode"],
+                      "clientID": device["client_id"],
                       "presentation": payload["aps"].get("interruption-level", "active"),
                       "stage": "apns_accepted" if result.status == 200 else "apns_failed",
                       "status": result.status, "reason": result.reason, "apnsID": result.apns_id})

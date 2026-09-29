@@ -22,19 +22,20 @@ and authenticated phone removal delete the credential, identity and push destina
 together. Installation claims alone cannot replace another credential.
 It listens only on loopback. Tailscale Serve supplies private HTTPS.
 `service/omarchy.py` receives the existing desktop companion's local `agent-event`
-protocol and collects resolved Omarchy theme colors without starting a Bluetooth
-owner. Synthetic mode remains the default for isolated tests. See the
+protocol without starting a Bluetooth owner. Synthetic mode remains the default
+for isolated tests. See the
 [routing runbook](omarchy-routing.md) for live event routing and limits.
-Activity and appearance both advance snapshot revisions; appearance-only changes
-retain the activity event ID and are excluded from APNs activity notifications.
+Activity and allowance changes both advance snapshot revisions; allowance-only
+changes retain the activity event ID and do not send activity alerts.
 `service/macos.py` receives reduced Codex lifecycle events from a trusted local
 hook script. It shares the source API and credentials but uses hook-derived
 session state rather than Linux process verification.
 
-`service/push.py` is an optional process beside that source. It sends a minimal
-APNs hint; the phone fetches current data from its previously paired endpoint.
-The hint never provides a fetch URL or credentials. Apple decides whether to grant
-background runtime. Watch requests use Core Bluetooth; see the notification delivery contract.
+`service/push.py` is an optional process beside the source. Ordinary APNs alerts
+carry a minimal hint so the phone can fetch from its paired endpoint; ActivityKit
+pushes carry a separate display copy for Live Activities. Neither includes a
+source URL or credential. Apple controls background execution, and custom-watch
+requests use Core Bluetooth. See the [communication protocol](protocol.md).
 
 ## Desktop package
 

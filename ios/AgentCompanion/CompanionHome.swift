@@ -235,9 +235,6 @@ struct CompanionHome: View {
                     activityHeadline(activity, historical: historical)
                 }
             }
-            if !presentation.preview && value?.mode == "synthetic" {
-                Text("Test source").font(.caption2).foregroundStyle(theme.secondaryInk).padding(.top, 12)
-            }
         }
         .foregroundStyle(theme.ink)
         .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 20)

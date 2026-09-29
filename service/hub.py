@@ -102,7 +102,7 @@ class Store:
                     alert_cursor INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS push_devices(
                     client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
-                    mode TEXT NOT NULL, cursor INTEGER NOT NULL, next_attempt REAL NOT NULL DEFAULT 0,
+                    cursor INTEGER NOT NULL, next_attempt REAL NOT NULL DEFAULT 0,
                     attempts INTEGER NOT NULL DEFAULT 0, last_result TEXT, last_apns_id TEXT);
                 CREATE TABLE IF NOT EXISTS watch_push_devices(
                     client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
@@ -115,6 +115,8 @@ class Store:
             for table in ("live_activities", "live_activity_starts"):
                 if "alert_cursor" not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN alert_cursor INTEGER NOT NULL DEFAULT 0")
+            if "mode" in {row[1] for row in db.execute("PRAGMA table_info(push_devices)")}:
+                db.execute("ALTER TABLE push_devices DROP COLUMN mode")
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM clients c LEFT JOIN client_devices d ON d.client_id=c.id "
                           "WHERE d.client_id IS NULL LIMIT 1").fetchone():
@@ -177,7 +179,7 @@ class Store:
             db.execute("INSERT OR REPLACE INTO client_devices VALUES (?,?,?,?)", (client_id, *identity))
             db.execute("DELETE FROM invitations WHERE hash=?", (digest(token),))
         return {"schema": 1, "sourceID": self.metadata("source_id"),
-                "clientID": client_id, "credential": credential, "clientManagement": 1}
+                "clientID": client_id, "credential": credential}
 
     def client_fetched(self, credential):
         with self.connect() as db:
@@ -232,8 +234,7 @@ class Store:
                     or not isinstance(payload.get("deviceToken"), str)
                     or not re.fullmatch(r"[0-9a-f]{32,512}", payload["deviceToken"])
                     or len(payload["deviceToken"]) % 2
-                    or payload.get("environment") not in ("development", "production")
-                    or payload.get("mode") != "alert"):
+                    or payload.get("environment") not in ("development", "production")):
                 raise ValueError("Invalid push registration")
             display_name = registered_display_name(payload)
         with self.connect() as db:
@@ -248,15 +249,15 @@ class Store:
                 if display_name is not None:
                     db.execute("UPDATE clients SET display_name=? WHERE id=?", (display_name or None, client_id))
                 old = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
-                values = (payload["deviceToken"], payload["environment"], payload["mode"])
-                if old is None or tuple(old[k] for k in ("token", "environment", "mode")) != values:
+                values = (payload["deviceToken"], payload["environment"])
+                if old is None or tuple(old[k] for k in ("token", "environment")) != values:
                     revision = db.execute("SELECT MAX(seq) FROM events").fetchone()[0]
-                    db.execute("INSERT OR REPLACE INTO push_devices(client_id,token,environment,mode,cursor) "
-                               "VALUES (?,?,?,?,?)", (client_id, *values, revision))
+                    db.execute("INSERT OR REPLACE INTO push_devices(client_id,token,environment,cursor) "
+                               "VALUES (?,?,?,?)", (client_id, *values, revision))
             row = db.execute("SELECT * FROM push_devices WHERE client_id=?", (client_id,)).fetchone()
         if not row:
             return {"registered": False}
-        return {"registered": True, "environment": row["environment"], "mode": row["mode"],
+        return {"registered": True, "environment": row["environment"],
                 "lastResult": row["last_result"], "lastAPNsID": row["last_apns_id"]}
 
     def watch_push_device(self, credential: str, payload: dict | None = None) -> dict | None:
@@ -361,7 +362,7 @@ class Store:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
-            if mode and mode[0] in ("omarchy", "macos"):
+            if mode and mode[0] != "synthetic":
                 return
             rows = db.execute("SELECT * FROM schedule WHERE fired=0 AND due<=? ORDER BY due,id", (now,)).fetchall()
             for row in rows:
@@ -375,19 +376,21 @@ class Store:
             row = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         value = {"schema": 1, "sourceID": self.metadata("source_id"),
                 "generation": self.metadata("generation"), "revision": row["seq"],
-                "sourceName": "Transport test", "mode": "synthetic",
+                "sourceName": "Transport test",
                 "observedAt": time.time(), "changedAt": row["at"], "freshFor": 30,
                 "state": row["state"], "eventID": str(row["seq"]),
                 "sessions": [] if row["state"] == "idle" else [{
                     "id": "test-session", "provider": "fixture", "state": row["state"]}]}
         if row["payload"]:
             value.update(json.loads(row["payload"]))
+        for old_field in ("mode", "appearance", "sessionLiveness"):
+            value.pop(old_field, None)  # Old persisted events may still contain these.
         return value
 
     @staticmethod
     def require_synthetic(db):
         mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
-        if mode and mode[0] in ("omarchy", "macos"):
+        if mode and mode[0] != "synthetic":
             raise ValueError("Synthetic controls are disabled for a live source; use a separate data directory")
 
 

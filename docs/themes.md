@@ -189,7 +189,7 @@ The phone persists one family ID in App Group preferences. Both the app and
 WidgetKit extension resolve that ID through the same catalog. The watch profile
 receives the selected dark glance colors even when no source snapshot is
 available; watch v2 carries background and foreground, and v3+ adds accent.
-Source appearance remains decodable but does not drive any surface. Selecting a
+Source appearance was later removed because it drove no surface. Selecting a
 new family refreshes active Live Activities with their current state preserved.
 
 Initial simulator review covered the picker in light Ayu and dark Sakura Mochi,

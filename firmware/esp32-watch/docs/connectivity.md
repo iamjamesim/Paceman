@@ -1,8 +1,9 @@
 # Connectivity and pairing
 
-> Upstream device reference from Omarchy Watch v0.6.1. Desktop behavior described
-> here belongs to the standalone project; see the root architecture and validation
-> docs for what Paceman currently forwards.
+> Device wire reference derived from Omarchy Watch v0.6.1, including Paceman's
+> later capability additions. The original desktop ownership flow below belongs
+> to the standalone project. Paceman's iPhone is the current BLE owner; see the
+> root [communication protocol](../../../docs/protocol.md) for the full path.
 
 The normal setup path is Bluetooth LE. USB is reserved for firmware,
 diagnostics, and recovery; it is not an ownership shortcut.
@@ -40,6 +41,7 @@ the current owner.
 | Effective profile write | `7f510002-1b15-4f0d-b7a5-4cf3a2c98ee1` |
 | Device identity read | `7f510003-1b15-4f0d-b7a5-4cf3a2c98ee1` |
 | Agent activity read/write/notify | `7f510004-1b15-4f0d-b7a5-4cf3a2c98ee1` |
+| Notification-sync read/notify | `7f510005-1b15-4f0d-b7a5-4cf3a2c98ee1` |
 
 Profile writes require authenticated encryption. Integers are little-endian.
 The version 1 packet remains a supported 36-byte time-only snapshot:
@@ -69,7 +71,7 @@ followed by:
 | 2 | daily high |
 | 2 | daily low |
 | 1 | WMO weather code |
-| 24 | null-terminated ASCII location |
+| 24 | null-terminated UTF-8 location (up to 23 data bytes) |
 
 Flag bit 0 marks valid weather, bit 1 selects Fahrenheit, and bit 2 marks night.
 Temperatures are signed integers. The initial identity value is 32 bytes and
@@ -90,8 +92,9 @@ persistent always-wake preference. The desktop negotiates down to version 1 or
 
 Capability bits are time sync (`1 << 0`), hour cycle (`1 << 1`), board RTC
 (`1 << 2`), theme (`1 << 3`), weather (`1 << 4`), display brightness
-(`1 << 5`), agent activity (`1 << 6`), alert sound (`1 << 7`), and distinct
-finished state (`1 << 8`). They describe optional device behavior; the negotiated
+(`1 << 5`), agent activity (`1 << 6`), alert sound (`1 << 7`), distinct
+finished state (`1 << 8`), notification sync (`1 << 9`), distinct failed state
+(`1 << 10`), and working sound (`1 << 11`). They describe optional device behavior; the negotiated
 protocol version determines profile packet layout.
 
 Version 4 appends an 18-byte Codex allowance snapshot to v3 (103 bytes total):
@@ -122,23 +125,36 @@ versions remain unchanged:
 | ---: | --- |
 | 2 | `OA` magic |
 | 1 | activity protocol version (`1`) |
-| 1 | state (`0` idle, `1` working, `2` needs input, `3` finished) |
+| 1 | state (`0` idle, `1` working, `2` needs input, `3` finished, `4` failed) |
 | 1 | flags (bit 0 requests one fresh alert; bit 1 requests its sound) |
 | 1 | reserved |
 | 4 | monotonic activity revision |
 | 4 | newest revision acknowledged on the watch |
 
-The desktop writes aggregate snapshots. Reading or receiving a notification
+The connected owner writes aggregate snapshots: the iPhone in Paceman, or the
+desktop in the upstream project. Reading or receiving a notification
 from the same characteristic returns the watch's acknowledgement revision. A
 snapshot restores visual state after reconnect, while the alert flag is sent
 once for each fresh, not-yet-delivered input request or completion. Sound is capability-gated so
 older firmware never receives a flag it cannot parse.
 
-Capability bit 8 advertises the distinct finished state. The desktop maps
+Capability bit 8 advertises the distinct finished state. The sender maps
 finished back to legacy attention (`2`) when that bit is absent. New firmware
-still accepts older desktops' attention snapshots. Packet size and version stay
+still accepts older senders' attention snapshots. Packet size and version stay
 unchanged. Both input requests and completions retain acknowledgement and
 once-per-revision alert behavior.
+
+Capability bit 10 similarly advertises distinct failed state (`4`). Without it,
+Paceman maps failed to finished or legacy attention. Bit 11 permits a sound for
+fresh work without changing the activity packet layout. The phone handles these
+fallbacks before writing.
+
+With capability bit 9, the watch exposes an encrypted eight-byte notification-sync
+value: `ON` magic (2 bytes), version `1` (1), reserved zero (1), and a little-endian
+32-bit request sequence. ANCS increments this sequence when it detects a Paceman
+notification. The iPhone treats it as a request to fetch current source state,
+not as an activity revision or acknowledgement. It also fetches on each new BLE
+handshake, so a rebooted watch does not need to replay a prior sequence.
 
 The local `agent-event` command accepts `needs-input` alongside `working`,
 `completed`, `interrupted`, and `ended`. Input requests take priority over

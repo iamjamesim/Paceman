@@ -48,7 +48,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(first["generation"], second["generation"])
         self.assertGreater(second["revision"], first["revision"])
         self.assertEqual(second["state"], "working")
-        self.assertEqual(second["mode"], "synthetic")
+        self.assertNotIn("mode", second)
 
     def test_snapshot_read_does_not_change_event_or_acknowledge_it(self):
         self.store.emit("needs_input")
@@ -56,6 +56,14 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(a["revision"], b["revision"])
         self.assertEqual(a["changedAt"], b["changedAt"])
         self.assertEqual(a["state"], "needs_input")
+
+    def test_legacy_local_metadata_is_not_exported(self):
+        with self.store.connect() as db:
+            db.execute("UPDATE events SET payload=? WHERE seq=1", (
+                '{"mode":"omarchy","appearance":{"name":"old"},"sessionLiveness":"process"}',))
+        snapshot = self.store.snapshot()
+        for field in ("mode", "appearance", "sessionLiveness"):
+            self.assertNotIn(field, snapshot)
 
     def test_scheduler_executes_once_in_order(self):
         with self.store.connect() as db:
@@ -65,6 +73,17 @@ class StoreTests(unittest.TestCase):
         with self.store.connect() as db:
             rows = db.execute("SELECT state FROM events ORDER BY seq").fetchall()
         self.assertEqual([row[0] for row in rows], ["idle", "working", "finished"])
+
+    def test_new_live_adapter_does_not_enable_synthetic_controls(self):
+        with self.store.connect() as db:
+            db.execute("INSERT OR REPLACE INTO metadata VALUES ('mode','nixos')")
+            db.execute("INSERT INTO schedule(due,state) VALUES (0,'working')")
+        with self.assertRaises(ValueError):
+            self.store.emit("working")
+        self.store.tick(now=1)
+        with self.store.connect() as db:
+            states = [row[0] for row in db.execute("SELECT state FROM events ORDER BY seq")]
+        self.assertEqual(states, ["idle"])
 
     def test_endpoint_rejects_plaintext_and_credentials(self):
         for value in ["http://test", "https://user:pass@test", "https://test/path", "https://test?secret=x", "https://test#x"]:
@@ -111,8 +130,7 @@ class HTTPTests(unittest.TestCase):
         now = time.time()
         for offset in range(4):
             status, ack = self.request("POST", "/v1/push", {
-                "deviceToken": "ab" * 32, "environment": "development",
-                "mode": "alert"}, pair["credential"])
+                "deviceToken": "ab" * 32, "environment": "development"}, pair["credential"])
             self.assertEqual(status, 200)
             self.assertTrue(ack["registered"])
             self.assertTrue(self.request("GET", "/v1/push", token=pair["credential"])[1]["registered"])
@@ -160,13 +178,14 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/v1/pair", {"invitation": "x" * 43})[0], 429)
 
     def test_push_registration_requires_pairing_and_can_only_remove_own_destination(self):
-        payload = {"deviceToken": "ab" * 32, "environment": "development", "mode": "alert"}
+        payload = {"deviceToken": "ab" * 32, "environment": "development"}
         self.assertEqual(self.request("POST", "/v1/push", payload)[0], 401)
         first, second = self.paired(), self.paired()
         status, value = self.request("POST", "/v1/push", payload, first["credential"])
         self.assertEqual(status, 200)
         self.assertTrue(value["registered"])
         self.assertNotIn("deviceToken", value)
+        self.assertNotIn("mode", value)
         self.assertEqual(self.request("GET", "/v1/push", token=second["credential"])[1], {"registered": False})
         self.request("DELETE", "/v1/push", token=second["credential"])
         self.assertTrue(self.request("GET", "/v1/push", token=first["credential"])[1]["registered"])
@@ -174,16 +193,15 @@ class HTTPTests(unittest.TestCase):
 
     def test_invalid_push_registration_and_revoked_client(self):
         pair = self.paired()
-        for payload in [[], {}, {"deviceToken": "https://attacker.example", "environment": "development", "mode": "alert"},
-                        {"deviceToken": "ab" * 32, "environment": "other", "mode": "alert"},
-                        {"deviceToken": "ab" * 32, "environment": "development", "mode": "voip"}]:
+        for payload in [[], {}, {"deviceToken": "https://attacker.example", "environment": "development"},
+                        {"deviceToken": "ab" * 32, "environment": "other"}]:
             self.assertEqual(self.request("POST", "/v1/push", payload, pair["credential"])[0], 400)
         self.store.revoke(pair["clientID"])
         self.assertEqual(self.request("GET", "/v1/push", token=pair["credential"])[0], 401)
 
     def test_push_registration_rejects_invalid_display_names(self):
         pair = self.paired()
-        base = {"deviceToken": "ab" * 32, "environment": "development", "mode": "alert"}
+        base = {"deviceToken": "ab" * 32, "environment": "development"}
         for name in (" ", " bad", "bad\nname", "x" * 1025, 7):
             self.assertEqual(self.request("POST", "/v1/push", {**base, "displayName": name},
                                           pair["credential"])[0], 400)

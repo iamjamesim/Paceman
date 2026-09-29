@@ -53,9 +53,9 @@ final class CompanionModel: ObservableObject {
                 let long = screen == "--screen=multi-long"
                 let observed = Date().timeIntervalSince1970 - (stale ? 300 : 0)
                 snapshots[id] = Snapshot(schema: 1, sourceID: id, generation: id, revision: 1,
-                    sourceName: "Jamess-MacBook-Pro", mode: "macos", observedAt: observed,
+                    sourceName: "Jamess-MacBook-Pro", observedAt: observed,
                     changedAt: observed, freshFor: 30, state: empty ? .idle : stale ? .finished : .working,
-                    eventID: "1", appearance: nil, allowance: nil,
+                    eventID: "1", allowance: nil,
                     sessions: empty ? [] : [AgentSession(id: "mac-task", provider: "codex",
                         state: stale ? .finished : .working,
                         name: long ? "Investigate multi-machine source recovery after a long disconnect" : "Build Mac client")])
@@ -142,8 +142,8 @@ final class CompanionModel: ObservableObject {
         let profiles = pairedSources.compactMap { snapshots[$0.sourceID] }
         let allowance = WatchAggregate.selectAllowance(current: current, profiles: profiles,
                                                        now: Date().timeIntervalSince1970)
-        return WatchAggregate.make(current: current, appearance: nil,
-                                   allowance: allowance, now: Date().timeIntervalSince1970)
+        return WatchAggregate.make(current: current, allowance: allowance,
+                                   now: Date().timeIntervalSince1970)
     }
 
     func setTheme(_ family: ThemeFamily) {
@@ -361,7 +361,7 @@ final class CompanionModel: ObservableObject {
             errors.removeValue(forKey: sourceID)
             revokedSources.remove(sourceID)
             status = age < value.freshFor
-                ? (value.mode == "synthetic" ? "Connected · synthetic test source" : "Connected · \(value.sourceName)")
+                ? "Connected · \(value.sourceName)"
                 : "Catching up · buffered snapshot is stale"
             do { try SourceSnapshotCache.save(value, receivedAt: receivedAt, to: SourceSnapshotCache.url(for: sourceID)) }
             catch { Diagnostics.shared.record("source_cache_write_failed") }

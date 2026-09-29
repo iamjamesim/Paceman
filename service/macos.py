@@ -374,8 +374,8 @@ class MacSource:
         old_key = db.execute("SELECT value FROM metadata WHERE key='activity_key'").fetchone()
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         old = json.loads(last["payload"]) if last["payload"] else {}
-        payload = {"sourceName": self.computer_name, "mode": "macos", "state": state,
-                   "sessions": sessions, "sessionLiveness": "hook", "allowance": self.allowance}
+        payload = {"sourceName": self.computer_name, "state": state,
+                   "sessions": sessions, "allowance": self.allowance}
         if old_key and old_key[0] == activity_key and all(old.get(k) == v for k, v in payload.items()):
             return False
         changed = not old_key or old_key[0] != activity_key

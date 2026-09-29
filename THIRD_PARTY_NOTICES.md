@@ -8,10 +8,7 @@ The [original license](firmware/esp32-watch/LICENSE),
 [font and data notices](firmware/esp32-watch/THIRD_PARTY_NOTICES.md), and
 [exact source provenance](firmware/esp32-watch/UPSTREAM.md) are included.
 
-The palette collector in `service/omarchy.py` adapts resolution and contrast
-behavior from Omarchy Watch v0.6.1's `desktop/daemon/omarchy_watchd.py`, under the
-same copyright and [MIT license](firmware/esp32-watch/LICENSE). The Bluetooth
-daemon and shell plugin are not imported.
+The Bluetooth daemon and shell plugin are not imported.
 
 ## iOS typography and symbols
 

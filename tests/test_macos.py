@@ -181,7 +181,7 @@ class MacSourceTests(unittest.TestCase):
                 clock[0] += 5.1
                 source.tick()
                 value = store.snapshot()
-                self.assertEqual(value["mode"], "macos")
+                self.assertNotIn("mode", value)
                 self.assertEqual(value["sourceName"], "My Mac")
                 self.assertEqual(value["state"], "needs_input")
                 self.assertEqual(len(value["sessions"]), 2)

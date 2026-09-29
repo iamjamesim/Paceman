@@ -97,4 +97,4 @@ loop waking a suspended phone.
 
 For implementation detail, use [component architecture](architecture.md),
 [data ownership and expiry](data-lifecycle.md), [Bluetooth lifecycle](bluetooth-lifecycle.md),
-[wire contracts](protocol.md), and [home-screen state semantics](home-screen-design.md).
+[communication protocol](protocol.md), and [home-screen state semantics](home-screen-design.md).

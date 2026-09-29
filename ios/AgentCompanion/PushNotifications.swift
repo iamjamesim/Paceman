@@ -17,7 +17,10 @@ struct PushHint: Decodable {
               let hint = try? JSONDecoder().decode(PushHint.self, from: data),
               hint.schema == 1, hint.sourceID == source.sourceID,
               UUID(uuidString: hint.generation) != nil,
-              hint.revision > 0, hint.eventID == String(hint.revision) else { return nil }
+              hint.revision > 0, !hint.eventID.isEmpty,
+              hint.eventID.utf8.count <= 128,
+              !hint.eventID.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+        else { return nil }
         return hint
     }
 
@@ -53,13 +56,12 @@ struct PushRegistrationReceipt: Codable, Equatable {
     let token: String
     let environment: String
     var displayName: String? = nil
-    var mode: String? = nil
 
     func matches(source: PairedSource, token: String, environment: String,
                  displayName: String? = nil) -> Bool {
         sourceID == source.sourceID && clientID == source.clientID &&
         self.token == token && self.environment == environment &&
-        self.displayName == displayName && (self.mode ?? "alert") == "alert"
+        self.displayName == displayName
     }
 }
 
@@ -117,7 +119,6 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         // destination now exists only to relay updates to a paired custom watch.
         UserDefaults.standard.removeObject(forKey: "phone-alerts-enabled")
         UserDefaults.standard.removeObject(forKey: "push-enabled")
-        UserDefaults.standard.removeObject(forKey: "push-mode")
         UserDefaults.standard.removeObject(forKey: "silent-transport-v1")
         UserDefaults.standard.removeObject(forKey: "phone-notification-presentation")
         UNUserNotificationCenter.current().delegate = self
@@ -221,7 +222,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
                 guard model?.pairedSources.contains(where: { $0.sourceID == source.sourceID && $0.credential == source.credential }) == true else { continue }
                 try Vault.save(PushRegistrationReceipt(sourceID: source.sourceID, clientID: source.clientID,
                                                         token: token, environment: environment,
-                                                        displayName: displayName, mode: "alert"), key: receiptKey)
+                                                        displayName: displayName), key: receiptKey)
                 completed += 1
                 Diagnostics.shared.record("push_destination_registered")
             } catch {

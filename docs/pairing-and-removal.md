@@ -35,9 +35,8 @@ are no longer scheduled. This change does not add watch freshness/lease support.
 For alpha acceptance, start Omarchy from fresh source data and pair the current
 iPhone app with a new QR code. `bash scripts/install-desktop.sh` installs the
 code but preserves the installed database; rerunning it is not a data reset.
-The installer no longer imports a checkout database. New pairings
-require `clientManagement: 1` in the source response and an installation
-identity in the request.
+The installer no longer imports a checkout database. New pairings require an
+installation identity in the request.
 An old database containing unidentified clients fails source startup with a
 clear reset instruction rather than silently keeping those credentials active.
 Clear old phone connections explicitly during a development reset; reinstalling
