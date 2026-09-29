@@ -9,6 +9,8 @@ request must not remove a pairing; an old snapshot must not look current. The
 | Owner | Stored state | Clear boundary |
 | --- | --- | --- |
 | Desktop source | Source ID, hashed client credentials, paired-client metadata, push destinations/cursors and current event in owner-only SQLite | Explicit client removal or source-data reset |
+| Source push config | Source-specific relay credential in an owner-only file | Source uninstall or credential rotation |
+| APNs relay | APNs key and hashed source-credential allowlist in host-managed secret files; no destination database | Key rotation or source revocation and secret update |
 | iPhone Keychain | Source endpoints and credentials, installation ID, custom-watch owner identity; device-only, available after first unlock | Explicit removal or confirmed revocation |
 | iPhone protected Application Support | One last-known snapshot per source, weather cache and bounded transport diagnostics | Source removal, relevant setting change or replacement data |
 | iPhone preferences | Phone theme, source names, per-watch settings and delivery bookkeeping | User change or corresponding device removal |

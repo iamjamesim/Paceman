@@ -1,8 +1,4 @@
-"""Personal APNs provider: reads the local source DB and sends directly to Apple.
-
-No public relay, enrollment service, or inbound internet port. Run alongside
-service.hub; the phone registers its destination through the existing paired HTTPS API.
-"""
+"""Source push worker: sends paired destinations through a relay or direct APNs."""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +11,7 @@ from pathlib import Path
 import re
 import time
 import uuid
+from urllib.parse import urlsplit
 
 from service.hub import Store
 
@@ -30,7 +27,7 @@ class Config:
     watch_private_key: bytes | None = None
 
     @classmethod
-    def load(cls, path: Path):
+    def load(cls, path: Path, *, require_private_key_permissions: bool = True):
         value = json.loads(path.read_text())
         if not isinstance(value, dict):
             raise ValueError("APNs config must be an object")
@@ -46,7 +43,7 @@ class Config:
             key_path = Path(value[name]).expanduser()
             if not key_path.is_absolute():
                 key_path = path.parent / key_path
-            if key_path.stat().st_mode & 0o077:
+            if require_private_key_permissions and key_path.stat().st_mode & 0o077:
                 raise ValueError("APNs key must be private: chmod 600 its .p8 file")
             return key_path.read_bytes()
 
@@ -66,6 +63,68 @@ class Result:
     status: int
     reason: str
     apns_id: str
+
+
+@dataclass(frozen=True)
+class RelayConfig:
+    url: str
+    source_id: str
+    credential: str
+
+    @classmethod
+    def load(cls, value: dict):
+        if not isinstance(value, dict):
+            raise ValueError("Relay config must be an object")
+        url = value.get("relayURL")
+        parsed = urlsplit(url) if isinstance(url, str) else None
+        if (not parsed or parsed.scheme != "https" or not parsed.hostname or parsed.username
+                or parsed.password or parsed.query or parsed.fragment or parsed.path not in ("", "/")):
+            raise ValueError("relayURL must be an HTTPS origin")
+        try:
+            source_id = str(uuid.UUID(value["sourceID"]))
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("Invalid relay sourceID") from error
+        credential = value.get("credential")
+        if not isinstance(credential, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", credential):
+            raise ValueError("Invalid relay credential")
+        if set(value) != {"relayURL", "sourceID", "credential"}:
+            raise ValueError("Unexpected relay config fields")
+        return cls(url.rstrip("/"), source_id, credential)
+
+
+class RelaySender:
+    def __init__(self, config: RelayConfig, client=None):
+        import httpx
+        self.config = config
+        self.client = client or httpx.Client(timeout=10, follow_redirects=False, trust_env=False)
+
+    def send(self, device: dict, payload: dict, headers: dict, now: float) -> Result:
+        import httpx
+        request = {"sourceID": self.config.source_id, "deviceToken": device["token"],
+                   "environment": device["environment"], "mode": device.get("mode", "alert"),
+                   "payload": payload, "headers": headers}
+        try:
+            response = self.client.post(self.config.url + "/v1/send", json=request,
+                headers={"Authorization": "Bearer " + self.config.credential})
+        except httpx.HTTPError:
+            return Result(0, "TransportError", headers["apns-id"])
+        if response.status_code != 200:
+            # Relay authentication/configuration failures are distinct from APNs failures.
+            return Result(0,
+                          "RelayUnavailable" if response.status_code >= 500 else "RelayRejected",
+                          headers["apns-id"])
+        try:
+            value = response.json()
+            status, reason, apns_id = value["status"], value["reason"], value["apnsID"]
+            if (type(status) is int and 0 <= status <= 599 and isinstance(reason, str)
+                    and re.fullmatch(r"[A-Za-z]{1,80}", reason) and apns_id == headers["apns-id"]):
+                return Result(status, reason, apns_id)
+        except (ValueError, KeyError, TypeError):
+            pass
+        return Result(0, "RelayUnavailable", headers["apns-id"])
+
+    def close(self):
+        self.client.close()
 
 
 def source_display_name(source_name: object, phone_name: str | None = None) -> str:
@@ -513,11 +572,20 @@ def main():
         except BlockingIOError:
             parser.error("A push worker is already running for this data directory")
         try:
-            sender = APNs(Config.load(args.config))
+            configuration = json.loads(args.config.read_text())
+            if not isinstance(configuration, dict):
+                raise ValueError("Push config must be an object")
+            if "relayURL" in configuration:
+                relay = RelayConfig.load(configuration)
+                if relay.source_id != store.metadata("source_id"):
+                    raise ValueError("Relay sourceID does not match this source database")
+                sender = RelaySender(relay)
+            else:
+                sender = APNs(Config.load(args.config))
         except (ValueError, OSError, ImportError):
-            parser.error("Cannot load APNs config/key. Check the config fields, private .p8 permissions, and requirements-push.txt.")
+            parser.error("Cannot load push config. Check source identity, private config, and requirements-push.txt.")
         worker = Worker(store, sender, args.data_dir / "push-delivery.jsonl")
-        print("Direct APNs worker running. APNs acceptance is not device delivery or a background wake.", flush=True)
+        print("Push worker running. APNs acceptance is not device delivery or a background wake.", flush=True)
         try:
             while True:
                 worker.step()

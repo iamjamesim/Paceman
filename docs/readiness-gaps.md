@@ -7,7 +7,7 @@ Paceman is a developer alpha. Mac Codex desktop and CLI hooks and the Omarchy Co
 - **Background delivery:** Connected locked-phone updates have reached the custom watch, but unattended reconnection, long idle periods, Focus, permission changes, and multiple-source combinations have not all passed physical checks. APNs acceptance is not evidence of visible phone or watch delivery.
 - **Custom-watch freshness:** The firmware cannot yet expire active source activity locally after losing the phone link. It reconciles when the phone reconnects.
 - **Codex allowance:** A reading can reach the phone and custom watch, but reset, unavailable, and desktop-only Mac cases need more validation. Multiple Codex accounts have no shared identity; the phone displays one recent source reading rather than merging accounts. Allowance-only changes wait for a later phone fetch.
-- **Distribution:** The alpha APNs sender uses a signing key on each source workstation. Public distribution needs a key-safe relay. Mac binaries also need Developer ID signing and notarization. The current installers are source-based developer paths.
+- **Distribution:** An authenticated, key-safe APNs relay is implemented but needs hosting and physical-device delivery checks. The legacy direct sender still exists for owner-controlled alpha installs; testers should use the relay. Mac binaries also need Developer ID signing and notarization. The current installers are source-based developer paths.
 - **Source retention:** The source events table has no retention limit. A future bound must preserve the current snapshot and push cursors.
 
 See [architecture](architecture.md), [push delivery](push-delivery.md), and [data lifecycle](data-lifecycle.md) for the behavior behind these limits.

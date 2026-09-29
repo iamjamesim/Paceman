@@ -10,13 +10,13 @@ Paceman is a **developer alpha**, installed from source. Mac Codex desktop and C
 2. Install a source on an [Apple Silicon Mac](docs/macos.md) or [Omarchy 4.0+ desktop](docs/desktop.md).
 3. Install Tailscale on phone and computer, configure a private Serve route on the computer, then scan its pairing code in Paceman. The platform guides cover hook review and the first real activity event.
 
-A source install does not by itself enable locked-phone notifications. The current alpha uses a separately configured APNs signing key on the source; see [push delivery](docs/push-delivery.md). The Apple Watch app requires watchOS 11 or later. The [ESP32 watch](firmware/esp32-watch/README.md) is optional.
+A source install does not by itself enable locked-phone notifications. Tester sources use an [authenticated relay](docs/push-relay.md) so the APNs signing key stays off their computers; the earlier direct sender remains available for owner-controlled alpha setups. The Apple Watch app requires watchOS 11 or later. The [ESP32 watch](firmware/esp32-watch/README.md) is optional.
 
 ## Repository
 
 | Path | Purpose |
 | --- | --- |
-| `service/` | Local source API, pairing, persistence and optional APNs sender |
+| `service/` | Local source API, pairing, persistence, push worker and APNs relay |
 | `macos/` | Menu-bar app, Codex hooks and per-user installer |
 | `desktop/` | Omarchy bar panel, source controls and installer |
 | `ios/` | iPhone app, Live Activities, Apple Watch app and complications |
@@ -30,6 +30,6 @@ The ESP32 package derives from [Omarchy Watch](https://github.com/iamjamesim/oma
 - [Architecture](docs/architecture.md): component ownership and data flow.
 - [Communication protocol](docs/protocol.md): pairing, snapshots, APNs and watch packets.
 - [Data lifecycle](docs/data-lifecycle.md): durable state, expiry and recovery.
-- [Push delivery](docs/push-delivery.md): APNs paths, local provider setup and limits.
+- [Push delivery](docs/push-delivery.md): APNs paths, relay and delivery limits.
 - [Bluetooth lifecycle](docs/bluetooth-lifecycle.md): watch reconnection and readiness.
 - [Known limitations](docs/readiness-gaps.md): supported scope and open gaps.

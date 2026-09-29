@@ -1,0 +1,9 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements-push.txt .
+RUN pip install --no-cache-dir -r requirements-push.txt
+COPY service ./service
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PACEMAN_APNS_CONFIG=/etc/secrets/apns.json \
+    PACEMAN_RELAY_SOURCES=/etc/secrets/sources.json
+CMD ["sh", "-c", "python -m service.relay serve --apns-config \"$PACEMAN_APNS_CONFIG\" --sources \"$PACEMAN_RELAY_SOURCES\""]

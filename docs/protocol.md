@@ -9,10 +9,10 @@ private Tailscale HTTPS.
 | Sender → receiver | Wire format | Job |
 | --- | --- | --- |
 | Source service → Paceman iPhone app | Authenticated HTTPS snapshot | Authoritative agent state and freshness. |
-| Source push worker → iOS Notification Center | Ordinary APNs alert | Notification event and a hint for the phone app to fetch. |
+| Source push worker → authenticated relay → iOS Notification Center | Ordinary APNs alert | Notification event and a hint for the phone app to fetch. |
 | iOS Notification Center → custom watch | Apple ANCS over BLE | Identifies a Paceman notification so the watch can request a fetch; does not forward APNs JSON. |
-| Source push worker → iPhone Live Activity | ActivityKit APNs | Expiring display copy for the Lock Screen and Dynamic Island. |
-| Source push worker → Paceman watchOS app | Background APNs | Optional Codex allowance reading; the app then reloads its WidgetKit complications. |
+| Source push worker → authenticated relay → iPhone Live Activity | ActivityKit APNs | Expiring display copy for the Lock Screen and Dynamic Island. |
+| Source push worker → authenticated relay → Paceman watchOS app | Background APNs | Optional Codex allowance reading; the app then reloads its WidgetKit complications. |
 | Paceman iPhone app ↔ custom watch | Encrypted BLE packets | Phone-selected profile and activity; watch acknowledgement and fetch requests. |
 
 ## Pairing and access
@@ -118,6 +118,15 @@ Push registration is authenticated and scoped to the paired client:
 | `POST/GET/DELETE /v1/push` | One iPhone ordinary-alert token. Registration sends `deviceToken`, `environment` (`development` or `production`), and optional `displayName`; status omits the token. |
 | `POST /v1/live-activity` | iPhone Live Activity start/update token, or its removal. |
 | `POST /v1/watch-push` | Optional watchOS app background-push token for allowance only. |
+
+The source owns these registrations. Its worker sends a bounded `POST /v1/send`
+over HTTPS to the relay with its source UUID, source-specific bearer credential,
+registered destination token and environment, APNs mode, approved payload, and
+approved headers. The relay's allowlist stores a hash of each source credential;
+removing one source denies its future sends. The relay stores no phone
+registrations. Revoking or re-pairing a phone still clears that phone's source
+destinations. The APNs signing key and topic remain on the relay. See
+[relay setup](push-relay.md).
 
 An ordinary alert (`apns-push-type: alert`) contains user-visible `aps` text
 and a small `companion` **fetch hint**. Here the alert refers to activity

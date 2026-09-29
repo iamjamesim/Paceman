@@ -8,9 +8,9 @@ Codex hooks / Omarchy event adapter
                  ▼
           Source + SQLite ── private HTTPS snapshot ──► iPhone ── BLE ──► ESP32 watch
                  │                                         ▲                 ▲
-                 ├── ordinary APNs ──► iOS Notification Center ── ANCS ─────┘
-                 ├── ActivityKit APNs ──► iPhone Live Activity
-                 └── allowance APNs ──► Apple Watch app
+                 └── authenticated relay ── APNs ──► iOS Notification Center ── ANCS ─────┘
+                                       ├── ActivityKit ──► iPhone Live Activity
+                                       └── allowance ──► Apple Watch app
 ```
 
 ## Computer source
@@ -26,7 +26,7 @@ The two event adapters feed the same source contract:
 
 Activity and allowance changes advance snapshot revisions. Allowance-only changes keep the activity event ID and do not send an activity alert. `service/status.py` publishes a private runtime heartbeat for the desktop panels; phone contact means an authenticated fetch, not watch delivery.
 
-`service/push.py` is an optional APNs sender beside the source. Ordinary notifications carry a fetch hint, while ActivityKit pushes carry an expiring display copy. Neither contains a source URL or credential. See [push delivery](push-delivery.md) and the [wire protocol](protocol.md).
+`service/push.py` is an optional push worker beside the source. It reads registered destinations from source SQLite and sends through `service/relay.py` with a source-specific credential; the relay alone holds the APNs key for tester setups. Ordinary notifications carry a fetch hint, while ActivityKit pushes carry an expiring display copy. Neither contains a source URL or paired-phone credential. See [push delivery](push-delivery.md) and the [wire protocol](protocol.md).
 
 ## Phone and watches
 

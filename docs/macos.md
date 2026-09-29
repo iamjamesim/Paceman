@@ -47,17 +47,17 @@ If it does not, inspect the pending hook rows and installed command. Report inst
 
 ## Enable iPhone notifications
 
-Pairing and hooks do not configure APNs. Locate an existing private APNs JSON config and `.p8` key on the Mac without displaying the key. Their team, topic, and environment must match the signed iPhone app. Install the per-user sender against the paired source database:
+Pairing and hooks do not configure APNs. For testers, enroll this source with the [authenticated relay](push-relay.md), then give the Mac only its owner-only relay config. The relay keeps the APNs key. Install the per-user sender against the paired source database:
 
 ```sh
-python3 -m macos.install_push --config PATH_TO_EXISTING_PRIVATE_CONFIG
+python3 -m macos.install_push --config PATH_TO_PRIVATE_RELAY_CONFIG
 ```
 
-The installer copies the private key/config into Paceman Application Support and starts the sender within the same background item. Confirm `dev.paceman.source` is running with `launchctl print`, then inspect the destination's `last_result` and `push-delivery.jsonl` for a recent `apns_accepted` (status 200). Ask the user to confirm a **new notification on the physical iPhone**. Apple acceptance and phone display are separate checks. Live Activity starts are logged separately as `live_activity_start_accepted`. See [push delivery](push-delivery.md) for watch and locked-phone checks.
+The installer copies the relay config into Paceman Application Support and starts the sender within the same background item. It removes any copied APNs key left by an earlier direct setup. Confirm `dev.paceman.source` is running with `launchctl print`, then inspect the destination's `last_result` and `push-delivery.jsonl` for a recent `apns_accepted` (status 200). Ask the user to confirm a **new notification on the physical iPhone**. Apple acceptance and phone display are separate checks. Live Activity starts are logged separately as `live_activity_start_accepted`. See [push delivery](push-delivery.md) for watch and locked-phone checks. Existing owner-controlled direct APNs setups remain documented there, but testers should use the relay.
 
 ## Control and removal
 
-**Sharing off** stops both source and sender while preserving hooks, pairing, and APNs configuration. **Manage Paceman… → Open menu app at login** is separate, so the menu can remain available while sharing is paused. A phone's **Remove access…** revokes only that phone. **Manage Paceman… → Uninstall Paceman…** removes the background item, menu app, Paceman hooks, local pairing data, and private APNs key. Remove a dedicated Tailscale Serve route separately. An Apple Development or ad hoc signature used for local builds is not a Developer ID signature or notarization.
+**Sharing off** stops both source and sender while preserving hooks, pairing, and push configuration. **Manage Paceman… → Open menu app at login** is separate, so the menu can remain available while sharing is paused. A phone's **Remove access…** revokes only that phone. **Manage Paceman… → Uninstall Paceman…** removes the background item, menu app, Paceman hooks, local pairing data, relay credential, and any legacy private APNs key. Remove a dedicated Tailscale Serve route separately. An Apple Development or ad hoc signature used for local builds is not a Developer ID signature or notarization.
 
 ## Coverage limits
 
