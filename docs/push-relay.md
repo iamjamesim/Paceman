@@ -4,13 +4,14 @@ The relay is a small Python HTTP service in `service/relay.py`. A hosting provid
 
 ## Server secrets
 
-Provide three secret files to the container, outside the image and repository:
+Provide three secret files to the container, outside the image and repository. If the APNs config has a separate `watchKeyID` and `watchKeyPath`, provide its key as a fourth secret file:
 
 | File | Contents |
 | --- | --- |
 | `/etc/secrets/apns.p8` | Apple APNs private key. |
 | `/etc/secrets/apns.json` | APNs identifiers and `keyPath` pointing to `/etc/secrets/apns.p8`. |
 | `/etc/secrets/sources.json` | JSON map from source UUID to SHA-256 hash of its relay credential. |
+| `/etc/secrets/apns-watch-key.p8` | Separate Watch APNs private key, when configured. Set `watchKeyPath` in `apns.json` to this path. |
 
 The APNs config has the same `teamID`, `keyID`, `topic`, `environment`, and optional separate Watch key fields as the legacy provider. Use a separate relay deployment and config for `development` and `production` tokens. Secret files on a managed host can be mounted read-only; the relay accepts the host's file permissions. The source allowlist is read for every send, so a replacement secret file can revoke a source without restarting the Python process. Some hosts redeploy the container when a secret file changes.
 
@@ -20,7 +21,7 @@ Example `/etc/secrets/apns.json` (identifiers are placeholders):
 {"teamID":"TEAMID1234","keyID":"KEYID12345","topic":"com.apselabs.agentcompanion.prototype","environment":"development","keyPath":"/etc/secrets/apns.p8"}
 ```
 
-Build with `docker build -f Dockerfile.relay -t paceman-relay .`. The image runs `python -m service.relay serve` on the host-supplied `PORT` (default 8080). Set the health check to `GET /healthz`, expose HTTPS publicly at the provider edge, and mount the three secret files. The application itself listens on HTTP inside the container. Keep request-body logging off. Startup validates the APNs key and source allowlist. `POST /v1/send` is authenticated; `/healthz` reveals only readiness of the HTTP process.
+Build with `docker build -f Dockerfile.relay -t paceman-relay .`. The image runs `python -m service.relay serve` on the host-supplied `PORT` (default 8080). Set the health check to `GET /healthz`, expose HTTPS publicly at the provider edge, and mount the secret files above. The application itself listens on HTTP inside the container. Keep request-body logging off. Startup validates the APNs key and source allowlist. `POST /v1/send` is authenticated; `/healthz` reveals only readiness of the HTTP process.
 
 ## Enroll and revoke a source
 
