@@ -1,8 +1,10 @@
 # APNs relay
 
-The relay is Paceman's production push path. It keeps the APNs `.p8` key off Macs. Macs enroll with a source credential; paired iPhones use a separate credential to register their APNs tokens. The relay sends only to registered source/phone/token combinations. Mac payloads contain status and display metadata; the relay rejects prompt and transcript fields. See [push delivery](push-delivery.md) for the notification formats.
+The relay is Paceman's production push path. The project operates one relay for the public app; people installing Paceman do not deploy one or receive its APNs key. Macs enroll with a source credential; paired iPhones use a separate credential to register their APNs tokens. The relay sends only to registered source/phone/token combinations. Mac payloads contain status and display metadata; the relay rejects prompt and transcript fields. See [push delivery](push-delivery.md) for the notification formats.
 
-## Deploy on Render
+## Project operator: deploy on Render
+
+These steps are for the Paceman service operator. A fork can run its own relay with its own signed app and matching Apple Developer credentials; a different team's APNs key cannot send to the public Paceman app.
 
 1. Deploy `Dockerfile.relay` as a paid Web Service. Set its health check to `/healthz`.
 2. Create paid Render Postgres in the same region. Set the Web Service's `DATABASE_URL` to its **internal** URL. The relay creates its tables on startup; no manual SQL or `sources.json` is needed.
@@ -22,7 +24,7 @@ The relay is Paceman's production push path. It keeps the APNs `.p8` key off Mac
 
 ## Connect a Mac
 
-After [installing the Mac source](macos.md), run:
+After [installing the Mac source](macos.md), point it at the project-operated relay:
 
 ```sh
 python3 -m macos.install_push --relay-url https://YOUR-SERVICE.onrender.com

@@ -47,7 +47,7 @@ If it does not, inspect the pending hook rows and installed command. Report inst
 
 ## Enable iPhone notifications
 
-Pairing and hooks do not configure APNs. Configure the per-user sender with the [authenticated relay](push-relay.md) before pairing the phone. The relay keeps the APNs key, and the installer generates a source-specific credential:
+Pairing and hooks do not configure APNs. Configure the per-user sender with Paceman's [project-operated relay](push-relay.md) before pairing the phone. The relay keeps the APNs key, and the installer generates a source-specific credential:
 
 ```sh
 python3 -m macos.install_push --relay-url https://YOUR-RENDER-SERVICE.onrender.com
