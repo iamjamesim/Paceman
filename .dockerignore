@@ -1,0 +1,9 @@
+*
+!service/
+!service/__init__.py
+!service/hub.py
+!service/push.py
+!service/relay.py
+!service/relay_registry.py
+!requirements-push.txt
+!requirements-relay.txt

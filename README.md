@@ -14,7 +14,7 @@ and broader background delivery remain unverified. See [known limitations](docs/
 
 | Path | Purpose |
 | --- | --- |
-| `service/` | Local source API, pairing, persistence and optional APNs sender |
+| `service/` | Local source API, pairing, persistence, push worker and APNs relay |
 | `macos/` | Menu-bar app, Codex hooks and per-user installer |
 | `desktop/` | Omarchy bar panel, source controls and installer |
 | `ios/` | iPhone app, Live Activities, Apple Watch app and complications |
@@ -43,14 +43,15 @@ and [Omarchy installation](docs/desktop.md) for platform steps.
 
 The source listens only on loopback. The phone reaches it through a private
 Tailscale Serve route; do not expose it with Funnel. Runtime state and signing
-keys stay outside the repository. Direct APNs with a workstation-held key is a
-personal alpha setup, not a distribution design.
+keys stay outside the repository. The [authenticated APNs relay](docs/push-relay.md)
+is the intended public push path.
 
 ## Reference
 
 - [Architecture](docs/architecture.md): component ownership and data flow.
 - [Communication protocol](docs/protocol.md): pairing, snapshots, APNs and watch packets.
 - [Data and lifecycle](docs/data-lifecycle.md): durable state, expiry and recovery.
-- [Push delivery](docs/push-delivery.md): APNs paths, local provider setup and limits.
+- [Push delivery](docs/push-delivery.md): APNs paths and delivery limits.
+- [APNs relay](docs/push-relay.md): deployment and pairing.
 - [Bluetooth lifecycle](docs/bluetooth-lifecycle.md): watch reconnection and readiness.
 - [Known limitations](docs/readiness-gaps.md): supported scope and open gaps.

@@ -49,7 +49,7 @@ static pid_t start_child(const char *python, const char *root, int push) {
         snprintf(entry, sizeof(entry), "%s/desktop/launch.py", lib);
         char *const args[] = {(char *)python, entry, "--data-dir", data, "serve",
                               "--source", "macos", "--status-file", status,
-                              "--agent-socket", socket_path, NULL};
+                              "--agent-socket", socket_path, "--relay-config", config, NULL};
         execv(python, args);
     }
     perror("Paceman background Python launch failed");

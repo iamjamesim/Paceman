@@ -209,6 +209,7 @@ final class CompanionModel: ObservableObject {
         do {
             try await client.remove(paired)
             removedOnComputer = true
+            try await client.removeRelayClient(paired)
             let remaining = PairedSourceOrder.removing(paired.sourceID, from: pairedSources)
             try pairedStore.save(remaining)
             sourceEpoch = UUID()

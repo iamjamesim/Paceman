@@ -397,10 +397,11 @@ class Store:
 class Server(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, store: Store, adapter=None, desktop_status=None):
+    def __init__(self, address, store: Store, adapter=None, desktop_status=None, relay_url=None):
         self.store = store
         self.adapter = adapter
         self.desktop_status = desktop_status
+        self.relay_url = relay_url
         self.started = time.monotonic()
         self.pair_attempts: list[float] = []
         self.pair_lock = threading.Lock()
@@ -505,6 +506,8 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, TypeError, AttributeError):
             self.reply(400, {"error": "invalid_request"})
             return
+        if result and self.server.relay_url:
+            result["relayURL"] = self.server.relay_url
         self.reply(200 if result else 401, result or {"error": "invitation_expired_or_used"})
 
     def do_DELETE(self):
@@ -530,6 +533,7 @@ def main():
     run.add_argument("--port", type=int, default=8765)
     run.add_argument("--source", choices=("synthetic", "omarchy", "macos"), default="synthetic")
     run.add_argument("--status-file", type=Path, help="Private desktop status JSON (optional)")
+    run.add_argument("--relay-config", type=Path, help="Installed relay config, when notifications use a relay")
     run.add_argument("--agent-socket", type=Path,
                      help="Omarchy event socket (default: $XDG_RUNTIME_DIR/omarchy-watch.sock)")
     run.add_argument("--omarchy-state", type=Path,
@@ -558,7 +562,13 @@ def main():
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 parser.error("A source is already running for this data directory")
-            server = stack.enter_context(Server(("127.0.0.1", args.port), store))
+            relay_url = None
+            if args.relay_config and args.relay_config.is_file():
+                config = json.loads(args.relay_config.read_text())
+                if isinstance(config, dict) and "relayURL" in config:
+                    relay_url = endpoint(config["relayURL"])
+            server = stack.enter_context(Server(("127.0.0.1", args.port), store,
+                                                relay_url=relay_url))
             if args.source == "omarchy":
                 from service.omarchy import OmarchySource
                 try:

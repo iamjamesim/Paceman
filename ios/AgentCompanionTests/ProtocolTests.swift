@@ -657,6 +657,40 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
+    func testPairingLearnsRelayAndPhoneBindsItsOwnPushToken() async throws {
+        let id = UUID().uuidString
+        let device = ClientDevice(installationID: UUID().uuidString, name: "Phone", platform: "ios")
+        let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: id,
+                                    invitation: String(repeating: "x", count: 43),
+                                    expiresAt: Date().timeIntervalSince1970 + 300)
+        let client = stubClient { request in
+            switch request.url?.path {
+            case "/v1/pair":
+                return (200, try JSONSerialization.data(withJSONObject: ["schema": 1,
+                    "sourceID": id, "clientID": UUID().uuidString, "credential": "phone-secret",
+                    "relayURL": "https://relay.example"]))
+            case "/v1/push":
+                XCTAssertEqual(request.url?.host, "test.example")
+                return (200, Data(#"{"registered":true}"#.utf8))
+            case "/v1/destinations":
+                XCTAssertEqual(request.url?.host, "relay.example")
+                XCTAssertEqual(request.httpMethod, "PUT")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer phone-secret")
+                let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
+                XCTAssertEqual(body["sourceID"] as? String, id)
+                XCTAssertEqual(body["mode"] as? String, "alert")
+                XCTAssertNil(body["prompt"])
+                XCTAssertNil(body["transcript"])
+                return (200, Data(#"{"registered":true}"#.utf8))
+            default: return (404, Data())
+            }
+        }
+        let paired = try await client.pair(invitation, device: device)
+        XCTAssertEqual(paired.relayURL?.absoluteString, "https://relay.example")
+        try await client.registerPush(paired, token: String(repeating: "ab", count: 32),
+                                      environment: "production")
+    }
+
     func testPushRegistrationRequiresServerConfirmation() async throws {
         let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "source", clientID: "client", credential: "secret")
         for confirmed in [true, false] {

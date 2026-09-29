@@ -9,10 +9,10 @@ private Tailscale HTTPS.
 | Sender → receiver | Wire format | Job |
 | --- | --- | --- |
 | Source service → Paceman iPhone app | Authenticated HTTPS snapshot | Authoritative agent state and freshness. |
-| Source push worker → iOS Notification Center | Ordinary APNs alert | Notification event and a hint for the phone app to fetch. |
+| Source push worker → authenticated relay → iOS Notification Center | Ordinary APNs alert | Notification event and a hint for the phone app to fetch. |
 | iOS Notification Center → custom watch | Apple ANCS over BLE | Identifies a Paceman notification so the watch can request a fetch; does not forward APNs JSON. |
-| Source push worker → iPhone Live Activity | ActivityKit APNs | Expiring display copy for the Lock Screen and Dynamic Island. |
-| Source push worker → Paceman watchOS app | Background APNs | Optional Codex allowance reading; the app then reloads its WidgetKit complications. |
+| Source push worker → authenticated relay → iPhone Live Activity | ActivityKit APNs | Expiring display copy for the Lock Screen and Dynamic Island. |
+| Source push worker → authenticated relay → Paceman watchOS app | Background APNs | Optional Codex allowance reading; the app then reloads its WidgetKit complications. |
 | Paceman iPhone app ↔ custom watch | Encrypted BLE packets | Phone-selected profile and activity; watch acknowledgement and fetch requests. |
 
 ## Pairing and access
@@ -43,11 +43,14 @@ The source responds with:
   "schema": 1,
   "sourceID": "11111111-1111-4111-8111-111111111111",
   "clientID": "44444444-4444-4444-8444-444444444444",
-  "credential": "example-private-credential"
+  "credential": "example-private-credential",
+  "relayURL": "https://relay.example"
 }
 ```
 
-The credential is never included in snapshots or pushes. An installation ID
+`relayURL` is present when the source uses the hosted APNs relay. The phone
+uses it to register its own APNs tokens after pairing. The credential is never
+included in snapshots or pushes. An installation ID
 is a label, not proof of ownership. Re-pairing the same installation requires
 its current credential and a new invitation; it rotates the credential and
 requires push registration again. The phone stores each source's access and
@@ -118,6 +121,17 @@ Push registration is authenticated and scoped to the paired client:
 | `POST/GET/DELETE /v1/push` | One iPhone ordinary-alert token. Registration sends `deviceToken`, `environment` (`development` or `production`), and optional `displayName`; status omits the token. |
 | `POST /v1/live-activity` | iPhone Live Activity start/update token, or its removal. |
 | `POST /v1/watch-push` | Optional watchOS app background-push token for allowance only. |
+
+The source owns the local registrations and syncs hashed paired-client credentials
+to the relay. The phone separately registers each APNs token with the relay using
+its paired-client credential. The relay stores hashed source credentials and
+source/client/token bindings in PostgreSQL. Its `POST /v1/send` requires a source
+bearer credential, source and client UUIDs, an exact registered token and
+environment, APNs mode (and ActivityKit ID when applicable), approved payload,
+and approved headers. Removing or re-pairing a phone clears its relay bindings;
+the source worker also syncs removals. The APNs signing key and topic remain on
+the relay. See
+[relay setup](push-relay.md).
 
 An ordinary alert (`apns-push-type: alert`) contains user-visible `aps` text
 and a small `companion` **fetch hint**. Here the alert refers to activity
