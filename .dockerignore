@@ -2,3 +2,4 @@
 !service/
 !service/*.py
 !requirements-push.txt
+!requirements-relay.txt
