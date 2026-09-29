@@ -25,9 +25,9 @@ Before installing or presenting a design as finished:
 - Stop when the user questions are answered clearly. Do not manufacture more
   refinements just to produce work.
 
-Use `docs/home-screen-design.md` for the current phone hierarchy and review notes.
-Desktop-specific decisions are in `docs/desktop-panel-design.md`. Cross-surface
-consistency means consistent semantics; layout differences need a user-facing reason.
+Use `docs/architecture.md` and `docs/data-lifecycle.md` for current system
+semantics. Cross-surface consistency means consistent meanings; layout differences
+need a user-facing reason.
 
 # Lifecycle engineering
 

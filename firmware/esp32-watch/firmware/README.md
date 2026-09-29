@@ -22,8 +22,8 @@ reconnects. The watch applies expiry rules locally; see
 Agent indicators distinguish working, needs input, and completion. Sound is
 enabled by default and toggleable in the Paceman iPhone app. Tapping an input or
 finished indicator persists an acknowledgement revision in NVS and notifies
-the connected phone. See [agent state motion](../../../docs/agent-state-motion.md)
-for animation and Reduce Motion behavior.
+the connected phone. See the [phone and watch protocol](../../../docs/protocol.md#iphone-and-custom-watch-ble)
+for state and acknowledgement semantics.
 
 While the native serial/JTAG interface is connected to a USB host, ESP-IDF
 holds its built-in no-light-sleep lock so flashing and monitoring remain
@@ -61,8 +61,9 @@ first firmware configure/build; see `simulator/README.md` for details.
 
 ## Prebuilt release bundle
 
-Tagged releases include the bootloader, partition table, and application as
-three separate binaries plus a `flash.sh` helper and SHA-256 checksums. Install
+A bundle made with `tools/package-release.sh` includes the bootloader,
+partition table, and application as three separate binaries, plus a `flash.sh`
+helper and SHA-256 checksums. Install
 Espressif's `esptool`, extract the bundle, and run:
 
 ```bash

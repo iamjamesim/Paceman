@@ -1,47 +1,13 @@
-# Known gaps
+# Known limitations
 
-These are current product limits, not design requests. A successful source
-snapshot, APNs response, phone fetch, BLE write and visible watch update are
-separate observations. Supported claims require the relevant physical check.
+Paceman is a developer alpha. Mac Codex desktop and CLI hooks and the Omarchy Codex CLI companion have been exercised on development devices. Only Codex activity is implemented. The ESP32 watch is experimental; iPhone and Apple Watch are the main receiving devices.
 
-## Before outside testers
+- **Mac activity:** A short-lived CLI task has remained Finished after exit when `SessionEnd` did not arrive. A desktop Computer Use approval has remained Working because no Needs input hook reached Paceman. Hook presence alone does not prove a hook was trusted or delivered. The Mac lacks Omarchy's process-ownership check.
+- **Omarchy desktop app:** The current adapter has been exercised with Codex CLI, not the Codex desktop app on Omarchy. Desktop hook delivery, process ownership, session exit, and allowance remain unverified there.
+- **Background delivery:** Connected locked-phone updates have reached the custom watch, but unattended reconnection, long idle periods, Focus, permission changes, and multiple-source combinations have not all passed physical checks. APNs acceptance is not evidence of visible phone or watch delivery.
+- **Custom-watch freshness:** The firmware cannot yet expire active source activity locally after losing the phone link. It reconciles when the phone reconnects.
+- **Codex allowance:** A reading can reach the phone and custom watch, but reset, unavailable, and desktop-only Mac cases need more validation. Multiple Codex accounts have no shared identity; the phone displays one recent source reading rather than merging accounts. Allowance-only changes wait for a later phone fetch.
+- **Distribution:** The alpha APNs sender uses a signing key on each source workstation. Public distribution needs a key-safe relay. Mac binaries also need Developer ID signing and notarization. The current installers are source-based developer paths.
+- **Source retention:** The source events table has no retention limit. A future bound must preserve the current snapshot and push cursors.
 
-- **Public push delivery:** The alpha uses an APNs signing key on each source
-  workstation. A public build needs a key-safe relay with authenticated source
-  events, destination registration and revocation, and abuse limits. Check
-  production APNs acceptance, phone presentation and Apple Watch display
-  separately.
-- **Mac session accuracy:** An ephemeral CLI task remained Finished after its
-  process exited. Test `SessionEnd` with real desktop, CLI and ChatGPT Work
-  sessions; use supported lifecycle signals to fix missing cleanup. A desktop
-  Computer Use approval remained Working because no Needs input hook reached
-  Paceman. Do not infer approval from tool duration.
-- **Clean installs:** Repeat Mac installation on a desktop-only Codex machine.
-  The current allowance query can use the desktop app's bundled runtime, whose
-  internal path may change. Run Omarchy's Codex desktop app through hook,
-  process-owner, session-exit and allowance checks before claiming support.
-- **Distribution:** Mac binaries need a distribution signing and notarization
-  path; both desktop installers need clean install, update, pause, removal and
-  recovery checks. Direct APNs and private Tailscale setup remain technical
-  preview steps.
-
-## Device and data checks
-
-- Locked-phone custom-watch delivery needs a matrix for idle, reconnection,
-  Focus, permission changes and multiple sources. Record source event → APNs →
-  ANCS → phone fetch → BLE receipt → visible state for each case.
-- The custom watch cannot yet expire active source activity locally after it
-  loses the phone link. Firmware needs a stale/disconnected treatment and
-  reconciliation on reconnect.
-- Mac Codex allowance reached the phone and physical custom watch. Reset,
-  unavailable and clean desktop-only cases remain untested. Quota-only updates
-  wait for the next phone fetch; measure locked-phone freshness before changing
-  that policy.
-- Multiple Codex accounts have no shared account identity. The phone picks a
-  recent source reading for display; it does not merge accounts.
-- Source events have no retention limit. Add bounded retention without losing
-  the current snapshot or push cursors.
-
-Only Codex agent monitoring is implemented. Other providers shown in design
-fixtures are examples, not supported integrations. The ESP32 watch is
-experimental; iPhone and Apple Watch are the main receiving devices.
+See [architecture](architecture.md), [push delivery](push-delivery.md), and [data lifecycle](data-lifecycle.md) for the behavior behind these limits.

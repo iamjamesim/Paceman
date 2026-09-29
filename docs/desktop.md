@@ -32,7 +32,7 @@ The source currently uses the [Omarchy Watch for Codex adapter](https://github.c
 
 ## Panel and control
 
-The panel shows Sharing, paired phones, aggregate activity, and a pairing action. **Last contact** means the phone last fetched an authenticated snapshot; it does not prove watch delivery. A five-second source heartbeat expires after 20 seconds. The panel shows a recovery action only when the source needs one. The [panel contract](desktop-panel-design.md) defines the connected, empty, and paused states.
+The panel shows Sharing, paired phones, aggregate activity, and a pairing action. **Last contact** means the phone last fetched an authenticated snapshot; it does not prove watch delivery. A five-second source heartbeat expires after 20 seconds. The panel shows a recovery action only when the source needs one. The panel keeps pairing and last-contact status separate from agent activity.
 
 ```sh
 pacemanctl status
@@ -50,4 +50,4 @@ Sharing off persists across login and updates. `pacemanctl stop` stops only the 
 bash scripts/uninstall-desktop.sh
 ```
 
-This removes the installed app, command, service, and panel. It retains source data, phone pairings, Codex hooks, and Tailscale routes for deliberate cleanup or reinstallation. The optional [APNs worker](direct-push-test.md) is separate from this installer; a desktop install alone does not establish locked-phone delivery. This package remains a local source installer, not a downloadable signed release.
+This removes the installed app, command, service, and panel. It retains source data, phone pairings, Codex hooks, and Tailscale routes for deliberate cleanup or reinstallation. The optional [APNs worker](push-delivery.md) is separate from this installer; a desktop install alone does not establish locked-phone delivery. This package remains a local source installer, not a downloadable signed release.

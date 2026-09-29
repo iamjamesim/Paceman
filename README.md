@@ -7,10 +7,8 @@ Bluetooth. Each computer runs its own source; the phone pairs with them
 separately over private Tailscale HTTPS.
 
 This is a developer alpha. Mac Codex desktop and CLI hooks and the Omarchy Codex
-CLI companion have been exercised on the owner's devices. Omarchy Codex desktop
-has not been validated. Background notification and watch delivery still need
-broader physical testing. [Known gaps](docs/readiness-gaps.md) records the
-specific limits.
+CLI companion have been exercised on development devices. Omarchy Codex desktop
+and broader background delivery remain unverified. See [known limitations](docs/readiness-gaps.md).
 
 ## Repository
 
@@ -53,5 +51,6 @@ personal alpha setup, not a distribution design.
 - [Architecture](docs/architecture.md): component ownership and data flow.
 - [Communication protocol](docs/protocol.md): pairing, snapshots, APNs and watch packets.
 - [Data and lifecycle](docs/data-lifecycle.md): durable state, expiry and recovery.
-- [Phone](docs/home-screen-design.md) and [desktop](docs/desktop-panel-design.md) screen contracts.
-- [Known gaps](docs/readiness-gaps.md): what remains unverified or incomplete.
+- [Push delivery](docs/push-delivery.md): APNs paths, local provider setup and limits.
+- [Bluetooth lifecycle](docs/bluetooth-lifecycle.md): watch reconnection and readiness.
+- [Known limitations](docs/readiness-gaps.md): supported scope and open gaps.

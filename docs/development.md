@@ -48,7 +48,7 @@ Emit synthetic transitions from another terminal:
 .venv/bin/python -m service.hub emit finished
 ```
 
-For locked-phone tests, configure [direct APNs](direct-push-test.md). Leaving SSE
+For locked-phone tests, configure [push delivery](push-delivery.md). Leaving SSE
 connected in the foreground does not establish background reliability.
 
 ## iPhone and Live Activities (Mac)
@@ -84,9 +84,8 @@ Fixtures disable real networking/Bluetooth; release builds ignore these argument
 
 The Apple Watch app and complications require watchOS 11+.
 
-The supported board is Waveshare ESP32-S3-Touch-AMOLED-2.06. The development watch
-already pairs with the phone. Open Connect your watch for a fresh unowned device;
-follow the current instruction and the system Bluetooth pairing prompt.
+The supported board is Waveshare ESP32-S3-Touch-AMOLED-2.06. For a fresh unowned
+device, open **Connect your watch** on the phone and follow its Bluetooth prompt.
 
 For source builds, activate ESP-IDF 5.5.x, then:
 

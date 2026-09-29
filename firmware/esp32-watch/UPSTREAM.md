@@ -18,5 +18,4 @@ The standalone desktop daemon, installer, bar plugin and agent-hook distribution
 remain upstream. Paceman receives Omarchy events through its own source service;
 the iPhone owns the watch Bluetooth connection.
 
-New integrated development belongs in this repository. Upstream remains the
-standalone product and release reference; no archive or remote changes were made.
+Upstream remains the standalone product and release reference.

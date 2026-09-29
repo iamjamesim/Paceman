@@ -53,7 +53,7 @@ Pairing and hooks do not configure APNs. Locate an existing private APNs JSON co
 python3 -m macos.install_push --config PATH_TO_EXISTING_PRIVATE_CONFIG
 ```
 
-The installer copies the private key/config into Paceman Application Support and starts the sender within the same background item. Confirm `dev.paceman.source` is running with `launchctl print`, then inspect the destination's `last_result` and `push-delivery.jsonl` for a recent `apns_accepted` (status 200). Ask the user to confirm a **new notification on the physical iPhone**. Apple acceptance and phone display are separate checks. Live Activity starts are logged separately as `live_activity_start_accepted`. See [delivery validation](direct-push-test.md) for watch and locked-phone checks.
+The installer copies the private key/config into Paceman Application Support and starts the sender within the same background item. Confirm `dev.paceman.source` is running with `launchctl print`, then inspect the destination's `last_result` and `push-delivery.jsonl` for a recent `apns_accepted` (status 200). Ask the user to confirm a **new notification on the physical iPhone**. Apple acceptance and phone display are separate checks. Live Activity starts are logged separately as `live_activity_start_accepted`. See [push delivery](push-delivery.md) for watch and locked-phone checks.
 
 ## Control and removal
 

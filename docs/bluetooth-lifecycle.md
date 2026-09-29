@@ -56,27 +56,8 @@ Every successful handshake asks the model for the latest snapshot. The phone
 sends current state and uses watch acknowledgements to decide whether a fresh
 alert is still owed. It does not replay a historical stream after an outage.
 
-## Physical acceptance
+## Platform references
 
-Test with Paceman backgrounded throughout unless the case explicitly says
-otherwise:
-
-1. Let the watch battery die, charge and boot it, then send Working and Finished.
-2. Power the watch off and on after an extended locked-phone idle period.
-3. Move the watch out of range and return it.
-4. Turn iPhone Bluetooth off and on.
-5. Reboot the iPhone with the watch available and unavailable.
-6. Terminate Paceman through normal system memory pressure and verify state restoration.
-7. Interrupt a profile and activity write, then verify the next session sends the latest snapshot.
-8. Disable and restore notification sharing; verify the UI distinguishes ANCS availability from the Paceman data channel.
-
-For each case, logs must show a disconnect or transport recovery, a system or
-callback-submitted connection, the complete handshake, `ble_ready`, and an
-accepted write. No foreground transition may be required. Simulator tests cover
-state decisions but cannot establish suspended-device or system-relaunch behavior.
-
-References:
-
-- https://developer.apple.com/documentation/corebluetooth/cbconnectperipheraloptionenableautoreconnect
-- https://developer.apple.com/documentation/corebluetooth/central-manager-state-restoration-options
-- https://developer.apple.com/library/archive/documentation/NetworkingInternetWeb/Conceptual/CoreBluetooth_concepts/CoreBluetoothBackgroundProcessingForIOSApps/PerformingTasksWhileYourAppIsInTheBackground.html
+- [Core Bluetooth automatic reconnection](https://developer.apple.com/documentation/corebluetooth/cbconnectperipheraloptionenableautoreconnect)
+- [Central manager state restoration](https://developer.apple.com/documentation/corebluetooth/central-manager-state-restoration-options)
+- [Core Bluetooth background execution](https://developer.apple.com/library/archive/documentation/NetworkingInternetWeb/Conceptual/CoreBluetooth_concepts/CoreBluetoothBackgroundProcessingForIOSApps/PerformingTasksWhileYourAppIsInTheBackground.html)

@@ -1,76 +1,37 @@
 # Architecture
 
-Paceman connects agent workspaces to personal gear. Work remains in the source
-agent environment; the hub presents current state and relays it to accessories.
+Each Mac or Omarchy computer runs an independent source. The source turns local Codex events into a current snapshot; the iPhone pairs with each source and owns presentation and the experimental watch's Bluetooth connection. Agent prompts, replies and tool arguments remain on the computer.
 
 ```text
-Omarchy events, Mac Codex hooks (or synthetic test source)
-    │
-    ▼
-Private source service ── HTTPS snapshot ──► iPhone ── BLE ──► watch
-    │                                                        ▲
-    ├── APNs notification ──► iOS Notification Center ── ANCS ─┘
-    └── ActivityKit push ──► Live Activity / Dynamic Island
+Codex hooks / Omarchy event adapter
+                 │
+                 ▼
+          Source + SQLite ── private HTTPS snapshot ──► iPhone ── BLE ──► ESP32 watch
+                 │                                         ▲                 ▲
+                 ├── ordinary APNs ──► iOS Notification Center ── ANCS ─────┘
+                 ├── ActivityKit APNs ──► iPhone Live Activity
+                 └── allowance APNs ──► Apple Watch app
 ```
 
-## Source service
+## Computer source
 
-`service/hub.py` owns source snapshots, SQLite persistence, single-use
-pairing invitations, installation metadata, per-client contact, authenticated reads,
-self-revocation, revision ordering and push destinations. Local desktop revocation
-and authenticated phone removal delete the credential, identity and push destination
-together. Installation claims alone cannot replace another credential.
-It listens only on loopback. Tailscale Serve supplies private HTTPS.
-`service/omarchy.py` receives the existing desktop companion's local `agent-event`
-protocol without starting a Bluetooth owner. Synthetic mode supports isolated tests.
-See [Omarchy installation](desktop.md) for the live route.
-Activity and allowance changes both advance snapshot revisions; allowance-only
-changes retain the activity event ID and do not send activity alerts.
-`service/macos.py` receives reduced Codex lifecycle events from a trusted local
-hook script. It shares the source API and credentials but uses hook-derived
-session state rather than Linux process verification.
+`service/hub.py` owns source identity, SQLite state, single-use pairing invitations, client credentials, authenticated snapshots, revisions, client revocation and push destinations. It binds to loopback; Tailscale Serve supplies private HTTPS. Removing a paired client deletes its credential and push destinations together. An installation ID alone cannot replace an existing credential.
 
-`service/push.py` is an optional process beside the source. Ordinary APNs alerts
-carry a minimal hint so the phone can fetch from its paired endpoint; ActivityKit
-pushes carry a separate display copy for Live Activities. Neither includes a
-source URL or credential. Apple controls background execution, and custom-watch
-requests use Core Bluetooth. See the [communication protocol](protocol.md).
+The two event adapters feed the same source contract:
 
-## Desktop package
+| Platform | Event input | Session liveness |
+| --- | --- | --- |
+| Mac | `service/macos.py` receives reduced lifecycle events from reviewed Codex hooks. | Hook-observed; sessions clear on source restart. |
+| Omarchy | `service/omarchy.py` receives the Codex companion's local event socket. | `service/processes.py` verifies the sending Codex process and reconciles its identity after restart. |
 
-`desktop/` supplies a per-user installer, control command and Omarchy bar panel.
-The installed systemd user service starts at login. `service/status.py` publishes
-an atomic, private runtime status file with a heartbeat, aggregate activity,
-per-state session counts and last authenticated client fetch. The panel expires a missing heartbeat and never
-claims Bluetooth or watch delivery status that the phone has not reported.
-The source runs independently of the shell. On Linux, `service/processes.py`
-binds sessions to the Codex ancestor of the kernel-identified hook sender, then
-reconciles PID/start-time/boot identities on startup and about once a second.
-Activity and liveness are separate; a living process can remain Finished or Idle. See [desktop setup](desktop.md).
-`macos/` supplies an arm64 SwiftUI menu-bar app, a per-user LaunchAgent, and an
-agent-led installer. See [Mac setup](macos.md).
+Activity and allowance changes advance snapshot revisions. Allowance-only changes keep the activity event ID and do not send an activity alert. `service/status.py` publishes a private runtime heartbeat for the desktop panels; phone contact means an authenticated fetch, not watch delivery.
 
-## iPhone and Live Activities
+`service/push.py` is an optional APNs sender beside the source. Ordinary notifications carry a fetch hint, while ActivityKit pushes carry an expiring display copy. Neither contains a source URL or credential. See [push delivery](push-delivery.md) and the [wire protocol](protocol.md).
 
-`CompanionModel` coordinates state, fetching and delivery. `SourceClient` handles
-the authenticated API. `WatchLink` handles accessory selection, ownership, BLE
-packets and restoration. `CompanionHome` and `PresentationModel` present current
-sessions and connection state; `ios/Shared/` defines theme and Live Activity types.
+## Phone and watches
 
-The app shows independently paired computer activity cards. Workspace setup becomes a status card; watch setup becomes
-a connection row. Settings contains Appearance, notifications, and developer tools.
-The phone owns the selected theme family independently of paired computers. The
-WidgetKit extension reads it from shared App Group preferences for Live Activities.
-There are no Home Screen or Lock Screen status widgets.
+`SourceClient` reads each paired source using its stored credential. `CompanionModel` coordinates fetching, source state and delivery. The iPhone retains a last-known snapshot per source but marks expired activity as historical. It owns the selected theme and chooses one fresh aggregate for the ESP32 watch. The Live Activity extension reads shared presentation preferences; no Home Screen or Lock Screen status widget is shipped.
 
-## Watch device package
+`WatchLink` owns ESP32 accessory selection, encrypted BLE packets and Core Bluetooth restoration. The watch owns rendering, its bond and owner ID, and the last accepted profile in NVS; current agent activity stays in RAM. A source disconnection does not change watch ownership. The iPhone negotiates profile v1–v5 and activity v1. See [Bluetooth lifecycle](bluetooth-lifecycle.md), [data lifecycle](data-lifecycle.md) and the [BLE protocol](protocol.md#iphone-and-custom-watch-ble).
 
-`firmware/esp32-watch/` retains the upstream firmware/simulator/tools layout so
-shared C rendering code and relative build paths remain coherent. Firmware owns
-rendering, power, BLE bonding and persisted owner identity. The phone negotiates
-profile v1–v5 for time, the phone-selected palette, weather, watch settings and source-reported Codex
-allowance, and still uses activity v1. The accepted profile survives watch
-restarts; agent activity remains an in-memory event state.
-
-The watch has one owner. A desktop disconnect does not transfer ownership.
-The old standalone desktop installer/bar plugin is deliberately not included.
+The Apple Watch app receives optional Codex allowance updates through its own background push path and refreshes complications. It does not share the ESP32 Bluetooth route.
