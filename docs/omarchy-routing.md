@@ -1,7 +1,7 @@
 # Omarchy routing test
 
 The live path is the existing Codex companion → local Paceman event receiver →
-private HTTPS snapshot/SSE → iPhone → phone-owned watch. Paceman does not own
+private HTTPS snapshot → iPhone → phone-owned watch. Paceman does not own
 Bluetooth, install agent hooks, or read conversations.
 
 ## Prepare the phone
@@ -154,7 +154,7 @@ OMARCHY_CODEX_HOOK=/absolute/path/to/omarchy-watch-codex/plugins/omarchy-watch-c
 ```
 
 This exercises the actual upstream companion script with fixture lifecycle/tool
-payloads, the Unix receiver, pairing, HTTP/SSE, revisions, multi-session ordering,
+payloads, the Unix receiver, pairing, HTTP snapshots, revisions, multi-session ordering,
 restart behavior, allowance updates and mocked APNs delivery. Without
 `OMARCHY_CODEX_HOOK`, only the optional upstream-script integration is skipped.
 It is desktop integration evidence, not a physical iPhone/watch test.

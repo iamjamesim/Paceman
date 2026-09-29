@@ -439,9 +439,9 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(snapshot.sessions)
     }
 
-    func testLegacyOrMalformedOptionalMetadataDoesNotDiscardAgentActivity() throws {
+    func testUnknownOrMalformedOptionalMetadataDoesNotDiscardAgentActivity() throws {
         for extra: [String: Any] in [
-            ["mode": "macos", "appearance": "legacy"],
+            ["futureMetadata": ["kind": "example"]],
             ["sessions": [["provider": "new-agent-schema"]]]
         ] {
             let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(extra))
@@ -560,13 +560,12 @@ final class ProtocolTests: XCTestCase {
         XCTAssertFalse(receipt.canRestore(authorizedIDs: [bluetoothID], ownedWatchID: "different-watch", hasOwner: true))
     }
 
-    func testSourceClientDoesNotRequireAdapterModeButRejectsOtherSources() throws {
+    func testSourceClientRejectsMismatchedOrMalformedSnapshotIdentity() throws {
         let id = UUID().uuidString
         let source = PairedSource(endpoint: URL(string: "https://test.example")!,
                                   sourceID: id, clientID: "test", credential: "test")
         let client = SourceClient()
         XCTAssertEqual(try client.decodeSnapshot(sourceFixture(["sourceID": id]), source: source).sourceID, id)
-        XCTAssertEqual(try client.decodeSnapshot(sourceFixture(["sourceID": id, "mode": "macos"]), source: source).sourceID, id)
         XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(), source: source))
         XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "generation": "invalid"]), source: source))
         XCTAssertThrowsError(try client.decodeSnapshot(sourceFixture(["sourceID": id, "revision": 0]), source: source))
