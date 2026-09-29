@@ -17,6 +17,7 @@ import uuid
 SCHEMA = (
     "CREATE TABLE IF NOT EXISTS relay_sources ("
     "id TEXT PRIMARY KEY, credential_hash TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS relay_revoked_sources (id TEXT PRIMARY KEY)",
     "CREATE TABLE IF NOT EXISTS relay_clients ("
     "source_id TEXT NOT NULL REFERENCES relay_sources(id) ON DELETE CASCADE, "
     "id TEXT NOT NULL, credential_hash TEXT NOT NULL, PRIMARY KEY (source_id,id))",
@@ -78,10 +79,13 @@ class Registry:
         if not valid_uuid(source_id) or not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", credential):
             raise ValueError("Invalid source registration")
         with self.connection() as db:
+            if db.one("SELECT 1 FROM relay_revoked_sources WHERE id=?", (source_id,)):
+                return False
             existing = db.one("SELECT credential_hash FROM relay_sources WHERE id=?", (source_id,))
             if existing:
                 return hmac.compare_digest(existing[0], digest(credential))
-            if db.one("SELECT COUNT(*) FROM relay_sources")[0] >= 10_000:
+            if (db.one("SELECT COUNT(*) FROM relay_sources")[0]
+                    + db.one("SELECT COUNT(*) FROM relay_revoked_sources")[0] >= 10_000):
                 return False
             db.execute("INSERT INTO relay_sources VALUES (?,?,?) ON CONFLICT(id) DO NOTHING",
                        (source_id, digest(credential), time.time() if now is None else now))
@@ -159,6 +163,9 @@ class Registry:
 
     def delete_source(self, source_id: str) -> None:
         with self.connection() as db:
+            # Keep the identity denied after a still-running Mac retries enrollment.
+            db.execute("INSERT INTO relay_revoked_sources(id) VALUES (?) ON CONFLICT(id) DO NOTHING",
+                       (source_id,))
             db.execute("DELETE FROM relay_sources WHERE id=?", (source_id,))
 
     def take_send_slot(self, source_id: str, now: float, per_minute: int = 120,

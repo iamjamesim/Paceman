@@ -96,6 +96,10 @@ class PublicRelayTests(unittest.TestCase):
         self.assertEqual(self.call()[0], 403)
         self.assertEqual(self.call("/v1/sources", "DELETE", {"sourceID": self.source})[0], 200)
         self.assertEqual(self.call()[0], 401)
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": self.source})[0], 409)
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": self.source},
+                                   credential=secrets.token_urlsafe(32))[0], 409)
+        self.assertTrue(self.registry.source_authorized(self.other, self.other_key))
 
     def test_payload_rejects_transcripts_and_topic_override(self):
         for changed in ({**self.request, "payload": {**self.request["payload"], "transcript": "private"}},
