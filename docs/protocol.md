@@ -12,7 +12,7 @@ private Tailscale HTTPS.
 | Source push worker → iOS Notification Center | Ordinary APNs alert | Notification event and a hint for the phone app to fetch. |
 | iOS Notification Center → custom watch | Apple ANCS over BLE | Identifies a Paceman notification so the watch can request a fetch; does not forward APNs JSON. |
 | Source push worker → iPhone Live Activity | ActivityKit APNs | Expiring display copy for the Lock Screen and Dynamic Island. |
-| Source push worker → Apple Watch app | Silent APNs | Optional Codex allowance reading, separate from custom-watch activity. |
+| Source push worker → Paceman watchOS app | Background APNs | Optional Codex allowance reading; the app then reloads its WidgetKit complications. |
 | Paceman iPhone app ↔ custom watch | Encrypted BLE packets | Phone-selected profile and activity; watch acknowledgement and fetch requests. |
 
 ## Pairing and access
@@ -117,7 +117,7 @@ Push registration is authenticated and scoped to the paired client:
 | --- | --- |
 | `POST/GET/DELETE /v1/push` | One iPhone ordinary-alert token. Registration sends `deviceToken`, `environment` (`development` or `production`), and optional `displayName`; status omits the token. |
 | `POST /v1/live-activity` | iPhone Live Activity start/update token, or its removal. |
-| `POST /v1/watch-push` | Optional Apple Watch app silent-push token for allowance only. |
+| `POST /v1/watch-push` | Optional watchOS app background-push token for allowance only. |
 
 An ordinary alert (`apns-push-type: alert`) contains user-visible `aps` text
 and a small `companion` **fetch hint**. Here the alert refers to activity
@@ -144,7 +144,9 @@ the allowance change as a new activity event:
 The iPhone app checks the hint against an existing pairing and fetches its
 stored source URL. The push cannot supply a URL or credential or set watch
 state. `eventID` need not equal `revision`. iOS decides whether and when to
-run the app or display the alert.
+run the app or display the alert. Working and idle alerts use passive
+presentation, but remain `alert` pushes that can appear in Notification
+Center and reach the custom watch through ANCS. They are not background pushes.
 
 **ANCS is a different wire format.** The custom watch receives an eight-byte
 iOS notification event (`event`, `flags`, `category`, `count`, and a
@@ -194,9 +196,14 @@ optional provider/workspace labels render it; `freshUntil` and `stale-date`
 bound freshness. A start push also carries `attributes` with the source ID
 and display name. An end push sets `event` to `end`.
 
-The separate Apple Watch app may receive an allowance-only silent push
-(`apns-push-type: background`) from the first paired source. The phone can
-also forward a selected reading through WatchConnectivity. Neither is a
+The separate watchOS app may receive an allowance-only background push
+(`apns-push-type: background`, `aps.content-available: 1`) at its own app
+token from the first paired source. Its notification handler stores the
+reading and calls `WidgetCenter.reloadTimelines` for the complications.
+WidgetKit's [own push path](https://developer.apple.com/documentation/widgetkit/updating-widgets-with-widgetkit-push-notifications)
+uses a different token, `apns-push-type: widgets`, and
+`aps.content-changed`; Paceman does not use it. The phone can also forward
+a selected reading through WatchConnectivity. Neither path produces a
 verified cross-machine account total:
 
 ```json
