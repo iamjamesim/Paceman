@@ -1,55 +1,22 @@
-# APNs relay for testers
+# APNs relay for public testers
 
-**Public TestFlight blocker:** The current relay is only suitable for a hand-enrolled internal pilot. It has no self-service source enrollment and does not independently bind an authenticated source to iPhone, Live Activity, or Watch tokens registered by that device. Do not deploy it as an open tester relay. Public enrollment needs authenticated phone registration, a persistent source-to-destination registry, automatic revocation, and send-time checks of both the source credential and its destination binding.
+The relay is a Python WSGI service in `service/relay.py`, packaged by `Dockerfile.relay`. It holds the APNs signing key. A Mac source has one random relay credential; the iPhone has its separate, source-issued pairing credential. The relay stores hashes of those credentials and hashes of registered APNs tokens in PostgreSQL. It verifies the source, paired client, token, environment, and push mode before every send. A source can only send the bounded Paceman payload shapes in `service/relay.py`; prompts and transcripts are rejected.
 
-The relay is a small Python HTTP service in `service/relay.py`. A hosting provider terminates HTTPS; the relay sends to APNs using the server-side `.p8` key. Source workers use only a separate, revocable credential per source. The same `Dockerfile.relay` runs on any container host. The service needs no database, queue, vendor API, or public source endpoint.
+**Release gate:** Software tests cover the authorization flow, but this path still needs a staged Render deployment and physical TestFlight device verification. The open source-enrollment endpoint also needs abuse monitoring before broad invitation distribution. Do not call a successful APNs response visible phone delivery.
 
-## Server secrets
+## Render staging setup
 
-Provide three secret files to the container, outside the image and repository. If the APNs config has a separate `watchKeyID` and `watchKeyPath`, provide its key as a fourth secret file:
+1. Keep the existing paid Web Service in Oregon. Connect the Paceman repository and deploy `Dockerfile.relay` from the reviewed branch. Its Docker command runs Gunicorn. Set the health check to `/healthz`. No custom domain is required for staging.
+2. Create a paid Render Postgres instance in the same Oregon region. Set the Web Service's `DATABASE_URL` environment variable to the database's **internal** connection URL. The relay creates its small schema at startup. Do not use a container filesystem, Render disk, or the 30-day free database for its registry.
+3. In the Web Service's Secret Files, add `apns.p8` and `apns.json`. The JSON must set `environment` to `production` for TestFlight and `keyPath` to `/etc/secrets/apns.p8`. Add a separate Watch key file only if `watchKeyID` differs from the phone key. Do not add `sources.json`; source registration is automatic. Do not print the key in build logs or put it in Git.
+4. Deploy and confirm `/healthz` returns `{"ok":true}`. The web service should keep request-body logging disabled. A production TestFlight build uses the `production` APNs environment.
+5. Install the Mac source, then run `python3 -m macos.install_push --relay-url https://YOUR-RENDER-SERVICE.onrender.com`. The installer generates and stores a per-source credential in owner-only Paceman Application Support and removes any copied legacy `.p8` key. The worker enrolls the source and syncs the hashed credentials of paired phones. Pair the phone **after** enabling the relay so it receives the relay URL in its pairing response. If already paired, renew that pairing with a fresh QR code.
+6. On the physical TestFlight phone, register ordinary notifications, Live Activities, and Watch delivery as applicable. The phone registers each token directly with the relay using its paired-client credential. The Mac also stores the destination locally. Confirm a fresh source event yields APNs acceptance in `push-delivery.jsonl`, then confirm a new notification appears on the phone. Remove phone access and verify a subsequent send is denied. Test a second source to verify isolation.
 
-| File | Contents |
-| --- | --- |
-| `/etc/secrets/apns.p8` | Apple APNs private key. |
-| `/etc/secrets/apns.json` | APNs identifiers and `keyPath` pointing to `/etc/secrets/apns.p8`. |
-| `/etc/secrets/sources.json` | JSON map from source UUID to SHA-256 hash of its relay credential. |
-| `/etc/secrets/apns-watch-key.p8` | Separate Watch APNs private key, when configured. Set `watchKeyPath` in `apns.json` to this path. |
+The relay URL is part of the pairing response and stored with that source on the phone. Moving providers requires updating the source relay URL and renewing pairing; a project domain can avoid that later if useful. Render's [Postgres guide](https://render.com/docs/postgresql-creating-connecting) explains internal URLs and same-region placement. See [pricing](https://render.com/pricing) for current service and database costs.
 
-The APNs config has the same `teamID`, `keyID`, `topic`, `environment`, and optional separate Watch key fields as the legacy provider. Use a separate relay deployment and config for `development` and `production` tokens. Secret files on a managed host can be mounted read-only; the relay accepts the host's file permissions. The source allowlist is read for every send, so a replacement secret file can revoke a source without restarting the Python process. Some hosts redeploy the container when a secret file changes.
+## Registry and revocation
 
-Example `/etc/secrets/apns.json` (identifiers are placeholders):
+`POST /v1/sources` creates a source using its 256-bit bearer credential. `PUT /v1/clients` replaces that source's paired-client credential hashes; the worker calls it before sends and on client changes. The phone calls `PUT` or `DELETE /v1/destinations` for its own token bindings. `DELETE /v1/clients/self` removes the phone's relay record. Removing or re-pairing a client on the Mac also removes its relay bindings on the next successful sync. `DELETE /v1/sources` revokes a whole source; send checks require its current credential and a matching destination. The relay permits at most 120 sends per source per minute.
 
-```json
-{"teamID":"TEAMID1234","keyID":"KEYID12345","topic":"com.apselabs.agentcompanion.prototype","environment":"development","keyPath":"/etc/secrets/apns.p8"}
-```
-
-Build with `docker build -f Dockerfile.relay -t paceman-relay .`. The image runs `python -m service.relay serve` on the host-supplied `PORT` (default 8080). Set the health check to `GET /healthz`, expose HTTPS publicly at the provider edge, and mount the secret files above. The application itself listens on HTTP inside the container. Keep request-body logging off. Startup validates the APNs key and source allowlist. `POST /v1/send` is authenticated; `/healthz` reveals only readiness of the HTTP process.
-
-## Enroll and revoke a source
-
-Read the source UUID from its owner-only database. For an installed Mac, the database is `~/Library/Application Support/Paceman/data/hub.sqlite3`; for another source, use its configured data directory. For example:
-
-```sh
-python3 -c 'import sqlite3; print(sqlite3.connect("SOURCE_DATA/hub.sqlite3").execute("SELECT value FROM metadata WHERE key=?", ("source_id",)).fetchone()[0])'
-python3 -m service.relay enroll --sources PRIVATE_SOURCES_JSON SOURCE_UUID
-```
-
-The enrollment command prints one random credential once and writes only its hash to the registry file. Transfer that credential privately to the source owner. Put the following JSON in an owner-only file on that source; it must match the source database UUID:
-
-```json
-{
-  "relayURL": "https://push.example.com",
-  "sourceID": "11111111-1111-4111-8111-111111111111",
-  "credential": "SOURCE_SPECIFIC_RANDOM_CREDENTIAL"
-}
-```
-
-Upload the updated `sources.json` as the relay's secret file. To revoke one source, run `python3 -m service.relay revoke --sources PRIVATE_SOURCES_JSON SOURCE_UUID` and upload the updated file. The relay then denies that source's next send. Rotate a source credential by enrolling the same UUID again and replacing both the server allowlist and source config. Do not send a relay credential to the iPhone; it is only for source-to-relay calls. Deleting a phone pairing is separate and immediately removes that phone's push registrations from its source.
-
-On a Mac, run `python3 -m macos.install_push --config OWNER_ONLY_RELAY_JSON` after the source is installed and paired. It copies the relay config into Paceman Application Support and runs the worker in the existing background item. Switching from the legacy direct sender removes Paceman's copied `.p8` files from that installation. On Omarchy, install `requirements-push.txt` and run `python -m service.push --config OWNER_ONLY_RELAY_JSON --data-dir SOURCE_DATA`.
-
-After a fresh activity event, inspect `push-delivery.jsonl` for `apns_accepted` (status 200), then ask the tester to confirm a new alert on the physical iPhone. Apple acceptance and phone display are separate checks. An APNs credential, device token, source URL, prompt, or transcript must not appear in logs.
-
-## Host choice
-
-For a first tester deployment, a small paid Render web service is the least setup: connect the repository, select `Dockerfile.relay`, add three secret files, and set `/healthz`. Its paid 512 MB service avoids the roughly one-minute wake time of its free service. Cloud Run's request-based, scale-to-zero pricing can cost less for sparse traffic, with more initial work for a Google Cloud project, billing, Secret Manager mounts, and image deployment. Both run the same container and expose a normal HTTPS origin; moving later requires changing `relayURL` in source configs (or repointing a domain), uploading the three secrets, and checking APNs acceptance. Use a domain you control if you want to move providers without reconfiguring every source. Current pricing and limits are linked from [Render](https://render.com/pricing), [Render free-service behavior](https://render.com/docs/free), [Cloud Run](https://cloud.google.com/run/pricing), and [Secret Manager](https://cloud.google.com/secret-manager/pricing).
+The Mac's existing local direct-APNs sender remains only for owner-controlled development installs. Do not distribute a Mac installation containing the `.p8` key to testers.

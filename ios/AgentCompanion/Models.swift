@@ -130,6 +130,15 @@ struct PairedSource: Codable {
     let sourceID: String
     let clientID: String
     let credential: String
+    let relayURL: URL?
+
+    init(endpoint: URL, sourceID: String, clientID: String, credential: String, relayURL: URL? = nil) {
+        self.endpoint = endpoint
+        self.sourceID = sourceID
+        self.clientID = clientID
+        self.credential = credential
+        self.relayURL = relayURL
+    }
 }
 
 struct ClientDevice: Codable, Equatable {

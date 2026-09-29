@@ -9,10 +9,38 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+from urllib.request import Request, build_opener, HTTPRedirectHandler
+
+from service.push import RelayConfig
 
 from macos.install import APP, LABEL, PLIST, PUSH_LABEL, PUSH_PLIST, ROOT
 
 HOOKS = Path.home() / ".codex/hooks.json"
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, *_):
+        return None
+
+
+def revoke_relay_source(config_path: Path) -> str | None:
+    """Return the source ID only when remote revocation cannot be confirmed."""
+    if not config_path.is_file():
+        return None
+    value = None
+    try:
+        value = json.loads(config_path.read_text())
+        if not isinstance(value, dict) or "relayURL" not in value:
+            return None
+        config = RelayConfig.load(value)
+        request = Request(config.url + "/v1/sources",
+            data=json.dumps({"sourceID": config.source_id}).encode(), method="DELETE",
+            headers={"Authorization": "Bearer " + config.credential,
+                     "Content-Type": "application/json"})
+        with build_opener(_NoRedirect()).open(request, timeout=5) as response:
+            return None if response.status == 200 else config.source_id
+    except Exception:
+        return value.get("sourceID", "unknown") if isinstance(value, dict) else "unknown"
 
 
 def cleaned_hooks(path: Path | None = None):
@@ -70,6 +98,7 @@ def uninstall():
             subprocess.run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{label}"],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
             path.unlink()
+    relay_revocation_pending = revoke_relay_source(ROOT / "private/apns.json")
     if hooks is not None:
         descriptor, name = tempfile.mkstemp(prefix=".paceman-hooks-", dir=HOOKS.parent)
         temporary = Path(name)
@@ -84,5 +113,9 @@ def uninstall():
         shutil.rmtree(APP)
     if ROOT.exists():
         shutil.rmtree(ROOT)
-    return ("Removed Paceman's Mac app, background item, Codex hooks, local pairings, "
-            "and APNs key. The iPhone app, Python, and Tailscale remain installed.")
+    result = ("Removed Paceman's Mac app, background item, Codex hooks, local pairings, "
+              "and APNs key. The iPhone app, Python, and Tailscale remain installed.")
+    if relay_revocation_pending:
+        result += (" Relay revocation could not be confirmed for source " + relay_revocation_pending
+                   + "; ask the project owner to revoke it in the relay database.")
+    return result

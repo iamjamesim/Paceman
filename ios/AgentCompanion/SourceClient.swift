@@ -129,14 +129,19 @@ final class SourceClient {
             request.setValue("Bearer \(previous.credential)", forHTTPHeaderField: "Authorization")
         }
         let data = try await response(request)
-        struct Redemption: Decodable { let schema: Int; let sourceID: String; let clientID: String; let credential: String }
+        struct Redemption: Decodable {
+            let schema: Int; let sourceID: String; let clientID: String; let credential: String
+            let relayURL: URL?
+        }
         let result = try JSONDecoder().decode(Redemption.self, from: data)
         guard result.schema == 1, result.sourceID == invitation.sourceID,
               !result.credential.isEmpty else {
             throw HubError.message("Unsupported pairing response. Update Paceman on this computer.")
         }
+        if let relay = result.relayURL { try validateRelay(relay) }
         return PairedSource(endpoint: origin, sourceID: result.sourceID,
-                            clientID: result.clientID, credential: result.credential)
+                            clientID: result.clientID, credential: result.credential,
+                            relayURL: result.relayURL)
     }
 
     func remove(_ source: PairedSource) async throws {
@@ -151,6 +156,14 @@ final class SourceClient {
         }
         catch let error as HubError where error.isUnauthorized {
             // Already revoked (or the response to an earlier removal was lost).
+        }
+    }
+
+    func removeRelayClient(_ source: PairedSource) async throws {
+        do {
+            try await relayCall(source, path: "v1/clients/self", method: "DELETE", fields: [:])
+        } catch let error as HubError where error.isUnauthorized {
+            // The source may already have removed this client's relay record.
         }
     }
 
@@ -189,6 +202,7 @@ final class SourceClient {
         guard registration.registered else {
             throw HubError.message("The computer did not confirm notification delivery")
         }
+        try await registerRelayDestination(source, mode: "alert", token: token, environment: environment)
     }
 
     func removePush(_ source: PairedSource) async throws {
@@ -196,6 +210,7 @@ final class SourceClient {
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         _ = try await response(request)
+        try await relayCall(source, path: "v1/destinations", method: "DELETE", fields: ["mode": "alert"])
     }
 
     func registerWatchPush(_ source: PairedSource, token: String, environment: String) async throws {
@@ -210,18 +225,25 @@ final class SourceClient {
         guard try JSONDecoder().decode(Registration.self, from: data).registered else {
             throw HubError.message("The computer did not confirm Watch delivery")
         }
+        try await registerRelayDestination(source, mode: "watch", token: token, environment: environment)
     }
 
     func registerLiveActivity(_ source: PairedSource, id: String, token: String, environment: String) async throws {
         try await liveActivityRequest(source, payload: ["activityID": id, "deviceToken": token, "environment": environment])
+        try await registerRelayDestination(source, mode: "liveactivity", token: token,
+                                           environment: environment, activityID: id)
     }
 
     func removeLiveActivity(_ source: PairedSource, id: String) async throws {
         try await liveActivityRequest(source, payload: ["activityID": id, "action": "remove"])
+        try await relayCall(source, path: "v1/destinations", method: "DELETE",
+                            fields: ["mode": "liveactivity", "activityID": id])
     }
 
     func recoverLiveActivity(_ source: PairedSource, id: String) async throws {
         try await liveActivityRequest(source, payload: ["activityID": id, "action": "recover"])
+        try await relayCall(source, path: "v1/destinations", method: "DELETE",
+                            fields: ["mode": "liveactivity", "activityID": id])
     }
 
     func registerLiveActivityStart(_ source: PairedSource, token: String, environment: String,
@@ -229,10 +251,14 @@ final class SourceClient {
         try await liveActivityRequest(source, payload: ["action": "register-start", "deviceToken": token,
                                                         "environment": environment,
                                                         "displayName": displayName ?? ""])
+        try await registerRelayDestination(source, mode: "liveactivity", token: token,
+                                           environment: environment)
     }
 
     func removeLiveActivityStart(_ source: PairedSource) async throws {
         try await liveActivityRequest(source, payload: ["action": "remove-start"])
+        try await relayCall(source, path: "v1/destinations", method: "DELETE",
+                            fields: ["mode": "liveactivity"])
     }
 
     private func liveActivityRequest(_ source: PairedSource, payload: [String: String]) async throws {
@@ -242,6 +268,41 @@ final class SourceClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
         _ = try await response(request)
+    }
+
+    func registerRelayDestination(_ source: PairedSource, mode: String, token: String,
+                                  environment: String, activityID: String = "") async throws {
+        var fields = ["mode": mode, "deviceToken": token, "environment": environment]
+        if !activityID.isEmpty { fields["activityID"] = activityID }
+        try await relayCall(source, path: "v1/destinations", method: "PUT", fields: fields)
+    }
+
+    private func validateRelay(_ url: URL) throws {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              parts.scheme == "https", parts.host != nil, parts.user == nil, parts.password == nil,
+              parts.query == nil, parts.fragment == nil, parts.path.isEmpty || parts.path == "/" else {
+            throw HubError.message("The computer supplied an invalid notification relay address")
+        }
+    }
+
+    private func relayCall(_ source: PairedSource, path: String, method: String,
+                           fields: [String: String]) async throws {
+        guard let relay = source.relayURL else { return }
+        try validateRelay(relay)
+        var request = URLRequest(url: relay.appendingPathComponent(path))
+        request.httpMethod = method
+        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject:
+            fields.merging(["sourceID": source.sourceID, "clientID": source.clientID]) { _, required in required })
+        // Pairing can finish just before the Mac worker syncs the new client's
+        // credential hash. Retry this active registration briefly.
+        for attempt in 0..<3 {
+            do { _ = try await response(request); return }
+            catch let error as HubError where error.isUnauthorized && method == "PUT" && attempt < 2 {
+                try await Task.sleep(nanoseconds: 700_000_000)
+            }
+        }
     }
 
     private func response(_ request: URLRequest) async throws -> Data {

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import secrets
 import shutil
 import sqlite3
 import subprocess
@@ -15,7 +16,7 @@ import tempfile
 from macos.install import LABEL as SOURCE_LABEL, PLIST as SOURCE_PLIST
 from macos.install import PUSH_LABEL as LABEL, PUSH_PLIST as PLIST
 from macos.install import REPO, ROOT, runtime_python
-from service.hub import Store
+from service.hub import Store, endpoint
 from service.push import Config, RelayConfig
 
 LABEL = "dev.paceman.push"
@@ -27,15 +28,30 @@ WATCH_KEY = PRIVATE / "apns-watch-key.p8"
 VENV = ROOT / "push-venv"
 
 
-def install(config_path: Path):
+def install(config_path: Path | None = None, *, relay_url: str | None = None):
     os.umask(0o077)
-    config_path = config_path.expanduser().resolve()
+    if (config_path is None) == (relay_url is None):
+        raise ValueError("Specify exactly one of --config or --relay-url")
+    if relay_url is not None:
+        relay_url = endpoint(relay_url)
+    if config_path is not None:
+        config_path = config_path.expanduser().resolve()
     if not (ROOT / "lib/service/push.py").is_file() or not (ROOT / "data/hub.sqlite3").is_file():
         raise ValueError("Install and pair the Paceman Mac source first")
     arguments = plistlib.loads(SOURCE_PLIST.read_bytes()).get("ProgramArguments", []) if SOURCE_PLIST.is_file() else []
     if not arguments or "PacemanBackground" not in arguments[0]:
         raise ValueError("Update the Mac app with macos/install.py before adding notifications")
-    raw = json.loads(config_path.read_text())
+    if relay_url is not None:
+        source_id = Store(ROOT / "data/hub.sqlite3").metadata("source_id")
+        previous = json.loads(CONFIG.read_text()) if CONFIG.is_file() else None
+        if (isinstance(previous, dict) and previous.get("relayURL") == relay_url
+                and previous.get("sourceID") == source_id):
+            raw = previous
+        else:
+            raw = {"relayURL": relay_url, "sourceID": source_id,
+                   "credential": secrets.token_urlsafe(32)}
+    else:
+        raw = json.loads(config_path.read_text())
     if not isinstance(raw, dict):
         raise ValueError("Push config must be an object")
     relay = RelayConfig.load(raw) if "relayURL" in raw else None
@@ -115,10 +131,12 @@ def install(config_path: Path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", required=True, type=Path, help="Existing private APNs JSON config")
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--config", type=Path, help="Existing private APNs JSON config")
+    selection.add_argument("--relay-url", help="Public HTTPS origin for automatic relay enrollment")
     args = parser.parse_args()
     try:
-        install(args.config)
+        install(args.config, relay_url=args.relay_url)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         parser.error(f"Push installation failed: {error}")
 

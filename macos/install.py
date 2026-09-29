@@ -384,9 +384,9 @@ def _finish_install(staged_app: Path):
     if (ROOT / "private/apns.json").is_file():
         print("The Mac background item also runs the configured iPhone notification worker.")
     else:
-        print("To deliver iPhone notifications, enroll this source with the APNs relay")
-        print("and run: python3 -m macos.install_push --config PRIVATE_RELAY_CONFIG")
-        print("Keep the relay credential private. See docs/macos.md for verification.")
+        print("To deliver iPhone notifications, run:")
+        print("python3 -m macos.install_push --relay-url https://YOUR-RENDER-SERVICE.onrender.com")
+        print("The installer generates a private source credential. See docs/macos.md for verification.")
     paired = 0
     database_path = ROOT / "data/hub.sqlite3"
     if database_path.is_file():

@@ -207,7 +207,11 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
                 ?? Vault.load(PushRegistrationReceipt.self, key: "push-registration-receipt")
             if receipt?.matches(source: source, token: token, environment: environment,
                                 displayName: displayName) == true {
-                completed += 1
+                do {
+                    try await client.registerRelayDestination(source, mode: "alert", token: token,
+                                                              environment: environment)
+                    completed += 1
+                } catch { Diagnostics.shared.record("push_relay_registration_failed") }
                 continue
             }
             do {

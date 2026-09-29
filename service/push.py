@@ -97,12 +97,39 @@ class RelaySender:
         import httpx
         self.config = config
         self.client = client or httpx.Client(timeout=10, follow_redirects=False, trust_env=False)
+        self.last_sync = 0.0
+        self.last_clients = None
+
+    def sync_clients(self, store: Store, now: float) -> bool:
+        """Replace server-side paired credentials before allowing any send."""
+        with store.connect() as db:
+            clients = [{"clientID": row[0], "credentialHash": row[1]}
+                       for row in db.execute("SELECT id,hash FROM clients ORDER BY id")]
+        if clients == self.last_clients and now - self.last_sync < 10:
+            return True
+        headers = {"Authorization": "Bearer " + self.config.credential}
+        try:
+            created = self.client.post(self.config.url + "/v1/sources",
+                                       json={"sourceID": self.config.source_id}, headers=headers)
+            if created.status_code != 200:
+                return False
+            response = self.client.put(self.config.url + "/v1/clients",
+                json={"sourceID": self.config.source_id, "clients": clients}, headers=headers)
+        except Exception:
+            return False
+        if response.status_code != 200:
+            return False
+        self.last_clients, self.last_sync = clients, now
+        return True
 
     def send(self, device: dict, payload: dict, headers: dict, now: float) -> Result:
         import httpx
-        request = {"sourceID": self.config.source_id, "deviceToken": device["token"],
+        request = {"sourceID": self.config.source_id, "clientID": device["client_id"],
+                   "deviceToken": device["token"],
                    "environment": device["environment"], "mode": device.get("mode", "alert"),
                    "payload": payload, "headers": headers}
+        if request["mode"] == "liveactivity":
+            request["activityID"] = device.get("activity_id", "")
         try:
             response = self.client.post(self.config.url + "/v1/send", json=request,
                 headers={"Authorization": "Bearer " + self.config.credential})
@@ -325,6 +352,8 @@ class Worker:
     def step(self, now=None):
         now = time.time() if now is None else now
         self.store.tick(now)
+        if isinstance(self.sender, RelaySender) and not self.sender.sync_clients(self.store, now):
+            return
         snapshot = self.store.snapshot()
         self.step_live_activities(now, snapshot)
         self.step_watch_allowance(now, snapshot)

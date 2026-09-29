@@ -43,11 +43,14 @@ The source responds with:
   "schema": 1,
   "sourceID": "11111111-1111-4111-8111-111111111111",
   "clientID": "44444444-4444-4444-8444-444444444444",
-  "credential": "example-private-credential"
+  "credential": "example-private-credential",
+  "relayURL": "https://paceman-relay.onrender.com"
 }
 ```
 
-The credential is never included in snapshots or pushes. An installation ID
+`relayURL` is present when the source uses the hosted APNs relay. The phone
+uses it to register its own APNs tokens after pairing. The credential is never
+included in snapshots or pushes. An installation ID
 is a label, not proof of ownership. Re-pairing the same installation requires
 its current credential and a new invitation; it rotates the credential and
 requires push registration again. The phone stores each source's access and
@@ -119,13 +122,15 @@ Push registration is authenticated and scoped to the paired client:
 | `POST /v1/live-activity` | iPhone Live Activity start/update token, or its removal. |
 | `POST /v1/watch-push` | Optional watchOS app background-push token for allowance only. |
 
-The source owns these registrations. Its worker sends a bounded `POST /v1/send`
-over HTTPS to the relay with its source UUID, source-specific bearer credential,
-registered destination token and environment, APNs mode, approved payload, and
-approved headers. The relay's allowlist stores a hash of each source credential;
-removing one source denies its future sends. The relay stores no phone
-registrations. Revoking or re-pairing a phone still clears that phone's source
-destinations. The APNs signing key and topic remain on the relay. See
+The source owns the local registrations and syncs hashed paired-client credentials
+to the relay. The phone separately registers each APNs token with the relay using
+its paired-client credential. The relay stores hashed source credentials and
+source/client/token bindings in PostgreSQL. Its `POST /v1/send` requires a source
+bearer credential, source and client UUIDs, an exact registered token and
+environment, APNs mode (and ActivityKit ID when applicable), approved payload,
+and approved headers. Removing or re-pairing a phone clears its relay bindings;
+the source worker also syncs removals. The APNs signing key and topic remain on
+the relay. See
 [relay setup](push-relay.md).
 
 An ordinary alert (`apns-push-type: alert`) contains user-visible `aps` text

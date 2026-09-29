@@ -2,69 +2,19 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import hmac
 import json
 import os
 from pathlib import Path
 import re
-import secrets
 from socketserver import ThreadingMixIn
+from threading import Lock
 import time
 import unicodedata
 import uuid
 from wsgiref.simple_server import make_server, WSGIServer
 
 from service.push import APNs, Config
-
-
-def source_id(value):
-    try:
-        normalized = str(uuid.UUID(value))
-    except (TypeError, ValueError, AttributeError) as error:
-        raise ValueError("Invalid source ID") from error
-    if normalized != value:
-        raise ValueError("Invalid source ID")
-    return normalized
-
-
-def registry(path: Path) -> dict[str, str]:
-    value = json.loads(path.read_text())
-    if not isinstance(value, dict):
-        raise ValueError("Invalid source registry")
-    for identity, digest in value.items():
-        source_id(identity)
-        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise ValueError("Invalid source registry")
-    return value
-
-
-def enroll(path: Path, identity: str) -> str:
-    identity = source_id(identity)
-    entries = registry(path) if path.exists() else {}
-    credential = secrets.token_urlsafe(32)
-    entries[identity] = hashlib.sha256(credential.encode()).hexdigest()
-    save_registry(path, entries)
-    return credential
-
-
-def revoke(path: Path, identity: str):
-    entries = registry(path)
-    entries.pop(source_id(identity), None)
-    save_registry(path, entries)
-
-
-def save_registry(path: Path, entries: dict[str, str]):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    fd = os.open(temporary, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w") as output:
-            json.dump(entries, output, sort_keys=True)
-            output.write("\n")
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+from service.relay_registry import Registry, valid_uuid
 
 
 def exact(value, required, optional=()):
@@ -143,16 +93,27 @@ def valid_payload(mode: str, identity: str, payload: object) -> bool:
 
 
 def valid_request(value: object, identity: str, now: float) -> bool:
-    if not exact(value, ("sourceID", "deviceToken", "environment", "mode", "payload", "headers")):
+    if not exact(value, ("sourceID", "clientID", "deviceToken", "environment", "mode", "payload", "headers"),
+                 ("activityID",)):
         return False
     token, mode, headers = value["deviceToken"], value["mode"], value["headers"]
-    if (value["sourceID"] != identity or not isinstance(token, str)
+    activity_id = value.get("activityID", "")
+    if (value["sourceID"] != identity or not valid_uuid(value["clientID"]) or not isinstance(token, str)
             or not re.fullmatch(r"[0-9a-f]{32,512}", token) or len(token) % 2
             or value["environment"] not in ("development", "production")
             or mode not in ("alert", "liveactivity", "watch")
+            or not isinstance(activity_id, str)
+            or len(activity_id) > 128
+            or (mode != "liveactivity" and "activityID" in value)
             or not exact(headers, ("apns-push-type", "apns-priority", "apns-expiration", "apns-id"),
                          ("apns-collapse-id",))):
         return False
+    if mode == "liveactivity":
+        payload = value["payload"]
+        aps = payload.get("aps") if isinstance(payload, dict) else None
+        event = aps.get("event") if isinstance(aps, dict) else None
+        if (event == "start") != (activity_id == ""):
+            return False
     expected_type = "background" if mode == "watch" else mode
     if (headers["apns-push-type"] != expected_type or headers["apns-priority"] not in ("5", "10")
             or not isinstance(headers["apns-id"], str)):
@@ -170,8 +131,8 @@ def valid_request(value: object, identity: str, now: float) -> bool:
 
 
 class RelayApp:
-    def __init__(self, sender: APNs, sources_path: Path, now=time.time):
-        self.sender, self.sources_path, self.now = sender, sources_path, now
+    def __init__(self, sender: APNs, sources: Registry, now=time.time):
+        self.sender, self.sources, self.now = sender, sources, now
 
     def __call__(self, environ, start_response):
         def answer(status, value):
@@ -181,7 +142,11 @@ class RelayApp:
             return [body]
         if environ.get("PATH_INFO") == "/healthz" and environ.get("REQUEST_METHOD") == "GET":
             return answer("200 OK", {"ok": True})
-        if environ.get("PATH_INFO") != "/v1/send" or environ.get("REQUEST_METHOD") != "POST":
+        path, method = environ.get("PATH_INFO"), environ.get("REQUEST_METHOD")
+        if (path, method) not in (("/v1/sources", "POST"), ("/v1/sources", "DELETE"),
+                                  ("/v1/clients", "PUT"), ("/v1/clients/self", "DELETE"),
+                                  ("/v1/destinations", "PUT"),
+                                  ("/v1/destinations", "DELETE"), ("/v1/send", "POST")):
             return answer("404 Not Found", {"error": "NotFound"})
         try:
             size = int(environ.get("CONTENT_LENGTH", ""))
@@ -193,20 +158,66 @@ class RelayApp:
             return answer("400 Bad Request", {"error": "InvalidRequest"})
         identity = value.get("sourceID") if isinstance(value, dict) else None
         auth = environ.get("HTTP_AUTHORIZATION", "")
-        try:
-            entries = registry(self.sources_path)
-        except (OSError, ValueError):
-            return answer("503 Service Unavailable", {"error": "RegistryUnavailable"})
-        try:
-            expected = entries.get(source_id(identity))
-        except ValueError:
-            expected = None
         candidate = auth.removeprefix("Bearer ") if auth.startswith("Bearer ") else ""
-        actual = hashlib.sha256(candidate.encode()).hexdigest()
-        if not expected or not candidate or not hmac.compare_digest(expected, actual):
+        if not valid_uuid(identity) or not candidate:
             return answer("401 Unauthorized", {"error": "Unauthorized"})
+        if path == "/v1/sources" and method == "POST":
+            if not exact(value, ("sourceID",)):
+                return answer("400 Bad Request", {"error": "InvalidRequest"})
+            try:
+                created = self.sources.create_source(identity, candidate, self.now())
+            except ValueError:
+                return answer("400 Bad Request", {"error": "InvalidRequest"})
+            return answer("200 OK" if created else "409 Conflict", {"registered": created})
+        authorized = (self.sources.source_authorized(identity, candidate)
+                      if path in ("/v1/clients", "/v1/send", "/v1/sources")
+                      else self.sources.client_authorized(identity, value.get("clientID"), candidate))
+        if not authorized:
+            return answer("401 Unauthorized", {"error": "Unauthorized"})
+        if path == "/v1/sources" and method == "DELETE":
+            if not exact(value, ("sourceID",)):
+                return answer("400 Bad Request", {"error": "InvalidRequest"})
+            self.sources.delete_source(identity)
+            return answer("200 OK", {"revoked": True})
+        if path == "/v1/clients":
+            if not exact(value, ("sourceID", "clients")):
+                return answer("400 Bad Request", {"error": "InvalidRequest"})
+            try:
+                self.sources.sync_clients(identity, value["clients"])
+            except ValueError:
+                return answer("400 Bad Request", {"error": "InvalidRequest"})
+            return answer("200 OK", {"synced": True})
+        if path == "/v1/clients/self":
+            if not exact(value, ("sourceID", "clientID")):
+                return answer("400 Bad Request", {"error": "InvalidRequest"})
+            self.sources.delete_client(identity, value["clientID"])
+            return answer("200 OK", {"revoked": True})
+        if path == "/v1/destinations":
+            if not exact(value, ("sourceID", "clientID", "mode"),
+                         ("activityID", "deviceToken", "environment")):
+                return answer("400 Bad Request", {"error": "InvalidRequest"})
+            activity_id = value.get("activityID", "")
+            try:
+                if method == "PUT":
+                    if not exact(value, ("sourceID", "clientID", "mode", "deviceToken", "environment"),
+                                 ("activityID",)):
+                        raise ValueError
+                    self.sources.bind(identity, value["clientID"], value["mode"], activity_id,
+                                      value["deviceToken"], value["environment"])
+                else:
+                    if not exact(value, ("sourceID", "clientID", "mode"), ("activityID",)):
+                        raise ValueError
+                    self.sources.unbind(identity, value["clientID"], value["mode"], activity_id)
+            except ValueError:
+                return answer("400 Bad Request", {"error": "InvalidRequest"})
+            return answer("200 OK", {"registered": method == "PUT"})
         if not valid_request(value, identity, self.now()):
             return answer("400 Bad Request", {"error": "InvalidRequest"})
+        if not self.sources.allowed(identity, value["clientID"], value["mode"],
+                                    value["deviceToken"], value["environment"], value.get("activityID", "")):
+            return answer("403 Forbidden", {"error": "DestinationNotRegistered"})
+        if not self.sources.take_send_slot(identity, self.now()):
+            return answer("429 Too Many Requests", {"error": "RateLimited"})
         result = self.sender.send({"token": value["deviceToken"], "environment": value["environment"],
                                    "mode": value["mode"]}, value["payload"], value["headers"], self.now())
         return answer("200 OK", {"status": result.status, "reason": result.reason, "apnsID": result.apns_id})
@@ -215,13 +226,16 @@ class RelayApp:
 def application(environ, start_response):
     global _app
     if _app is None:
-        _app = RelayApp(APNs(Config.load(Path(os.environ["PACEMAN_APNS_CONFIG"]),
-                                        require_private_key_permissions=False)),
-                        Path(os.environ["PACEMAN_RELAY_SOURCES"]))
+        with _app_lock:
+            if _app is None:
+                _app = RelayApp(APNs(Config.load(Path(os.environ["PACEMAN_APNS_CONFIG"]),
+                                            require_private_key_permissions=False)),
+                                Registry(os.environ["DATABASE_URL"]))
     return _app(environ, start_response)
 
 
 _app = None
+_app_lock = Lock()
 
 
 class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
@@ -230,30 +244,18 @@ class ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("enroll", "revoke"):
-        command = commands.add_parser(name)
-        command.add_argument("--sources", type=Path, required=True)
-        command.add_argument("source_id")
-    serve = commands.add_parser("serve")
-    serve.add_argument("--apns-config", type=Path, required=True)
-    serve.add_argument("--sources", type=Path, required=True)
-    serve.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8080")))
+    parser.add_argument("--apns-config", type=Path, required=True)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8080")))
     args = parser.parse_args()
     os.umask(0o077)
-    if args.command == "enroll":
-        print(enroll(args.sources, args.source_id))
-    elif args.command == "revoke":
-        revoke(args.sources, args.source_id)
-    else:
-        registry(args.sources)
-        sender = APNs(Config.load(args.apns_config, require_private_key_permissions=False))
-        try:
-            with make_server("0.0.0.0", args.port, RelayApp(sender, args.sources),
-                             server_class=ThreadingWSGIServer) as server:
-                server.serve_forever()
-        finally:
-            sender.close()
+    sources = Registry(os.environ["DATABASE_URL"])
+    sender = APNs(Config.load(args.apns_config, require_private_key_permissions=False))
+    try:
+        with make_server("0.0.0.0", args.port, RelayApp(sender, sources),
+                         server_class=ThreadingWSGIServer) as server:
+            server.serve_forever()
+    finally:
+        sender.close()
 
 
 if __name__ == "__main__":
