@@ -1,14 +1,16 @@
 # Paceman
 
-**Take your agents with you.** Paceman shows local Codex activity from Mac and
-Omarchy computers on an iPhone, in Live Activities, and on Apple Watch. An
-optional experimental ESP32 watch receives a phone-selected activity state over
-Bluetooth. Each computer runs its own source; the phone pairs with them
-separately over private Tailscale HTTPS.
+**Take your agents with you.** Paceman keeps Codex activity visible when you leave your desk. See which paired computer is working, needs input, finished, or failed on iPhone and in Live Activities, including the Apple Watch Smart Stack. The Apple Watch app and complications show Codex allowance; an optional experimental ESP32 watch displays the phone-selected activity. Agent work stays on the computer, while each local source shares status with the phone over private Tailscale HTTPS.
 
-This is a developer alpha. Mac Codex desktop and CLI hooks and the Omarchy Codex
-CLI companion have been exercised on development devices. Omarchy Codex desktop
-and broader background delivery remain unverified. See [known limitations](docs/readiness-gaps.md).
+Paceman is a **developer alpha**, installed from source. Mac Codex desktop and CLI hooks and the Omarchy Codex CLI companion have been exercised on development devices. Omarchy Codex desktop and broader background delivery remain unverified. See [known limitations](docs/readiness-gaps.md).
+
+## Get started
+
+1. [Build the iPhone app](docs/development.md#iphone-and-live-activities-mac) with Xcode for iOS 18 or later.
+2. Install a source on an [Apple Silicon Mac](docs/macos.md) or [Omarchy 4.0+ desktop](docs/desktop.md).
+3. Install Tailscale on phone and computer, configure a private Serve route on the computer, then scan its pairing code in Paceman. The platform guides cover hook review and the first real activity event.
+
+A source install does not by itself enable locked-phone notifications. The current alpha uses a separately configured APNs signing key on the source; see [push delivery](docs/push-delivery.md). The Apple Watch app requires watchOS 11 or later. The [ESP32 watch](firmware/esp32-watch/README.md) is optional.
 
 ## Repository
 
@@ -21,36 +23,13 @@ and broader background delivery remain unverified. See [known limitations](docs/
 | `firmware/esp32-watch/` | Experimental watch firmware and simulator |
 | `tests/`, `scripts/` | Portable checks and development tools |
 
-The ESP32 package derives from [Omarchy Watch](https://github.com/iamjamesim/omarchy-watch);
-its [provenance](firmware/esp32-watch/UPSTREAM.md) and
-[third-party notices](THIRD_PARTY_NOTICES.md) are retained.
+The ESP32 package derives from [Omarchy Watch](https://github.com/iamjamesim/omarchy-watch). Its [provenance](firmware/esp32-watch/UPSTREAM.md) and [third-party notices](THIRD_PARTY_NOTICES.md) are retained. Contributors can start with the [development guide](docs/development.md) for builds and tests.
 
-## Build and connect
-
-Use Python 3.11+ and a C compiler for the portable checks. Optional APNs tests
-use the pinned Python dependencies:
-
-```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-push.txt
-PATH="$PWD/.venv/bin:$PATH" bash scripts/check.sh
-```
-
-On a Mac with Xcode, run `bash scripts/check-on-mac.sh` and the
-`AgentCompanion` scheme's tests in an installed iPhone simulator. See
-[development setup](docs/development.md), [Mac installation](docs/macos.md),
-and [Omarchy installation](docs/desktop.md) for platform steps.
-
-The source listens only on loopback. The phone reaches it through a private
-Tailscale Serve route; do not expose it with Funnel. Runtime state and signing
-keys stay outside the repository. Direct APNs with a workstation-held key is a
-personal alpha setup, not a distribution design.
-
-## Reference
+## Technical reference
 
 - [Architecture](docs/architecture.md): component ownership and data flow.
 - [Communication protocol](docs/protocol.md): pairing, snapshots, APNs and watch packets.
-- [Data and lifecycle](docs/data-lifecycle.md): durable state, expiry and recovery.
+- [Data lifecycle](docs/data-lifecycle.md): durable state, expiry and recovery.
 - [Push delivery](docs/push-delivery.md): APNs paths, local provider setup and limits.
 - [Bluetooth lifecycle](docs/bluetooth-lifecycle.md): watch reconnection and readiness.
 - [Known limitations](docs/readiness-gaps.md): supported scope and open gaps.
