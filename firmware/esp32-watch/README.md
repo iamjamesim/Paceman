@@ -9,10 +9,10 @@ the BLE protocol and pairing identity remain compatible with that firmware.
 - `tools/render-watchface.sh`: preview, after firmware configuration downloads LVGL.
 - `tools/package-release.sh`: build and package flash binaries.
 - `firmware/release/flash.sh`: install an extracted release without erasing pairing.
-- `docs/`: upstream design and protocol references. Desktop instructions describe
-  the old standalone product, not Paceman's mobile relay.
+- The root [communication protocol](../../docs/protocol.md) describes Paceman's
+  phone-owned BLE and source contracts.
 
-See `UPSTREAM.md` for provenance and the repository root HANDOFF.md for current work.
+See `UPSTREAM.md` for provenance and the root [development guide](../../docs/development.md) for builds.
 Do not erase flash for routine updates: NVS contains the phone bond and ownership.
 
 Run tools from this device-package root. `tools/package-release.sh` reads the

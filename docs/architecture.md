@@ -22,9 +22,8 @@ and authenticated phone removal delete the credential, identity and push destina
 together. Installation claims alone cannot replace another credential.
 It listens only on loopback. Tailscale Serve supplies private HTTPS.
 `service/omarchy.py` receives the existing desktop companion's local `agent-event`
-protocol without starting a Bluetooth owner. Synthetic mode remains the default
-for isolated tests. See the
-[routing runbook](omarchy-routing.md) for live event routing and limits.
+protocol without starting a Bluetooth owner. Synthetic mode supports isolated tests.
+See [Omarchy installation](desktop.md) for the live route.
 Activity and allowance changes both advance snapshot revisions; allowance-only
 changes retain the activity event ID and do not send activity alerts.
 `service/macos.py` receives reduced Codex lifecycle events from a trusted local
@@ -75,11 +74,3 @@ restarts; agent activity remains an in-memory event state.
 
 The watch has one owner. A desktop disconnect does not transfer ownership.
 The old standalone desktop installer/bar plugin is deliberately not included.
-
-## Growth boundaries
-
-Add workspace adapters under the source service and device-specific presentation
-under their own packages. Share protocol definitions and fixtures, not UI code
-across unrelated platforms. A second workspace or device should not require a
-separate copy of pairing, state ordering or permission handling. Avoid introducing
-a plugin framework until actual integrations demonstrate a need.

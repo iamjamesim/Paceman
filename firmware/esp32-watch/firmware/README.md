@@ -15,15 +15,15 @@ watch is at or below 15% battery. Routine background sync remains dark.
 Dynamic CPU frequency scaling, tickless idle, automatic light sleep, Bluetooth
 modem sleep, and slower owned-device advertising reduce the idle load. After a
 link loss, the watch advertises more quickly for 30 seconds before returning to
-the slower rate. Cached profiles restore desktop context before Bluetooth
+the slower rate. Cached profiles restore phone-selected context before Bluetooth
 reconnects. The watch applies expiry rules locally; see
-[data freshness](../docs/data-freshness.md) for the v5 display policy and legacy behavior.
+[data lifecycle](../../../docs/data-lifecycle.md) for freshness boundaries.
 
 Agent indicators distinguish working, needs input, and completion. Sound is
 enabled by default and toggleable in the Paceman iPhone app. Tapping an input or
 finished indicator persists an acknowledgement revision in NVS and notifies
-the connected phone. See [agent attention](../docs/design.md#agent-attention)
-for animations, sound patterns, and wake behavior.
+the connected phone. See [agent state motion](../../../docs/agent-state-motion.md)
+for animation and Reduce Motion behavior.
 
 While the native serial/JTAG interface is connected to a USB host, ESP-IDF
 holds its built-in no-light-sleep lock so flashing and monitoring remain

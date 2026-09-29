@@ -82,17 +82,15 @@ WATCH_PREVIEW_ALLOWANCE=rim WATCH_PREVIEW_REMAINING=79 \
 
 Remaining accepts 0–100 or -1 for unavailable; default is 79. Reset text is a
 fixed fixture. Try 10, 0, 100, and -1 as well. Without these environment variables
-the original simulator behavior is unchanged. See
-[allowance-preview.md](../docs/allowance-preview.md) for the data source and display behavior.
+the original simulator behavior is unchanged. See the root
+[data lifecycle](../../../docs/data-lifecycle.md) for source freshness rules.
 
 The original live desktop preview helpers are not included in Paceman. Use the
-fixtures above until the workspace adapter exists. `simulator/build/test-profile`
-checks wire validation and expiry without a physical device.
+fixtures above. `simulator/build/test-profile` checks wire validation and expiry
+without a physical device.
 
-When accepting a visual checkpoint, copy `simulator/output/watchface.png` to
-`docs/images/plain-01.png` to retain the accepted device framebuffer. The repository landing page uses
-photos in `docs/images/omarchy-watch-hero.webp` and
-`docs/images/omarchy-watch-on-wrist.webp`. Generated working previews remain ignored.
+Generated working previews remain ignored; keep review captures outside the
+published source tree.
 
 ## Freshness states
 

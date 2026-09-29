@@ -257,8 +257,26 @@ The profile layout is negotiated using the identity read:
 | v4 / 103 bytes | Allowance remaining, window, observation and reset times. |
 | v5 / 111 bytes | Forecast-day expiry. |
 
+All multibyte values are little-endian. The profile byte ranges are:
+
+| Bytes | Field |
+| --- | --- |
+| 0–1, 2, 3 | `OW`, version, kind (`1` = profile) |
+| 4–7, 8–15, 16–17 | Revision, Unix time, signed UTC offset in minutes |
+| 18, 19, 20–35 | Hour cycle (`12` or `24`), flags, 16-byte owner ID |
+| 36–38, 39–41 | Background and foreground RGB |
+| 42–49, 50–55 | Weather observation time; signed current, high and low temperatures (two bytes each) |
+| 56, 57–80 | WMO weather code; null-terminated location |
+| 81–83, 84 | Accent RGB; brightness (`20`–`100`) |
+| 85, 86, 87–94, 95–102 | Remaining allowance (`255` = unavailable), window (`0` unavailable, `1` weekly, `2` session), observation and reset times |
+| 103–110 | Signed forecast-day expiry time |
+
 Profile flags mark valid weather, Fahrenheit, night mode and a transient
 preview. The location is null-terminated UTF-8 (at most 23 data bytes).
+Capability bits 0–11 respectively advertise time sync, hour cycle, RTC,
+theme, weather, brightness, activity, alert sound, distinct Finished,
+notification sync, distinct Failed, and Working sound. The identity read also
+reports the watch ID, owner status, protocol range and firmware version.
 Activity states are 0 idle, 1 working, 2 needs input, 3 finished, 4 failed.
 Finished and failed require their capability bits; the phone maps them to
 supported older states when needed. Acknowledgement records a wearer action,

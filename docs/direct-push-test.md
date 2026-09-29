@@ -1,66 +1,17 @@
-# Direct APNs delivery and validation
+# APNs delivery and physical validation
 
-For the trusted alpha, the desktop's existing APNs worker notifies the phone when
-agent activity changes. For the custom watch, iOS forwards the notification using
-Apple Notification Center Service (ANCS). The watch filters by Paceman's app
-identifier, then requests current state over its subscribed BLE characteristic.
-Core Bluetooth wakes the app to fetch the paired source and forward its latest
-snapshot. There is no periodic accessory polling. This integration still needs
-locked-phone acceptance testing; a successful build is not delivery evidence.
+The optional source worker sends activity notifications and ActivityKit pushes. For the custom watch, iOS Notification Center passes Paceman notifications through ANCS; the watch requests a fresh snapshot over the phone's paired Bluetooth and HTTPS links. The push carries no source URL, credential, code, or task text. APNs acceptance, phone presentation, background execution, and watch rendering are distinct outcomes.
 
-```text
-Desktop → APNs → iOS Notification Center → ANCS → watch sync request
-                                                    ↓
-                         Core Bluetooth app wake → paired-source fetch → watch
-Desktop → ActivityKit start/update APNs → Live Activity display
-```
-
-## Delivery policy
-
-Notification delivery requires notification permission. Presentation follows the
-activity state; iOS Settings remains the user's presentation control.
-
-| Activity | Notification presentation |
+| State | Notification |
 | --- | --- |
-| Working | Passive; no screen wake or sound, but an entry in the notification list |
-| Needs input | Active attention request with sound, subject to iOS Settings |
-| Finished | Active attention request with sound, subject to iOS Settings |
-| Idle | Passive; authoritative sync clears the last activity |
+| Working, Idle | Passive list entry, no sound or screen wake. |
+| Needs input, Finished | Alert and sound, subject to iOS settings. |
 
-Notification-mode payloads omit `content-available` and use APNs push type `alert`.
-ANCS and the accessory's Bluetooth request drive background watch synchronization.
-Passive entries additionally set `interruption-level: passive`
-and omit sound. The foreground app handles passive updates without presenting a
-banner, sound or list entry. This does not suppress their background presentation.
+Events are coalesced to the latest snapshot, subject to a ten-second minimum between attempts and a five-minute age limit. Transient failures retry with backoff; a crash can duplicate a send. Tailscale, notification permission, watch notification sharing, Bluetooth proximity, and source reachability all affect delivery. A force-quit app is not a supported automatic-wake path.
 
-Notification delivery uses a 10-second minimum between attempts. It coalesces
-pending activity to the newest event, discards events older than five minutes,
-and retries transient failures with backoff. Appearance-only changes do not generate activity alerts.
-A process crash can duplicate a send; this is not an exactly-once protocol.
+## Configure the local provider
 
-APNs acceptance, notification presentation, app execution and watch rendering are
-separate outcomes. A visible notification does not guarantee a background callback.
-The callback-only route failed a locked-phone run: no callback occurred until
-someone opened the notification. ANCS replaces this wake dependency with an
-accessory event. APNs callbacks remain opportunistic catch-up. Both routes use the
-stored paired endpoint, not a URL from the push. The network
-request has a 12-second overall timeout; the handler allows up to three additional
-seconds for the BLE write. Tailscale must be connected and the source reachable.
-Force-quitting the app is a separate case, not a supported automatic-wake strategy.
-
-## Deployment
-
-Follow [the desktop handoff](phone-monitoring-handoff.md). Update the installed
-worker and restart it with its existing config/data-directory arguments. There is
-no test flag or alternate service. Updating this Mac checkout does not update the
-Omarchy installation or reload its running Python worker.
-
-The retained APNs key belongs to the team signing the phone app. Keep the key and
-actual config outside the repository, owner-readable only. Do not commit them,
-paste them into chat, or distribute them to testers. Other users of our signed
-app need the planned relay; self-builders can use their own developer team.
-
-For a new local setup, the config format is:
+Use a private APNs `.p8` key and JSON config outside this repository. The signing team, topic, and environment must match the installed iPhone build; Debug uses `development`, Release uses `production`. Never publish or paste the key. A config shape is:
 
 ```json
 {
@@ -72,153 +23,13 @@ For a new local setup, the config format is:
 }
 ```
 
-These are example identifiers. The key path may be absolute or relative to the
-config file; make it private with `chmod 600`. Topic and environment must match
-the installed app. Debug uses development; Release uses production. The worker
-rejects mismatched environments. APNs signing and the app's remote-notification
-background mode must be enabled in its signing profile.
+On Mac, use the [per-user installer](macos.md#enable-iphone-notifications). On Omarchy, install `requirements-push.txt` in the provider environment and run `python -m service.push --config CONFIG --data-dir SOURCE_DATA` against the **installed paired source database**. Only one worker can hold its push lock. This setup does not require a public inbound port. Revoking a source or push destination stops its sends.
 
-Install `requirements-push.txt` in the existing provider's Python environment.
-The worker runs as `python -m service.push --config CONFIG --data-dir SOURCE_DATA`.
-Substitute existing private paths. It must point at the actual source database,
-not a new synthetic database. Only one worker can hold the database's push lock.
-No public inbound port or hosted relay is required for this personal setup.
+## Validate on devices
 
-## Physical validation
+1. Pair the computer and verify a foreground fetch. Confirm iPhone notifications and Live Activities are enabled as needed. For the custom watch, enable **Watch updates**, allow notification sharing or **Share System Notifications** in Bluetooth settings, and use matching phone and firmware versions.
+2. Disconnect the debugger, lock the phone for at least three minutes, and start a new agent session without opening Paceman. Exercise Working → Needs input → Working → Finished → Idle, holding each state long enough to observe. Do not touch the notification or watch during the unattended run.
+3. Confirm the Live Activity and notification on the physical phone, and the state on the watch. Repeat with two paired computers; each should retain its own activity. Repeat after a long idle and after Bluetooth disconnection/reconnection.
+4. Correlate the phone's **Test log → Export timing log** with the source's `push-delivery.jsonl`. `apns_accepted` and `live_activity_start_accepted` mean Apple accepted the sends, not that the devices displayed them. Look for an ANCS notification event, a paired-source fetch, a BLE write, and visible watch rendering. A foreground open or notification tap does not count as unattended delivery.
 
-1. Pair each computer and verify a foreground source fetch. The home Live
-   Activities destination should say **On** when iPhone Live Activities are
-   allowed and a computer is paired; this label does not prove remote-start
-   registration. Check registration on the source separately. This setup does
-   not require notification permission.
-   Enable notifications during custom-watch setup, or from the paired watch's
-   recovery guidance when a delivery requirement is off.
-2. Leave **Watch updates** on in Paceman Watch details. Disconnect the debugger.
-   Use firmware 0.6.2 or later and the matching phone app. Accept notification
-   sharing for the watch, or enable **Share System Notifications** in Settings →
-   Bluetooth. The transport lab shows authorization. Notifications must be enabled
-   in Notification Center; background-only pushes do not enter ANCS.
-3. Lock the phone normally for at least three minutes. On a paired computer,
-   begin a new agent session without opening Paceman. Verify that the computer's
-   Live Activity starts. Trigger Working → Needs input → Working → Finished →
-   Idle, holding each state for at least 15 seconds. Observe the phone and
-   watch before touching either device. Repeat on a second computer and verify
-   both activities keep their own source names and states.
-   Confirm there is only one activity per computer through those revisions.
-   Tap one activity: it should open that computer's Home card. A finished
-   Live Activity should end automatically after its short resting period;
-   later work should be able to start another one.
-4. Record Live Activity start/update/end, notification arrival, watch rendering
-   and approximate latency. Passive Working/Idle entries do not light the screen
-   or make a sound; inspect the list after observing the watch. Do not tap a
-   notification during the unattended run.
-5. Repeat several transitions within an hour, then after 30 minutes, two hours,
-   and overnight. Check cellular, network recovery and Low Power Mode separately;
-   record Focus and notification-summary settings when interpreting timing.
-6. Export **Test log → Export timing log** from the phone and correlate it with
-   `push-delivery.jsonl` in each source's existing private data directory. Both
-   logs remain local. Check `live_activity_start_accepted` and
-   `live_activity_apns_accepted` separately from visible device delivery.
-
-The protocol carries a revisioned current snapshot, not a backlog. A rapidly
-superseded transition may be coalesced. The goal is timely current state, with
-attention behavior assessed separately. Phone foreground catch-up and wearer-
-initiated watch acknowledgement remain normal behavior; neither is periodic watch
-polling. Do not touch the watch during isolation runs because an acknowledgement
-can also trigger a fetch.
-
-## Evidence and log interpretation
-
-Distinct event notifications passed a repeated locked-phone run: seven successive
-watch-triggered fetches completed BLE writes, and the user confirmed updates on
-the watch. That run omitted content-available to isolate ANCS. Callback-only
-forwarding and replacement notifications had previously missed updates.
-
-The run also exposed a separate reconnect gap: opening Paceman resumed an overdue
-app-timer retry. Repeated delivery on an established connection is therefore
-validated for that run, but unattended reconnection and extended idle remain open.
-Correlate `watch_notification_received`, fetch/write, and the observed display;
-a notification tap or foreground event does not count as unattended delivery.
-
-| Stage | Meaning |
-| --- | --- |
-| `apns_accepted` / `apns_failed` | Source result from Apple; not device delivery |
-| `presentation` | Source classification: active, passive or none |
-| `push_background_callback` | App delegate invoked; correlate with app lifecycle to establish background execution |
-| `push_notification_opened` | User tapped the notification; not unattended delivery |
-| `push_foreground_received` | Notification handled while the app was open |
-| `watch_notification_baseline` | First counter value after setup; may be an explicit read of retained state, not a new wake |
-| `watch_notification_subscribed` | Phone confirmed its accessory sync subscription |
-| `watch_notification_received` | Changed accessory counter after the baseline; correlate with firmware ANCS receipt |
-| `watch_fetch_completed` | Authoritative snapshot fetched for an accessory request |
-| `watch_ble_accepted` / `watch_ble_unconfirmed` | Accessory request's bounded BLE wait result |
-| `push_fetch_completed` | Latest paired-source snapshot fetched and accepted |
-| `ble_write_accepted` | Bluetooth accepted a write for that event; not display confirmation |
-| `push_ble_accepted` / `push_ble_unconfirmed` | Handler's bounded wait result |
-
-Phone fetch/write entries now include the state, and writes include the watch
-revision. Push callback entries report whether `content-available` was present;
-Bluetooth restoration and remote-notification launch options have distinct stages.
-Firmware diagnostics record session-local notification handles/flags, attribute
-request success or failure, the Paceman match result, sync request transmission,
-and the state/revision applied by the UI task. They never record notification text,
-other apps' identifiers, credentials or payload contents. Serial capture must be
-running before the transition: it cannot recover earlier output. The animations
-are Working = opacity pulse, Needs input = bounce, Finished = gentle sway.
-
-Payloads contain only source/generation/revision metadata and generic display text,
-not task text, code, credentials or endpoint URLs. They are not end-to-end encrypted
-notification content. Actual snapshots are fetched through the paired HTTPS source.
-The current watch cannot yet expire stale source state locally; inspect the display
-during connectivity-loss tests instead of assuming a persistent icon is current.
-
-If branding is stale, check both components. The system supplies the app name from
-phone metadata; the desktop supplies the notification body. The earlier Paceman
-body correction is in commit `77b2e84`. Check the actual installed worker and restart
-its process after deployment, then verify a newly generated notification.
-
-## Accessory requirements
-
-ANCS forwards notifications, not arbitrary app payloads. The watch requests only
-app identifiers, never unrelated message content, and does not infer agent state
-from notification wording. The existing authenticated fetch preserves source
-identity, ordering, acknowledgement and watch sound preferences. Existing
-notifications on reconnection are ignored; the normal watch handshake fetches
-current state. Requests arriving during a fetch coalesce into one follow-up.
-
-Sharing permission, Notification Center delivery, Bluetooth proximity and network
-access remain requirements. ANCS is not a guarantee of latency through every
-Focus/summary/privacy setting or after force-quit. Test those states explicitly.
-The newer Accessory Notifications/Transport Extension APIs are restricted to EU
-customers, so this global route does not depend on them.
-
-## Fully hidden notifications
-
-Passive notifications remain in the list. Removing a delivered notification is
-cleanup, not guaranteed prevention of display. Apple's supported pre-presentation
-filtering requires its approved `com.apple.developer.usernotifications.filtering`
-entitlement on a Notification Service Extension. This app has neither configured.
-An empty notification without that entitlement is not an equivalent mechanism.
-
-The extension runs separately from the app. Entitlement approval alone does not
-establish access to its BLE connection or wake the main app. A later prototype
-would need to validate supported forwarding and coexistence before depending on
-it. Do not add this second process to the current path without that evidence.
-
-## Stop and revoke
-
-**Disable push** deletes the paired destination before unregistering with Apple.
-If the source is unreachable, retry rather than silently leaving registration
-active. Removing or revoking a source also removes its push destinations. Retain
-the existing source database and pairing when restarting the worker.
-
-## References
-
-- [Passive notification presentation](https://developer.apple.com/documentation/usernotifications/unnotificationinterruptionlevel/passive)
-- [Remote notification callbacks](https://developer.apple.com/documentation/uikit/uiapplicationdelegate/application(_:didreceiveremotenotification:fetchcompletionhandler:))
-- [Background notification limits](https://developer.apple.com/documentation/usernotifications/pushing-background-updates-to-your-app)
-- [Notification filtering entitlement](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.usernotifications.filtering)
-- [Filtering entitlement request](https://developer.apple.com/contact/request/notification-service/)
-
-- [ANCS specification](https://developer.apple.com/library/archive/documentation/CoreBluetooth/Reference/AppleNotificationCenterServiceSpecification/Specification/Specification.html)
-- [Core Bluetooth background execution](https://developer.apple.com/library/archive/documentation/NetworkingInternetWeb/Conceptual/CoreBluetooth_concepts/CoreBluetoothBackgroundProcessingForIOSApps/PerformingTasksWhileYourAppIsInTheBackground.html)
+An established connection has passed a repeated locked-phone run, but unattended reconnection and longer idle delivery still need physical acceptance. See [Bluetooth lifecycle](bluetooth-lifecycle.md) and [known gaps](readiness-gaps.md).

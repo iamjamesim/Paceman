@@ -1,47 +1,36 @@
 # Paceman
 
-**Take your agents with you.**
+**Take your agents with you.** Paceman shows local Codex activity from Mac and
+Omarchy computers on an iPhone, in Live Activities, and on Apple Watch. An
+optional experimental ESP32 watch receives a phone-selected activity state over
+Bluetooth. Each computer runs its own source; the phone pairs with them
+separately over private Tailscale HTTPS.
 
-Personal gear for working with agents: connect your workspaces to watches
-and small displays that feel like yours. Easy pairing, shared visual
-character, and calm awareness come first; lightweight interactions are secondary.
+This is a developer alpha. Mac Codex desktop and CLI hooks and the Omarchy Codex
+CLI companion have been exercised on the owner's devices. Omarchy Codex desktop
+has not been validated. Background notification and watch delivery still need
+broader physical testing. [Known gaps](docs/readiness-gaps.md) records the
+specific limits.
 
-Paceman is a private prototype codename. The current implementation connects
-Omarchy and macOS desktop sources to an iPhone and an ESP32 watch. Sources
-support synthetic tests, live Omarchy companion events, and local Mac Codex
-lifecycle hooks.
+## Repository
 
-## Components
-
-| Directory | Responsibility |
+| Path | Purpose |
 | --- | --- |
-| `ios/` | SwiftUI iPhone app, Live Activity extension, source pairing and Bluetooth relay |
-| `service/` | Private Python source, snapshots, pairing and optional APNs sender |
-| `macos/` | Native menu-bar client, local Codex hook adapter and agent-led installer |
-| `firmware/esp32-watch/` | ESP32 watch firmware, simulator, fonts and build tools |
-| `tests/` | Source API, persistence and APNs tests |
-| `scripts/` | Local checks, source pairing and iOS asset/project generation |
-| `docs/` | Setup, architecture and contracts |
+| `service/` | Local source API, pairing, persistence and optional APNs sender |
+| `macos/` | Menu-bar app, Codex hooks and per-user installer |
+| `desktop/` | Omarchy bar panel, source controls and installer |
+| `ios/` | iPhone app, Live Activities, Apple Watch app and complications |
+| `firmware/esp32-watch/` | Experimental watch firmware and simulator |
+| `tests/`, `scripts/` | Portable checks and development tools |
 
-Paceman Watch began as [omarchy-watch](https://github.com/iamjamesim/omarchy-watch)
-and has since evolved for Paceman's iPhone relay and connected workspaces. The
-original watch package and wire protocol are documented in its
-[provenance](firmware/esp32-watch/UPSTREAM.md).
+The ESP32 package derives from [Omarchy Watch](https://github.com/iamjamesim/omarchy-watch);
+its [provenance](firmware/esp32-watch/UPSTREAM.md) and
+[third-party notices](THIRD_PARTY_NOTICES.md) are retained.
 
-## Start developing
+## Build and connect
 
-- [Desktop installation](docs/desktop.md): install/update the login service and Omarchy bar panel.
-- [Mac alpha client](docs/macos.md): install and validate the native menu-bar source.
-- [Desktop visual reference](docs/desktop-visual-reference.md): canonical screenshots and macOS design guidance.
-- [Next milestones](docs/roadmap.md): phone identity, delivery status, background setup and adapter packaging.
-- [Setup](docs/development.md): source, private networking, iPhone and watch.
-- [Omarchy routing test](docs/omarchy-routing.md): connect existing desktop events to the phone.
-- [System lifecycle map](docs/system-lifecycle.md): state ownership, freshness and recovery.
-- [Architecture](docs/architecture.md): component boundaries and data flow.
-- [Communication protocol](docs/protocol.md): pairing, snapshots, notifications, and watch packets.
-- [Pairing and removal](docs/pairing-and-removal.md): identified connections, upgrade behavior, and Mac acceptance.
-- [Prototype scope](docs/paceman-prototype.md): the experience we are finishing.
-- [Handoff](HANDOFF.md): next work and compatibility constraints.
+Use Python 3.11+ and a C compiler for the portable checks. Optional APNs tests
+use the pinned Python dependencies:
 
 ```sh
 python3 -m venv .venv
@@ -49,48 +38,20 @@ python3 -m venv .venv
 PATH="$PWD/.venv/bin:$PATH" bash scripts/check.sh
 ```
 
-On a Mac with Xcode, also run `bash scripts/check-on-mac.sh` and run the
-`AgentCompanion` scheme's tests on an installed iPhone simulator.
+On a Mac with Xcode, run `bash scripts/check-on-mac.sh` and the
+`AgentCompanion` scheme's tests in an installed iPhone simulator. See
+[development setup](docs/development.md), [Mac installation](docs/macos.md),
+and [Omarchy installation](docs/desktop.md) for platform steps.
 
-## Current Codex compatibility
+The source listens only on loopback. The phone reaches it through a private
+Tailscale Serve route; do not expose it with Funnel. Runtime state and signing
+keys stay outside the repository. Direct APNs with a workstation-held key is a
+personal alpha setup, not a distribution design.
 
-Paceman monitors local Codex sessions through reviewed hooks on each connected
-computer. Its two desktop sources have different adapters:
+## Reference
 
-| Computer and Codex surface | Current status |
-| --- | --- |
-| macOS, Codex desktop app | Real hook events and an iPhone notification were observed; its allowance reached the custom watch. Agent-state delivery to the watch still needs a fuller hardware pass. |
-| macOS, Codex CLI | Uses the same installed hooks; a real CLI event was observed. Session removal after CLI exit still needs correction, so this path is beta. |
-| Omarchy, Codex CLI | Tested through the separately installed Omarchy Watch for Codex companion and Paceman's process-verified receiver. |
-| Omarchy, Codex desktop app | Not validated with Paceman yet. The official [Linux desktop preview](https://learn.chatgpt.com/docs/linux/linux-app) supports Arch, but shared hook configuration alone does not prove the companion, process ownership, or allowance path works. |
-
-For macOS, install Paceman and review its eight Codex hooks in the app or CLI.
-The Mac's allowance requires a locally signed-in Codex desktop runtime or CLI.
-For Omarchy, install and review the separate companion hooks; its allowance
-currently comes from Omarchy's agents panel. Only local sessions that deliver
-those hooks are monitored. See the [Mac setup](docs/macos.md),
-[Omarchy setup](docs/desktop.md), and [readiness gaps](docs/readiness-gaps.md).
-
-## Current limits
-
-The alpha can pair more than one computer and one custom watch. The phone forwards
-activity, theme, weather, allowance and watch preferences. Background agent
-transitions use user-visible APNs alert transport and the watch receives those
-events through iOS notification sharing, so notification permission and sharing
-must remain enabled. iOS controls notification delivery and background execution.
-Long-duration disruption and upgrade testing is still in progress.
-
-The ESP32 Paceman Watch is optional experimental hardware. Without it, Paceman
-does not request notification or location permission for watch delivery, or send
-passive progress entries for ANCS. The phone uses Live Activities; the Apple
-Watch experience uses the Watch app and complications.
-
-Keep runtime state and credentials in ignored `.runtime/`. Never distribute an
-APNs private key in the app or repository. Direct APNs is a personal prototype
-arrangement, not a shared-key distribution design. The private source is intended
-for Tailscale access, not direct public internet exposure.
-
-The Xcode scheme, bundle IDs and Bluetooth protocol still use legacy names to
-preserve installed-device pairing. Existing watches may retain their former
-Bluetooth name until their firmware is updated.
-See [third-party notices](THIRD_PARTY_NOTICES.md) for included code and fonts.
+- [Architecture](docs/architecture.md): component ownership and data flow.
+- [Communication protocol](docs/protocol.md): pairing, snapshots, APNs and watch packets.
+- [Data and lifecycle](docs/data-lifecycle.md): durable state, expiry and recovery.
+- [Phone](docs/home-screen-design.md) and [desktop](docs/desktop-panel-design.md) screen contracts.
+- [Known gaps](docs/readiness-gaps.md): what remains unverified or incomplete.
