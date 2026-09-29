@@ -43,7 +43,7 @@ and [Omarchy installation](docs/desktop.md) for platform steps.
 
 The source listens only on loopback. The phone reaches it through a private
 Tailscale Serve route; do not expose it with Funnel. Runtime state and signing
-keys stay outside the repository. Tester notifications use the
+keys stay outside the repository. Distributed installs use the
 [authenticated APNs relay](docs/push-relay.md); direct APNs with a
 workstation-held key remains a personal alpha setup.
 

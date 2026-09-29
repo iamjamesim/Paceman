@@ -1,6 +1,6 @@
 # Push delivery
 
-The optional source worker sends ordinary activity notifications, ActivityKit updates, and optional watchOS allowance updates. For testers, it sends bounded requests to an authenticated relay; only the relay holds the APNs key. Ordinary notifications can reach the experimental ESP32 watch through Apple's Notification Center Service (ANCS). The watch then asks the iPhone to fetch the current authenticated source snapshot and forward it over Bluetooth. The ordinary notification carries a source ID and event hint; ActivityKit receives an expiring display copy. Neither carries a source URL, paired credential, code, prompt, or transcript. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
+The optional source worker sends ordinary activity notifications, ActivityKit updates, and optional watchOS allowance updates. Distributed installs send bounded requests through the authenticated relay, which holds the APNs key. Ordinary notifications can reach the experimental ESP32 watch through Apple's Notification Center Service (ANCS). The watch then asks the iPhone to fetch the current authenticated source snapshot and forward it over Bluetooth. The ordinary notification carries a source ID and event hint; ActivityKit receives an expiring display copy. Neither carries a source URL, paired credential, code, prompt, or transcript. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
 
 ```text
 Source → authenticated relay → APNs → iPhone notification → ANCS → ESP32 watch request
@@ -23,7 +23,7 @@ The worker retries transient relay failures until the event's five-minute limit.
 
 ## Legacy local APNs provider
 
-The alpha direct sender remains available for existing owner-controlled installs. It uses a private APNs `.p8` key on each configured source and is unsuitable for tester Macs. Its JSON config belongs outside this repository, readable only by its owner. The team, topic, and environment must match the signed iPhone app; Debug uses `development` and Release uses `production`.
+The alpha direct sender remains available for existing owner-controlled installs. It uses a private APNs `.p8` key on each configured source and is unsuitable for distribution. Its JSON config belongs outside this repository, readable only by its owner. The team, topic, and environment must match the signed iPhone app; Debug uses `development` and Release uses `production`.
 
 ```json
 {

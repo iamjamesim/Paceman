@@ -47,13 +47,13 @@ If it does not, inspect the pending hook rows and installed command. Report inst
 
 ## Enable iPhone notifications
 
-Pairing and hooks do not configure APNs. For testers, install the per-user sender with the [authenticated relay](push-relay.md) before pairing the phone. The relay keeps the APNs key, and the installer generates a source-only credential:
+Pairing and hooks do not configure APNs. For distributed installs, configure the per-user sender with the [authenticated relay](push-relay.md) before pairing the phone. The relay keeps the APNs key, and the installer generates a source-only credential:
 
 ```sh
 python3 -m macos.install_push --relay-url https://YOUR-RENDER-SERVICE.onrender.com
 ```
 
-The installer stores the source credential in Paceman Application Support and starts the sender within the same background item. It removes any copied APNs key left by an earlier direct setup. If the phone was already paired, renew pairing with a fresh QR code so it learns the relay URL. Confirm `dev.paceman.source` is running with `launchctl print`, then inspect the destination's `last_result` and `push-delivery.jsonl` for a recent `apns_accepted` (status 200). Ask the user to confirm a **new notification on the physical iPhone**. Apple acceptance and phone display are separate checks. Live Activity starts are logged separately as `live_activity_start_accepted`. See [push delivery](push-delivery.md) for watch and locked-phone checks. Existing owner-controlled direct APNs setups remain documented there, but testers should use the relay.
+The installer stores the source credential in Paceman Application Support and starts the sender within the same background item. It removes any copied APNs key left by an earlier direct setup. If the phone was already paired, renew pairing with a fresh QR code so it learns the relay URL. Confirm `dev.paceman.source` is running with `launchctl print`, then inspect the destination's `last_result` and `push-delivery.jsonl` for a recent `apns_accepted` (status 200). Ask the user to confirm a **new notification on the physical iPhone**. Apple acceptance and phone display are separate checks. Live Activity starts are logged separately as `live_activity_start_accepted`. See [push delivery](push-delivery.md) for watch and locked-phone checks. Existing owner-controlled direct APNs setups remain documented there; distributed installs use the relay.
 
 ## Control and removal
 

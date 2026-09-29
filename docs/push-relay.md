@@ -1,6 +1,6 @@
 # APNs relay
 
-The relay keeps the APNs `.p8` key off tester Macs. Macs enroll with a source credential; paired iPhones use a separate credential to register their APNs tokens. The relay sends only to registered source/phone/token combinations. Mac payloads contain status and display metadata; the relay rejects prompt and transcript fields. See [push delivery](push-delivery.md) for the notification formats.
+The relay is Paceman's production push path. It keeps the APNs `.p8` key off Macs. Macs enroll with a source credential; paired iPhones use a separate credential to register their APNs tokens. The relay sends only to registered source/phone/token combinations. Mac payloads contain status and display metadata; the relay rejects prompt and transcript fields. See [push delivery](push-delivery.md) for the notification formats.
 
 ## Deploy on Render
 
