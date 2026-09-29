@@ -224,6 +224,8 @@ class PublicRelayTests(unittest.TestCase):
         self.assertEqual(value["relayURL"], "https://relay.example")
         self.assertNotIn("keyPath", value)
         self.assertFalse(key.exists())
+        self.assertEqual(private.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((private / "apns.json").stat().st_mode & 0o777, 0o600)
 
     def test_mac_uninstall_revokes_source_before_discarding_credential(self):
         temporary = tempfile.TemporaryDirectory()

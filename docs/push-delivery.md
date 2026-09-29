@@ -21,9 +21,9 @@ The Mac enrolls with a source credential; the phone registers its own token with
 
 The worker retries transient relay failures until the event's five-minute limit. Only one worker can hold a source database's push lock.
 
-## Legacy local APNs provider
+## Development-only direct APNs
 
-The alpha direct sender remains available for existing owner-controlled installs. It uses a private APNs `.p8` key on each configured source and is unsuitable for distribution. Its JSON config belongs outside this repository, readable only by its owner. The team, topic, and environment must match the signed iPhone app; Debug uses `development` and Release uses `production`.
+The older direct sender remains temporarily for existing personal and Omarchy development setups. It is not a public install path: each configured source needs a private APNs `.p8` key. Its JSON config belongs outside this repository, readable only by its owner. The team, topic, and environment must match the signed iPhone app; Debug uses `development` and Release uses `production`.
 
 ```json
 {
