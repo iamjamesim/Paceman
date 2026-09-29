@@ -17,9 +17,9 @@ The worker coalesces activity to the newest snapshot, waits at least ten seconds
 
 ## Authenticated relay
 
-Each source has a separate random relay credential. The source worker enrolls automatically and syncs its paired-client credential hashes. The phone registers its own APNs tokens with the relay using its pairing credential; the relay stores only hashes of credentials and tokens. Removing one source denies its future sends without changing another source or the APNs key. Client removal and re-pairing clear destinations locally and at the relay. The relay accepts only the three Paceman APNs shapes and an allowlist of fields, constructs the APNs topic itself, and returns bounded status, reason, and APNs ID. The send request carries a phone/watch token, source and client IDs, coarse state and display metadata, or an allowance reading; it carries no prompts, transcripts, source URL, or paired-phone credential. HTTPS is required between source and relay.
+The Mac enrolls with a source credential; the phone registers its own token with its pairing credential. The relay checks both identities, the token, environment, and push mode before calling APNs. Removing a client clears its local destination and syncs the removal to the relay. See [relay setup](push-relay.md) for deployment and revocation, and [protocol](protocol.md#phone-notifications-and-live-activities) for the request contract.
 
-See [relay setup](push-relay.md) for enrollment, revocation, and deployment. The worker continues to coalesce and retry from the source database. If a relay is unavailable, the pending event remains eligible until its five-minute activity limit; an explicit client revocation removes the local destination and is synced to the relay. Only one worker can hold a source database's push lock.
+The worker retries transient relay failures until the event's five-minute limit. Only one worker can hold a source database's push lock.
 
 ## Legacy local APNs provider
 

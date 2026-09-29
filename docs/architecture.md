@@ -26,7 +26,7 @@ The two event adapters feed the same source contract:
 
 Activity and allowance changes advance snapshot revisions. Allowance-only changes keep the activity event ID and do not send an activity alert. `service/status.py` publishes a private runtime heartbeat for the desktop panels; phone contact means an authenticated fetch, not watch delivery.
 
-`service/push.py` is an optional push worker beside the source. It reads registered destinations from source SQLite, syncs hashed paired-client credentials, and sends through `service/relay.py` with a source-specific credential. The phone separately binds its APNs tokens at the relay using its pairing credential. The relay checks those bindings in PostgreSQL and alone holds the APNs key for tester setups. Ordinary notifications carry a fetch hint, while ActivityKit pushes carry an expiring display copy. Neither contains a source URL or paired-phone credential. See [push delivery](push-delivery.md) and the [wire protocol](protocol.md).
+`service/push.py` sends source events through `service/relay.py` for tester setups. The phone registers its APNs tokens separately; the relay checks both parties and holds the APNs key. Ordinary pushes carry a fetch hint, while ActivityKit pushes carry an expiring display copy. See [push delivery](push-delivery.md) and the [wire protocol](protocol.md).
 
 ## Phone and watches
 

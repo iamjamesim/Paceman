@@ -25,7 +25,7 @@ The relay keeps the APNs `.p8` key off tester Macs. Macs enroll with a source cr
 After [installing the Mac source](macos.md), run:
 
 ```sh
-python3 -m macos.install_push --relay-url https://paceman-relay-dev.onrender.com
+python3 -m macos.install_push --relay-url https://YOUR-SERVICE.onrender.com
 ```
 
 The installer creates a source credential and removes any active local APNs key copy. Pair the iPhone with a fresh QR code, even if it was paired before. Changing relay hosts also requires a fresh pairing.
