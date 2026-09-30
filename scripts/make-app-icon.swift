@@ -23,16 +23,26 @@ for x in [404.0, 576.0] {
 
 if dev {
     let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-        colors: [rgb(25, 151, 236), rgb(20, 65, 145)] as CFArray,
+        colors: [rgb(61, 183, 242), rgb(60, 99, 239)] as CFArray,
         locations: [0, 1])!
     context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 1024),
         end: CGPoint(x: 1024, y: 0), options: [])
-    context.setStrokeColor(rgb(216, 242, 255, 0.13))
+    context.setFillColor(rgb(209, 242, 255, 0.17))
+    context.fillEllipse(in: CGRect(x: 120, y: 120, width: 784, height: 784))
+    // TestFlight's broad, quiet blueprint grid reads at Home Screen size.
+    context.setStrokeColor(rgb(219, 244, 255, 0.27))
     context.setLineWidth(5)
-    for diameter in [760.0, 970.0, 1180.0] {
-        context.strokeEllipse(in: CGRect(x: 512 - diameter / 2,
-            y: 512 - diameter / 2, width: diameter, height: diameter))
+    for position in [256.0, 512.0, 768.0] {
+        context.move(to: CGPoint(x: position, y: 0))
+        context.addLine(to: CGPoint(x: position, y: 1024))
+        context.move(to: CGPoint(x: 0, y: position))
+        context.addLine(to: CGPoint(x: 1024, y: position))
     }
+    context.strokePath()
+    context.addPath(rounded(CGRect(x: 12, y: 12, width: 1000, height: 1000), 246))
+    context.setStrokeColor(rgb(223, 247, 255, 0.3))
+    context.setLineWidth(6)
+    context.strokePath()
 } else {
     // Fixed release artwork follows the Ayu default: navy and yellow.
     context.setFillColor(rgb(31, 36, 48))
@@ -41,27 +51,6 @@ if dev {
 context.setFillColor(dev ? rgb(245, 250, 255) : rgb(255, 204, 102))
 context.addPath(body)
 context.drawPath(using: .eoFill)
-if dev {
-    // A half-blue robot with a light grid echoes TestFlight's solid/wireframe mix.
-    context.saveGState()
-    context.clip(to: CGRect(x: 512, y: 0, width: 512, height: 1024))
-    context.addPath(body)
-    context.clip(using: .evenOdd)
-    context.setFillColor(rgb(168, 220, 251))
-    context.fill(CGRect(x: 512, y: 260, width: 280, height: 448))
-    context.setStrokeColor(rgb(44, 139, 204, 0.5))
-    context.setLineWidth(5)
-    for x in stride(from: 512.0, through: 800.0, by: 56.0) {
-        context.move(to: CGPoint(x: x, y: 250))
-        context.addLine(to: CGPoint(x: x, y: 710))
-    }
-    for y in stride(from: 260.0, through: 710.0, by: 56.0) {
-        context.move(to: CGPoint(x: 500, y: y))
-        context.addLine(to: CGPoint(x: 800, y: y))
-    }
-    context.strokePath()
-    context.restoreGState()
-}
 context.fill(CGRect(x: 498, y: 694, width: 28, height: 118))
 context.fillEllipse(in: CGRect(x: 479, y: 779, width: 66, height: 66))
 for x in [162.0, 818.0] {
