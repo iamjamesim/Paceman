@@ -1,0 +1,9 @@
+{
+  "id" : "1713cff9-0390-4f67-b1e1-d8e07506df92",
+  "targets" : [
+    {
+      "id" : "9a0313e3-d21c-4142-8625-c58e991df2b6",
+      "name" : "AgentCompanion"
+    }
+  ]
+}
