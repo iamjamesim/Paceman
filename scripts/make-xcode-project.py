@@ -158,7 +158,7 @@ def build_ref(name):
 info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Paceman",
         "CFBundleExecutable": "$(EXECUTABLE_NAME)", "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
         "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "Paceman", "CFBundlePackageType": "APPL",
-        "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "2", "LSRequiresIPhoneOS": True,
+        "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "4", "LSRequiresIPhoneOS": True,
         "NSSupportsLiveActivities": True, "UILaunchScreen": {}, "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
         "UIApplicationSceneManifest": {"UIApplicationSupportsMultipleScenes": False},
         "UIBackgroundModes": ["bluetooth-central", "remote-notification", "fetch"],
@@ -177,7 +177,7 @@ info["CFBundleURLTypes"] = [{"CFBundleURLName": "paceman", "CFBundleURLSchemes":
 widget_info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Paceman",
     "CFBundleExecutable": "$(EXECUTABLE_NAME)", "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
     "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "Paceman", "CFBundlePackageType": "XPC!",
-    "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "2", "UIAppFonts": info["UIAppFonts"],
+    "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": "4", "UIAppFonts": info["UIAppFonts"],
     "NSExtension": {"NSExtensionPointIdentifier": "com.apple.widgetkit-extension"}}
 with (root / "AgentCompanionWidgets/Info.plist").open("wb") as file: plistlib.dump(widget_info, file)
 for name in ("AgentCompanion", "AgentCompanionWidgets"):
