@@ -67,7 +67,7 @@ xcodebuild -project ios/AgentCompanion.xcodeproj -scheme AgentCompanion \
 
 Replace SIMULATOR-UDID with an installed simulator. The iPhone app uses
 `ai.paceman.app`; the watch and widget identifiers extend that prefix, and all
-app targets share `group.ai.paceman.app`. Select the intended Apple Developer
+app targets share `group.ai.paceman.shared`. Select the intended Apple Developer
 team for every app and extension target in Xcode before device signing. The
 repository does not pin a team or include private signing keys. A build with
 the new identifier installs as a separate app from older development builds;

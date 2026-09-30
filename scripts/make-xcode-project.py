@@ -9,7 +9,7 @@ import shutil
 
 root = Path(__file__).resolve().parents[1] / "ios"
 app_id = "ai.paceman.app"
-app_group = "group.ai.paceman.app"
+app_group = "group.ai.paceman.shared"
 objects = {}
 # Preserve user-selected signing settings when regenerating on the Mac.
 previous_settings = {}

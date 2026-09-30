@@ -2,7 +2,7 @@ import Foundation
 
 /// The small, credential-free value copied from the iPhone to Apple Watch.
 struct WatchAllowanceSnapshot: Codable, Equatable {
-    static let appGroup = "group.ai.paceman.app"
+    static let appGroup = "group.ai.paceman.shared"
     static let storageKey = "apple-watch-codex-allowance"
 
     let provider: String
