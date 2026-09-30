@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 from desktop import install
+from desktop import install_push
 from desktop.control import private_endpoint, read_status, set_sharing, pair_phone, remove_access
 from tests.identity import device
 from service.hub import Server, Store
@@ -225,6 +226,12 @@ class DesktopInstallTests(unittest.TestCase):
             unit = (home / ".config/systemd/user/paceman-source.service").read_text()
             self.assertNotIn(str(source), unit)
             self.assertNotIn("@APP@", unit)
+            self.assertIn("--relay-config", unit)
+            self.assertIn("Wants=paceman-push.service", unit)
+            push_unit = (home / ".config/systemd/user/paceman-push.service").read_text()
+            self.assertIn("PartOf=paceman-source.service", push_unit)
+            self.assertIn("push-venv/bin/python3", push_unit)
+            self.assertNotIn("@STATE@", push_unit)
             self.assertTrue((home / ".local/bin/pacemanctl").exists())
             (home / ".local/state/paceman/sharing-paused").write_text('{"paused":true}')
             calls.clear()
@@ -234,9 +241,11 @@ class DesktopInstallTests(unittest.TestCase):
             self.assertIn(("/usr/bin/systemctl", "--user", "disable", "--now", "paceman-source.service"), calls)
             with patch("sys.argv", ["install.py", "uninstall"]):
                 install.main()
+            self.assertIn(("/usr/bin/systemctl", "--user", "disable", "--now", "paceman-push.service"), calls)
             self.assertTrue(Store(installed.path).authorized(client["credential"]))
             self.assertFalse((home / ".local/bin/pacemanctl").exists())
             self.assertFalse((home / ".local/lib/paceman").exists())
+            self.assertFalse((home / ".config/systemd/user/paceman-push.service").exists())
             self.assertEqual(json.loads(hooks.read_text()), {"hooks": {
                 **{event: [] for event in install.HOOK_EVENTS if event != "Stop"},
                 "Stop": unrelated["hooks"]["Stop"]}})
@@ -250,6 +259,41 @@ class DesktopInstallTests(unittest.TestCase):
         hooks.symlink_to(self.root / "missing")
         with self.assertRaises(ValueError):
             install.hook_document(hooks, self.root / "app")
+
+    def test_relay_setup_reuses_source_credential_and_respects_sharing(self):
+        home = self.root / "home"
+        app = home / ".local/lib/paceman"
+        state = home / ".local/state/paceman"
+        (app / "service").mkdir(parents=True)
+        (app / "service/push.py").touch()
+        Store(state / "hub.sqlite3")
+        (state / "push-venv/bin").mkdir(parents=True)
+        (state / "push-venv/bin/python3").touch()
+        calls = []
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0)
+        with patch.object(install_push.Path, "home", return_value=home), \
+             patch.object(install_push.subprocess, "run", side_effect=fake_run), \
+             patch.dict(os.environ, {"XDG_STATE_HOME": str(home / ".local/state")}):
+            install_push.configure("https://relay.example")
+            config = state / "private/apns.json"
+            first = json.loads(config.read_text())
+            self.assertEqual(first["sourceID"], Store(state / "hub.sqlite3").metadata("source_id"))
+            self.assertEqual(config.stat().st_mode & 0o777, 0o600)
+            install_push.configure("https://relay.example")
+            self.assertEqual(json.loads(config.read_text()), first)
+            self.assertEqual(sum(call[-2:] == ["restart", install.SERVICE] for call in calls), 2)
+            install_push.configure("https://relay-new.example")
+            changed = json.loads(config.read_text())
+            self.assertEqual(changed["relayURL"], "https://relay-new.example")
+            self.assertEqual(changed["credential"], first["credential"])
+            (state / "sharing-paused").touch()
+            calls.clear()
+            install_push.configure("https://relay.example")
+            self.assertFalse(any("restart" in call for call in calls))
+            with self.assertRaises(ValueError):
+                install_push.configure("http://relay.example")
 
     def test_unit_paths_escape_systemd_specifiers(self):
         value = install.render_unit(Path('/home/test/50% "app"'), self.root / "state")

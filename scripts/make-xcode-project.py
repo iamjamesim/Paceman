@@ -14,6 +14,8 @@ objects = {}
 # Preserve user-selected signing settings when regenerating on the Mac.
 previous_settings = {}
 existing_project = root / "AgentCompanion.xcodeproj/project.pbxproj"
+if existing_project.exists() and b"/* PacemanWatch */" in existing_project.read_bytes():
+    raise SystemExit("The Xcode project includes Watch targets; edit it directly instead of regenerating the phone-only project.")
 if existing_project.exists() and shutil.which("plutil"):
     result = subprocess.run(["plutil", "-convert", "json", "-o", "-", str(existing_project)], capture_output=True, text=True)
     if result.returncode == 0:

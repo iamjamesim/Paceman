@@ -44,9 +44,10 @@ def install(config_path: Path | None = None, *, relay_url: str | None = None):
     if relay_url is not None:
         source_id = Store(ROOT / "data/hub.sqlite3").metadata("source_id")
         previous = json.loads(CONFIG.read_text()) if CONFIG.is_file() else None
-        if (isinstance(previous, dict) and previous.get("relayURL") == relay_url
-                and previous.get("sourceID") == source_id):
-            raw = previous
+        if isinstance(previous, dict) and previous.get("sourceID") == source_id and "relayURL" in previous:
+            existing = RelayConfig.load(previous)
+            raw = {"relayURL": relay_url, "sourceID": source_id,
+                   "credential": existing.credential}
         else:
             raw = {"relayURL": relay_url, "sourceID": source_id,
                    "credential": secrets.token_urlsafe(32)}

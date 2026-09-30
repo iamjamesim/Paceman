@@ -7,6 +7,7 @@ import unittest
 from tests.identity import device
 from service.hub import Store
 from service.push import APNs, Config, Result, Worker, notification, watch_allowance_notification
+from service.relay import APNsRouter
 
 
 class FakeSender:
@@ -425,6 +426,41 @@ class APNsProtocolTests(unittest.TestCase):
         self.pem = self.key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                                           serialization.NoEncryption())
         self.config = Config("ABCDEFGHIJ", "1234567890", "com.example.companion", "development", self.pem)
+
+    def test_relay_routes_each_environment_to_its_own_apns_host(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        (root / "apns.p8").write_bytes(self.pem)
+        base = {"teamID": self.config.team_id, "keyID": self.config.key_id,
+                "topic": self.config.topic, "keyPath": "apns.p8"}
+        path = root / "apns.json"
+        path.write_text(json.dumps({"environments": {
+            environment: {**base, "environment": environment,
+                          "topic": self.config.topic + (".dev" if environment == "development" else "")}
+            for environment in ("development", "production")}}))
+        router = APNsRouter.load(path)
+        self.addCleanup(router.close)
+        requests = []
+        client = self.httpx.Client(transport=self.httpx.MockTransport(
+            lambda request: (requests.append(request), self.httpx.Response(200))[1]))
+        self.addCleanup(client.close)
+        for sender in router.senders.values():
+            sender.client.close()
+            sender.watch_client.close()
+            sender.client = sender.watch_client = client
+        for environment in ("development", "production"):
+            result = router.send({"token": "ab" * 32, "environment": environment},
+                                 {}, {"apns-id": environment}, 100)
+            self.assertEqual(result.status, 200)
+        self.assertEqual([request.url.host for request in requests],
+                         ["api.sandbox.push.apple.com", "api.push.apple.com"])
+        self.assertEqual([request.headers["apns-topic"] for request in requests],
+                         [self.config.topic + ".dev", self.config.topic])
+        path.write_text(json.dumps({"environments": {"production": {
+            **base, "environment": "development"}}}))
+        with self.assertRaises(ValueError):
+            APNsRouter.load(path)
 
     def test_http_request_and_jwt_signature_then_refresh(self):
         calls = []

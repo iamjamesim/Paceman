@@ -4,7 +4,7 @@
 <dict>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.ai.paceman.shared</string>
+		<string>$(APP_GROUP_ID)</string>
 	</array>
 	<key>aps-environment</key>
 	<string>$(APNS_ENVIRONMENT)</string>

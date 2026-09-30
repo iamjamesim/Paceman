@@ -21,6 +21,7 @@ from service.relay_registry import Registry, digest
 class FakeAPNs:
     def __init__(self):
         self.calls = []
+        self.environments = {"development", "production"}
 
     def send(self, device, payload, headers, now):
         self.calls.append(device)
@@ -78,6 +79,39 @@ class PublicRelayTests(unittest.TestCase):
         self.assertEqual(self.call(credential=self.other_key)[0], 401)
         self.assertEqual(self.call(body={**self.request, "sourceID": self.other}, credential=self.other_key)[0], 400)
         self.assertEqual(len(self.sender.calls), 1)
+
+    def test_mixed_environments_share_one_relay_without_cross_send(self):
+        self.assertEqual(self.call("/healthz", "GET"),
+                         (200, {"ok": True, "apnsEnvironments": ["development", "production"]}))
+        self.assertEqual(self.call()[0], 200)
+        debug_client = str(uuid.uuid4())
+        debug_key = secrets.token_urlsafe(32)
+        self.registry.sync_clients(self.source, [
+            {"clientID": self.client_id, "credentialHash": digest(self.phone_key)},
+            {"clientID": debug_client, "credentialHash": digest(debug_key)}])
+        self.registry.bind(self.source, debug_client, "alert", "", self.token, "development")
+        debug_request = {**self.request, "clientID": debug_client, "environment": "development"}
+        self.assertEqual(self.call(body=debug_request)[0], 200)
+        self.assertEqual([call["environment"] for call in self.sender.calls],
+                         ["production", "development"])
+        self.sender.environments = {"production"}
+        self.assertEqual(self.call(body=debug_request),
+                         (503, {"error": "EnvironmentUnavailable"}))
+        self.assertEqual(self.call("/v1/destinations", "PUT", {**self.binding(),
+            "clientID": debug_client, "environment": "development"}, debug_key),
+            (503, {"error": "EnvironmentUnavailable"}))
+        self.assertEqual(self.call()[0], 200)
+
+    def test_one_phone_can_replace_debug_token_with_testflight_token(self):
+        self.registry.bind(self.source, self.client_id, "alert", "", "cd" * 32, "development")
+        self.assertEqual(self.call(body={**self.request, "deviceToken": "cd" * 32,
+                                          "environment": "development"})[0], 200)
+        self.assertEqual(self.call("/v1/destinations", "PUT", self.binding(), self.phone_key)[0], 200)
+        self.assertEqual(self.call()[0], 200)
+        self.assertEqual(self.call(body={**self.request, "deviceToken": "cd" * 32,
+                                          "environment": "development"})[0], 403)
+        self.assertEqual([call["environment"] for call in self.sender.calls],
+                         ["development", "production"])
 
     def test_phone_cannot_bind_another_client(self):
         self.assertEqual(self.call("/v1/destinations", "PUT", {**self.binding(),
@@ -219,9 +253,12 @@ class PublicRelayTests(unittest.TestCase):
                              VENV=venv, SOURCE_PLIST=plist, PLIST=Path(temporary.name) / "absent.plist"),
               patch.object(mac_push.subprocess, "run")):
             mac_push.install(relay_url="https://relay.example")
+            initial_credential = json.loads((private / "apns.json").read_text())["credential"]
+            mac_push.install(relay_url="https://relay-new.example")
         value = json.loads((private / "apns.json").read_text())
         self.assertEqual(value["sourceID"], source_id)
-        self.assertEqual(value["relayURL"], "https://relay.example")
+        self.assertEqual(value["relayURL"], "https://relay-new.example")
+        self.assertEqual(value["credential"], initial_credential)
         self.assertNotIn("keyPath", value)
         self.assertFalse(key.exists())
         self.assertEqual(private.stat().st_mode & 0o777, 0o700)

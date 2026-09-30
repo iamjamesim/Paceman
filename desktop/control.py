@@ -161,7 +161,8 @@ def main():
         elif args.command in ("share-on", "share-off"):
             set_sharing(args.command == "share-on")
         elif args.command == "logs":
-            subprocess.run(["/usr/bin/journalctl", "--user", "-u", SERVICE, "-n", "60", "--no-pager"], check=True)
+            subprocess.run(["/usr/bin/journalctl", "--user", "-u", SERVICE,
+                            "-u", "paceman-push.service", "-n", "60", "--no-pager"], check=True)
         else:
             subprocess.run(["/usr/bin/systemctl", "--user", args.command, SERVICE], check=True, timeout=20)
     except (OSError, ValueError, subprocess.SubprocessError) as error:

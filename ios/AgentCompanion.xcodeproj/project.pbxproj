@@ -1,1091 +1,968 @@
 // !$*UTF8*$!
 {
-"archiveVersion" = 1;
-"classes" = {
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
 
-};
-"objectVersion" = 56;
-"objects" = {
-"D379F6C442F8870FB0E79011" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "AgentCompanionApp.swift";
-"sourceTree" = "<group>";
-};
-"4DD859D1BE648823977083D7" = {
-"isa" = "PBXBuildFile";
-"fileRef" = D379F6C442F8870FB0E79011;
-};
-"54B7D4A440EEDD69EDC2A9FD" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "CompanionHome.swift";
-"sourceTree" = "<group>";
-};
-"18D3411A0012A71F226E0018" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 54B7D4A440EEDD69EDC2A9FD;
-};
-"9942C20CC22E078951EFC383" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "CompanionModel.swift";
-"sourceTree" = "<group>";
-};
-"121B30221447365343E59D83" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 9942C20CC22E078951EFC383;
-};
-"D2E6D3C202B2837FA88267EB" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "DesignComponents.swift";
-"sourceTree" = "<group>";
-};
-"91631E219B023E6346746153" = {
-"isa" = "PBXBuildFile";
-"fileRef" = D2E6D3C202B2837FA88267EB;
-};
-"34730BE9166078328F7B4C2E" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "DeviceScreens.swift";
-"sourceTree" = "<group>";
-};
-"BBB120693469CAA1EDBDA723" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 34730BE9166078328F7B4C2E;
-};
-"475442A98D8C435C13330F69" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "Diagnostics.swift";
-"sourceTree" = "<group>";
-};
-"91C73879A77B8A0965060A4E" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 475442A98D8C435C13330F69;
-};
-"F41016C8973BBFBD9F46452C" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "Models.swift";
-"sourceTree" = "<group>";
-};
-"85823C9B465AC690B032FD72" = {
-"isa" = "PBXBuildFile";
-"fileRef" = F41016C8973BBFBD9F46452C;
-};
-"53A0B480E81CE7792FFECD47" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "MonitoringCoordinator.swift";
-"sourceTree" = "<group>";
-};
-"29080546DA1A6452F190944B" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 53A0B480E81CE7792FFECD47;
-};
-"C22DAF0807D2C4F1D5F67EDD" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "PairingFlow.swift";
-"sourceTree" = "<group>";
-};
-"DD81EE7302209EA266EAB9F5" = {
-"isa" = "PBXBuildFile";
-"fileRef" = C22DAF0807D2C4F1D5F67EDD;
-};
-"5A2527AAAD8BC2B2A1D8145A" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "PhoneWeather.swift";
-"sourceTree" = "<group>";
-};
-"4707535C834FA8A2A5433D13" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 5A2527AAAD8BC2B2A1D8145A;
-};
-"4063D838A906D1FE650B3271" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "PresentationModel.swift";
-"sourceTree" = "<group>";
-};
-"372116223A298916CEC818DD" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 4063D838A906D1FE650B3271;
-};
-"AB9409EC0CB3E53BF8065C91" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "PushNotifications.swift";
-"sourceTree" = "<group>";
-};
-"8DB73A93D61D167ED24E998C" = {
-"isa" = "PBXBuildFile";
-"fileRef" = AB9409EC0CB3E53BF8065C91;
-};
-"5D485593EF3F215E9037FD0C" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "QRScanner.swift";
-"sourceTree" = "<group>";
-};
-"F9A9D3E63B8A94A6BC3C2F1A" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 5D485593EF3F215E9037FD0C;
-};
-"73982D0A3F322D36D27475D5" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "SettingsScreen.swift";
-"sourceTree" = "<group>";
-};
-"6DBE70171119466D95BD38EE" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 73982D0A3F322D36D27475D5;
-};
-"16321946EF3229AC1C8C8EF6" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "SourceClient.swift";
-"sourceTree" = "<group>";
-};
-"09DACEC89D3557D06DF4B92C" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 16321946EF3229AC1C8C8EF6;
-};
-"11D665B35AB2977BAFF84303" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "TransportDiagnostics.swift";
-"sourceTree" = "<group>";
-};
-"7F6E335436455669020C4D87" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 11D665B35AB2977BAFF84303;
-};
-"0A9CDC126C239A459B50BF92" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "WatchLink.swift";
-"sourceTree" = "<group>";
-};
-"8C40CDC910BF7112B1737D7F" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 0A9CDC126C239A459B50BF92;
-};
-"61391C5AF8BA1F3362482CC8" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "WeatherSettings.swift";
-"sourceTree" = "<group>";
-};
-"F61079DCD2F16853DBF4558A" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 61391C5AF8BA1F3362482CC8;
-};
-"410A10C0F2E22FD09B3221CF" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "../Shared/CompanionTheme.swift";
-"sourceTree" = "<group>";
-};
-"9516029B56CA47C00704B550" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 410A10C0F2E22FD09B3221CF;
-};
-"A8C8DF105E4285CAFDDFCB64" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "../Shared/MonitoringActivity.swift";
-"sourceTree" = "<group>";
-};
-"3E6377140CCCB7EC63582076" = {
-"isa" = "PBXBuildFile";
-"fileRef" = A8C8DF105E4285CAFDDFCB64;
-};
-"74DC4E2181E4A50618ECF63E" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "../Shared/PacemanMark.swift";
-"sourceTree" = "<group>";
-};
-"A57CCBC9342DF7F35A334767" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 74DC4E2181E4A50618ECF63E;
-};
-"2FE30F3CCFF8D70208F26CEB" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "folder.assetcatalog";
-"path" = "../Resources/Assets.xcassets";
-"sourceTree" = "<group>";
-};
-"EACE2D07DA83C10B6636B3DF" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 2FE30F3CCFF8D70208F26CEB;
-};
-"533E91AE7A7B11C6F2BE02C4" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "file";
-"path" = "../Resources/JetBrainsMono-OFL.txt";
-"sourceTree" = "<group>";
-};
-"3A3E911E297CAD2837216AA2" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 533E91AE7A7B11C6F2BE02C4;
-};
-"0EC3990017A5B1462F8B45ED" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "file";
-"path" = "../Resources/JetBrainsMono-Regular.ttf";
-"sourceTree" = "<group>";
-};
-"5324DEFFDA216314A48C0920" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 0EC3990017A5B1462F8B45ED;
-};
-"4E4A1F447E8A84C824FABEA4" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "file";
-"path" = "../Resources/JetBrainsMono-SemiBold.ttf";
-"sourceTree" = "<group>";
-};
-"0C5EDA3F3E02E44F4ED21750" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 4E4A1F447E8A84C824FABEA4;
-};
-"D9F51782C2ABC2C62BDAB1CB" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "file";
-"path" = "../Resources/MaterialDesignIcons-LICENSE.txt";
-"sourceTree" = "<group>";
-};
-"A7820C84F1E168259E35C6E2" = {
-"isa" = "PBXBuildFile";
-"fileRef" = D9F51782C2ABC2C62BDAB1CB;
-};
-"710F65DAD28A4C9F9623C4A1" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "text";
-"path" = "../Resources/ThemeLicenses.txt";
-"sourceTree" = "<group>";
-};
-"78814487621842B495499ED4" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 710F65DAD28A4C9F9623C4A1;
-};
-"F0A000000000000000000001" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "audio.wav"; "path" = "../Resources/Sounds/PacemanInput.wav"; "sourceTree" = "<group>"; };
-"F0A000000000000000000002" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "audio.wav"; "path" = "../Resources/Sounds/PacemanFinished.wav"; "sourceTree" = "<group>"; };
-"F0A000000000000000000003" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "audio.wav"; "path" = "../Resources/Sounds/PacemanFailed.wav"; "sourceTree" = "<group>"; };
-"F0A000000000000000000007" = { "isa" = "PBXFileReference"; "lastKnownFileType" = "audio.wav"; "path" = "../Resources/Sounds/PacemanWorking.wav"; "sourceTree" = "<group>"; };
-"F0A000000000000000000004" = { "isa" = "PBXBuildFile"; "fileRef" = F0A000000000000000000001; };
-"F0A000000000000000000005" = { "isa" = "PBXBuildFile"; "fileRef" = F0A000000000000000000002; };
-"F0A000000000000000000006" = { "isa" = "PBXBuildFile"; "fileRef" = F0A000000000000000000003; };
-"F0A000000000000000000008" = { "isa" = "PBXBuildFile"; "fileRef" = F0A000000000000000000007; };
-"BADFBA3833E9F76BE403D636" = {
-"isa" = "PBXGroup";
-"children" = (D379F6C442F8870FB0E79011, 54B7D4A440EEDD69EDC2A9FD, 9942C20CC22E078951EFC383, D2E6D3C202B2837FA88267EB, 34730BE9166078328F7B4C2E, 475442A98D8C435C13330F69, F41016C8973BBFBD9F46452C, 53A0B480E81CE7792FFECD47, C22DAF0807D2C4F1D5F67EDD, 5A2527AAAD8BC2B2A1D8145A, 4063D838A906D1FE650B3271, AB9409EC0CB3E53BF8065C91, 5D485593EF3F215E9037FD0C, 73982D0A3F322D36D27475D5, 16321946EF3229AC1C8C8EF6, 11D665B35AB2977BAFF84303, 0A9CDC126C239A459B50BF92, 61391C5AF8BA1F3362482CC8, AAA000000000000000000001, AAA000000000000000000002, 410A10C0F2E22FD09B3221CF, A8C8DF105E4285CAFDDFCB64, 74DC4E2181E4A50618ECF63E, 2FE30F3CCFF8D70208F26CEB, 533E91AE7A7B11C6F2BE02C4, 0EC3990017A5B1462F8B45ED, 4E4A1F447E8A84C824FABEA4, D9F51782C2ABC2C62BDAB1CB, 710F65DAD28A4C9F9623C4A1, F0A000000000000000000001, F0A000000000000000000002, F0A000000000000000000003, F0A000000000000000000007);
-"path" = "AgentCompanion";
-"sourceTree" = "<group>";
-};
-"AEB6B64403AE524DA8E19EB9" = {
-"isa" = "PBXSourcesBuildPhase";
-"buildActionMask" = 2147483647;
-"files" = (4DD859D1BE648823977083D7, 18D3411A0012A71F226E0018, 121B30221447365343E59D83, 91631E219B023E6346746153, BBB120693469CAA1EDBDA723, 91C73879A77B8A0965060A4E, 85823C9B465AC690B032FD72, 29080546DA1A6452F190944B, DD81EE7302209EA266EAB9F5, 4707535C834FA8A2A5433D13, 372116223A298916CEC818DD, 8DB73A93D61D167ED24E998C, F9A9D3E63B8A94A6BC3C2F1A, 6DBE70171119466D95BD38EE, 09DACEC89D3557D06DF4B92C, 7F6E335436455669020C4D87, 8C40CDC910BF7112B1737D7F, F61079DCD2F16853DBF4558A, BBB000000000000000000001, BBB000000000000000000002, 9516029B56CA47C00704B550, 3E6377140CCCB7EC63582076, A57CCBC9342DF7F35A334767);
-"runOnlyForDeploymentPostprocessing" = 0;
-};
-"77C2218D3A890C109504E1BC" = {
-"isa" = "PBXFrameworksBuildPhase";
-"buildActionMask" = 2147483647;
-"files" = ();
-"runOnlyForDeploymentPostprocessing" = 0;
-};
-"F4E87BF18452C5C4BBA7E306" = {
-"isa" = "PBXResourcesBuildPhase";
-"buildActionMask" = 2147483647;
-"files" = (EACE2D07DA83C10B6636B3DF, 3A3E911E297CAD2837216AA2, 5324DEFFDA216314A48C0920, 0C5EDA3F3E02E44F4ED21750, A7820C84F1E168259E35C6E2, 78814487621842B495499ED4, F0A000000000000000000004, F0A000000000000000000005, F0A000000000000000000006, F0A000000000000000000008);
-"runOnlyForDeploymentPostprocessing" = 0;
-};
-"AF2F81A8C99FE38B411B7DC4" = {
-"isa" = "PBXFileReference";
-"explicitFileType" = "wrapper.application";
-"includeInIndex" = 0;
-"path" = "AgentCompanion.app";
-"sourceTree" = "BUILT_PRODUCTS_DIR";
-};
-"0FE453910DCE5F42D8B54BB1" = {
-"isa" = "XCBuildConfiguration";
-"buildSettings" = {
-"PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app";
-"SWIFT_VERSION" = "5.0";
-"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
-"TARGETED_DEVICE_FAMILY" = "1";
-"CODE_SIGN_STYLE" = "Automatic";
-"SDKROOT" = "iphoneos";
-"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
-"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
-"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
-"ENABLE_TESTABILITY" = "YES";
-"LD_RUNPATH_SEARCH_PATHS" = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks");
-"GENERATE_INFOPLIST_FILE" = "NO";
-"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
-"INFOPLIST_FILE" = "AgentCompanion/Info.plist";
-"APNS_ENVIRONMENT" = "development";
-"CODE_SIGN_ENTITLEMENTS" = "AgentCompanion/AgentCompanion.entitlements";
-};
-"name" = "Debug";
-};
-"BDAFE18FEB8D1E2F9A70E4E2" = {
-"isa" = "XCBuildConfiguration";
-"buildSettings" = {
-"PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app";
-"SWIFT_VERSION" = "5.0";
-"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
-"TARGETED_DEVICE_FAMILY" = "1";
-"CODE_SIGN_STYLE" = "Automatic";
-"SDKROOT" = "iphoneos";
-"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
-"SWIFT_OPTIMIZATION_LEVEL" = "-O";
-"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "";
-"ENABLE_TESTABILITY" = "NO";
-"LD_RUNPATH_SEARCH_PATHS" = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks");
-"GENERATE_INFOPLIST_FILE" = "NO";
-"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
-"INFOPLIST_FILE" = "AgentCompanion/Info.plist";
-"APNS_ENVIRONMENT" = "production";
-"CODE_SIGN_ENTITLEMENTS" = "AgentCompanion/AgentCompanion.entitlements";
-};
-"name" = "Release";
-};
-"FEDCF411EC66402A6C4BD28B" = {
-"isa" = "XCConfigurationList";
-"buildConfigurations" = (0FE453910DCE5F42D8B54BB1, BDAFE18FEB8D1E2F9A70E4E2);
-"defaultConfigurationIsVisible" = 0;
-"defaultConfigurationName" = "Release";
-};
-"E7BE5E2673F66E8136F94E4A" = {
-"isa" = "PBXContainerItemProxy";
-"containerPortal" = 244210E48437B6556980A702;
-"proxyType" = 1;
-"remoteGlobalIDString" = B742666B0E1B3E7999894166;
-"remoteInfo" = "AgentCompanionWidgets";
-};
-"8A241B4F6D3225C4C0FCA8DF" = {
-"isa" = "PBXTargetDependency";
-"target" = B742666B0E1B3E7999894166;
-"targetProxy" = E7BE5E2673F66E8136F94E4A;
-};
-"0BF3A498A71EE05330E5B618" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 89EFB625009FFE549BBA2B4E;
-"settings" = {
-"ATTRIBUTES" = ("RemoveHeadersOnCopy");
-};
-};
-"0B4F7E9CF2396F31E256630C" = {
-"isa" = "PBXCopyFilesBuildPhase";
-"buildActionMask" = 2147483647;
-"dstPath" = "";
-"dstSubfolderSpec" = 13;
-"files" = (0BF3A498A71EE05330E5B618);
-"name" = "Embed App Extensions";
-"runOnlyForDeploymentPostprocessing" = 0;
-};
-"CBC5C0F42E88ADCFC3E10095" = {
-"isa" = "PBXNativeTarget";
-"buildConfigurationList" = FEDCF411EC66402A6C4BD28B;
-"buildPhases" = (AEB6B64403AE524DA8E19EB9, 77C2218D3A890C109504E1BC, F4E87BF18452C5C4BBA7E306, 0B4F7E9CF2396F31E256630C, DDD000000000000000000008);
-"buildRules" = ();
-"dependencies" = (8A241B4F6D3225C4C0FCA8DF, FFD000000000000000000001);
-"name" = "AgentCompanion";
-"productName" = "AgentCompanion";
-"productReference" = AF2F81A8C99FE38B411B7DC4;
-"productType" = "com.apple.product-type.application";
-};
-"77C4A027998D3821B065079C" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "ProtocolTests.swift";
-"sourceTree" = "<group>";
-};
-"DFEE64A8F305244BF72F5E2B" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 77C4A027998D3821B065079C;
-};
-"4A3E199B648B7258935C2F43" = {
-"isa" = "PBXGroup";
-"children" = (77C4A027998D3821B065079C);
-"path" = "AgentCompanionTests";
-"sourceTree" = "<group>";
-};
-"969539559FE549C0BEAEA0A0" = {
-"isa" = "PBXSourcesBuildPhase";
-"buildActionMask" = 2147483647;
-"files" = (DFEE64A8F305244BF72F5E2B);
-"runOnlyForDeploymentPostprocessing" = 0;
-};
-"07D142371282BC83F5CE7218" = {
-"isa" = "PBXFrameworksBuildPhase";
-"buildActionMask" = 2147483647;
-"files" = ();
-"runOnlyForDeploymentPostprocessing" = 0;
-};
-"E34CFFDE1052F15663E1861C" = {
-"isa" = "PBXResourcesBuildPhase";
-"buildActionMask" = 2147483647;
-"files" = ();
-"runOnlyForDeploymentPostprocessing" = 0;
-};
-"67EBBA090ECAA1A7655F7E26" = {
-"isa" = "PBXFileReference";
-"explicitFileType" = "wrapper.cfbundle";
-"includeInIndex" = 0;
-"path" = "AgentCompanionTests.xctest";
-"sourceTree" = "BUILT_PRODUCTS_DIR";
-};
-"1913E5D7DE1B004F42627B1D" = {
-"isa" = "XCBuildConfiguration";
-"buildSettings" = {
-"PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.tests";
-"SWIFT_VERSION" = "5.0";
-"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
-"TARGETED_DEVICE_FAMILY" = "1";
-"CODE_SIGN_STYLE" = "Automatic";
-"SDKROOT" = "iphoneos";
-"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
-"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
-"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
-"ENABLE_TESTABILITY" = "YES";
-"LD_RUNPATH_SEARCH_PATHS" = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks");
-"GENERATE_INFOPLIST_FILE" = "YES";
-"TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/AgentCompanion.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AgentCompanion";
-"BUNDLE_LOADER" = "$(TEST_HOST)";
-};
-"name" = "Debug";
-};
-"235897D93508BF2748F50EED" = {
-"isa" = "XCBuildConfiguration";
-"buildSettings" = {
-"PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.tests";
-"SWIFT_VERSION" = "5.0";
-"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
-"TARGETED_DEVICE_FAMILY" = "1";
-"CODE_SIGN_STYLE" = "Automatic";
-"SDKROOT" = "iphoneos";
-"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
-"SWIFT_OPTIMIZATION_LEVEL" = "-O";
-"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "";
-"ENABLE_TESTABILITY" = "NO";
-"LD_RUNPATH_SEARCH_PATHS" = ("$(inherited)", "@executable_path/Frameworks", "@loader_path/Frameworks");
-"GENERATE_INFOPLIST_FILE" = "YES";
-"TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/AgentCompanion.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AgentCompanion";
-"BUNDLE_LOADER" = "$(TEST_HOST)";
-};
-"name" = "Release";
-};
-"8F9C84A84420B7A370BC72C6" = {
-"isa" = "XCConfigurationList";
-"buildConfigurations" = (1913E5D7DE1B004F42627B1D, 235897D93508BF2748F50EED);
-"defaultConfigurationIsVisible" = 0;
-"defaultConfigurationName" = "Release";
-};
-"16F03F28DD94BED5A53591BC" = {
-"isa" = "PBXContainerItemProxy";
-"containerPortal" = 244210E48437B6556980A702;
-"proxyType" = 1;
-"remoteGlobalIDString" = CBC5C0F42E88ADCFC3E10095;
-"remoteInfo" = "AgentCompanion";
-};
-"CA50F09BF5737386B1A72DA0" = {
-"isa" = "PBXTargetDependency";
-"target" = CBC5C0F42E88ADCFC3E10095;
-"targetProxy" = 16F03F28DD94BED5A53591BC;
-};
-"64034EAF17D1149159795A3B" = {
-"isa" = "PBXNativeTarget";
-"buildConfigurationList" = 8F9C84A84420B7A370BC72C6;
-"buildPhases" = (969539559FE549C0BEAEA0A0, 07D142371282BC83F5CE7218, E34CFFDE1052F15663E1861C);
-"buildRules" = ();
-"dependencies" = (CA50F09BF5737386B1A72DA0);
-"name" = "AgentCompanionTests";
-"productName" = "AgentCompanionTests";
-"productReference" = 67EBBA090ECAA1A7655F7E26;
-"productType" = "com.apple.product-type.bundle.unit-test";
-};
-"031E47700CF4F7D578075936" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "AgentCompanionWidgets.swift";
-"sourceTree" = "<group>";
-};
-"930B8C267D07406166FACB21" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 031E47700CF4F7D578075936;
-};
-"89115BD5C6DEF9BC618C29D1" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "MonitoringLiveActivity.swift";
-"sourceTree" = "<group>";
-};
-"BE63D1262DA3508908FBDD80" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 89115BD5C6DEF9BC618C29D1;
-};
-"D8D53A8619584907B80159C0" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "MonitoringWatchCard.swift";
-"sourceTree" = "<group>";
-};
-"28491F44D7954F10A7811A27" = {
-"isa" = "PBXBuildFile";
-"fileRef" = D8D53A8619584907B80159C0;
-};
-"A0A0DB42DFD68EEE9C6F1ACA" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "../Shared/CompanionTheme.swift";
-"sourceTree" = "<group>";
-};
-"F2E4C04882C6027046BD5713" = {
-"isa" = "PBXBuildFile";
-"fileRef" = A0A0DB42DFD68EEE9C6F1ACA;
-};
-"0EB40FFAB4E1EF97F47D1EC3" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "../Shared/MonitoringActivity.swift";
-"sourceTree" = "<group>";
-};
-"18AA2CC889D4BFF46EBE99FC" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 0EB40FFAB4E1EF97F47D1EC3;
-};
-"D17A5954249382D67D099D76" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"path" = "../Shared/PacemanMark.swift";
-"sourceTree" = "<group>";
-};
-"6115E8A8D215A5DC9742A9BD" = {
-"isa" = "PBXBuildFile";
-"fileRef" = D17A5954249382D67D099D76;
-};
-"826CA7BC2742CA11425402B9" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "folder.assetcatalog";
-"path" = "../Resources/Assets.xcassets";
-"sourceTree" = "<group>";
-};
-"29AE955B42282A2E03467FCE" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 826CA7BC2742CA11425402B9;
-};
-"DFD86C43387ED72496B19CC2" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "file";
-"path" = "../Resources/JetBrainsMono-OFL.txt";
-"sourceTree" = "<group>";
-};
-"90437D362B45AF0565B6B345" = {
-"isa" = "PBXBuildFile";
-"fileRef" = DFD86C43387ED72496B19CC2;
-};
-"4B4246EE710BDB6A05D42EFD" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "file";
-"path" = "../Resources/JetBrainsMono-Regular.ttf";
-"sourceTree" = "<group>";
-};
-"243A18A386F4C92DE35A549A" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 4B4246EE710BDB6A05D42EFD;
-};
-"9DF0B057999A9285C70D53A2" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "file";
-"path" = "../Resources/JetBrainsMono-SemiBold.ttf";
-"sourceTree" = "<group>";
-};
-"A5DB70B13AB5A206A42216A5" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 9DF0B057999A9285C70D53A2;
-};
-"18AC41BDE050EFD68C333A1B" = {
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "file";
-"path" = "../Resources/MaterialDesignIcons-LICENSE.txt";
-"sourceTree" = "<group>";
-};
-"37CCBD182B2F2B93AC731618" = {
-"isa" = "PBXBuildFile";
-"fileRef" = 18AC41BDE050EFD68C333A1B;
-};
-"F144C871AA2096B5086F0709" = {
-"isa" = "PBXGroup";
-"children" = (031E47700CF4F7D578075936, 89115BD5C6DEF9BC618C29D1, D8D53A8619584907B80159C0, A0A0DB42DFD68EEE9C6F1ACA, 0EB40FFAB4E1EF97F47D1EC3, D17A5954249382D67D099D76, 826CA7BC2742CA11425402B9, DFD86C43387ED72496B19CC2, 4B4246EE710BDB6A05D42EFD, 9DF0B057999A9285C70D53A2, 18AC41BDE050EFD68C333A1B);
-"path" = "AgentCompanionWidgets";
-"sourceTree" = "<group>";
-};
-"1F66AA38F15CB7A77FAD348C" = {
-"isa" = "PBXSourcesBuildPhase";
-"buildActionMask" = 2147483647;
-"files" = (930B8C267D07406166FACB21, BE63D1262DA3508908FBDD80, 28491F44D7954F10A7811A27, F2E4C04882C6027046BD5713, 18AA2CC889D4BFF46EBE99FC, 6115E8A8D215A5DC9742A9BD);
-"runOnlyForDeploymentPostprocessing" = 0;
-};
-"E31351353393DDC7D7121737" = {
-"isa" = "PBXFrameworksBuildPhase";
-"buildActionMask" = 2147483647;
-"files" = ();
-"runOnlyForDeploymentPostprocessing" = 0;
-};
-"462BF504FF57D5C560C44DBD" = {
-"isa" = "PBXResourcesBuildPhase";
-"buildActionMask" = 2147483647;
-"files" = (29AE955B42282A2E03467FCE, 90437D362B45AF0565B6B345, 243A18A386F4C92DE35A549A, A5DB70B13AB5A206A42216A5, 37CCBD182B2F2B93AC731618);
-"runOnlyForDeploymentPostprocessing" = 0;
-};
-"89EFB625009FFE549BBA2B4E" = {
-"isa" = "PBXFileReference";
-"explicitFileType" = "wrapper.app-extension";
-"includeInIndex" = 0;
-"path" = "AgentCompanionWidgets.appex";
-"sourceTree" = "BUILT_PRODUCTS_DIR";
-};
-"B1127F7F88A84D322A8B37B0" = {
-"isa" = "XCBuildConfiguration";
-"buildSettings" = {
-"PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.widgets";
-"SWIFT_VERSION" = "5.0";
-"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
-"TARGETED_DEVICE_FAMILY" = "1";
-"CODE_SIGN_STYLE" = "Automatic";
-"SDKROOT" = "iphoneos";
-"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
-"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
-"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
-"ENABLE_TESTABILITY" = "YES";
-"LD_RUNPATH_SEARCH_PATHS" = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
-"GENERATE_INFOPLIST_FILE" = "NO";
-"INFOPLIST_FILE" = "AgentCompanionWidgets/Info.plist";
-"CODE_SIGN_ENTITLEMENTS" = "AgentCompanionWidgets/AgentCompanionWidgets.entitlements";
-"APPLICATION_EXTENSION_API_ONLY" = "YES";
-"SKIP_INSTALL" = "YES";
-};
-"name" = "Debug";
-};
-"058484F8038C94045CD137DC" = {
-"isa" = "XCBuildConfiguration";
-"buildSettings" = {
-"PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.widgets";
-"SWIFT_VERSION" = "5.0";
-"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
-"TARGETED_DEVICE_FAMILY" = "1";
-"CODE_SIGN_STYLE" = "Automatic";
-"SDKROOT" = "iphoneos";
-"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
-"SWIFT_OPTIMIZATION_LEVEL" = "-O";
-"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "";
-"ENABLE_TESTABILITY" = "NO";
-"LD_RUNPATH_SEARCH_PATHS" = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks");
-"GENERATE_INFOPLIST_FILE" = "NO";
-"INFOPLIST_FILE" = "AgentCompanionWidgets/Info.plist";
-"CODE_SIGN_ENTITLEMENTS" = "AgentCompanionWidgets/AgentCompanionWidgets.entitlements";
-"APPLICATION_EXTENSION_API_ONLY" = "YES";
-"SKIP_INSTALL" = "YES";
-};
-"name" = "Release";
-};
-"D37E352D67DFF2BA1E3215D0" = {
-"isa" = "XCConfigurationList";
-"buildConfigurations" = (B1127F7F88A84D322A8B37B0, 058484F8038C94045CD137DC);
-"defaultConfigurationIsVisible" = 0;
-"defaultConfigurationName" = "Release";
-};
-"B742666B0E1B3E7999894166" = {
-"isa" = "PBXNativeTarget";
-"buildConfigurationList" = D37E352D67DFF2BA1E3215D0;
-"buildPhases" = (1F66AA38F15CB7A77FAD348C, E31351353393DDC7D7121737, 462BF504FF57D5C560C44DBD);
-"buildRules" = ();
-"dependencies" = ();
-"name" = "AgentCompanionWidgets";
-"productName" = "AgentCompanionWidgets";
-"productReference" = 89EFB625009FFE549BBA2B4E;
-"productType" = "com.apple.product-type.app-extension";
-};
-"0A3E27B8CA818264D75C8D81" = {
-"isa" = "PBXGroup";
-"children" = (AF2F81A8C99FE38B411B7DC4, 67EBBA090ECAA1A7655F7E26, 89EFB625009FFE549BBA2B4E, AAA000000000000000000009, AAA00000000000000000000A);
-"name" = "Products";
-"sourceTree" = "<group>";
-};
-"0D6E4079E36703EBD37C0072" = {
-"isa" = "PBXGroup";
-"children" = (BADFBA3833E9F76BE403D636, 4A3E199B648B7258935C2F43, F144C871AA2096B5086F0709, CCC000000000000000000001, CCC000000000000000000002, 0A3E27B8CA818264D75C8D81);
-"sourceTree" = "<group>";
-};
-"09AA38CEF3EA53936A20C858" = {
-"isa" = "XCBuildConfiguration";
-"name" = "Debug";
-"buildSettings" = {
-"CLANG_ENABLE_MODULES" = "YES";
-"SWIFT_STRICT_CONCURRENCY" = "minimal";
-"DEBUG_INFORMATION_FORMAT" = "dwarf";
-"ONLY_ACTIVE_ARCH" = "YES";
-};
-};
-"2C51B24F1BD0E37CCD3A85CD" = {
-"isa" = "XCBuildConfiguration";
-"name" = "Release";
-"buildSettings" = {
-"CLANG_ENABLE_MODULES" = "YES";
-"SWIFT_STRICT_CONCURRENCY" = "minimal";
-"DEBUG_INFORMATION_FORMAT" = "dwarf";
-"ONLY_ACTIVE_ARCH" = "NO";
-};
-};
-"4F9780D05AFB226691EE6E8A" = {
-"isa" = "XCConfigurationList";
-"buildConfigurations" = (09AA38CEF3EA53936A20C858, 2C51B24F1BD0E37CCD3A85CD);
-"defaultConfigurationIsVisible" = 0;
-"defaultConfigurationName" = "Release";
-};
-"244210E48437B6556980A702" = {
-"isa" = "PBXProject";
-"attributes" = {
-"LastUpgradeCheck" = "1600";
-"BuildIndependentTargetsInParallel" = "YES";
-};
-"buildConfigurationList" = 4F9780D05AFB226691EE6E8A;
-"compatibilityVersion" = "Xcode 14.0";
-"developmentRegion" = "en";
-"hasScannedForEncodings" = 0;
-"knownRegions" = ("en", "Base");
-"mainGroup" = 0D6E4079E36703EBD37C0072;
-"productRefGroup" = 0A3E27B8CA818264D75C8D81;
-"projectDirPath" = "";
-"projectRoot" = "";
-"targets" = (CBC5C0F42E88ADCFC3E10095, 64034EAF17D1149159795A3B, B742666B0E1B3E7999894166, FFF000000000000000000001, FFF000000000000000000002);
-};
-"AAA000000000000000000001" = {
-"path" = "AppleWatchAllowanceBridge.swift";
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"sourceTree" = "<group>";
-};
-"AAA000000000000000000002" = {
-"path" = "../Shared/WatchAllowanceSnapshot.swift";
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"sourceTree" = "<group>";
-};
-"AAA000000000000000000003" = {
-"path" = "PacemanWatchApp.swift";
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"sourceTree" = "<group>";
-};
-"AAA000000000000000000004" = {
-"path" = "../Shared/WatchAllowanceSnapshot.swift";
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"sourceTree" = "<group>";
-};
-"AAA000000000000000000007" = {
-"path" = "AllowanceComplication.swift";
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"sourceTree" = "<group>";
-};
-"AAA000000000000000000008" = {
-"path" = "../Shared/WatchAllowanceSnapshot.swift";
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "sourcecode.swift";
-"sourceTree" = "<group>";
-};
-"AAA000000000000000000009" = {
-"path" = "PacemanWatch.app";
-"isa" = "PBXFileReference";
-"includeInIndex" = "0";
-"explicitFileType" = "wrapper.application";
-"sourceTree" = "BUILT_PRODUCTS_DIR";
-};
-"AAA00000000000000000000A" = {
-"path" = "PacemanWatchWidgets.appex";
-"isa" = "PBXFileReference";
-"includeInIndex" = "0";
-"explicitFileType" = "wrapper.app-extension";
-"sourceTree" = "BUILT_PRODUCTS_DIR";
-};
-"AAA00000000000000000000B" = {
-"path" = "Assets.xcassets";
-"isa" = "PBXFileReference";
-"lastKnownFileType" = "folder.assetcatalog";
-"sourceTree" = "<group>";
-};
-"BBB000000000000000000001" = {
-"isa" = "PBXBuildFile";
-"fileRef" = AAA000000000000000000001;
-};
-"BBB000000000000000000002" = {
-"isa" = "PBXBuildFile";
-"fileRef" = AAA000000000000000000002;
-};
-"BBB000000000000000000003" = {
-"isa" = "PBXBuildFile";
-"fileRef" = AAA000000000000000000003;
-};
-"BBB000000000000000000004" = {
-"isa" = "PBXBuildFile";
-"fileRef" = AAA000000000000000000004;
-};
-"BBB000000000000000000005" = {
-"isa" = "PBXBuildFile";
-"fileRef" = AAA000000000000000000007;
-};
-"BBB000000000000000000006" = {
-"isa" = "PBXBuildFile";
-"fileRef" = AAA000000000000000000008;
-};
-"BBB000000000000000000007" = {
-"isa" = "PBXBuildFile";
-"fileRef" = AAA000000000000000000009;
-"settings" = {
-"ATTRIBUTES" = ("RemoveHeadersOnCopy");
-};
-};
-"BBB000000000000000000008" = {
-"isa" = "PBXBuildFile";
-"fileRef" = AAA00000000000000000000A;
-"settings" = {
-"ATTRIBUTES" = ("RemoveHeadersOnCopy");
-};
-};
-"BBB000000000000000000009" = {
-"isa" = "PBXBuildFile";
-"fileRef" = AAA00000000000000000000B;
-};
-"CCC000000000000000000001" = {
-"path" = "PacemanWatch";
-"isa" = "PBXGroup";
-"children" = (AAA000000000000000000003, AAA000000000000000000004, AAA00000000000000000000B);
-"sourceTree" = "<group>";
-};
-"CCC000000000000000000002" = {
-"path" = "PacemanWatchWidgets";
-"isa" = "PBXGroup";
-"children" = (AAA000000000000000000007, AAA000000000000000000008);
-"sourceTree" = "<group>";
-};
-"DDD000000000000000000001" = {
-"isa" = "PBXSourcesBuildPhase";
-"buildActionMask" = "2147483647";
-"files" = (BBB000000000000000000003, BBB000000000000000000004);
-"runOnlyForDeploymentPostprocessing" = "0";
-};
-"DDD000000000000000000002" = {
-"isa" = "PBXFrameworksBuildPhase";
-"buildActionMask" = "2147483647";
-"files" = ();
-"runOnlyForDeploymentPostprocessing" = "0";
-};
-"DDD000000000000000000003" = {
-"isa" = "PBXResourcesBuildPhase";
-"buildActionMask" = "2147483647";
-"files" = (BBB000000000000000000009);
-"runOnlyForDeploymentPostprocessing" = "0";
-};
-"DDD000000000000000000004" = {
-"buildActionMask" = "2147483647";
-"dstSubfolderSpec" = "13";
-"isa" = "PBXCopyFilesBuildPhase";
-"runOnlyForDeploymentPostprocessing" = "0";
-"dstPath" = "";
-"files" = (BBB000000000000000000008);
-"name" = "Embed Watch Widgets";
-};
-"DDD000000000000000000005" = {
-"isa" = "PBXSourcesBuildPhase";
-"buildActionMask" = "2147483647";
-"files" = (BBB000000000000000000005, BBB000000000000000000006);
-"runOnlyForDeploymentPostprocessing" = "0";
-};
-"DDD000000000000000000006" = {
-"isa" = "PBXFrameworksBuildPhase";
-"buildActionMask" = "2147483647";
-"files" = ();
-"runOnlyForDeploymentPostprocessing" = "0";
-};
-"DDD000000000000000000007" = {
-"isa" = "PBXResourcesBuildPhase";
-"buildActionMask" = "2147483647";
-"files" = ();
-"runOnlyForDeploymentPostprocessing" = "0";
-};
-"DDD000000000000000000008" = {
-"buildActionMask" = "2147483647";
-"dstSubfolderSpec" = "1";
-"isa" = "PBXCopyFilesBuildPhase";
-"runOnlyForDeploymentPostprocessing" = "0";
-"dstPath" = "Watch";
-"files" = (BBB000000000000000000007);
-"name" = "Embed Watch Content";
-};
-"EEE000000000000000000001" = {
-"isa" = "XCBuildConfiguration";
-"buildSettings" = {
-"APNS_ENVIRONMENT" = "development";
-"WATCHOS_DEPLOYMENT_TARGET" = "11.0";
-"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
-"TARGETED_DEVICE_FAMILY" = "4";
-"INFOPLIST_FILE" = "PacemanWatch/Info.plist";
-"SKIP_INSTALL" = "YES";
-"ENABLE_TESTABILITY" = "YES";
-"GENERATE_INFOPLIST_FILE" = "NO";
-"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
-"SUPPORTED_PLATFORMS" = "watchos watchsimulator";
-"CODE_SIGN_ENTITLEMENTS" = "PacemanWatch/PacemanWatch.entitlements";
-"SDKROOT" = "watchos";
-"CODE_SIGN_STYLE" = "Automatic";
-"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
-"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.watchkitapp";
-"PRODUCT_NAME" = "$(TARGET_NAME)";
-"SWIFT_VERSION" = "5.0";
-};
-"name" = "Debug";
-};
-"EEE000000000000000000002" = {
-"isa" = "XCBuildConfiguration";
-"buildSettings" = {
-"APNS_ENVIRONMENT" = "production";
-"WATCHOS_DEPLOYMENT_TARGET" = "11.0";
-"TARGETED_DEVICE_FAMILY" = "4";
-"INFOPLIST_FILE" = "PacemanWatch/Info.plist";
-"SKIP_INSTALL" = "YES";
-"ENABLE_TESTABILITY" = "NO";
-"GENERATE_INFOPLIST_FILE" = "NO";
-"SWIFT_OPTIMIZATION_LEVEL" = "-O";
-"SUPPORTED_PLATFORMS" = "watchos watchsimulator";
-"CODE_SIGN_ENTITLEMENTS" = "PacemanWatch/PacemanWatch.entitlements";
-"SDKROOT" = "watchos";
-"CODE_SIGN_STYLE" = "Automatic";
-"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
-"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.watchkitapp";
-"PRODUCT_NAME" = "$(TARGET_NAME)";
-"SWIFT_VERSION" = "5.0";
-};
-"name" = "Release";
-};
-"EEE000000000000000000003" = {
-"isa" = "XCConfigurationList";
-"defaultConfigurationIsVisible" = "0";
-"defaultConfigurationName" = "Release";
-"buildConfigurations" = (EEE000000000000000000001, EEE000000000000000000002);
-};
-"EEE000000000000000000004" = {
-"isa" = "XCBuildConfiguration";
-"buildSettings" = {
-"APPLICATION_EXTENSION_API_ONLY" = "YES";
-"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
-"TARGETED_DEVICE_FAMILY" = "4";
-"INFOPLIST_FILE" = "PacemanWatchWidgets/Info.plist";
-"SKIP_INSTALL" = "YES";
-"ENABLE_TESTABILITY" = "YES";
-"GENERATE_INFOPLIST_FILE" = "NO";
-"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
-"SUPPORTED_PLATFORMS" = "watchos watchsimulator";
-"CODE_SIGN_ENTITLEMENTS" = "PacemanWatchWidgets/PacemanWatchWidgets.entitlements";
-"SDKROOT" = "watchos";
-"CODE_SIGN_STYLE" = "Automatic";
-"PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.watchkitapp.widgets";
-"SWIFT_VERSION" = "5.0";
-"WATCHOS_DEPLOYMENT_TARGET" = "11.0";
-};
-"name" = "Debug";
-};
-"EEE000000000000000000005" = {
-"isa" = "XCBuildConfiguration";
-"buildSettings" = {
-"APPLICATION_EXTENSION_API_ONLY" = "YES";
-"TARGETED_DEVICE_FAMILY" = "4";
-"INFOPLIST_FILE" = "PacemanWatchWidgets/Info.plist";
-"SKIP_INSTALL" = "YES";
-"ENABLE_TESTABILITY" = "NO";
-"GENERATE_INFOPLIST_FILE" = "NO";
-"SWIFT_OPTIMIZATION_LEVEL" = "-O";
-"SUPPORTED_PLATFORMS" = "watchos watchsimulator";
-"CODE_SIGN_ENTITLEMENTS" = "PacemanWatchWidgets/PacemanWatchWidgets.entitlements";
-"SDKROOT" = "watchos";
-"CODE_SIGN_STYLE" = "Automatic";
-"PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.watchkitapp.widgets";
-"SWIFT_VERSION" = "5.0";
-"WATCHOS_DEPLOYMENT_TARGET" = "11.0";
-};
-"name" = "Release";
-};
-"EEE000000000000000000006" = {
-"isa" = "XCConfigurationList";
-"defaultConfigurationIsVisible" = "0";
-"defaultConfigurationName" = "Release";
-"buildConfigurations" = (EEE000000000000000000004, EEE000000000000000000005);
-};
-"FFC000000000000000000001" = {
-"isa" = "PBXContainerItemProxy";
-"containerPortal" = 244210E48437B6556980A702;
-"remoteGlobalIDString" = FFF000000000000000000001;
-"remoteInfo" = "PacemanWatch";
-"proxyType" = "1";
-};
-"FFC000000000000000000002" = {
-"isa" = "PBXContainerItemProxy";
-"containerPortal" = 244210E48437B6556980A702;
-"remoteGlobalIDString" = FFF000000000000000000002;
-"remoteInfo" = "PacemanWatchWidgets";
-"proxyType" = "1";
-};
-"FFD000000000000000000001" = {
-"isa" = "PBXTargetDependency";
-"target" = FFF000000000000000000001;
-"targetProxy" = FFC000000000000000000001;
-};
-"FFD000000000000000000002" = {
-"isa" = "PBXTargetDependency";
-"target" = FFF000000000000000000002;
-"targetProxy" = FFC000000000000000000002;
-};
-"FFF000000000000000000001" = {
-"buildConfigurationList" = EEE000000000000000000003;
-"productReference" = AAA000000000000000000009;
-"productType" = "com.apple.product-type.application";
-"productName" = "PacemanWatch";
-"isa" = "PBXNativeTarget";
-"buildPhases" = (DDD000000000000000000001, DDD000000000000000000002, DDD000000000000000000003, DDD000000000000000000004);
-"dependencies" = (FFD000000000000000000002);
-"name" = "PacemanWatch";
-"buildRules" = ();
-};
-"FFF000000000000000000002" = {
-"buildConfigurationList" = EEE000000000000000000006;
-"productReference" = AAA00000000000000000000A;
-"productType" = "com.apple.product-type.app-extension";
-"productName" = "PacemanWatchWidgets";
-"isa" = "PBXNativeTarget";
-"buildPhases" = (DDD000000000000000000005, DDD000000000000000000006, DDD000000000000000000007);
-"dependencies" = ();
-"name" = "PacemanWatchWidgets";
-"buildRules" = ();
-};
-};
-"rootObject" = 244210E48437B6556980A702;
+/* Begin PBXBuildFile section */
+		09DACEC89D3557D06DF4B92C /* SourceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16321946EF3229AC1C8C8EF6 /* SourceClient.swift */; };
+		0BF3A498A71EE05330E5B618 /* AgentCompanionWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 89EFB625009FFE549BBA2B4E /* AgentCompanionWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		0C5EDA3F3E02E44F4ED21750 /* ../Resources/JetBrainsMono-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 4E4A1F447E8A84C824FABEA4 /* ../Resources/JetBrainsMono-SemiBold.ttf */; };
+		121B30221447365343E59D83 /* CompanionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9942C20CC22E078951EFC383 /* CompanionModel.swift */; };
+		18AA2CC889D4BFF46EBE99FC /* ../Shared/MonitoringActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EB40FFAB4E1EF97F47D1EC3 /* ../Shared/MonitoringActivity.swift */; };
+		18D3411A0012A71F226E0018 /* CompanionHome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54B7D4A440EEDD69EDC2A9FD /* CompanionHome.swift */; };
+		243A18A386F4C92DE35A549A /* ../Resources/JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 4B4246EE710BDB6A05D42EFD /* ../Resources/JetBrainsMono-Regular.ttf */; };
+		28491F44D7954F10A7811A27 /* MonitoringWatchCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8D53A8619584907B80159C0 /* MonitoringWatchCard.swift */; };
+		29080546DA1A6452F190944B /* MonitoringCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53A0B480E81CE7792FFECD47 /* MonitoringCoordinator.swift */; };
+		29AE955B42282A2E03467FCE /* ../Resources/Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 826CA7BC2742CA11425402B9 /* ../Resources/Assets.xcassets */; };
+		372116223A298916CEC818DD /* PresentationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4063D838A906D1FE650B3271 /* PresentationModel.swift */; };
+		37CCBD182B2F2B93AC731618 /* ../Resources/MaterialDesignIcons-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = 18AC41BDE050EFD68C333A1B /* ../Resources/MaterialDesignIcons-LICENSE.txt */; };
+		3A3E911E297CAD2837216AA2 /* ../Resources/JetBrainsMono-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = 533E91AE7A7B11C6F2BE02C4 /* ../Resources/JetBrainsMono-OFL.txt */; };
+		3E6377140CCCB7EC63582076 /* ../Shared/MonitoringActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C8DF105E4285CAFDDFCB64 /* ../Shared/MonitoringActivity.swift */; };
+		4707535C834FA8A2A5433D13 /* PhoneWeather.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A2527AAAD8BC2B2A1D8145A /* PhoneWeather.swift */; };
+		4DD859D1BE648823977083D7 /* AgentCompanionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D379F6C442F8870FB0E79011 /* AgentCompanionApp.swift */; };
+		5324DEFFDA216314A48C0920 /* ../Resources/JetBrainsMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 0EC3990017A5B1462F8B45ED /* ../Resources/JetBrainsMono-Regular.ttf */; };
+		6115E8A8D215A5DC9742A9BD /* ../Shared/PacemanMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = D17A5954249382D67D099D76 /* ../Shared/PacemanMark.swift */; };
+		6DBE70171119466D95BD38EE /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73982D0A3F322D36D27475D5 /* SettingsScreen.swift */; };
+		78814487621842B495499ED4 /* ../Resources/ThemeLicenses.txt in Resources */ = {isa = PBXBuildFile; fileRef = 710F65DAD28A4C9F9623C4A1 /* ../Resources/ThemeLicenses.txt */; };
+		7F6E335436455669020C4D87 /* TransportDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11D665B35AB2977BAFF84303 /* TransportDiagnostics.swift */; };
+		85823C9B465AC690B032FD72 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = F41016C8973BBFBD9F46452C /* Models.swift */; };
+		8C40CDC910BF7112B1737D7F /* WatchLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A9CDC126C239A459B50BF92 /* WatchLink.swift */; };
+		8DB73A93D61D167ED24E998C /* PushNotifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB9409EC0CB3E53BF8065C91 /* PushNotifications.swift */; };
+		90437D362B45AF0565B6B345 /* ../Resources/JetBrainsMono-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = DFD86C43387ED72496B19CC2 /* ../Resources/JetBrainsMono-OFL.txt */; };
+		91631E219B023E6346746153 /* DesignComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E6D3C202B2837FA88267EB /* DesignComponents.swift */; };
+		91C73879A77B8A0965060A4E /* Diagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 475442A98D8C435C13330F69 /* Diagnostics.swift */; };
+		930B8C267D07406166FACB21 /* AgentCompanionWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 031E47700CF4F7D578075936 /* AgentCompanionWidgets.swift */; };
+		9516029B56CA47C00704B550 /* ../Shared/CompanionTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 410A10C0F2E22FD09B3221CF /* ../Shared/CompanionTheme.swift */; };
+		A57CCBC9342DF7F35A334767 /* ../Shared/PacemanMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74DC4E2181E4A50618ECF63E /* ../Shared/PacemanMark.swift */; };
+		A5DB70B13AB5A206A42216A5 /* ../Resources/JetBrainsMono-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 9DF0B057999A9285C70D53A2 /* ../Resources/JetBrainsMono-SemiBold.ttf */; };
+		A7820C84F1E168259E35C6E2 /* ../Resources/MaterialDesignIcons-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = D9F51782C2ABC2C62BDAB1CB /* ../Resources/MaterialDesignIcons-LICENSE.txt */; };
+		BBB000000000000000000001 /* AppleWatchAllowanceBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA000000000000000000001 /* AppleWatchAllowanceBridge.swift */; };
+		BBB000000000000000000002 /* ../Shared/WatchAllowanceSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA000000000000000000002 /* ../Shared/WatchAllowanceSnapshot.swift */; };
+		BBB000000000000000000003 /* PacemanWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA000000000000000000003 /* PacemanWatchApp.swift */; };
+		BBB000000000000000000004 /* ../Shared/WatchAllowanceSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA000000000000000000004 /* ../Shared/WatchAllowanceSnapshot.swift */; };
+		BBB000000000000000000005 /* AllowanceComplication.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA000000000000000000007 /* AllowanceComplication.swift */; };
+		BBB000000000000000000006 /* ../Shared/WatchAllowanceSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA000000000000000000008 /* ../Shared/WatchAllowanceSnapshot.swift */; };
+		BBB000000000000000000007 /* PacemanWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = AAA000000000000000000009 /* PacemanWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BBB000000000000000000008 /* PacemanWatchWidgets.appex in Embed Watch Widgets */ = {isa = PBXBuildFile; fileRef = AAA00000000000000000000A /* PacemanWatchWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		BBB000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AAA00000000000000000000B /* Assets.xcassets */; };
+		BBB120693469CAA1EDBDA723 /* DeviceScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34730BE9166078328F7B4C2E /* DeviceScreens.swift */; };
+		BE63D1262DA3508908FBDD80 /* MonitoringLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89115BD5C6DEF9BC618C29D1 /* MonitoringLiveActivity.swift */; };
+		DD81EE7302209EA266EAB9F5 /* PairingFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C22DAF0807D2C4F1D5F67EDD /* PairingFlow.swift */; };
+		DFEE64A8F305244BF72F5E2B /* ProtocolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77C4A027998D3821B065079C /* ProtocolTests.swift */; };
+		EACE2D07DA83C10B6636B3DF /* ../Resources/Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2FE30F3CCFF8D70208F26CEB /* ../Resources/Assets.xcassets */; };
+		F0A000000000000000000004 /* ../Resources/Sounds/PacemanInput.wav in Resources */ = {isa = PBXBuildFile; fileRef = F0A000000000000000000001 /* ../Resources/Sounds/PacemanInput.wav */; };
+		F0A000000000000000000005 /* ../Resources/Sounds/PacemanFinished.wav in Resources */ = {isa = PBXBuildFile; fileRef = F0A000000000000000000002 /* ../Resources/Sounds/PacemanFinished.wav */; };
+		F0A000000000000000000006 /* ../Resources/Sounds/PacemanFailed.wav in Resources */ = {isa = PBXBuildFile; fileRef = F0A000000000000000000003 /* ../Resources/Sounds/PacemanFailed.wav */; };
+		F0A000000000000000000008 /* ../Resources/Sounds/PacemanWorking.wav in Resources */ = {isa = PBXBuildFile; fileRef = F0A000000000000000000007 /* ../Resources/Sounds/PacemanWorking.wav */; };
+		F2E4C04882C6027046BD5713 /* ../Shared/CompanionTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0A0DB42DFD68EEE9C6F1ACA /* ../Shared/CompanionTheme.swift */; };
+		F61079DCD2F16853DBF4558A /* WeatherSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61391C5AF8BA1F3362482CC8 /* WeatherSettings.swift */; };
+		F9A9D3E63B8A94A6BC3C2F1A /* QRScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D485593EF3F215E9037FD0C /* QRScanner.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		16F03F28DD94BED5A53591BC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 244210E48437B6556980A702 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CBC5C0F42E88ADCFC3E10095;
+			remoteInfo = AgentCompanion;
+		};
+		E7BE5E2673F66E8136F94E4A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 244210E48437B6556980A702 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B742666B0E1B3E7999894166;
+			remoteInfo = AgentCompanionWidgets;
+		};
+		FFC000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 244210E48437B6556980A702 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FFF000000000000000000001;
+			remoteInfo = PacemanWatch;
+		};
+		FFC000000000000000000002 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 244210E48437B6556980A702 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FFF000000000000000000002;
+			remoteInfo = PacemanWatchWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		0B4F7E9CF2396F31E256630C /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				0BF3A498A71EE05330E5B618 /* AgentCompanionWidgets.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DDD000000000000000000004 /* Embed Watch Widgets */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				BBB000000000000000000008 /* PacemanWatchWidgets.appex in Embed Watch Widgets */,
+			);
+			name = "Embed Watch Widgets";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DDD000000000000000000008 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = Watch;
+			dstSubfolderSpec = 1;
+			files = (
+				BBB000000000000000000007 /* PacemanWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		031E47700CF4F7D578075936 /* AgentCompanionWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCompanionWidgets.swift; sourceTree = "<group>"; };
+		0A9CDC126C239A459B50BF92 /* WatchLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchLink.swift; sourceTree = "<group>"; };
+		0EB40FFAB4E1EF97F47D1EC3 /* ../Shared/MonitoringActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/MonitoringActivity.swift; sourceTree = "<group>"; };
+		0EC3990017A5B1462F8B45ED /* ../Resources/JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/JetBrainsMono-Regular.ttf"; sourceTree = "<group>"; };
+		11D665B35AB2977BAFF84303 /* TransportDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportDiagnostics.swift; sourceTree = "<group>"; };
+		16321946EF3229AC1C8C8EF6 /* SourceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceClient.swift; sourceTree = "<group>"; };
+		18AC41BDE050EFD68C333A1B /* ../Resources/MaterialDesignIcons-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/MaterialDesignIcons-LICENSE.txt"; sourceTree = "<group>"; };
+		2FE30F3CCFF8D70208F26CEB /* ../Resources/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = ../Resources/Assets.xcassets; sourceTree = "<group>"; };
+		34730BE9166078328F7B4C2E /* DeviceScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScreens.swift; sourceTree = "<group>"; };
+		4063D838A906D1FE650B3271 /* PresentationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresentationModel.swift; sourceTree = "<group>"; };
+		410A10C0F2E22FD09B3221CF /* ../Shared/CompanionTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/CompanionTheme.swift; sourceTree = "<group>"; };
+		475442A98D8C435C13330F69 /* Diagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Diagnostics.swift; sourceTree = "<group>"; };
+		4B4246EE710BDB6A05D42EFD /* ../Resources/JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/JetBrainsMono-Regular.ttf"; sourceTree = "<group>"; };
+		4E4A1F447E8A84C824FABEA4 /* ../Resources/JetBrainsMono-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/JetBrainsMono-SemiBold.ttf"; sourceTree = "<group>"; };
+		533E91AE7A7B11C6F2BE02C4 /* ../Resources/JetBrainsMono-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/JetBrainsMono-OFL.txt"; sourceTree = "<group>"; };
+		53A0B480E81CE7792FFECD47 /* MonitoringCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringCoordinator.swift; sourceTree = "<group>"; };
+		54B7D4A440EEDD69EDC2A9FD /* CompanionHome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionHome.swift; sourceTree = "<group>"; };
+		5A2527AAAD8BC2B2A1D8145A /* PhoneWeather.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneWeather.swift; sourceTree = "<group>"; };
+		5D485593EF3F215E9037FD0C /* QRScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScanner.swift; sourceTree = "<group>"; };
+		61391C5AF8BA1F3362482CC8 /* WeatherSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherSettings.swift; sourceTree = "<group>"; };
+		67EBBA090ECAA1A7655F7E26 /* AgentCompanionTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AgentCompanionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		710F65DAD28A4C9F9623C4A1 /* ../Resources/ThemeLicenses.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ../Resources/ThemeLicenses.txt; sourceTree = "<group>"; };
+		73982D0A3F322D36D27475D5 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
+		74DC4E2181E4A50618ECF63E /* ../Shared/PacemanMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/PacemanMark.swift; sourceTree = "<group>"; };
+		77C4A027998D3821B065079C /* ProtocolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolTests.swift; sourceTree = "<group>"; };
+		826CA7BC2742CA11425402B9 /* ../Resources/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = ../Resources/Assets.xcassets; sourceTree = "<group>"; };
+		89115BD5C6DEF9BC618C29D1 /* MonitoringLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringLiveActivity.swift; sourceTree = "<group>"; };
+		89EFB625009FFE549BBA2B4E /* AgentCompanionWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AgentCompanionWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		9942C20CC22E078951EFC383 /* CompanionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionModel.swift; sourceTree = "<group>"; };
+		9DF0B057999A9285C70D53A2 /* ../Resources/JetBrainsMono-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/JetBrainsMono-SemiBold.ttf"; sourceTree = "<group>"; };
+		A0A0DB42DFD68EEE9C6F1ACA /* ../Shared/CompanionTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/CompanionTheme.swift; sourceTree = "<group>"; };
+		A8C8DF105E4285CAFDDFCB64 /* ../Shared/MonitoringActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/MonitoringActivity.swift; sourceTree = "<group>"; };
+		AAA000000000000000000001 /* AppleWatchAllowanceBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleWatchAllowanceBridge.swift; sourceTree = "<group>"; };
+		AAA000000000000000000002 /* ../Shared/WatchAllowanceSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/WatchAllowanceSnapshot.swift; sourceTree = "<group>"; };
+		AAA000000000000000000003 /* PacemanWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacemanWatchApp.swift; sourceTree = "<group>"; };
+		AAA000000000000000000004 /* ../Shared/WatchAllowanceSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/WatchAllowanceSnapshot.swift; sourceTree = "<group>"; };
+		AAA000000000000000000007 /* AllowanceComplication.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AllowanceComplication.swift; sourceTree = "<group>"; };
+		AAA000000000000000000008 /* ../Shared/WatchAllowanceSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/WatchAllowanceSnapshot.swift; sourceTree = "<group>"; };
+		AAA000000000000000000009 /* PacemanWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PacemanWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AAA00000000000000000000A /* PacemanWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PacemanWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		AAA00000000000000000000B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		AB9409EC0CB3E53BF8065C91 /* PushNotifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotifications.swift; sourceTree = "<group>"; };
+		AF2F81A8C99FE38B411B7DC4 /* AgentCompanion.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentCompanion.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C22DAF0807D2C4F1D5F67EDD /* PairingFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingFlow.swift; sourceTree = "<group>"; };
+		D17A5954249382D67D099D76 /* ../Shared/PacemanMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/PacemanMark.swift; sourceTree = "<group>"; };
+		D2E6D3C202B2837FA88267EB /* DesignComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignComponents.swift; sourceTree = "<group>"; };
+		D379F6C442F8870FB0E79011 /* AgentCompanionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCompanionApp.swift; sourceTree = "<group>"; };
+		D8D53A8619584907B80159C0 /* MonitoringWatchCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringWatchCard.swift; sourceTree = "<group>"; };
+		D9F51782C2ABC2C62BDAB1CB /* ../Resources/MaterialDesignIcons-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/MaterialDesignIcons-LICENSE.txt"; sourceTree = "<group>"; };
+		DFD86C43387ED72496B19CC2 /* ../Resources/JetBrainsMono-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/JetBrainsMono-OFL.txt"; sourceTree = "<group>"; };
+		F0A000000000000000000001 /* ../Resources/Sounds/PacemanInput.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanInput.wav; sourceTree = "<group>"; };
+		F0A000000000000000000002 /* ../Resources/Sounds/PacemanFinished.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanFinished.wav; sourceTree = "<group>"; };
+		F0A000000000000000000003 /* ../Resources/Sounds/PacemanFailed.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanFailed.wav; sourceTree = "<group>"; };
+		F0A000000000000000000007 /* ../Resources/Sounds/PacemanWorking.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanWorking.wav; sourceTree = "<group>"; };
+		F41016C8973BBFBD9F46452C /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		07D142371282BC83F5CE7218 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		77C2218D3A890C109504E1BC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DDD000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DDD000000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E31351353393DDC7D7121737 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0A3E27B8CA818264D75C8D81 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AF2F81A8C99FE38B411B7DC4 /* AgentCompanion.app */,
+				67EBBA090ECAA1A7655F7E26 /* AgentCompanionTests.xctest */,
+				89EFB625009FFE549BBA2B4E /* AgentCompanionWidgets.appex */,
+				AAA000000000000000000009 /* PacemanWatch.app */,
+				AAA00000000000000000000A /* PacemanWatchWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		0D6E4079E36703EBD37C0072 = {
+			isa = PBXGroup;
+			children = (
+				BADFBA3833E9F76BE403D636 /* AgentCompanion */,
+				4A3E199B648B7258935C2F43 /* AgentCompanionTests */,
+				F144C871AA2096B5086F0709 /* AgentCompanionWidgets */,
+				CCC000000000000000000001 /* PacemanWatch */,
+				CCC000000000000000000002 /* PacemanWatchWidgets */,
+				0A3E27B8CA818264D75C8D81 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		4A3E199B648B7258935C2F43 /* AgentCompanionTests */ = {
+			isa = PBXGroup;
+			children = (
+				77C4A027998D3821B065079C /* ProtocolTests.swift */,
+			);
+			path = AgentCompanionTests;
+			sourceTree = "<group>";
+		};
+		BADFBA3833E9F76BE403D636 /* AgentCompanion */ = {
+			isa = PBXGroup;
+			children = (
+				D379F6C442F8870FB0E79011 /* AgentCompanionApp.swift */,
+				54B7D4A440EEDD69EDC2A9FD /* CompanionHome.swift */,
+				9942C20CC22E078951EFC383 /* CompanionModel.swift */,
+				D2E6D3C202B2837FA88267EB /* DesignComponents.swift */,
+				34730BE9166078328F7B4C2E /* DeviceScreens.swift */,
+				475442A98D8C435C13330F69 /* Diagnostics.swift */,
+				F41016C8973BBFBD9F46452C /* Models.swift */,
+				53A0B480E81CE7792FFECD47 /* MonitoringCoordinator.swift */,
+				C22DAF0807D2C4F1D5F67EDD /* PairingFlow.swift */,
+				5A2527AAAD8BC2B2A1D8145A /* PhoneWeather.swift */,
+				4063D838A906D1FE650B3271 /* PresentationModel.swift */,
+				AB9409EC0CB3E53BF8065C91 /* PushNotifications.swift */,
+				5D485593EF3F215E9037FD0C /* QRScanner.swift */,
+				73982D0A3F322D36D27475D5 /* SettingsScreen.swift */,
+				16321946EF3229AC1C8C8EF6 /* SourceClient.swift */,
+				11D665B35AB2977BAFF84303 /* TransportDiagnostics.swift */,
+				0A9CDC126C239A459B50BF92 /* WatchLink.swift */,
+				61391C5AF8BA1F3362482CC8 /* WeatherSettings.swift */,
+				AAA000000000000000000001 /* AppleWatchAllowanceBridge.swift */,
+				AAA000000000000000000002 /* ../Shared/WatchAllowanceSnapshot.swift */,
+				410A10C0F2E22FD09B3221CF /* ../Shared/CompanionTheme.swift */,
+				A8C8DF105E4285CAFDDFCB64 /* ../Shared/MonitoringActivity.swift */,
+				74DC4E2181E4A50618ECF63E /* ../Shared/PacemanMark.swift */,
+				2FE30F3CCFF8D70208F26CEB /* ../Resources/Assets.xcassets */,
+				533E91AE7A7B11C6F2BE02C4 /* ../Resources/JetBrainsMono-OFL.txt */,
+				0EC3990017A5B1462F8B45ED /* ../Resources/JetBrainsMono-Regular.ttf */,
+				4E4A1F447E8A84C824FABEA4 /* ../Resources/JetBrainsMono-SemiBold.ttf */,
+				D9F51782C2ABC2C62BDAB1CB /* ../Resources/MaterialDesignIcons-LICENSE.txt */,
+				710F65DAD28A4C9F9623C4A1 /* ../Resources/ThemeLicenses.txt */,
+				F0A000000000000000000001 /* ../Resources/Sounds/PacemanInput.wav */,
+				F0A000000000000000000002 /* ../Resources/Sounds/PacemanFinished.wav */,
+				F0A000000000000000000003 /* ../Resources/Sounds/PacemanFailed.wav */,
+				F0A000000000000000000007 /* ../Resources/Sounds/PacemanWorking.wav */,
+			);
+			path = AgentCompanion;
+			sourceTree = "<group>";
+		};
+		CCC000000000000000000001 /* PacemanWatch */ = {
+			isa = PBXGroup;
+			children = (
+				AAA000000000000000000003 /* PacemanWatchApp.swift */,
+				AAA000000000000000000004 /* ../Shared/WatchAllowanceSnapshot.swift */,
+				AAA00000000000000000000B /* Assets.xcassets */,
+			);
+			path = PacemanWatch;
+			sourceTree = "<group>";
+		};
+		CCC000000000000000000002 /* PacemanWatchWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				AAA000000000000000000007 /* AllowanceComplication.swift */,
+				AAA000000000000000000008 /* ../Shared/WatchAllowanceSnapshot.swift */,
+			);
+			path = PacemanWatchWidgets;
+			sourceTree = "<group>";
+		};
+		F144C871AA2096B5086F0709 /* AgentCompanionWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				031E47700CF4F7D578075936 /* AgentCompanionWidgets.swift */,
+				89115BD5C6DEF9BC618C29D1 /* MonitoringLiveActivity.swift */,
+				D8D53A8619584907B80159C0 /* MonitoringWatchCard.swift */,
+				A0A0DB42DFD68EEE9C6F1ACA /* ../Shared/CompanionTheme.swift */,
+				0EB40FFAB4E1EF97F47D1EC3 /* ../Shared/MonitoringActivity.swift */,
+				D17A5954249382D67D099D76 /* ../Shared/PacemanMark.swift */,
+				826CA7BC2742CA11425402B9 /* ../Resources/Assets.xcassets */,
+				DFD86C43387ED72496B19CC2 /* ../Resources/JetBrainsMono-OFL.txt */,
+				4B4246EE710BDB6A05D42EFD /* ../Resources/JetBrainsMono-Regular.ttf */,
+				9DF0B057999A9285C70D53A2 /* ../Resources/JetBrainsMono-SemiBold.ttf */,
+				18AC41BDE050EFD68C333A1B /* ../Resources/MaterialDesignIcons-LICENSE.txt */,
+			);
+			path = AgentCompanionWidgets;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		64034EAF17D1149159795A3B /* AgentCompanionTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8F9C84A84420B7A370BC72C6 /* Build configuration list for PBXNativeTarget "AgentCompanionTests" */;
+			buildPhases = (
+				969539559FE549C0BEAEA0A0 /* Sources */,
+				07D142371282BC83F5CE7218 /* Frameworks */,
+				E34CFFDE1052F15663E1861C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CA50F09BF5737386B1A72DA0 /* PBXTargetDependency */,
+			);
+			name = AgentCompanionTests;
+			productName = AgentCompanionTests;
+			productReference = 67EBBA090ECAA1A7655F7E26 /* AgentCompanionTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B742666B0E1B3E7999894166 /* AgentCompanionWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D37E352D67DFF2BA1E3215D0 /* Build configuration list for PBXNativeTarget "AgentCompanionWidgets" */;
+			buildPhases = (
+				1F66AA38F15CB7A77FAD348C /* Sources */,
+				E31351353393DDC7D7121737 /* Frameworks */,
+				462BF504FF57D5C560C44DBD /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AgentCompanionWidgets;
+			productName = AgentCompanionWidgets;
+			productReference = 89EFB625009FFE549BBA2B4E /* AgentCompanionWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		CBC5C0F42E88ADCFC3E10095 /* AgentCompanion */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FEDCF411EC66402A6C4BD28B /* Build configuration list for PBXNativeTarget "AgentCompanion" */;
+			buildPhases = (
+				AEB6B64403AE524DA8E19EB9 /* Sources */,
+				77C2218D3A890C109504E1BC /* Frameworks */,
+				F4E87BF18452C5C4BBA7E306 /* Resources */,
+				0B4F7E9CF2396F31E256630C /* Embed App Extensions */,
+				DDD000000000000000000008 /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8A241B4F6D3225C4C0FCA8DF /* PBXTargetDependency */,
+				FFD000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = AgentCompanion;
+			productName = AgentCompanion;
+			productReference = AF2F81A8C99FE38B411B7DC4 /* AgentCompanion.app */;
+			productType = "com.apple.product-type.application";
+		};
+		FFF000000000000000000001 /* PacemanWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EEE000000000000000000003 /* Build configuration list for PBXNativeTarget "PacemanWatch" */;
+			buildPhases = (
+				DDD000000000000000000001 /* Sources */,
+				DDD000000000000000000002 /* Frameworks */,
+				DDD000000000000000000003 /* Resources */,
+				DDD000000000000000000004 /* Embed Watch Widgets */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FFD000000000000000000002 /* PBXTargetDependency */,
+			);
+			name = PacemanWatch;
+			productName = PacemanWatch;
+			productReference = AAA000000000000000000009 /* PacemanWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
+		FFF000000000000000000002 /* PacemanWatchWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EEE000000000000000000006 /* Build configuration list for PBXNativeTarget "PacemanWatchWidgets" */;
+			buildPhases = (
+				DDD000000000000000000005 /* Sources */,
+				DDD000000000000000000006 /* Frameworks */,
+				DDD000000000000000000007 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PacemanWatchWidgets;
+			productName = PacemanWatchWidgets;
+			productReference = AAA00000000000000000000A /* PacemanWatchWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		244210E48437B6556980A702 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = 4F9780D05AFB226691EE6E8A /* Build configuration list for PBXProject "AgentCompanion" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 0D6E4079E36703EBD37C0072;
+			productRefGroup = 0A3E27B8CA818264D75C8D81 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CBC5C0F42E88ADCFC3E10095 /* AgentCompanion */,
+				64034EAF17D1149159795A3B /* AgentCompanionTests */,
+				B742666B0E1B3E7999894166 /* AgentCompanionWidgets */,
+				FFF000000000000000000001 /* PacemanWatch */,
+				FFF000000000000000000002 /* PacemanWatchWidgets */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		462BF504FF57D5C560C44DBD /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				29AE955B42282A2E03467FCE /* ../Resources/Assets.xcassets in Resources */,
+				90437D362B45AF0565B6B345 /* ../Resources/JetBrainsMono-OFL.txt in Resources */,
+				243A18A386F4C92DE35A549A /* ../Resources/JetBrainsMono-Regular.ttf in Resources */,
+				A5DB70B13AB5A206A42216A5 /* ../Resources/JetBrainsMono-SemiBold.ttf in Resources */,
+				37CCBD182B2F2B93AC731618 /* ../Resources/MaterialDesignIcons-LICENSE.txt in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DDD000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BBB000000000000000000009 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DDD000000000000000000007 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E34CFFDE1052F15663E1861C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F4E87BF18452C5C4BBA7E306 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				EACE2D07DA83C10B6636B3DF /* ../Resources/Assets.xcassets in Resources */,
+				3A3E911E297CAD2837216AA2 /* ../Resources/JetBrainsMono-OFL.txt in Resources */,
+				5324DEFFDA216314A48C0920 /* ../Resources/JetBrainsMono-Regular.ttf in Resources */,
+				0C5EDA3F3E02E44F4ED21750 /* ../Resources/JetBrainsMono-SemiBold.ttf in Resources */,
+				A7820C84F1E168259E35C6E2 /* ../Resources/MaterialDesignIcons-LICENSE.txt in Resources */,
+				78814487621842B495499ED4 /* ../Resources/ThemeLicenses.txt in Resources */,
+				F0A000000000000000000004 /* ../Resources/Sounds/PacemanInput.wav in Resources */,
+				F0A000000000000000000005 /* ../Resources/Sounds/PacemanFinished.wav in Resources */,
+				F0A000000000000000000006 /* ../Resources/Sounds/PacemanFailed.wav in Resources */,
+				F0A000000000000000000008 /* ../Resources/Sounds/PacemanWorking.wav in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1F66AA38F15CB7A77FAD348C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				930B8C267D07406166FACB21 /* AgentCompanionWidgets.swift in Sources */,
+				BE63D1262DA3508908FBDD80 /* MonitoringLiveActivity.swift in Sources */,
+				28491F44D7954F10A7811A27 /* MonitoringWatchCard.swift in Sources */,
+				F2E4C04882C6027046BD5713 /* ../Shared/CompanionTheme.swift in Sources */,
+				18AA2CC889D4BFF46EBE99FC /* ../Shared/MonitoringActivity.swift in Sources */,
+				6115E8A8D215A5DC9742A9BD /* ../Shared/PacemanMark.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		969539559FE549C0BEAEA0A0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DFEE64A8F305244BF72F5E2B /* ProtocolTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AEB6B64403AE524DA8E19EB9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4DD859D1BE648823977083D7 /* AgentCompanionApp.swift in Sources */,
+				18D3411A0012A71F226E0018 /* CompanionHome.swift in Sources */,
+				121B30221447365343E59D83 /* CompanionModel.swift in Sources */,
+				91631E219B023E6346746153 /* DesignComponents.swift in Sources */,
+				BBB120693469CAA1EDBDA723 /* DeviceScreens.swift in Sources */,
+				91C73879A77B8A0965060A4E /* Diagnostics.swift in Sources */,
+				85823C9B465AC690B032FD72 /* Models.swift in Sources */,
+				29080546DA1A6452F190944B /* MonitoringCoordinator.swift in Sources */,
+				DD81EE7302209EA266EAB9F5 /* PairingFlow.swift in Sources */,
+				4707535C834FA8A2A5433D13 /* PhoneWeather.swift in Sources */,
+				372116223A298916CEC818DD /* PresentationModel.swift in Sources */,
+				8DB73A93D61D167ED24E998C /* PushNotifications.swift in Sources */,
+				F9A9D3E63B8A94A6BC3C2F1A /* QRScanner.swift in Sources */,
+				6DBE70171119466D95BD38EE /* SettingsScreen.swift in Sources */,
+				09DACEC89D3557D06DF4B92C /* SourceClient.swift in Sources */,
+				7F6E335436455669020C4D87 /* TransportDiagnostics.swift in Sources */,
+				8C40CDC910BF7112B1737D7F /* WatchLink.swift in Sources */,
+				F61079DCD2F16853DBF4558A /* WeatherSettings.swift in Sources */,
+				BBB000000000000000000001 /* AppleWatchAllowanceBridge.swift in Sources */,
+				BBB000000000000000000002 /* ../Shared/WatchAllowanceSnapshot.swift in Sources */,
+				9516029B56CA47C00704B550 /* ../Shared/CompanionTheme.swift in Sources */,
+				3E6377140CCCB7EC63582076 /* ../Shared/MonitoringActivity.swift in Sources */,
+				A57CCBC9342DF7F35A334767 /* ../Shared/PacemanMark.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DDD000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BBB000000000000000000003 /* PacemanWatchApp.swift in Sources */,
+				BBB000000000000000000004 /* ../Shared/WatchAllowanceSnapshot.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DDD000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BBB000000000000000000005 /* AllowanceComplication.swift in Sources */,
+				BBB000000000000000000006 /* ../Shared/WatchAllowanceSnapshot.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		8A241B4F6D3225C4C0FCA8DF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B742666B0E1B3E7999894166 /* AgentCompanionWidgets */;
+			targetProxy = E7BE5E2673F66E8136F94E4A /* PBXContainerItemProxy */;
+		};
+		CA50F09BF5737386B1A72DA0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CBC5C0F42E88ADCFC3E10095 /* AgentCompanion */;
+			targetProxy = 16F03F28DD94BED5A53591BC /* PBXContainerItemProxy */;
+		};
+		FFD000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FFF000000000000000000001 /* PacemanWatch */;
+			targetProxy = FFC000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		FFD000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FFF000000000000000000002 /* PacemanWatchWidgets */;
+			targetProxy = FFC000000000000000000002 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		058484F8038C94045CD137DC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_GROUP_ID = group.ai.paceman.shared;
+				PACEMAN_DISPLAY_NAME = Paceman;
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = AgentCompanionWidgets/AgentCompanionWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = ZTG42P5438;
+				ENABLE_TESTABILITY = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AgentCompanionWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		09AA38CEF3EA53936A20C858 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_STRICT_CONCURRENCY = minimal;
+			};
+			name = Debug;
+		};
+		0FE453910DCE5F42D8B54BB1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_GROUP_ID = group.ai.paceman.dev.shared;
+				APNS_ENVIRONMENT = development;
+				PACEMAN_DISPLAY_NAME = "Paceman Dev";
+				PACEMAN_URL_SCHEME = "paceman-dev";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
+				CODE_SIGN_ENTITLEMENTS = AgentCompanion/AgentCompanion.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = ZTG42P5438;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AgentCompanion/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.dev;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		1913E5D7DE1B004F42627B1D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.dev.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentCompanion.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AgentCompanion";
+			};
+			name = Debug;
+		};
+		235897D93508BF2748F50EED /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				ENABLE_TESTABILITY = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AgentCompanion.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AgentCompanion";
+			};
+			name = Release;
+		};
+		2C51B24F1BD0E37CCD3A85CD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ONLY_ACTIVE_ARCH = NO;
+				SWIFT_STRICT_CONCURRENCY = minimal;
+			};
+			name = Release;
+		};
+		B1127F7F88A84D322A8B37B0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_GROUP_ID = group.ai.paceman.dev.shared;
+				PACEMAN_DISPLAY_NAME = "Paceman Dev";
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = AgentCompanionWidgets/AgentCompanionWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = ZTG42P5438;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AgentCompanionWidgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.dev.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		BDAFE18FEB8D1E2F9A70E4E2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_GROUP_ID = group.ai.paceman.shared;
+				APNS_ENVIRONMENT = production;
+				PACEMAN_DISPLAY_NAME = Paceman;
+				PACEMAN_URL_SCHEME = paceman;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = AgentCompanion/AgentCompanion.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = ZTG42P5438;
+				ENABLE_TESTABILITY = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AgentCompanion/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		EEE000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_GROUP_ID = group.ai.paceman.dev.shared;
+				APNS_ENVIRONMENT = development;
+				IOS_COMPANION_BUNDLE_ID = ai.paceman.app.dev;
+				PACEMAN_DISPLAY_NAME = "Paceman Dev";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
+				CODE_SIGN_ENTITLEMENTS = PacemanWatch/PacemanWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = ZTG42P5438;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PacemanWatch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.dev.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		EEE000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_GROUP_ID = group.ai.paceman.shared;
+				APNS_ENVIRONMENT = production;
+				IOS_COMPANION_BUNDLE_ID = ai.paceman.app;
+				PACEMAN_DISPLAY_NAME = Paceman;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = PacemanWatch/PacemanWatch.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = ZTG42P5438;
+				ENABLE_TESTABILITY = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PacemanWatch/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
+		EEE000000000000000000004 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_GROUP_ID = group.ai.paceman.dev.shared;
+				PACEMAN_DISPLAY_NAME = "Paceman Dev";
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = PacemanWatchWidgets/PacemanWatchWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = ZTG42P5438;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PacemanWatchWidgets/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.dev.watchkitapp.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Debug;
+		};
+		EEE000000000000000000005 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APP_GROUP_ID = group.ai.paceman.shared;
+				PACEMAN_DISPLAY_NAME = Paceman;
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = PacemanWatchWidgets/PacemanWatchWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = ZTG42P5438;
+				ENABLE_TESTABILITY = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PacemanWatchWidgets/Info.plist;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.watchkitapp.widgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "watchos watchsimulator";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 11.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4F9780D05AFB226691EE6E8A /* Build configuration list for PBXProject "AgentCompanion" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				09AA38CEF3EA53936A20C858 /* Debug */,
+				2C51B24F1BD0E37CCD3A85CD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8F9C84A84420B7A370BC72C6 /* Build configuration list for PBXNativeTarget "AgentCompanionTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1913E5D7DE1B004F42627B1D /* Debug */,
+				235897D93508BF2748F50EED /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D37E352D67DFF2BA1E3215D0 /* Build configuration list for PBXNativeTarget "AgentCompanionWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B1127F7F88A84D322A8B37B0 /* Debug */,
+				058484F8038C94045CD137DC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EEE000000000000000000003 /* Build configuration list for PBXNativeTarget "PacemanWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EEE000000000000000000001 /* Debug */,
+				EEE000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		EEE000000000000000000006 /* Build configuration list for PBXNativeTarget "PacemanWatchWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EEE000000000000000000004 /* Debug */,
+				EEE000000000000000000005 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FEDCF411EC66402A6C4BD28B /* Build configuration list for PBXNativeTarget "AgentCompanion" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0FE453910DCE5F42D8B54BB1 /* Debug */,
+				BDAFE18FEB8D1E2F9A70E4E2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 244210E48437B6556980A702 /* Project object */;
 }

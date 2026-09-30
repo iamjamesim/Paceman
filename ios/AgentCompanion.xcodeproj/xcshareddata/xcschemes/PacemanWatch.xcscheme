@@ -17,6 +17,7 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "FFF000000000000000000001"
                BuildableName = "PacemanWatch.app"
+               BlueprintName = "PacemanWatch"
                ReferencedContainer = "container:AgentCompanion.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -30,6 +31,7 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "CBC5C0F42E88ADCFC3E10095"
                BuildableName = "AgentCompanion.app"
+               BlueprintName = "AgentCompanion"
                ReferencedContainer = "container:AgentCompanion.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>

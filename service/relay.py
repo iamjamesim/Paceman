@@ -17,6 +17,46 @@ from service.push import APNs, Config
 from service.relay_registry import Registry, valid_uuid
 
 
+class APNsRouter:
+    """Keep APNs credentials and connections separate for each token environment."""
+
+    def __init__(self, senders: dict[str, APNs]):
+        self.senders = senders
+        self.environments = frozenset(senders)
+
+    @classmethod
+    def load(cls, path: Path):
+        value = json.loads(path.read_text())
+        if not isinstance(value, dict):
+            raise ValueError("APNs config must be an object")
+        if "environments" not in value:
+            config = Config.from_value(value, path, require_private_key_permissions=False)
+            return cls({config.environment: APNs(config)})
+        environments = value["environments"]
+        if (set(value) != {"environments"} or not isinstance(environments, dict)
+                or not environments or set(environments) - {"development", "production"}):
+            raise ValueError("Specify development and/or production APNs configurations")
+        senders = {}
+        try:
+            for environment, item in environments.items():
+                config = Config.from_value(item, path, require_private_key_permissions=False)
+                if config.environment != environment:
+                    raise ValueError("APNs configuration environment does not match its name")
+                senders[environment] = APNs(config)
+        except Exception:
+            for sender in senders.values():
+                sender.close()
+            raise
+        return cls(senders)
+
+    def send(self, device, payload, headers, now):
+        return self.senders[device["environment"]].send(device, payload, headers, now)
+
+    def close(self):
+        for sender in self.senders.values():
+            sender.close()
+
+
 def exact(value, required, optional=()):
     return isinstance(value, dict) and set(required) <= set(value) and set(value) <= set(required) | set(optional)
 
@@ -131,7 +171,7 @@ def valid_request(value: object, identity: str, now: float) -> bool:
 
 
 class RelayApp:
-    def __init__(self, sender: APNs, sources: Registry, now=time.time):
+    def __init__(self, sender: APNsRouter, sources: Registry, now=time.time):
         self.sender, self.sources, self.now = sender, sources, now
 
     def __call__(self, environ, start_response):
@@ -141,7 +181,7 @@ class RelayApp:
                                     ("Cache-Control", "no-store")])
             return [body]
         if environ.get("PATH_INFO") == "/healthz" and environ.get("REQUEST_METHOD") == "GET":
-            return answer("200 OK", {"ok": True})
+            return answer("200 OK", {"ok": True, "apnsEnvironments": sorted(self.sender.environments)})
         path, method = environ.get("PATH_INFO"), environ.get("REQUEST_METHOD")
         if (path, method) not in (("/v1/sources", "POST"), ("/v1/sources", "DELETE"),
                                   ("/v1/clients", "PUT"), ("/v1/clients/self", "DELETE"),
@@ -202,6 +242,8 @@ class RelayApp:
                     if not exact(value, ("sourceID", "clientID", "mode", "deviceToken", "environment"),
                                  ("activityID",)):
                         raise ValueError
+                    if value["environment"] not in self.sender.environments:
+                        return answer("503 Service Unavailable", {"error": "EnvironmentUnavailable"})
                     self.sources.bind(identity, value["clientID"], value["mode"], activity_id,
                                       value["deviceToken"], value["environment"])
                 else:
@@ -213,6 +255,8 @@ class RelayApp:
             return answer("200 OK", {"registered": method == "PUT"})
         if not valid_request(value, identity, self.now()):
             return answer("400 Bad Request", {"error": "InvalidRequest"})
+        if value["environment"] not in self.sender.environments:
+            return answer("503 Service Unavailable", {"error": "EnvironmentUnavailable"})
         if not self.sources.allowed(identity, value["clientID"], value["mode"],
                                     value["deviceToken"], value["environment"], value.get("activityID", "")):
             return answer("403 Forbidden", {"error": "DestinationNotRegistered"})
@@ -228,8 +272,7 @@ def application(environ, start_response):
     if _app is None:
         with _app_lock:
             if _app is None:
-                _app = RelayApp(APNs(Config.load(Path(os.environ["PACEMAN_APNS_CONFIG"]),
-                                            require_private_key_permissions=False)),
+                _app = RelayApp(APNsRouter.load(Path(os.environ["PACEMAN_APNS_CONFIG"])),
                                 Registry(os.environ["DATABASE_URL"]))
     return _app(environ, start_response)
 
@@ -249,7 +292,7 @@ def main():
     args = parser.parse_args()
     os.umask(0o077)
     sources = Registry(os.environ["DATABASE_URL"])
-    sender = APNs(Config.load(args.apns_config, require_private_key_permissions=False))
+    sender = APNsRouter.load(args.apns_config)
     try:
         with make_server("0.0.0.0", args.port, RelayApp(sender, sources),
                          server_class=ThreadingWSGIServer) as server:

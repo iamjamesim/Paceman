@@ -143,7 +143,11 @@ enum ThemeFamily: String, CaseIterable, Identifiable {
 }
 
 enum ThemePreference {
+    #if DEBUG
+    static let appGroup = "group.ai.paceman.dev.shared"
+    #else
     static let appGroup = "group.ai.paceman.shared"
+    #endif
     static let key = "selected-theme-family"
     static var sharedDefaults: UserDefaults { UserDefaults(suiteName: appGroup) ?? .standard }
     static func load(from defaults: UserDefaults) -> ThemeFamily {

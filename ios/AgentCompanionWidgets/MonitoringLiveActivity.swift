@@ -54,7 +54,11 @@ struct MonitoringLiveActivity: Widget {
     }
 
     private func computerURL(_ sourceID: String) -> URL? {
+        #if DEBUG
+        URL(string: "paceman-dev://computer/\(sourceID)")
+        #else
         URL(string: "paceman://computer/\(sourceID)")
+        #endif
     }
 }
 

@@ -15,6 +15,7 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = "io.github.iamjamesim.paceman"
 SERVICE = "paceman-source.service"
+PUSH_SERVICE = "paceman-push.service"
 HOOK_PURPOSES = (
     ("UserPromptSubmit", "show new work"),
     ("PreToolUse", "track tool calls and input questions"),
@@ -69,8 +70,8 @@ def unit_escape(path):
     return value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
 
 
-def render_unit(app, state):
-    return (ROOT / "systemd/paceman-source.service").read_text().replace(
+def render_unit(app, state, service=SERVICE):
+    return (ROOT / "systemd" / service).read_text().replace(
         "@APP@", unit_escape(app)).replace("@STATE@", unit_escape(state))
 
 
@@ -140,6 +141,7 @@ def main():
     app = home / ".local/lib/paceman"
     ctl = home / ".local/bin/pacemanctl"
     unit = config / "systemd/user" / SERVICE
+    push_unit = config / "systemd/user" / PUSH_SERVICE
     plugin = config / "omarchy/plugins" / PLUGIN
     hooks_path = home / ".codex/hooks.json"
     try:
@@ -148,6 +150,7 @@ def main():
         if args.action == "uninstall":
             hooks_document, changed_hooks = hook_document(hooks_path, app, remove=True)
             run("/usr/bin/systemctl", "--user", "disable", "--now", SERVICE, check=False)
+            run("/usr/bin/systemctl", "--user", "disable", "--now", PUSH_SERVICE, check=False)
             if plugin.exists():
                 directory(plugin)
                 run("/usr/bin/omarchy", "plugin", "disable", PLUGIN, check=False)
@@ -157,6 +160,7 @@ def main():
             shutil.rmtree(app)
             ctl.unlink(missing_ok=True)
             unit.unlink(missing_ok=True)
+            push_unit.unlink(missing_ok=True)
             run("/usr/bin/systemctl", "--user", "daemon-reload")
             if Path("/usr/bin/omarchy").exists():
                 run("/usr/bin/omarchy", "shell", "shell", "rescanPlugins", check=False)
@@ -174,6 +178,7 @@ def main():
         # Validate code before stopping an existing installation.
         run("/usr/bin/python3", "-I", str(ROOT / "desktop/launch.py"), "--help")
         unit_content = render_unit(app, state)
+        push_unit_content = render_unit(app, state, PUSH_SERVICE)
         started_install = time.time()
         run("/usr/bin/systemctl", "--user", "stop", SERVICE, check=False)
         run("/usr/bin/systemctl", "--user", "disable", "--now", "omarchy-watch.service", check=False)
@@ -191,6 +196,7 @@ def main():
             write(app / "desktop" / name, (ROOT / "desktop" / name).read_bytes())
         write(ctl, (ROOT / "desktop/pacemanctl").read_bytes(), 0o755)
         write(unit, unit_content.encode())
+        write(push_unit, push_unit_content.encode())
         if not args.no_bar:
             for name in ("manifest.json", "BarWidget.qml", "PanelContent.qml", "ConnectionRow.qml", "PacemanMark.qml", "PanelModel.js", "PairingOverlay.qml"):
                 write(plugin / name, (ROOT / "desktop/plugin" / name).read_bytes())

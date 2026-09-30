@@ -29,6 +29,10 @@ class Config:
     @classmethod
     def load(cls, path: Path, *, require_private_key_permissions: bool = True):
         value = json.loads(path.read_text())
+        return cls.from_value(value, path, require_private_key_permissions=require_private_key_permissions)
+
+    @classmethod
+    def from_value(cls, value: object, path: Path, *, require_private_key_permissions: bool = True):
         if not isinstance(value, dict):
             raise ValueError("APNs config must be an object")
         for field in ("teamID", "keyID"):

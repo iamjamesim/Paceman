@@ -64,4 +64,4 @@ Sharing off persists across login and updates. `pacemanctl stop` stops only the 
 bash scripts/uninstall-desktop.sh
 ```
 
-This removes the installed app, command, service, panel, and Paceman's Codex hooks. It retains source data, phone pairings, unrelated Codex hooks, the separate Omarchy Watch Codex plugin if installed, and Tailscale routes for deliberate cleanup or reinstallation. The optional [APNs worker](push-delivery.md) is separate from this installer; a desktop install alone does not establish locked-phone delivery. This package remains a local source installer, not a downloadable signed release.
+This removes the installed app, command, services, panel, and Paceman's Codex hooks. It retains source data, phone pairings, unrelated Codex hooks, the separate Omarchy Watch Codex plugin if installed, and Tailscale routes for deliberate cleanup or reinstallation. Configure the optional [relay worker](push-relay.md) after installation for locked-phone delivery; the source installer alone does not enable it. This package remains a local source installer, not a downloadable signed release.

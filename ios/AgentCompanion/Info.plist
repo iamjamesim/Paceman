@@ -6,12 +6,12 @@
 	<string>$(APNS_ENVIRONMENT)</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>ai.paceman.app.weather</string>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).weather</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Paceman</string>
+	<string>$(PACEMAN_DISPLAY_NAME)</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -28,10 +28,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>paceman</string>
+			<string>$(PACEMAN_URL_SCHEME)</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>paceman</string>
+				<string>$(PACEMAN_URL_SCHEME)</string>
 			</array>
 		</dict>
 	</array>
