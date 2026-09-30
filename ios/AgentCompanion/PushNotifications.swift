@@ -205,16 +205,10 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
             let receiptKey = "push-registration-receipt.\(source.sourceID)"
             let receipt = Vault.load(PushRegistrationReceipt.self, key: receiptKey)
                 ?? Vault.load(PushRegistrationReceipt.self, key: "push-registration-receipt")
-            if receipt?.matches(source: source, token: token, environment: environment,
-                                displayName: displayName) == true {
-                do {
-                    try await client.registerRelayDestination(source, mode: "alert", token: token,
-                                                              environment: environment)
-                    completed += 1
-                } catch { Diagnostics.shared.record("push_relay_registration_failed") }
-                continue
-            }
             do {
+                // A saved receipt does not prove the source still has its
+                // destination. Re-registering the same token preserves its
+                // cursor and restores a missing row before relay binding.
                 try await client.registerPush(source, token: token, environment: environment,
                                               displayName: displayName)
                 guard enabled else {
@@ -224,9 +218,12 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
                     continue
                 }
                 guard model?.pairedSources.contains(where: { $0.sourceID == source.sourceID && $0.credential == source.credential }) == true else { continue }
-                try Vault.save(PushRegistrationReceipt(sourceID: source.sourceID, clientID: source.clientID,
-                                                        token: token, environment: environment,
-                                                        displayName: displayName), key: receiptKey)
+                if receipt?.matches(source: source, token: token, environment: environment,
+                                    displayName: displayName) != true {
+                    try Vault.save(PushRegistrationReceipt(sourceID: source.sourceID, clientID: source.clientID,
+                                                            token: token, environment: environment,
+                                                            displayName: displayName), key: receiptKey)
+                }
                 completed += 1
                 Diagnostics.shared.record("push_destination_registered")
             } catch {
