@@ -27,8 +27,6 @@ if dev {
         locations: [0, 1])!
     context.drawLinearGradient(gradient, start: CGPoint(x: 0, y: 1024),
         end: CGPoint(x: 1024, y: 0), options: [])
-    context.setFillColor(rgb(209, 242, 255, 0.17))
-    context.fillEllipse(in: CGRect(x: 120, y: 120, width: 784, height: 784))
     // TestFlight's broad, quiet blueprint grid reads at Home Screen size.
     context.setStrokeColor(rgb(219, 244, 255, 0.27))
     context.setLineWidth(5)
@@ -38,10 +36,6 @@ if dev {
         context.move(to: CGPoint(x: 0, y: position))
         context.addLine(to: CGPoint(x: 1024, y: position))
     }
-    context.strokePath()
-    context.addPath(rounded(CGRect(x: 12, y: 12, width: 1000, height: 1000), 246))
-    context.setStrokeColor(rgb(223, 247, 255, 0.3))
-    context.setLineWidth(6)
     context.strokePath()
 } else {
     // Fixed release artwork follows the Ayu default: navy and yellow.
