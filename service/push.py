@@ -428,9 +428,10 @@ class Worker:
                 "SELECT w.* FROM watch_push_devices w JOIN clients c ON w.client_id=c.id")]
         for device in devices:
             changed = fingerprint != device["last_fingerprint"]
-            # Stay within Apple's suggested two to three background pushes per hour.
-            # Re-send an unchanged reading so a throttled delivery can recover.
-            if now < device["next_attempt"] or (not changed and now - device["last_sent"] < 1500):
+            # Give a changed reading priority. Retry an accepted reading once after
+            # 30 minutes, then save the background-push budget until it changes.
+            if now < device["next_attempt"] or (not changed and (
+                    device["recovery_sends"] >= 1 or now - device["last_sent"] < 1800)):
                 continue
             with self.store.connect() as db:
                 current = db.execute("SELECT * FROM watch_push_devices WHERE client_id=?",
@@ -445,16 +446,21 @@ class Worker:
                 "ExpiredProviderToken", "EnvironmentMismatch") or result.status in (401, 403)
             delay = (1200 if accepted else min(3600, 30 * 2 ** min(device["attempts"], 6))
                      if retryable else 3600)
+            recovery_sends = device["recovery_sends"]
+            if accepted:
+                recovery_sends = 0 if changed else recovery_sends + 1
             with self.store.connect() as db:
                 if invalid:
                     db.execute("DELETE FROM watch_push_devices WHERE client_id=? AND token=?",
                                (device["client_id"], device["token"]))
                 else:
                     db.execute("UPDATE watch_push_devices SET last_fingerprint=?,last_sent=?,next_attempt=?,"
-                               "attempts=?,last_result=?,last_apns_id=? WHERE client_id=? AND token=?",
+                               "attempts=?,last_result=?,last_apns_id=?,recovery_sends=? "
+                               "WHERE client_id=? AND token=?",
                                (fingerprint if accepted else device["last_fingerprint"],
                                 now if accepted else device["last_sent"], now + delay,
                                 0 if accepted else device["attempts"] + 1, result.reason, result.apns_id,
+                                recovery_sends,
                                 device["client_id"], device["token"]))
             self.log({"at": now, "stage": "watch_allowance_accepted" if accepted else "watch_allowance_failed",
                       "clientID": device["client_id"], "status": result.status, "reason": result.reason,

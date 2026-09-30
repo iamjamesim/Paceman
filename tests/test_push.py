@@ -53,6 +53,16 @@ class PushWorkerTests(unittest.TestCase):
         self.assertNotIn("mode", columns)
         self.assertTrue(reopened.push_device(self.client["credential"])["registered"])
 
+    def test_existing_watch_registration_adds_recovery_counter(self):
+        self.store.watch_push_device(self.client["credential"], {
+            "deviceToken": "ef" * 32, "environment": "development"})
+        with self.store.connect() as db:
+            db.execute("ALTER TABLE watch_push_devices DROP COLUMN recovery_sends")
+        reopened = Store(self.store.path)
+        with reopened.connect() as db:
+            row = db.execute("SELECT token,recovery_sends FROM watch_push_devices").fetchone()
+        self.assertEqual((row["token"], row["recovery_sends"]), ("ef" * 32, 0))
+
     def register(self):
         return self.store.push_device(self.client["credential"], {
             "deviceToken": self.device_token, "environment": "development"})
@@ -297,6 +307,71 @@ class PushWorkerTests(unittest.TestCase):
         self.worker.step(now + 1201)
         self.assertEqual(len([call for call in self.sender.calls if call[0].get("mode") == "watch"]), 2)
         self.assertEqual(watch[0][1]["allowance"]["remaining"], 64)
+
+    def test_unchanged_watch_reading_gets_one_recovery_send_per_client(self):
+        now = 1_800_000_000
+        first_token, second_token = "ef" * 32, "cd" * 32
+        self.store.watch_push_device(self.client["credential"], {
+            "deviceToken": first_token, "environment": "development"})
+        other = self.pair()
+        self.store.watch_push_device(other["credential"], {
+            "deviceToken": second_token, "environment": "development"})
+        allowance = {"provider": "codex", "remaining": 64, "window": 1,
+                     "windowDurationMins": 10080, "updatedAt": now, "resetsAt": now + 500000}
+        def publish():
+            with self.store.connect() as db:
+                db.execute("UPDATE events SET payload=? WHERE seq=(SELECT MAX(seq) FROM events)",
+                           (json.dumps({"allowance": allowance}),))
+        def watch_calls():
+            return [call for call in self.sender.calls if call[0].get("mode") == "watch"]
+
+        publish()
+        self.worker.step(now)
+        self.assertEqual({call[0]["token"] for call in watch_calls()}, {first_token, second_token})
+        with self.store.connect() as db:
+            db.execute("UPDATE watch_push_devices SET next_attempt=? WHERE client_id=?",
+                       (now + 3600, other["clientID"]))
+        self.worker.step(now + 1800)
+        self.assertEqual([call[0]["token"] for call in watch_calls()[2:]], [first_token])
+        allowance["updatedAt"] = now + 3600
+        publish()
+        self.worker.step(now + 3600)
+        self.assertEqual([call[0]["token"] for call in watch_calls()[3:]], [second_token])
+        allowance["updatedAt"] = now + 7200
+        publish()
+        self.worker.step(now + 7200)
+        self.assertEqual(len(watch_calls()), 4)
+        allowance["remaining"] = 63
+        publish()
+        self.worker.step(now + 7201)
+        self.assertEqual({call[0]["token"] for call in watch_calls()[4:]}, {first_token, second_token})
+        with self.store.connect() as db:
+            self.assertEqual([row[0] for row in db.execute(
+                "SELECT recovery_sends FROM watch_push_devices ORDER BY client_id")], [0, 0])
+
+    def test_failed_watch_recovery_does_not_consume_the_retry(self):
+        now = 1_800_000_000
+        self.store.watch_push_device(self.client["credential"], {
+            "deviceToken": "ef" * 32, "environment": "development"})
+        allowance = {"provider": "codex", "remaining": 64, "window": 1,
+                     "windowDurationMins": 10080, "updatedAt": now, "resetsAt": now + 500000}
+        def publish():
+            with self.store.connect() as db:
+                db.execute("UPDATE events SET payload=? WHERE seq=(SELECT MAX(seq) FROM events)",
+                           (json.dumps({"allowance": allowance}),))
+        publish()
+        self.worker.step(now)
+        self.sender.result = Result(503, "ServiceUnavailable", "failed-retry")
+        self.worker.step(now + 1800)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT recovery_sends FROM watch_push_devices").fetchone()[0], 0)
+        allowance["updatedAt"] = now + 1831
+        publish()
+        self.sender.result = Result(200, "Accepted", "recovered")
+        self.worker.step(now + 1831)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT recovery_sends FROM watch_push_devices").fetchone()[0], 1)
+        self.assertEqual(len([call for call in self.sender.calls if call[0].get("mode") == "watch"]), 3)
 
     def test_watch_registration_is_separate_and_revocation_clears_it(self):
         token = "ef" * 32

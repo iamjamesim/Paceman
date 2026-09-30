@@ -108,7 +108,8 @@ class Store:
                     client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
                     last_fingerprint TEXT, last_sent REAL NOT NULL DEFAULT 0,
                     next_attempt REAL NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
-                    last_result TEXT, last_apns_id TEXT);
+                    last_result TEXT, last_apns_id TEXT,
+                    recovery_sends INTEGER NOT NULL DEFAULT 0);
             """)
             if "display_name" not in {row[1] for row in db.execute("PRAGMA table_info(clients)")}:
                 db.execute("ALTER TABLE clients ADD COLUMN display_name TEXT")
@@ -117,6 +118,8 @@ class Store:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN alert_cursor INTEGER NOT NULL DEFAULT 0")
             if "mode" in {row[1] for row in db.execute("PRAGMA table_info(push_devices)")}:
                 db.execute("ALTER TABLE push_devices DROP COLUMN mode")
+            if "recovery_sends" not in {row[1] for row in db.execute("PRAGMA table_info(watch_push_devices)")}:
+                db.execute("ALTER TABLE watch_push_devices ADD COLUMN recovery_sends INTEGER NOT NULL DEFAULT 0")
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM clients c LEFT JOIN client_devices d ON d.client_id=c.id "
                           "WHERE d.client_id IS NULL LIMIT 1").fetchone():
