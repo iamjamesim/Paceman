@@ -17,7 +17,7 @@ int main(void)
     assert(!watch_ancs_should_request_attributes(2, 0x10));
     assert(!watch_ancs_should_request_attributes(3, 0));
 
-    const char *app = "com.apselabs.agentcompanion.prototype";
+    const char *app = "ai.paceman.app";
     uint8_t wire[256] = {0, 0x78, 0x56, 0x34, 0x12, 0, 0, 0};
     wire[6] = strlen(app);
     memcpy(wire + 8, app, strlen(app));

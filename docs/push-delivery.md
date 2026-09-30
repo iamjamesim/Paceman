@@ -29,7 +29,7 @@ The older direct sender remains temporarily for existing personal and Omarchy de
 {
   "teamID": "TEAMID1234",
   "keyID": "KEYID12345",
-  "topic": "com.apselabs.agentcompanion.prototype",
+  "topic": "ai.paceman.app",
   "environment": "development",
   "keyPath": "AuthKey_KEYID12345.p8"
 }

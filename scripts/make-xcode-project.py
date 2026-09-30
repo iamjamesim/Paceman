@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a dependency-free Xcode project; safe to rerun after adding Swift files."""
+"""Generate the iPhone targets of a dependency-free Xcode project."""
 import hashlib
 import json
 from pathlib import Path
@@ -8,6 +8,8 @@ import subprocess
 import shutil
 
 root = Path(__file__).resolve().parents[1] / "ios"
+app_id = "ai.paceman.app"
+app_group = "group.ai.paceman.app"
 objects = {}
 # Preserve user-selected signing settings when regenerating on the Mac.
 previous_settings = {}
@@ -73,7 +75,7 @@ for name in ["AgentCompanion", "AgentCompanionTests", "AgentCompanionWidgets"]:
     products.append(product)
     configs = []
     for config in ["Debug", "Release"]:
-        settings = {"PRODUCT_NAME": "$(TARGET_NAME)", "PRODUCT_BUNDLE_IDENTIFIER": "com.apselabs.agentcompanion.prototype" + (".tests" if test else ".widgets" if widget else ""),
+        settings = {"PRODUCT_NAME": "$(TARGET_NAME)", "PRODUCT_BUNDLE_IDENTIFIER": app_id + (".tests" if test else ".widgets" if widget else ""),
                     "SWIFT_VERSION": "5.0", "IPHONEOS_DEPLOYMENT_TARGET": "18.0", "TARGETED_DEVICE_FAMILY": "1",
                     "CODE_SIGN_STYLE": "Automatic", "SDKROOT": "iphoneos", "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator",
                     "SWIFT_OPTIMIZATION_LEVEL": "-Onone" if config == "Debug" else "-O",
@@ -86,7 +88,7 @@ for name in ["AgentCompanion", "AgentCompanionTests", "AgentCompanionWidgets"]:
                              "BUNDLE_LOADER": "$(TEST_HOST)"})
         elif widget:
             settings.update({"INFOPLIST_FILE": "AgentCompanionWidgets/Info.plist", "CODE_SIGN_ENTITLEMENTS": "AgentCompanionWidgets/AgentCompanionWidgets.entitlements",
-                "APPLICATION_EXTENSION_API_ONLY": "YES", "SKIP_INSTALL": "YES", "DEVELOPMENT_TEAM": "CF5Q5833P7",
+                "APPLICATION_EXTENSION_API_ONLY": "YES", "SKIP_INSTALL": "YES",
                 "LD_RUNPATH_SEARCH_PATHS": ["$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks"]})
         else:
             settings["ASSETCATALOG_COMPILER_APPICON_NAME"] = "AppIcon"
@@ -163,13 +165,13 @@ info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Paceman",
         "NSLocationWhenInUseUsageDescription": "Use your approximate location to show local weather on your watch.",
         "NSLocationDefaultAccuracyReduced": True,
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Keep weather on your watch local as you travel, even when Paceman is closed.",
-        "BGTaskSchedulerPermittedIdentifiers": ["com.apselabs.agentcompanion.weather"],
+        "BGTaskSchedulerPermittedIdentifiers": [app_id + ".weather"],
         "NSCameraUsageDescription": "Scan a pairing invitation from your work computer.",
         "NSAccessorySetupKitSupports": ["Bluetooth"],
         "NSAccessorySetupBluetoothServices": ["7F510001-1B15-4F0D-B7A5-4CF3A2C98EE1"],
         "NSAccessorySetupBluetoothNames": ["Watch"]}
 info["UIAppFonts"] = ["JetBrainsMono-Regular.ttf", "JetBrainsMono-SemiBold.ttf"]
-info["CFBundleURLTypes"] = [{"CFBundleURLName": "companion", "CFBundleURLSchemes": ["agentcompanion"]}]
+info["CFBundleURLTypes"] = [{"CFBundleURLName": "paceman", "CFBundleURLSchemes": ["paceman"]}]
 widget_info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Paceman",
     "CFBundleExecutable": "$(EXECUTABLE_NAME)", "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
     "CFBundleInfoDictionaryVersion": "6.0", "CFBundleName": "Paceman", "CFBundlePackageType": "XPC!",
@@ -177,7 +179,7 @@ widget_info = {"CFBundleDevelopmentRegion": "en", "CFBundleDisplayName": "Pacema
     "NSExtension": {"NSExtensionPointIdentifier": "com.apple.widgetkit-extension"}}
 with (root / "AgentCompanionWidgets/Info.plist").open("wb") as file: plistlib.dump(widget_info, file)
 for name in ("AgentCompanion", "AgentCompanionWidgets"):
-    entitlement = {"com.apple.security.application-groups": ["group.com.apselabs.agentcompanion.prototype"]}
+    entitlement = {"com.apple.security.application-groups": [app_group]}
     if name == "AgentCompanion":
         entitlement["aps-environment"] = "$(APNS_ENVIRONMENT)"
         entitlement["com.apple.developer.weatherkit"] = True

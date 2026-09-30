@@ -12,6 +12,6 @@
     <key>CFBundleVersion</key><string>4</string>
     <key>WKApplication</key><true/>
     <key>UIBackgroundModes</key><array><string>remote-notification</string></array>
-    <key>WKCompanionAppBundleIdentifier</key><string>com.apselabs.agentcompanion.prototype</string>
+    <key>WKCompanionAppBundleIdentifier</key><string>ai.paceman.app</string>
     <key>WKRunsIndependentlyOfCompanionApp</key><false/>
 </dict></plist>

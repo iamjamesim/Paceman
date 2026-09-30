@@ -177,7 +177,7 @@ final class PhoneWeather: NSObject, ObservableObject, @preconcurrency CLLocation
     private var locationPriority = false
     private var pendingPriority = false
     private var backgroundWork = UIBackgroundTaskIdentifier.invalid
-    static let backgroundIdentifier = "com.apselabs.agentcompanion.weather"
+    static let backgroundIdentifier = "ai.paceman.app.weather"
     private var task: Task<Void, Never>?
     private var generation = UUID()
     private var lastAttempt: Date?

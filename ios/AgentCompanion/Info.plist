@@ -6,7 +6,7 @@
 	<string>$(APNS_ENVIRONMENT)</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>com.apselabs.agentcompanion.weather</string>
+		<string>ai.paceman.app.weather</string>
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
@@ -28,10 +28,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>companion</string>
+			<string>paceman</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>agentcompanion</string>
+				<string>paceman</string>
 			</array>
 		</dict>
 	</array>

@@ -319,7 +319,7 @@
 "isa" = "XCBuildConfiguration";
 "buildSettings" = {
 "PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype";
+"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app";
 "SWIFT_VERSION" = "5.0";
 "IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
 "TARGETED_DEVICE_FAMILY" = "1";
@@ -335,7 +335,6 @@
 "INFOPLIST_FILE" = "AgentCompanion/Info.plist";
 "APNS_ENVIRONMENT" = "development";
 "CODE_SIGN_ENTITLEMENTS" = "AgentCompanion/AgentCompanion.entitlements";
-"DEVELOPMENT_TEAM" = "CF5Q5833P7";
 };
 "name" = "Debug";
 };
@@ -343,7 +342,7 @@
 "isa" = "XCBuildConfiguration";
 "buildSettings" = {
 "PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype";
+"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app";
 "SWIFT_VERSION" = "5.0";
 "IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
 "TARGETED_DEVICE_FAMILY" = "1";
@@ -359,7 +358,6 @@
 "INFOPLIST_FILE" = "AgentCompanion/Info.plist";
 "APNS_ENVIRONMENT" = "production";
 "CODE_SIGN_ENTITLEMENTS" = "AgentCompanion/AgentCompanion.entitlements";
-"DEVELOPMENT_TEAM" = "CF5Q5833P7";
 };
 "name" = "Release";
 };
@@ -453,7 +451,7 @@
 "isa" = "XCBuildConfiguration";
 "buildSettings" = {
 "PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype.tests";
+"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.tests";
 "SWIFT_VERSION" = "5.0";
 "IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
 "TARGETED_DEVICE_FAMILY" = "1";
@@ -467,7 +465,6 @@
 "GENERATE_INFOPLIST_FILE" = "YES";
 "TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/AgentCompanion.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AgentCompanion";
 "BUNDLE_LOADER" = "$(TEST_HOST)";
-"DEVELOPMENT_TEAM" = "CF5Q5833P7";
 };
 "name" = "Debug";
 };
@@ -475,7 +472,7 @@
 "isa" = "XCBuildConfiguration";
 "buildSettings" = {
 "PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype.tests";
+"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.tests";
 "SWIFT_VERSION" = "5.0";
 "IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
 "TARGETED_DEVICE_FAMILY" = "1";
@@ -489,7 +486,6 @@
 "GENERATE_INFOPLIST_FILE" = "YES";
 "TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/AgentCompanion.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/AgentCompanion";
 "BUNDLE_LOADER" = "$(TEST_HOST)";
-"DEVELOPMENT_TEAM" = "CF5Q5833P7";
 };
 "name" = "Release";
 };
@@ -667,7 +663,7 @@
 "isa" = "XCBuildConfiguration";
 "buildSettings" = {
 "PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype.widgets";
+"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.widgets";
 "SWIFT_VERSION" = "5.0";
 "IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
 "TARGETED_DEVICE_FAMILY" = "1";
@@ -683,7 +679,6 @@
 "CODE_SIGN_ENTITLEMENTS" = "AgentCompanionWidgets/AgentCompanionWidgets.entitlements";
 "APPLICATION_EXTENSION_API_ONLY" = "YES";
 "SKIP_INSTALL" = "YES";
-"DEVELOPMENT_TEAM" = "CF5Q5833P7";
 };
 "name" = "Debug";
 };
@@ -691,7 +686,7 @@
 "isa" = "XCBuildConfiguration";
 "buildSettings" = {
 "PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype.widgets";
+"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.widgets";
 "SWIFT_VERSION" = "5.0";
 "IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
 "TARGETED_DEVICE_FAMILY" = "1";
@@ -707,7 +702,6 @@
 "CODE_SIGN_ENTITLEMENTS" = "AgentCompanionWidgets/AgentCompanionWidgets.entitlements";
 "APPLICATION_EXTENSION_API_ONLY" = "YES";
 "SKIP_INSTALL" = "YES";
-"DEVELOPMENT_TEAM" = "CF5Q5833P7";
 };
 "name" = "Release";
 };
@@ -952,7 +946,6 @@
 "APNS_ENVIRONMENT" = "development";
 "WATCHOS_DEPLOYMENT_TARGET" = "11.0";
 "SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
-"DEVELOPMENT_TEAM" = "CF5Q5833P7";
 "TARGETED_DEVICE_FAMILY" = "4";
 "INFOPLIST_FILE" = "PacemanWatch/Info.plist";
 "SKIP_INSTALL" = "YES";
@@ -964,7 +957,7 @@
 "SDKROOT" = "watchos";
 "CODE_SIGN_STYLE" = "Automatic";
 "ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
-"PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype.watchkitapp";
+"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.watchkitapp";
 "PRODUCT_NAME" = "$(TARGET_NAME)";
 "SWIFT_VERSION" = "5.0";
 };
@@ -975,7 +968,6 @@
 "buildSettings" = {
 "APNS_ENVIRONMENT" = "production";
 "WATCHOS_DEPLOYMENT_TARGET" = "11.0";
-"DEVELOPMENT_TEAM" = "CF5Q5833P7";
 "TARGETED_DEVICE_FAMILY" = "4";
 "INFOPLIST_FILE" = "PacemanWatch/Info.plist";
 "SKIP_INSTALL" = "YES";
@@ -987,7 +979,7 @@
 "SDKROOT" = "watchos";
 "CODE_SIGN_STYLE" = "Automatic";
 "ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
-"PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype.watchkitapp";
+"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.watchkitapp";
 "PRODUCT_NAME" = "$(TARGET_NAME)";
 "SWIFT_VERSION" = "5.0";
 };
@@ -1004,7 +996,6 @@
 "buildSettings" = {
 "APPLICATION_EXTENSION_API_ONLY" = "YES";
 "SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG";
-"DEVELOPMENT_TEAM" = "CF5Q5833P7";
 "TARGETED_DEVICE_FAMILY" = "4";
 "INFOPLIST_FILE" = "PacemanWatchWidgets/Info.plist";
 "SKIP_INSTALL" = "YES";
@@ -1016,7 +1007,7 @@
 "SDKROOT" = "watchos";
 "CODE_SIGN_STYLE" = "Automatic";
 "PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype.watchkitapp.widgets";
+"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.watchkitapp.widgets";
 "SWIFT_VERSION" = "5.0";
 "WATCHOS_DEPLOYMENT_TARGET" = "11.0";
 };
@@ -1026,7 +1017,6 @@
 "isa" = "XCBuildConfiguration";
 "buildSettings" = {
 "APPLICATION_EXTENSION_API_ONLY" = "YES";
-"DEVELOPMENT_TEAM" = "CF5Q5833P7";
 "TARGETED_DEVICE_FAMILY" = "4";
 "INFOPLIST_FILE" = "PacemanWatchWidgets/Info.plist";
 "SKIP_INSTALL" = "YES";
@@ -1038,7 +1028,7 @@
 "SDKROOT" = "watchos";
 "CODE_SIGN_STYLE" = "Automatic";
 "PRODUCT_NAME" = "$(TARGET_NAME)";
-"PRODUCT_BUNDLE_IDENTIFIER" = "com.apselabs.agentcompanion.prototype.watchkitapp.widgets";
+"PRODUCT_BUNDLE_IDENTIFIER" = "ai.paceman.app.watchkitapp.widgets";
 "SWIFT_VERSION" = "5.0";
 "WATCHOS_DEPLOYMENT_TARGET" = "11.0";
 };

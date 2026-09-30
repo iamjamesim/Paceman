@@ -17,7 +17,7 @@ static const ble_uuid128_t data_uuid = BLE_UUID128_INIT(
 
 static const char *TAG = "watch_ancs";
 /* Public application identifier, not a credential. Keep in sync with iOS. */
-static const char *paceman_app = "com.apselabs.agentcompanion.prototype";
+static const char *paceman_app = "ai.paceman.app";
 static uint16_t connection = BLE_HS_CONN_HANDLE_NONE;
 static uintptr_t epoch;
 static void (*on_changed)(void);

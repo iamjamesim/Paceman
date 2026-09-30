@@ -14,13 +14,13 @@ These steps are for the Paceman service operator. A fork can run its own relay w
    {
      "teamID": "TEAMID1234",
      "keyID": "KEYID12345",
-     "topic": "com.apselabs.agentcompanion.prototype",
+     "topic": "ai.paceman.app",
      "environment": "development",
      "keyPath": "/etc/secrets/apns.p8"
    }
    ```
 
-   Use `development` for a debug iPhone build and `production` for TestFlight; the key must allow that environment. If the Watch uses a different key, add an `apns-watch.p8` Secret File and set `watchKeyID` and `watchKeyPath` (`/etc/secrets/apns-watch.p8`) in the JSON. Keep request bodies and keys out of logs and Git.
+   Use `development` for a debug iPhone build and `production` for TestFlight; the key must allow that environment. After changing the app identifier or developer team, update the deployed `teamID`, `keyID`, and `topic` to match the newly signed app, then re-register the phone's push token. If the Watch uses a different key, add an `apns-watch.p8` Secret File and set `watchKeyID` and `watchKeyPath` (`/etc/secrets/apns-watch.p8`) in the JSON. Keep request bodies and keys out of logs and Git.
 
 ## Connect a Mac
 

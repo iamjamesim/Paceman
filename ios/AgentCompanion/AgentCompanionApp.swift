@@ -132,7 +132,7 @@ struct CompanionRoot: View {
             presentation.syncComputerNames(model.pairedSources, snapshots: model.snapshots)
         }
         .onOpenURL { url in
-            guard url.scheme == "agentcompanion" else { return }
+            guard url.scheme == "paceman" else { return }
             if url.host == "computer", let id = url.pathComponents.dropFirst().first,
                model.pairedSources.contains(where: { $0.sourceID == id }) {
                 focusedSourceID = id

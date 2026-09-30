@@ -65,14 +65,18 @@ xcodebuild -project ios/AgentCompanion.xcodeproj -scheme AgentCompanion \
   -derivedDataPath .runtime/DerivedData CODE_SIGNING_ALLOWED=NO test
 ```
 
-Replace SIMULATOR-UDID with an installed simulator. Device signing needs an
-eligible Apple Developer team for APNs. Existing signing identifiers belong to
-the current prototype; changing them can require fresh provisioning and pairing.
-No private signing keys are checked in. A new developer should configure their own provisioning before device use.
+Replace SIMULATOR-UDID with an installed simulator. The iPhone app uses
+`ai.paceman.app`; the watch and widget identifiers extend that prefix, and all
+app targets share `group.ai.paceman.app`. Select the intended Apple Developer
+team for every app and extension target in Xcode before device signing. The
+repository does not pin a team or include private signing keys. A build with
+the new identifier installs as a separate app from older development builds;
+pair its phone and watch again, and register new push tokens with the matching
+APNs topic.
 
-After adding/removing Swift files, regenerate with
-`python3 scripts/make-xcode-project.py`. The generator preserves existing per-target
-signing settings; review the resulting diff. Regenerate the icon with
+The project generator currently covers the iPhone app, tests, and iPhone widget.
+Do not rerun it on the current project: it would remove the Watch targets. Add
+new Swift files in Xcode until the generator supports them. Regenerate the icon with
 `swift scripts/make-app-icon.swift ios/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png`
 only when its design changes.
 
