@@ -76,9 +76,8 @@ class MacSource:
         self.closed = False
         self.monotonic = monotonic
         self.pending_attention = {}
-        # Async questions outlive the tool call and may outlive the turn.
-        # A later user message is only a proxy for resolution: Codex hooks do
-        # not identify which async question, if any, that message answers.
+        # Async questions outlive the tool call, but end with their turn.
+        # A later user message can clear one while the turn is still running.
         self.pending_questions = {}
         self.published_questions = set()
 
@@ -208,8 +207,10 @@ class MacSource:
                 if (previous and previous["turn"] == turn and previous["state"] == "failed"
                         and self.confirmed_turns.get(key) == turn):
                     return False
-                if (previous and previous["turn"] == turn and previous["state"] in ("finished", "failed")
-                        and event == "working" and command.get("hook") == "PostToolUse"):
+                # Once a turn is terminal, no delayed nonterminal hook can
+                # reopen it. A new prompt with a new turn ID remains valid.
+                if (previous and previous["state"] in ("finished", "failed")
+                        and (not turn or previous["turn"] == turn) and event != "completed"):
                     return False
                 if event == "question-opened":
                     self.pending_questions[key] = (turn, self.monotonic() + ATTENTION_DELAY,
@@ -235,7 +236,7 @@ class MacSource:
                     return False
                 self.pending_attention.pop(key, None)
                 question_cleared = False
-                if command.get("hook") in ("UserPromptSubmit", "Interrupt"):
+                if event == "completed" or command.get("hook") in ("UserPromptSubmit", "Interrupt"):
                     question_cleared = self.pending_questions.pop(key, None) is not None
                     self.published_questions.discard(key)
                 if (previous and previous["turn"] == turn and previous["state"] == EVENT_STATES[event]
@@ -266,7 +267,7 @@ class MacSource:
                         previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
                         if previous and previous["turn"] != turn:
                             continue
-                        if previous and previous["state"] in ("needs_input", "finished"):
+                        if previous and previous["state"] in ("needs_input", "finished", "failed"):
                             continue
                         db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
                                    (key, turn, "needs_input", time.time(), workspace_label))
@@ -298,10 +299,11 @@ class MacSource:
                 retired = 0
                 for row in db.execute("SELECT id FROM mac_sessions WHERE state IN ('finished','failed') AND updated<=?",
                                       (time.time() - FINISHED_RETENTION,)):
-                    if row["id"] not in self.pending_questions:
-                        retired += db.execute("DELETE FROM mac_sessions WHERE id=?", (row["id"],)).rowcount
-                        self.turn_ids.pop(row["id"], None)
-                        self.confirmed_turns.pop(row["id"], None)
+                    retired += db.execute("DELETE FROM mac_sessions WHERE id=?", (row["id"],)).rowcount
+                    self.pending_questions.pop(row["id"], None)
+                    self.published_questions.discard(row["id"])
+                    self.turn_ids.pop(row["id"], None)
+                    self.confirmed_turns.pop(row["id"], None)
                 if retired:
                     self._publish(db, lifecycle_only=True)
             if now < self.next_allowance_at:
@@ -342,9 +344,12 @@ class MacSource:
                     continue
                 self.confirmed_turns[key] = pair[1]
                 state = "failed" if status == "failed" else "finished"
-                if row["state"] == state:
-                    continue
                 self.pending_attention.pop(key, None)
+                question_cleared = self.pending_questions.pop(key, None) is not None
+                self.published_questions.discard(key)
+                if row["state"] == state:
+                    changed |= question_cleared
+                    continue
                 db.execute("UPDATE mac_sessions SET state=?,updated=? WHERE id=?",
                            (state, time.time(), key))
                 changed = True
@@ -362,7 +367,11 @@ class MacSource:
         sessions = []
         for row in records:
             question = self.pending_questions.get(row["id"])
-            state = "needs_input" if question and question[1] <= now_monotonic else row["state"]
+            # A completed or failed turn is authoritative even if a delayed
+            # question marker survives an event path we did not anticipate.
+            state = ("needs_input" if row["state"] not in ("finished", "failed")
+                     and question and question[0] == row["turn"] and question[1] <= now_monotonic
+                     else row["state"])
             session = {"id": row["id"], "provider": "codex", "state": state}
             if row["workspace_label"]:
                 session["workspaceLabel"] = row["workspace_label"]

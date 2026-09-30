@@ -266,7 +266,7 @@ class MacSourceTests(unittest.TestCase):
                 hook("PostToolUse", "request_user_input")
                 self.assertEqual(store.snapshot()["state"], "working")
 
-    def test_async_question_remains_attention_until_next_user_message(self):
+    def test_async_question_ends_with_completed_turn(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             root.chmod(0o700)
@@ -292,15 +292,49 @@ class MacSourceTests(unittest.TestCase):
                 source.tick()
                 self.assertEqual(store.snapshot()["state"], "needs_input")
                 hook("PostToolUse", "Bash")
-                hook("Stop")
                 self.assertEqual(store.snapshot()["state"], "needs_input")
+                hook("Stop")
+                self.assertEqual(store.snapshot()["state"], "finished")
+                self.assertFalse(source.pending_questions)
+                hook("PreToolUse", "request_user_input_async")
+                hook("PermissionRequest")
+                hook("UserPromptSubmit")
+                clock[0] += 6
+                source.tick()
+                self.assertEqual(store.snapshot()["state"], "finished")
+                with store.connect() as db:
+                    key = db.execute("SELECT id FROM mac_sessions").fetchone()[0]
+                source.pending_questions[key] = ("1", clock[0] - 1, None)
+                source.publish_current()
+                self.assertEqual(store.snapshot()["state"], "finished")
                 with store.connect() as db:
                     db.execute("UPDATE mac_sessions SET updated=?",
                                (time.time() - FINISHED_RETENTION - 1,))
                 source.tick()
-                self.assertEqual(store.snapshot()["state"], "needs_input")
+                self.assertEqual(store.snapshot()["state"], "idle")
+                self.assertFalse(source.pending_questions)
                 hook("UserPromptSubmit", turn="2")
                 self.assertEqual(store.snapshot()["state"], "working")
+
+    def test_completed_turn_status_clears_async_question_without_stop(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            session, turn = str(uuid4()), str(uuid4())
+            clock = [10.0]
+            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                           turn_status_reader=lambda turns: {(session, turn): "completed"},
+                           monotonic=lambda: clock[0]) as source:
+                event = dict(command="agent-event", session=session, turn=turn)
+                source.receive({**event, "event": "working", "hook": "UserPromptSubmit"})
+                source.receive({**event, "event": "question-opened", "hook": "PreToolUse"})
+                clock[0] += 6
+                source.publish_current()
+                self.assertEqual(store.snapshot()["state"], "needs_input")
+                source._refresh_turn_statuses(list(source.turn_ids.items()))
+                self.assertEqual(store.snapshot()["state"], "finished")
+                self.assertFalse(source.pending_questions)
 
     def test_finished_rows_retire_without_expiring_live_work(self):
         with tempfile.TemporaryDirectory() as temporary:
