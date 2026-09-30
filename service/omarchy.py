@@ -23,6 +23,7 @@ from service.processes import CodexProcesses, ProcessIdentity
 
 MAX_AGE = 24 * 60 * 60
 FINISHED_RETENTION = 10 * 60
+ATTENTION_DELAY = 5.0
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
 EVENTS = {"working": "working", "needs-input": "needs_input", "completed": "finished",
           "interrupted": "idle", "ended": "idle"}
@@ -56,7 +57,7 @@ class EventHandler(socketserver.StreamRequestHandler):
 
 class OmarchySource:
     def __init__(self, store, *, socket_path: Path | None = None, state_dir: Path | None = None,
-                 processes=None, computer_name: str | None = None):
+                 processes=None, computer_name: str | None = None, monotonic=time.monotonic):
         self.store = store
         self.socket_path = socket_path or default_socket()
         self.state_dir = state_dir or Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy"
@@ -66,6 +67,8 @@ class OmarchySource:
         self.thread = None
         self.socket_inode = None
         self.last_event_at = 0
+        self.pending_questions = {}
+        self.monotonic = monotonic
         self.processes = processes if processes is not None else CodexProcesses()
         self.computer_name = (computer_name or socket.gethostname()).split(".")[0][:80] or "Computer"
 
@@ -130,6 +133,7 @@ class OmarchySource:
             raise ValueError("Unsupported command")
         source, session, turn = (command.get(key) for key in ("source", "session", "turn"))
         event = command.get("event")
+        async_question = event == "needs-input" and command.get("attention") == "async"
         if (not all(isinstance(value, str) and IDENTIFIER.fullmatch(value) for value in (source, session))
                 or not isinstance(event, str) or event not in EVENTS
                 or not isinstance(turn, str)
@@ -168,7 +172,9 @@ class OmarchySource:
                 if previous["turn"] == turn:
                     if same_owner and (binding["closed"] or (previous["state"] == "idle" and event != "ended")):
                         return self.publish(db, lifecycle_only=True)
-                    if same_owner and previous["state"] == EVENTS[event] and event != "ended":
+                    if (same_owner and previous["state"] == EVENTS[event]
+                            and event != "ended" and not async_question
+                            and command.get("hook") != "UserPromptSubmit"):
                         return self.publish(db, lifecycle_only=True)
                     if same_owner and previous["state"] in ("idle", "finished") and event in ("working", "needs-input"):
                         return self.publish(db, lifecycle_only=True)
@@ -180,10 +186,17 @@ class OmarchySource:
             for row in replaced:
                 db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id=?", (row[0],))
                 db.execute("UPDATE omarchy_processes SET closed=1 WHERE session_id=?", (row[0],))
+                self.pending_questions.pop(row[0], None)
+            if async_question:
+                self.pending_questions[key] = (turn, self.monotonic() + ATTENTION_DELAY)
+            elif event in ("completed", "interrupted", "ended") or command.get("hook") == "UserPromptSubmit":
+                self.pending_questions.pop(key, None)
+            state = (previous["state"] if async_question and previous and previous["turn"] == turn
+                     else "working" if async_question else EVENTS[event])
             db.execute("INSERT OR REPLACE INTO omarchy_processes VALUES (?,?,?,?,0)",
                        (key, owner.pid, owner.start_ticks, owner.boot_id))
             db.execute("INSERT OR REPLACE INTO omarchy_sessions VALUES (?,?,?,?,?)",
-                       (key, source, turn, EVENTS[event], time.time()))
+                       (key, source, turn, state, time.time()))
             self.last_event_at = time.time()
             if event == "ended":
                 db.execute("UPDATE omarchy_processes SET closed=1 WHERE session_id=?", (key,))
@@ -198,10 +211,11 @@ class OmarchySource:
             if not self.processes.is_alive(self.identity(row)):
                 db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id=?", (row["session_id"],))
                 db.execute("DELETE FROM omarchy_processes WHERE session_id=?", (row["session_id"],))
+                self.pending_questions.pop(row["session_id"], None)
 
     def tick(self, *, force=False):
         with self.lock:
-            if not force and time.monotonic() < self.next_poll:
+            if not force and self.monotonic() < self.next_poll:
                 return
             with self.store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
@@ -214,18 +228,26 @@ class OmarchySource:
                 db.execute("DELETE FROM omarchy_sessions WHERE updated<? AND id NOT IN "
                            "(SELECT session_id FROM omarchy_processes)", (cutoff,))
                 self.publish(db, lifecycle_only=True)
-            self.next_poll = time.monotonic() + 1
+            self.next_poll = self.monotonic() + 1
 
     def publish(self, db, *, lifecycle_only=False) -> bool:
         records = db.execute("SELECT s.* FROM omarchy_sessions s JOIN omarchy_processes p "
                              "ON p.session_id=s.id WHERE p.closed=0 ORDER BY s.id").fetchall()
         cutoff = time.time() - FINISHED_RETENTION
         records = [row for row in records if row["state"] != "finished" or row["updated"] > cutoff]
-        sessions = [{"id": row["id"], "provider": row["provider"], "state": row["state"]} for row in records]
+        now_monotonic = self.monotonic()
+        sessions = []
+        for row in records:
+            question = self.pending_questions.get(row["id"])
+            state = ("needs_input" if row["state"] not in ("finished", "idle")
+                     and question and question[0] == row["turn"] and question[1] <= now_monotonic
+                     else row["state"])
+            sessions.append({"id": row["id"], "provider": row["provider"], "state": state})
         # Needs-input takes precedence; active work wins over old completions.
-        state = next((state for state in ("needs_input", "working", "finished")
-                      if any(row["state"] == state for row in records)), "idle")
-        activity_key = json.dumps([(row["id"], row["turn"], row["state"]) for row in records])
+        state = next((candidate for candidate in ("needs_input", "working", "finished")
+                      if any(session["state"] == candidate for session in sessions)), "idle")
+        activity_key = json.dumps([(row["id"], row["turn"], session["state"])
+                                   for row, session in zip(records, sessions)])
         previous_key = db.execute("SELECT value FROM metadata WHERE key='activity_key'").fetchone()
         sessions_changed = previous_key is None or previous_key[0] != activity_key
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()

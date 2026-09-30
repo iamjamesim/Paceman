@@ -30,6 +30,11 @@ Leave Funnel off and do not replace unrelated routes. The installer does not man
 
 The source currently uses the [Omarchy Watch for Codex adapter](https://github.com/iamjamesim/omarchy-watch-codex#install-and-update) for agent events. Follow that adapter's hook installation and review steps, then start a fresh local Codex session. Its events arrive on the legacy `$XDG_RUNTIME_DIR/omarchy-watch.sock` socket. Paceman verifies the sending process and its Codex ancestor, and reconciles process identity on startup and about once a second. Hooks contain activity metadata, not prompt or command content.
 
+Companion v0.3.0 also reports async input questions. Paceman waits five seconds
+before showing one, keeps it visible after the tool returns, and clears it when
+the turn ends or a new prompt begins. Earlier companion versions still cover
+blocking questions and approvals.
+
 ## Panel and control
 
 The panel shows Sharing, paired phones, aggregate activity, and a pairing action. **Last contact** means the phone last fetched an authenticated snapshot; it does not prove watch delivery. A five-second source heartbeat expires after 20 seconds. The panel shows a recovery action only when the source needs one. The panel keeps pairing and last-contact status separate from agent activity.

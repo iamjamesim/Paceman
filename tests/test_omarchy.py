@@ -153,6 +153,39 @@ class OmarchyTests(unittest.TestCase):
         self.assertEqual(self.event('needs-input')['state'], 'idle')
         self.assertEqual(self.event('working', turn='turn-2')['state'], 'working')
 
+    def test_async_question_waits_five_seconds_and_ends_with_turn(self):
+        clock = [100.0]
+        self.source.monotonic = lambda: clock[0]
+        self.event('working', hook='UserPromptSubmit')
+        opened = self.event('needs-input', attention='async', hook='PreToolUse')
+        self.assertEqual(opened['state'], 'working')
+        clock[0] += 6
+        self.source.tick(force=True)
+        self.assertEqual(self.store.snapshot()['state'], 'needs_input')
+        self.assertEqual(self.event('working', hook='PostToolUse')['state'], 'needs_input')
+        self.assertEqual(self.event('completed', hook='Stop')['state'], 'finished')
+        self.assertEqual(self.event('needs-input', attention='async', hook='PreToolUse')['state'], 'finished')
+
+    def test_short_async_question_does_not_alert(self):
+        clock = [100.0]
+        self.source.monotonic = lambda: clock[0]
+        self.event('working', hook='UserPromptSubmit')
+        self.event('needs-input', attention='async', hook='PreToolUse')
+        self.assertEqual(self.event('completed', hook='Stop')['state'], 'finished')
+        clock[0] += 6
+        self.source.tick(force=True)
+        self.assertEqual(self.store.snapshot()['state'], 'finished')
+
+    def test_new_prompt_clears_async_question(self):
+        clock = [100.0]
+        self.source.monotonic = lambda: clock[0]
+        self.event('working', hook='UserPromptSubmit')
+        self.event('needs-input', attention='async', hook='PreToolUse')
+        clock[0] += 6
+        self.source.tick(force=True)
+        self.assertEqual(self.store.snapshot()['state'], 'needs_input')
+        self.assertEqual(self.event('working', turn='turn-2', hook='UserPromptSubmit')['state'], 'working')
+
     def test_finished_turn_disappears_without_losing_live_process_binding(self):
         self.event('working', session='active')
         self.event('completed', session='old')
@@ -272,19 +305,32 @@ class OmarchyTests(unittest.TestCase):
                 thread.join(timeout=2)
 
     @unittest.skipUnless(os.environ.get('OMARCHY_CODEX_HOOK'), 'Set OMARCHY_CODEX_HOOK to exercise the upstream companion')
-    def test_existing_companion_routes_without_hook_changes(self):
+    def test_companion_routes_blocking_and_async_questions(self):
         hook = os.environ['OMARCHY_CODEX_HOOK']
+        def send(name, extra=None, turn='turn-1'):
+            payload = dict(hook_event_name=name, session_id='integration', turn_id=turn, **(extra or {}))
+            result = subprocess.run([sys.executable, hook], input=json.dumps(payload), text=True,
+                                    capture_output=True, timeout=3,
+                                    env={**os.environ, 'XDG_RUNTIME_DIR': str(self.root)})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return self.store.snapshot()['state']
+
         sequence = [('UserPromptSubmit', {}, 'working'),
                     ('PreToolUse', {'tool_name': 'request_user_input', 'tool_use_id': 'call-1'}, 'needs_input'),
                     ('PostToolUse', {'tool_name': 'request_user_input', 'tool_use_id': 'call-1'}, 'working'),
                     ('Stop', {}, 'finished'), ('SessionEnd', {}, 'idle')]
         for name, extra, state in sequence:
-            payload = dict(hook_event_name=name, session_id='integration', turn_id='turn-1', **extra)
-            result = subprocess.run([sys.executable, hook], input=json.dumps(payload), text=True,
-                                    capture_output=True, timeout=3,
-                                    env={**os.environ, 'XDG_RUNTIME_DIR': str(self.root)})
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(self.store.snapshot()['state'], state)
+            self.assertEqual(send(name, extra), state)
+        clock = [100.0]
+        self.source.monotonic = lambda: clock[0]
+        self.assertEqual(send('UserPromptSubmit', turn='turn-2'), 'working')
+        async_tool = {'tool_name': 'request_user_input_async', 'tool_use_id': 'async-1'}
+        self.assertEqual(send('PreToolUse', async_tool, 'turn-2'), 'working')
+        self.assertEqual(send('PostToolUse', async_tool, 'turn-2'), 'working')
+        clock[0] += 6
+        self.source.tick(force=True)
+        self.assertEqual(self.store.snapshot()['state'], 'needs_input')
+        self.assertEqual(send('Stop', turn='turn-2'), 'finished')
 
 
 if __name__ == '__main__':
