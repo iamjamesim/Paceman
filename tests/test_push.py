@@ -308,7 +308,7 @@ class PushWorkerTests(unittest.TestCase):
         self.assertEqual(len([call for call in self.sender.calls if call[0].get("mode") == "watch"]), 2)
         self.assertEqual(watch[0][1]["allowance"]["remaining"], 64)
 
-    def test_unchanged_watch_reading_gets_one_recovery_send_per_client(self):
+    def test_unchanged_watch_reading_retries_per_client_and_prioritizes_changes(self):
         now = 1_800_000_000
         first_token, second_token = "ef" * 32, "cd" * 32
         self.store.watch_push_device(self.client["credential"], {
@@ -348,6 +348,33 @@ class PushWorkerTests(unittest.TestCase):
         with self.store.connect() as db:
             self.assertEqual([row[0] for row in db.execute(
                 "SELECT recovery_sends FROM watch_push_devices ORDER BY client_id")], [0, 0])
+
+    def test_unchanged_watch_reading_retries_sparsely(self):
+        now = 1_800_000_000
+        self.store.watch_push_device(self.client["credential"], {
+            "deviceToken": "ef" * 32, "environment": "development"})
+        allowance = {"provider": "codex", "remaining": 64, "window": 1,
+                     "windowDurationMins": 10080, "updatedAt": now, "resetsAt": now + 500000}
+
+        def step(at):
+            allowance["updatedAt"] = at
+            with self.store.connect() as db:
+                db.execute("UPDATE events SET payload=? WHERE seq=(SELECT MAX(seq) FROM events)",
+                           (json.dumps({"allowance": allowance}),))
+            self.worker.step(at)
+            return len([call for call in self.sender.calls if call[0].get("mode") == "watch"])
+
+        self.assertEqual(step(now), 1)
+        self.assertEqual(step(now + 1799), 1)
+        self.assertEqual(step(now + 1800), 2)
+        self.assertEqual(step(now + 8999), 2)
+        self.assertEqual(step(now + 9000), 3)
+        self.assertEqual(step(now + 23399), 3)
+        self.assertEqual(step(now + 23400), 4)
+        self.assertEqual(step(now + 37799), 4)
+        self.assertEqual(step(now + 37800), 5)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT recovery_sends FROM watch_push_devices").fetchone()[0], 4)
 
     def test_failed_watch_recovery_does_not_consume_the_retry(self):
         now = 1_800_000_000

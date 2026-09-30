@@ -428,10 +428,12 @@ class Worker:
                 "SELECT w.* FROM watch_push_devices w JOIN clients c ON w.client_id=c.id")]
         for device in devices:
             changed = fingerprint != device["last_fingerprint"]
-            # Give a changed reading priority. Retry an accepted reading once after
-            # 30 minutes, then save the background-push budget until it changes.
-            if now < device["next_attempt"] or (not changed and (
-                    device["recovery_sends"] >= 1 or now - device["last_sent"] < 1800)):
+            # Give a changed reading priority. APNs acceptance is not a delivery
+            # receipt, so retry unchanged readings sparsely while they stay fresh.
+            recovery_delay = (1800 if device["recovery_sends"] == 0 else
+                              7200 if device["recovery_sends"] == 1 else 14400)
+            if now < device["next_attempt"] or (not changed and
+                    now - device["last_sent"] < recovery_delay):
                 continue
             with self.store.connect() as db:
                 current = db.execute("SELECT * FROM watch_push_devices WHERE client_id=?",

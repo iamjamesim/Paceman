@@ -15,7 +15,7 @@ Source → authenticated relay → ActivityKit APNs → iPhone Live Activity
 
 The worker coalesces activity to the newest snapshot, waits at least ten seconds between attempts, discards events over five minutes old, and retries transient failures with backoff. A process crash can duplicate a send. Appearance-only changes do not send activity alerts. The iPhone always fetches from its stored paired endpoint, not a URL supplied by the push.
 
-For each registered Apple Watch, the same source worker sends a changed allowance reading after its per-destination 20-minute spacing. It retries an accepted reading once after 30 minutes, then stops sending that unchanged reading. Mac and Omarchy sources use this same policy. APNs acceptance does not confirm that watchOS processed the background push.
+For each registered Apple Watch, the same source worker sends a changed allowance reading after its per-destination 20-minute spacing. While the source keeps the reading fresh, it retries an accepted but unchanged reading after 30 minutes, then after two hours, then every four hours. Failed APNs requests retain their existing backoff and do not consume these recovery sends. Mac and Omarchy sources use this same policy. APNs acceptance does not confirm that watchOS processed the background push.
 
 ## Authenticated relay
 
