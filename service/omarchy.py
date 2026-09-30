@@ -1,7 +1,8 @@
 """Omarchy event receiver without Bluetooth ownership.
 
-Accepts the existing omarchy-watch-codex agent-event protocol. Only opaque IDs and
-lifecycle states are retained; hook arguments and conversation content are ignored.
+Accepts Paceman's Codex hooks and the older omarchy-watch-codex protocol. Only
+opaque IDs and lifecycle states are retained; hook arguments and conversation
+content are ignored.
 """
 from __future__ import annotations
 
@@ -68,6 +69,7 @@ class OmarchySource:
         self.socket_inode = None
         self.last_event_at = 0
         self.pending_questions = {}
+        self.native_turns = {}
         self.monotonic = monotonic
         self.processes = processes if processes is not None else CodexProcesses()
         self.computer_name = (computer_name or socket.gethostname()).split(".")[0][:80] or "Computer"
@@ -134,6 +136,7 @@ class OmarchySource:
         source, session, turn = (command.get(key) for key in ("source", "session", "turn"))
         event = command.get("event")
         async_question = event == "needs-input" and command.get("attention") == "async"
+        native = command.get("adapter") == "paceman"
         if (not all(isinstance(value, str) and IDENTIFIER.fullmatch(value) for value in (source, session))
                 or not isinstance(event, str) or event not in EVENTS
                 or not isinstance(turn, str)
@@ -157,10 +160,19 @@ class OmarchySource:
                 # A late event from another still-live process cannot take over
                 # an already registered session.
                 return self.publish(db, lifecycle_only=True)
+            if binding is not None and not same_owner:
+                self.pending_questions.pop(key, None)
+                self.native_turns.pop(key, None)
             if not turn:
                 if previous is None:
                     return self.publish(db, lifecycle_only=True)
                 turn = previous["turn"]
+            # During migration both plugins can fire for one Codex turn. Once
+            # Paceman has observed that turn, older nonterminal companion hooks
+            # cannot clear its pending question or reorder its lifecycle.
+            if (not native and event in ("working", "needs-input")
+                    and self.native_turns.get(key) == turn):
+                return self.publish(db, lifecycle_only=True)
             if ((binding is None or binding["closed"]) and event != "ended"
                     and db.execute("SELECT COUNT(*) FROM omarchy_processes WHERE closed=0 AND NOT "
                                    "(pid=? AND start_ticks=? AND boot_id=?)",
@@ -175,6 +187,8 @@ class OmarchySource:
                     if (same_owner and previous["state"] == EVENTS[event]
                             and event != "ended" and not async_question
                             and command.get("hook") != "UserPromptSubmit"):
+                        if native:
+                            self.native_turns[key] = turn
                         return self.publish(db, lifecycle_only=True)
                     if same_owner and previous["state"] in ("idle", "finished") and event in ("working", "needs-input"):
                         return self.publish(db, lifecycle_only=True)
@@ -187,6 +201,9 @@ class OmarchySource:
                 db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id=?", (row[0],))
                 db.execute("UPDATE omarchy_processes SET closed=1 WHERE session_id=?", (row[0],))
                 self.pending_questions.pop(row[0], None)
+                self.native_turns.pop(row[0], None)
+            if native:
+                self.native_turns[key] = turn
             if async_question:
                 self.pending_questions[key] = (turn, self.monotonic() + ATTENTION_DELAY)
             elif event in ("completed", "interrupted", "ended") or command.get("hook") == "UserPromptSubmit":
@@ -200,6 +217,7 @@ class OmarchySource:
             self.last_event_at = time.time()
             if event == "ended":
                 db.execute("UPDATE omarchy_processes SET closed=1 WHERE session_id=?", (key,))
+                self.native_turns.pop(key, None)
             return self.publish(db, lifecycle_only=event == "ended")
 
     @staticmethod
@@ -212,6 +230,7 @@ class OmarchySource:
                 db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id=?", (row["session_id"],))
                 db.execute("DELETE FROM omarchy_processes WHERE session_id=?", (row["session_id"],))
                 self.pending_questions.pop(row["session_id"], None)
+                self.native_turns.pop(row["session_id"], None)
 
     def tick(self, *, force=False):
         with self.lock:

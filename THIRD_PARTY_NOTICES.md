@@ -10,6 +10,14 @@ The [original license](firmware/esp32-watch/LICENSE),
 
 The Bluetooth daemon and shell plugin are not imported.
 
+## Omarchy Watch for Codex
+
+`desktop/codex_hook.py` adapts the public Omarchy Watch for Codex hook at commit
+`b874c7862f2688460a7e538df3e5f40f449adf45`, Copyright (c) 2026 Omarchy
+Watch contributors, under the MIT license. Its [original license](desktop/OMARCHY_WATCH_CODEX_LICENSE)
+and [source provenance](desktop/CODEX_HOOK_UPSTREAM.md) are retained beside the
+hook and copied into Paceman's Linux installation.
+
 ## iOS typography and symbols
 
 The bundled JetBrains Mono fonts in `ios/Resources/` are covered by the included

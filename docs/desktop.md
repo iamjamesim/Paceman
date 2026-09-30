@@ -10,7 +10,21 @@ Requires Python 3.11+, a user systemd session, Omarchy 4.0+, and Tailscale on co
 bash scripts/install-desktop.sh
 ```
 
-The installer copies Paceman to `~/.local/lib/paceman`, installs `~/.local/bin/pacemanctl`, enables the user service, and reloads the bar. Re-run to update. `--no-bar` installs the source alone. An update preserves installed pairing data and Sharing choice. A fresh install does not import a checkout's `.runtime` data. The installer disables the old `omarchy-watch.service` if present; it does not erase that application's data or install agent hooks.
+The installer copies Paceman to `~/.local/lib/paceman`, installs `~/.local/bin/pacemanctl`, enables the user service, reloads the bar, and adds seven Paceman commands to `~/.codex/hooks.json`. Re-run to update the source and hook together. `--no-bar` installs the source alone. An update preserves installed pairing data, Sharing choice, and unrelated Codex hooks. A fresh install does not import a checkout's `.runtime` data. The installer disables the old `omarchy-watch.service` if present; it does not remove that application's data or its separate Codex plugin.
+
+## Review Codex hooks
+
+Installing and pairing do not enable session monitoring until you review the hooks. In Codex CLI, enter `/hooks` or choose **Review hooks** at startup. Expand each Paceman event row; Codex calls its command **Hook 1**. Verify that it runs the command printed by the installer, shaped like:
+
+```sh
+/usr/bin/python3 -I /home/YOU/.local/lib/paceman/desktop/codex_hook.py
+```
+
+The seven events are `UserPromptSubmit` (new work), `PreToolUse` (tool calls and input questions), `PermissionRequest` (approval needed), `PostToolUse` (resolved blocking input and approvals), `Stop` (finished turn), `Interrupt` (interrupted turn), and `SessionEnd` (closed session). The hook sends event and tool names plus opaque session, turn, and call IDs to Paceman's private local socket. It does not send prompts, replies, command arguments, or answers. The user decides whether to trust each entry.
+
+After review, start a fresh local Codex task and submit a prompt. Check that `lastAgentEventAt` advances in `pacemanctl status`. If it does not, review the hook rows and installed command; monitoring setup remains incomplete. Paceman verifies the sending Codex process and reconciles its identity after source restart.
+
+If `omarchy-watch-codex` is already installed, Paceman still accepts its events during migration. Paceman's own hooks take precedence for nonterminal events when both run. After verifying Paceman's hooks, remove the old Codex plugin with `codex plugin remove omarchy-watch-codex@omarchy-watch-codex` if it was used only for Paceman; the installer does not remove it for you.
 
 ## Private phone connection
 
@@ -28,12 +42,7 @@ tailscale serve --bg --https=8443 http://127.0.0.1:8765
 
 Leave Funnel off and do not replace unrelated routes. The installer does not manage them. Use the bar panel's QR button or `pacemanctl pair --open`, then scan from **Connect computer** on iPhone. Invitations expire after five minutes and contain a pairing secret. The phone pairs with the watch separately.
 
-The source currently uses the [Omarchy Watch for Codex adapter](https://github.com/iamjamesim/omarchy-watch-codex#install-and-update) for agent events. Follow that adapter's hook installation and review steps, then start a fresh local Codex session. Its events arrive on the legacy `$XDG_RUNTIME_DIR/omarchy-watch.sock` socket. Paceman verifies the sending process and its Codex ancestor, and reconciles process identity on startup and about once a second. Hooks contain activity metadata, not prompt or command content.
-
-Companion v0.3.0 also reports async input questions. Paceman waits five seconds
-before showing one, keeps it visible after the tool returns, and clears it when
-the turn ends or a new prompt begins. Earlier companion versions still cover
-blocking questions and approvals.
+Paceman's hook uses the existing `$XDG_RUNTIME_DIR/omarchy-watch.sock` socket so older companion hooks still work. Paceman waits five seconds before showing an async input question, keeps it visible after the tool returns, and clears it when the turn ends or a new prompt begins.
 
 ## Panel and control
 
@@ -55,4 +64,4 @@ Sharing off persists across login and updates. `pacemanctl stop` stops only the 
 bash scripts/uninstall-desktop.sh
 ```
 
-This removes the installed app, command, service, and panel. It retains source data, phone pairings, Codex hooks, and Tailscale routes for deliberate cleanup or reinstallation. The optional [APNs worker](push-delivery.md) is separate from this installer; a desktop install alone does not establish locked-phone delivery. This package remains a local source installer, not a downloadable signed release.
+This removes the installed app, command, service, panel, and Paceman's Codex hooks. It retains source data, phone pairings, unrelated Codex hooks, the separate Omarchy Watch Codex plugin if installed, and Tailscale routes for deliberate cleanup or reinstallation. The optional [APNs worker](push-delivery.md) is separate from this installer; a desktop install alone does not establish locked-phone delivery. This package remains a local source installer, not a downloadable signed release.

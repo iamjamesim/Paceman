@@ -9,7 +9,7 @@ on the computer, while each local source shares status with the phone over
 private Tailscale HTTPS.
 
 Paceman is a **developer alpha**, installed from source. Mac Codex desktop and
-CLI hooks and the Omarchy Codex CLI companion have been exercised on development
+Mac CLI hooks and the Omarchy Codex CLI companion have been exercised on development
 devices. Omarchy Codex desktop and broader background delivery remain
 unverified. See [known limitations](docs/readiness-gaps.md).
 
@@ -31,7 +31,7 @@ is optional.
 | --- | --- |
 | `service/` | Local source API, pairing, persistence, push worker and APNs relay |
 | `macos/` | Menu-bar app, Codex hooks and per-user installer |
-| `desktop/` | Omarchy bar panel, source controls and installer |
+| `desktop/` | Omarchy bar panel, Codex hook, source controls and installer |
 | `ios/` | iPhone app, Live Activities, Apple Watch app and complications |
 | `firmware/esp32-watch/` | Experimental watch firmware and simulator |
 | `tests/`, `scripts/` | Portable checks and development tools |

@@ -3,7 +3,7 @@
 Each Mac or Omarchy computer runs an independent source. The source turns local Codex events into a current snapshot; the iPhone pairs with each source and owns presentation and the experimental watch's Bluetooth connection. Agent prompts, replies and tool arguments remain on the computer.
 
 ```text
-Codex hooks / Omarchy event adapter
+       Reviewed Codex hooks
                  │
                  ▼
           Source + SQLite ── private HTTPS snapshot ──► iPhone ── BLE ──► ESP32 watch
@@ -22,7 +22,7 @@ The two event adapters feed the same source contract:
 | Platform | Event input | Session liveness |
 | --- | --- | --- |
 | Mac | `service/macos.py` receives reduced lifecycle events from reviewed Codex hooks. | Hook-observed; sessions clear on source restart. |
-| Omarchy | `service/omarchy.py` receives the Codex companion's local event socket. | `service/processes.py` verifies the sending Codex process and reconciles its identity after restart. |
+| Omarchy | `service/omarchy.py` receives Paceman's reviewed Codex hooks on a local socket; the older Omarchy Watch companion remains compatible. | `service/processes.py` verifies the sending Codex process and reconciles its identity after restart. |
 
 Both adapters treat a completed turn as Finished. Late input or work events from
 that same turn cannot reopen it; a new turn may start work again.

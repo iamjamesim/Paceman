@@ -189,6 +189,11 @@ class DesktopInstallTests(unittest.TestCase):
                             ignore=shutil.ignore_patterns("__pycache__"))
         Store(source / ".runtime/hub.sqlite3")
         home = self.root / "home"
+        hooks = home / ".codex/hooks.json"
+        hooks.parent.mkdir(parents=True)
+        unrelated = {"hooks": {"Stop": [{"hooks": [{"type": "command",
+            "command": "/usr/bin/true", "timeout": 3}]}]}}
+        hooks.write_text(json.dumps(unrelated))
         calls = []
         def fake_run(*args, **kwargs):
             calls.append(args)
@@ -200,11 +205,22 @@ class DesktopInstallTests(unittest.TestCase):
              patch.object(install.socket, "socket"):
             with patch("sys.argv", ["install.py", "install"]):
                 install.main()
+            self.assertTrue((home / ".local/lib/paceman/desktop/codex_hook.py").exists())
+            self.assertTrue((home / ".local/lib/paceman/desktop/CODEX_HOOK_UPSTREAM.md").exists())
+            self.assertTrue((home / ".local/lib/paceman/desktop/OMARCHY_WATCH_CODEX_LICENSE").exists())
+            self.assertEqual(hooks.stat().st_mode & 0o777, 0o600)
+            installed_hooks = json.loads(hooks.read_text())["hooks"]
+            self.assertEqual(set(installed_hooks), set(install.HOOK_EVENTS))
+            self.assertEqual(installed_hooks["Stop"][0], unrelated["hooks"]["Stop"][0])
+            for event in install.HOOK_EVENTS:
+                self.assertTrue(any(install.owns_hook(item, home / ".local/lib/paceman")
+                    for group in installed_hooks[event] for item in group["hooks"]))
             self.assertFalse((home / ".local/state/paceman/hub.sqlite3").exists())
             installed = Store(home / ".local/state/paceman/hub.sqlite3")
             client = installed.redeem(installed.invite("https://test.example")["invitation"], device=device())
             with patch("sys.argv", ["install.py", "install"]):
                 install.main()
+            self.assertEqual(json.loads(hooks.read_text())["hooks"], installed_hooks)
             self.assertTrue(Store(installed.path).authorized(client["credential"]))
             unit = (home / ".config/systemd/user/paceman-source.service").read_text()
             self.assertNotIn(str(source), unit)
@@ -221,6 +237,19 @@ class DesktopInstallTests(unittest.TestCase):
             self.assertTrue(Store(installed.path).authorized(client["credential"]))
             self.assertFalse((home / ".local/bin/pacemanctl").exists())
             self.assertFalse((home / ".local/lib/paceman").exists())
+            self.assertEqual(json.loads(hooks.read_text()), {"hooks": {
+                **{event: [] for event in install.HOOK_EVENTS if event != "Stop"},
+                "Stop": unrelated["hooks"]["Stop"]}})
+
+    def test_hook_config_is_validated_before_install_changes_services(self):
+        hooks = self.root / "hooks.json"
+        hooks.write_text('{')
+        with self.assertRaises(json.JSONDecodeError):
+            install.hook_document(hooks, self.root / "app")
+        hooks.unlink()
+        hooks.symlink_to(self.root / "missing")
+        with self.assertRaises(ValueError):
+            install.hook_document(hooks, self.root / "app")
 
     def test_unit_paths_escape_systemd_specifiers(self):
         value = install.render_unit(Path('/home/test/50% "app"'), self.root / "state")

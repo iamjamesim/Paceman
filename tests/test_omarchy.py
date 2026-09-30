@@ -304,12 +304,10 @@ class OmarchyTests(unittest.TestCase):
                 server.shutdown()
                 thread.join(timeout=2)
 
-    @unittest.skipUnless(os.environ.get('OMARCHY_CODEX_HOOK'), 'Set OMARCHY_CODEX_HOOK to exercise the upstream companion')
-    def test_companion_routes_blocking_and_async_questions(self):
-        hook = os.environ['OMARCHY_CODEX_HOOK']
+    def exercise_hook_questions(self, hook):
         def send(name, extra=None, turn='turn-1'):
             payload = dict(hook_event_name=name, session_id='integration', turn_id=turn, **(extra or {}))
-            result = subprocess.run([sys.executable, hook], input=json.dumps(payload), text=True,
+            result = subprocess.run([sys.executable, '-I', hook], input=json.dumps(payload), text=True,
                                     capture_output=True, timeout=3,
                                     env={**os.environ, 'XDG_RUNTIME_DIR': str(self.root)})
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -331,6 +329,29 @@ class OmarchyTests(unittest.TestCase):
         self.source.tick(force=True)
         self.assertEqual(self.store.snapshot()['state'], 'needs_input')
         self.assertEqual(send('Stop', turn='turn-2'), 'finished')
+
+    def test_paceman_hook_routes_blocking_and_async_questions(self):
+        hook = Path(__file__).resolve().parents[1] / 'desktop/codex_hook.py'
+        self.exercise_hook_questions(hook)
+
+    def test_paceman_hooks_take_precedence_during_companion_migration(self):
+        clock = [100.0]
+        self.source.monotonic = lambda: clock[0]
+        self.event('working', hook='UserPromptSubmit')  # Older plugin arrived first.
+        self.event('working', hook='UserPromptSubmit', adapter='paceman')
+        self.event('needs-input', attention='async', adapter='paceman')
+        clock[0] += 6
+        self.source.tick(force=True)
+        self.assertEqual(self.store.snapshot()['state'], 'needs_input')
+        self.assertEqual(self.event('working', hook='UserPromptSubmit')['state'], 'needs_input')
+        self.assertEqual(self.event('needs-input')['state'], 'needs_input')
+        self.assertEqual(self.event('completed', adapter='paceman')['state'], 'finished')
+        # The older plugin can still supply a future turn if Paceman hooks stop.
+        self.assertEqual(self.event('working', turn='turn-2')['state'], 'working')
+
+    @unittest.skipUnless(os.environ.get('OMARCHY_CODEX_HOOK'), 'Set OMARCHY_CODEX_HOOK to exercise the upstream companion')
+    def test_companion_routes_blocking_and_async_questions(self):
+        self.exercise_hook_questions(os.environ['OMARCHY_CODEX_HOOK'])
 
 
 if __name__ == '__main__':

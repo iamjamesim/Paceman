@@ -14,8 +14,9 @@ were removed. Packaging reads PROJECT_VER from firmware/CMakeLists.txt and
 accepts macOS/Linux checksum tools; font output cleanup uses Python for
 portability. Setup documentation describes the package-relative paths.
 
-The standalone desktop daemon, installer, bar plugin and agent-hook distribution
-remain upstream. Paceman receives Omarchy events through its own source service;
-the iPhone owns the watch Bluetooth connection.
+The standalone desktop daemon, installer, and bar plugin remain upstream.
+Paceman's Linux Codex hook is adapted separately from Omarchy Watch for Codex;
+see `../../desktop/CODEX_HOOK_UPSTREAM.md`. Paceman receives Codex events through
+its own source service; the iPhone owns the watch Bluetooth connection.
 
 Upstream remains the standalone product and release reference.

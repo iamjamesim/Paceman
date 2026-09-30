@@ -63,7 +63,7 @@ first firmware configure/build; see `simulator/README.md` for details.
 
 A bundle made with `tools/package-release.sh` includes the bootloader,
 partition table, and application as three separate binaries, plus a `flash.sh`
-helper and SHA-256 checksums. Install
+helper, license and provenance notices, and SHA-256 checksums. Install
 Espressif's `esptool`, extract the bundle, and run:
 
 ```bash

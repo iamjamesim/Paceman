@@ -1,8 +1,9 @@
-"""Per-user Omarchy installation. Runtime data and agent hooks are preserved."""
+"""Per-user Omarchy installation with reviewed Paceman Codex hooks."""
 import argparse
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import socket
 import stat
@@ -14,6 +15,16 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = "io.github.iamjamesim.paceman"
 SERVICE = "paceman-source.service"
+HOOK_PURPOSES = (
+    ("UserPromptSubmit", "show new work"),
+    ("PreToolUse", "track tool calls and input questions"),
+    ("PermissionRequest", "show approval needed"),
+    ("PostToolUse", "clear resolved blocking questions and approvals"),
+    ("Stop", "show a finished turn"),
+    ("Interrupt", "clear an interrupted turn"),
+    ("SessionEnd", "remove a closed session"),
+)
+HOOK_EVENTS = tuple(event for event, _ in HOOK_PURPOSES)
 
 
 def run(*args, check=True):
@@ -63,6 +74,60 @@ def render_unit(app, state):
         "@APP@", unit_escape(app)).replace("@STATE@", unit_escape(state))
 
 
+def hook_command(app):
+    return "/usr/bin/python3 -I " + shlex.quote(str(app / "desktop/codex_hook.py"))
+
+
+def owns_hook(item, app):
+    if not isinstance(item, dict) or not isinstance(item.get("command"), str):
+        return False
+    try:
+        return shlex.split(item["command"]) == [
+            "/usr/bin/python3", "-I", str(app / "desktop/codex_hook.py")]
+    except ValueError:
+        return False
+
+
+def hook_document(path, app, *, remove=False):
+    """Return a changed hooks document without touching unrelated entries."""
+    if path.is_symlink():
+        raise ValueError("Refusing a symbolic-link Codex hooks file")
+    document = json.loads(path.read_text()) if path.exists() else {}
+    if not isinstance(document, dict):
+        raise ValueError("Existing ~/.codex/hooks.json is not a JSON object")
+    hooks = document.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError("Existing Codex hooks configuration is not an object")
+    changed = []
+    for event in (tuple(hooks) if remove else HOOK_EVENTS):
+        groups = hooks.get(event, [])
+        if not isinstance(groups, list):
+            raise ValueError(f"Existing {event} hooks are not a list")
+        remaining = []
+        found = False
+        for group in groups:
+            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+                remaining.append(group)
+                continue
+            kept = [item for item in group["hooks"] if not owns_hook(item, app)]
+            if len(kept) != len(group["hooks"]):
+                found = True
+            if remove:
+                if kept:
+                    remaining.append({**group, "hooks": kept})
+            else:
+                remaining.append(group)
+        if remove:
+            if found:
+                hooks[event] = remaining
+                changed.append(event)
+        elif not found:
+            hooks.setdefault(event, groups).append({"hooks": [{"type": "command",
+                "command": hook_command(app), "timeout": 3}]})
+            changed.append(event)
+    return document, changed
+
+
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
@@ -76,25 +141,31 @@ def main():
     ctl = home / ".local/bin/pacemanctl"
     unit = config / "systemd/user" / SERVICE
     plugin = config / "omarchy/plugins" / PLUGIN
+    hooks_path = home / ".codex/hooks.json"
     try:
         for path in (app, ctl.parent, unit.parent, state):
             directory(path)
         if args.action == "uninstall":
+            hooks_document, changed_hooks = hook_document(hooks_path, app, remove=True)
             run("/usr/bin/systemctl", "--user", "disable", "--now", SERVICE, check=False)
             if plugin.exists():
                 directory(plugin)
                 run("/usr/bin/omarchy", "plugin", "disable", PLUGIN, check=False)
                 shutil.rmtree(plugin)
+            if changed_hooks:
+                write(hooks_path, (json.dumps(hooks_document, indent=2) + "\n").encode(), 0o600)
             shutil.rmtree(app)
             ctl.unlink(missing_ok=True)
             unit.unlink(missing_ok=True)
             run("/usr/bin/systemctl", "--user", "daemon-reload")
             if Path("/usr/bin/omarchy").exists():
                 run("/usr/bin/omarchy", "shell", "shell", "rescanPlugins", check=False)
-            print("Paceman desktop removed. Pairings, data, Tailscale routes and agent hooks preserved.")
+            print("Paceman desktop and its Codex hooks removed. Pairings, data, Tailscale routes and unrelated hooks preserved.")
             return
         if sys.version_info < (3, 11):
             raise ValueError("Python 3.11 or later is required")
+        directory(hooks_path.parent)
+        hooks_document, changed_hooks = hook_document(hooks_path, app)
         run("/usr/bin/systemctl", "--user", "show-environment")
         if not args.no_bar:
             run("/usr/bin/omarchy", "plugin", "validate", str(ROOT / "desktop/plugin"))
@@ -116,6 +187,8 @@ def main():
             for source in (ROOT / package).glob("*.py"):
                 if source.name != "install.py":
                     write(app / package / source.name, source.read_bytes())
+        for name in ("CODEX_HOOK_UPSTREAM.md", "OMARCHY_WATCH_CODEX_LICENSE"):
+            write(app / "desktop" / name, (ROOT / "desktop" / name).read_bytes())
         write(ctl, (ROOT / "desktop/pacemanctl").read_bytes(), 0o755)
         write(unit, unit_content.encode())
         if not args.no_bar:
@@ -144,9 +217,15 @@ def main():
             run("/usr/bin/omarchy", "plugin", "enable", PLUGIN)
             # QML components are cached; rescanning alone does not load upgrades.
             run("/usr/bin/omarchy", "restart", "shell")
+        if changed_hooks:
+            write(hooks_path, (json.dumps(hooks_document, indent=2) + "\n").encode(), 0o600)
         print("Paceman updated; sharing remains off." if paused else
               "Paceman is running and starts at login. Open its bar panel or run pacemanctl status.")
-        print("Existing Codex hooks are reused. See docs/desktop.md for first-time hook and Tailscale setup.")
+        print("Review Paceman's Codex hooks with /hooks; Codex calls each entry Hook 1.")
+        print("Command:", hook_command(app))
+        for event, purpose in HOOK_PURPOSES:
+            print(f"  {event}: {purpose}")
+        print("After review, run a fresh local task and check lastAgentEventAt in pacemanctl status.")
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         detail = getattr(error, "stderr", "") or str(error)
         print(f"Paceman installation: {detail.strip()}", file=sys.stderr)
