@@ -8,24 +8,24 @@ These steps are for the Paceman service operator. A fork can run its own relay w
 
 1. Deploy `Dockerfile.relay` as a paid Web Service. Set its health check to `/healthz`.
 2. Create paid Render Postgres in the same region. Set the Web Service's `DATABASE_URL` to its **internal** URL. The relay creates its tables on startup; no manual SQL or `sources.json` is needed.
-3. Add Secret Files named `apns.p8` and `apns.json`. The JSON file must contain both APNs environments, using your Apple team and key IDs:
+3. Add Secret Files named `apns-sandbox.p8`, `apns-production.p8`, and `apns.json`. The JSON file must contain both APNs environments, using your Apple team and the corresponding key IDs:
 
    ```json
    {
      "environments": {
        "development": {
-         "teamID": "TEAMID1234", "keyID": "KEYID12345", "topic": "ai.paceman.app.dev",
-         "environment": "development", "keyPath": "/etc/secrets/apns.p8"
+         "teamID": "TEAMID1234", "keyID": "SANDBOX123", "topic": "ai.paceman.app.dev",
+         "environment": "development", "keyPath": "/etc/secrets/apns-sandbox.p8"
        },
        "production": {
-         "teamID": "TEAMID1234", "keyID": "KEYID12345", "topic": "ai.paceman.app",
-         "environment": "production", "keyPath": "/etc/secrets/apns.p8"
+         "teamID": "TEAMID1234", "keyID": "PRODKEY123", "topic": "ai.paceman.app",
+         "environment": "production", "keyPath": "/etc/secrets/apns-production.p8"
        }
      }
    }
    ```
 
-   Debug builds register development tokens; TestFlight builds register production tokens. The relay routes each token to its matching APNs host. Use a key authorized for both environments, or separate key IDs and paths in the two entries. The existing single-environment JSON remains valid during migration. After changing the app identifier or developer team, update the deployed `teamID`, `keyID`, and `topic` to match the newly signed app, then re-register the phone's push token. If the Watch uses a different key, add an `apns-watch.p8` Secret File and set `watchKeyID` and `watchKeyPath` (`/etc/secrets/apns-watch.p8`) in both environments. Keep request bodies and keys out of logs and Git.
+   Debug builds register development tokens; TestFlight builds register production tokens. The relay routes each token to its matching APNs host. Keep the existing Sandbox key if its `.p8` file is available, and create one Production key. A team-scoped key covers the phone and Watch topics in its environment. The existing single-environment JSON remains valid during migration. After changing the app identifier or developer team, update the deployed `teamID`, `keyID`, and `topic` to match the newly signed app, then re-register the phone's push token. Keep request bodies and keys out of logs and Git.
 
 ## Connect a Mac
 
