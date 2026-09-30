@@ -148,6 +148,7 @@ class OmarchyTests(unittest.TestCase):
     def test_closed_turn_cannot_be_resurrected_and_session_end_can_omit_turn(self):
         self.event('completed')
         self.assertEqual(self.event('working')['state'], 'finished')
+        self.assertEqual(self.event('needs-input')['state'], 'finished')
         self.assertEqual(self.event('ended', turn='')['state'], 'idle')
         self.assertEqual(self.event('needs-input')['state'], 'idle')
         self.assertEqual(self.event('working', turn='turn-2')['state'], 'working')
