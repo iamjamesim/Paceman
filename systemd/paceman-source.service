@@ -7,7 +7,7 @@ Wants=paceman-push.service
 [Service]
 Type=simple
 ExecCondition=/usr/bin/test ! -e "@STATE@/sharing-paused"
-ExecStart=/usr/bin/python3 -I "@APP@/desktop/launch.py" --data-dir "@STATE@" serve --source omarchy --status-file "%t/paceman/status.json" --relay-config "@STATE@/private/apns.json"
+ExecStart=/usr/bin/python3 -I "@APP@/service/launch.py" --data-dir "@STATE@" serve --source omarchy --status-file "%t/paceman/status.json" --relay-config "@STATE@/private/apns.json"
 Restart=on-failure
 RestartSec=3
 KillSignal=SIGINT

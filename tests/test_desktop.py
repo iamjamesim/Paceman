@@ -12,9 +12,9 @@ import time
 import unittest
 from unittest.mock import patch
 
-from desktop import install
-from desktop import install_push
-from desktop.control import private_endpoint, read_status, set_sharing, pair_phone, remove_access
+from omarchy import install
+from omarchy import install_push
+from omarchy.control import private_endpoint, read_status, set_sharing, pair_phone, remove_access
 from tests.identity import device
 from service.hub import Server, Store
 from service.status import DesktopStatus
@@ -88,7 +88,7 @@ class DesktopStatusTests(unittest.TestCase):
         first, second = [self.store.redeem(self.store.invite('https://test.example')['invitation'], device=device()) for _ in range(2)]
         self.store.push_device(first['credential'], {'deviceToken': 'ab' * 32, 'environment': 'development'})
         (self.root / 'sharing-paused').write_text('{}')
-        with patch('desktop.control.state_directory', return_value=self.root), patch('desktop.control.status_path', return_value=self.root / 'absent'):
+        with patch('omarchy.control.state_directory', return_value=self.root), patch('omarchy.control.status_path', return_value=self.root / 'absent'):
             status = remove_access(first['clientID'])
             self.assertFalse(status['sharingEnabled'])
             self.assertEqual([row['id'] for row in status['clients']], [second['clientID']])
@@ -117,7 +117,7 @@ class DesktopStatusTests(unittest.TestCase):
 
     def test_sharing_choice_persists_and_rolls_back_on_service_failure(self):
         marker = self.root / "sharing-paused"
-        with patch("desktop.control.pause_path", return_value=marker), patch("desktop.control.subprocess.run") as run:
+        with patch("omarchy.control.pause_path", return_value=marker), patch("omarchy.control.subprocess.run") as run:
             set_sharing(False)
             self.assertTrue(marker.exists())
             self.assertIn("disable", run.call_args.args[0])
@@ -137,8 +137,8 @@ class DesktopStatusTests(unittest.TestCase):
         marker = self.root / "sharing-paused"
         marker.write_text('{"paused":true}')
         client = self.store.redeem(self.store.invite("https://test.example")["invitation"], device=device())
-        with patch("desktop.control.state_directory", return_value=self.root), \
-             patch("desktop.control.status_path", return_value=self.root / "missing.json"):
+        with patch("omarchy.control.state_directory", return_value=self.root), \
+             patch("omarchy.control.status_path", return_value=self.root / "missing.json"):
             value = read_status()
             self.assertFalse(value["sharingEnabled"])
             self.assertFalse(value["running"])
@@ -155,10 +155,10 @@ class DesktopStatusTests(unittest.TestCase):
                 return subprocess.CompletedProcess(args, 0, json.dumps(config), "")
             return original_run(args, **kwargs)
         output = io.StringIO()
-        with patch("desktop.control.state_directory", return_value=self.root), \
-             patch("desktop.control.read_status", return_value={"running": True}), \
-             patch("desktop.control.subprocess.run", side_effect=command), \
-             patch("desktop.control.urllib.request.urlopen"), redirect_stdout(output):
+        with patch("omarchy.control.state_directory", return_value=self.root), \
+             patch("omarchy.control.read_status", return_value={"running": True}), \
+             patch("omarchy.control.subprocess.run", side_effect=command), \
+             patch("omarchy.control.urllib.request.urlopen"), redirect_stdout(output):
             pair_phone(json_output=True)
         value = json.loads(output.getvalue())
         self.assertEqual(set(value), {"qrPath", "expiresAt"})
@@ -185,7 +185,7 @@ class DesktopInstallTests(unittest.TestCase):
 
     def test_install_upgrade_uninstall_preserve_data_with_mocked_system_services(self):
         source = self.root / "source"
-        for directory in ("desktop", "service", "systemd"):
+        for directory in ("omarchy", "service", "systemd"):
             shutil.copytree(install.ROOT / directory, source / directory,
                             ignore=shutil.ignore_patterns("__pycache__"))
         Store(source / ".runtime/hub.sqlite3")
@@ -195,6 +195,9 @@ class DesktopInstallTests(unittest.TestCase):
         unrelated = {"hooks": {"Stop": [{"hooks": [{"type": "command",
             "command": "/usr/bin/true", "timeout": 3}]}]}}
         hooks.write_text(json.dumps(unrelated))
+        legacy = home / ".local/lib/paceman/desktop"
+        legacy.mkdir(parents=True)
+        (legacy / "old.py").write_text("# old installation\n")
         calls = []
         def fake_run(*args, **kwargs):
             calls.append(args)
@@ -206,9 +209,10 @@ class DesktopInstallTests(unittest.TestCase):
              patch.object(install.socket, "socket"):
             with patch("sys.argv", ["install.py", "install"]):
                 install.main()
-            self.assertTrue((home / ".local/lib/paceman/desktop/codex_hook.py").exists())
-            self.assertTrue((home / ".local/lib/paceman/desktop/CODEX_HOOK_UPSTREAM.md").exists())
-            self.assertTrue((home / ".local/lib/paceman/desktop/OMARCHY_WATCH_CODEX_LICENSE").exists())
+            self.assertTrue((home / ".local/lib/paceman/omarchy/codex_hook.py").exists())
+            self.assertTrue((home / ".local/lib/paceman/omarchy/CODEX_HOOK_UPSTREAM.md").exists())
+            self.assertTrue((home / ".local/lib/paceman/omarchy/OMARCHY_WATCH_CODEX_LICENSE").exists())
+            self.assertFalse(legacy.exists())
             self.assertEqual(hooks.stat().st_mode & 0o777, 0o600)
             installed_hooks = json.loads(hooks.read_text())["hooks"]
             self.assertEqual(set(installed_hooks), set(install.HOOK_EVENTS))
@@ -259,6 +263,28 @@ class DesktopInstallTests(unittest.TestCase):
         hooks.symlink_to(self.root / "missing")
         with self.assertRaises(ValueError):
             install.hook_document(hooks, self.root / "app")
+
+    def test_legacy_desktop_hooks_migrate_without_duplicates(self):
+        app = self.root / "app"
+        hooks = self.root / "hooks.json"
+        old = f"/usr/bin/python3 -I {app}/desktop/codex_hook.py"
+        document = {"hooks": {"Stop": [{"hooks": [
+            {"type": "command", "command": old, "timeout": 3},
+            {"type": "command", "command": "/usr/bin/true"}]}]}}
+        hooks.write_text(json.dumps(document))
+        migrated, changed = install.hook_document(hooks, app)
+        self.assertIn("Stop", changed)
+        commands = [item["command"] for group in migrated["hooks"]["Stop"]
+                    for item in group["hooks"]]
+        self.assertEqual(commands, [install.hook_command(app), "/usr/bin/true"])
+        hooks.write_text(json.dumps(migrated))
+        again, changed = install.hook_document(hooks, app)
+        self.assertEqual(changed, [])
+        self.assertEqual(again, migrated)
+        removed, changed = install.hook_document(hooks, app, remove=True)
+        self.assertIn("Stop", changed)
+        self.assertEqual(removed["hooks"]["Stop"][0]["hooks"],
+                         [{"type": "command", "command": "/usr/bin/true"}])
 
     def test_relay_setup_reuses_source_credential_and_respects_sharing(self):
         home = self.root / "home"

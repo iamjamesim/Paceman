@@ -229,7 +229,7 @@ def _finish_install(staged_app: Path):
     staging = staged_app.parent
     staged_lib = staging / "lib"
     staged_lib.mkdir()
-    for folder in ("service", "desktop", "macos"):
+    for folder in ("service", "macos"):
         shutil.copytree(REPO / folder, staged_lib / folder,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     staged_wrapper = staging / "pacemanctl"
@@ -296,8 +296,10 @@ def _finish_install(staged_app: Path):
         if source_was_loaded:
             subprocess.run(["/bin/launchctl", "bootout", label], check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for folder in ("service", "desktop", "macos"):
+        for folder in ("service", "macos"):
             replace(staged_lib / folder, lib / folder, folder)
+        if (lib / "desktop").exists() or (lib / "desktop").is_symlink():
+            replace(None, lib / "desktop", "desktop")
         replace(staged_wrapper, wrapper, "pacemanctl")
         replace(staged_app, APP, "Paceman.app")
         replace(staged_plist, PLIST, "source.plist")

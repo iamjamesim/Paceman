@@ -30,8 +30,8 @@ trap 'rm -f "$temporary"' EXIT
 
 git -C "$repo" archive --format=tar \
   --prefix="Paceman-Omarchy-$version/" "$ref" -- \
-  README.md LICENSE THIRD_PARTY_NOTICES.md docs desktop service systemd \
-  requirements-push.txt scripts/install-desktop.sh scripts/uninstall-desktop.sh \
+  README.md LICENSE THIRD_PARTY_NOTICES.md docs omarchy service systemd \
+  requirements-push.txt scripts/install-omarchy.sh scripts/uninstall-omarchy.sh \
   | gzip -n > "$temporary"
 mv "$temporary" "$archive"
 

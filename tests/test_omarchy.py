@@ -331,7 +331,7 @@ class OmarchyTests(unittest.TestCase):
         self.assertEqual(send('Stop', turn='turn-2'), 'finished')
 
     def test_paceman_hook_routes_blocking_and_async_questions(self):
-        hook = Path(__file__).resolve().parents[1] / 'desktop/codex_hook.py'
+        hook = Path(__file__).resolve().parents[1] / 'omarchy/codex_hook.py'
         self.exercise_hook_questions(hook)
 
     def test_paceman_hooks_take_precedence_during_companion_migration(self):

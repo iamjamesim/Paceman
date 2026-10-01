@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const model = vm.createContext({});
-vm.runInContext(readFileSync(path.join(__dirname, '../desktop/plugin/PanelModel.js'), 'utf8'), model);
+vm.runInContext(readFileSync(path.join(__dirname, '../omarchy/plugin/PanelModel.js'), 'utf8'), model);
 const now = 1000;
 function present(counts, overrides = {}) {
   const priority = ['needs_input', 'working', 'finished'];

@@ -46,7 +46,7 @@ static pid_t start_child(const char *python, const char *root, int push) {
         execv(python, args);
     } else {
         char entry[4096];
-        snprintf(entry, sizeof(entry), "%s/desktop/launch.py", lib);
+        snprintf(entry, sizeof(entry), "%s/service/launch.py", lib);
         char *const args[] = {(char *)python, entry, "--data-dir", data, "serve",
                               "--source", "macos", "--status-file", status,
                               "--agent-socket", socket_path, "--relay-config", config, NULL};

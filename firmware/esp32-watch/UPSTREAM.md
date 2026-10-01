@@ -16,7 +16,7 @@ portability. Setup documentation describes the package-relative paths.
 
 The standalone desktop daemon, installer, and bar plugin remain upstream.
 Paceman's Linux Codex hook is adapted separately from Omarchy Watch for Codex;
-see `../../desktop/CODEX_HOOK_UPSTREAM.md`. Paceman receives Codex events through
+see `../../omarchy/CODEX_HOOK_UPSTREAM.md`. Paceman receives Codex events through
 its own source service; the iPhone owns the watch Bluetooth connection.
 
 Upstream remains the standalone product and release reference.

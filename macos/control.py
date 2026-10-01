@@ -17,7 +17,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-from desktop.control import private_endpoint
+from service.network import private_endpoint
 from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint
 

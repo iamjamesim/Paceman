@@ -6,7 +6,7 @@ from pathlib import Path
 import secrets
 import subprocess
 
-from desktop import install
+from omarchy import install
 from service.hub import Store, endpoint
 from service.push import RelayConfig
 

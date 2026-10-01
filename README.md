@@ -16,7 +16,7 @@ unverified. See [known limitations](docs/readiness-gaps.md).
 ## Get started
 
 1. [Build the iPhone app](docs/development.md#iphone-and-live-activities-mac) with Xcode for iOS 18 or later.
-2. Install a source on an [Apple Silicon Mac](docs/macos.md) or [Omarchy 4.0+ desktop](docs/desktop.md).
+2. Install a source on an [Apple Silicon Mac](docs/macos.md) or [Omarchy 4.0+ desktop](docs/omarchy.md).
 3. Install Tailscale on phone and computer, configure a private Serve route on the computer, then scan its pairing code in Paceman. The platform guides cover hook review and the first real activity event.
 
 Locked-phone notifications use the [project-operated APNs relay](docs/push-relay.md),
@@ -31,7 +31,7 @@ is optional.
 | --- | --- |
 | `service/` | Local source API, pairing, persistence, push worker and APNs relay |
 | `macos/` | Menu-bar app, Codex hooks and per-user installer |
-| `desktop/` | Omarchy bar panel, Codex hook, source controls and installer |
+| `omarchy/` | Omarchy bar panel, Codex hook, source controls and installer |
 | `ios/` | iPhone app, Live Activities, Apple Watch app and complications |
 | `firmware/esp32-watch/` | Experimental watch firmware and simulator |
 | `tests/`, `scripts/` | Portable checks and development tools |

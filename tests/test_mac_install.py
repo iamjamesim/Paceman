@@ -111,11 +111,13 @@ class MacInstallTests(unittest.TestCase):
             repo = Path(temporary) / "repo"
             staging = root / ".install-test"
             staged_app = staging / "Paceman.app"
-            for folder in ("service", "desktop", "macos"):
+            for folder in ("service", "macos"):
                 (root / "lib" / folder).mkdir(parents=True)
                 (root / "lib" / folder / "version").write_text("old")
                 (repo / folder).mkdir(parents=True)
                 (repo / folder / "version").write_text("new")
+            (root / "lib/desktop").mkdir()
+            (root / "lib/desktop/version").write_text("legacy")
             (repo / "macos/launch_control.py").write_text("#!/usr/bin/python3 -I\nnew")
             (root / "bin").mkdir()
             (root / "bin/pacemanctl").write_text("old")
@@ -164,8 +166,10 @@ class MacInstallTests(unittest.TestCase):
 
             failed = fail_start or fail_hooks
             expected = "old" if failed else "new"
-            for folder in ("service", "desktop", "macos"):
+            for folder in ("service", "macos"):
                 self.assertEqual((root / "lib" / folder / "version").read_text(), expected)
+            self.assertEqual((root / "lib/desktop").exists(), failed)
+            self.assertFalse((root / "lib/omarchy").exists())
             self.assertEqual((app / "version").read_text(), expected)
             self.assertEqual((root / "bin/pacemanctl").read_text(), "old" if failed else f"#!{sys.executable} -I\nnew")
             if failed:

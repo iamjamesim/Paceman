@@ -76,15 +76,16 @@ def render_unit(app, state, service=SERVICE):
 
 
 def hook_command(app):
-    return "/usr/bin/python3 -I " + shlex.quote(str(app / "desktop/codex_hook.py"))
+    return "/usr/bin/python3 -I " + shlex.quote(str(app / "omarchy/codex_hook.py"))
 
 
 def owns_hook(item, app):
     if not isinstance(item, dict) or not isinstance(item.get("command"), str):
         return False
     try:
-        return shlex.split(item["command"]) == [
-            "/usr/bin/python3", "-I", str(app / "desktop/codex_hook.py")]
+        return shlex.split(item["command"]) in (
+            ["/usr/bin/python3", "-I", str(app / "omarchy/codex_hook.py")],
+            ["/usr/bin/python3", "-I", str(app / "desktop/codex_hook.py")])
     except ValueError:
         return False
 
@@ -106,25 +107,30 @@ def hook_document(path, app, *, remove=False):
             raise ValueError(f"Existing {event} hooks are not a list")
         remaining = []
         found = False
+        modified = False
         for group in groups:
             if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
                 remaining.append(group)
                 continue
-            kept = [item for item in group["hooks"] if not owns_hook(item, app)]
-            if len(kept) != len(group["hooks"]):
-                found = True
-            if remove:
-                if kept:
-                    remaining.append({**group, "hooks": kept})
-            else:
-                remaining.append(group)
-        if remove:
-            if found:
-                hooks[event] = remaining
-                changed.append(event)
-        elif not found:
-            hooks.setdefault(event, groups).append({"hooks": [{"type": "command",
+            kept = []
+            for item in group["hooks"]:
+                if not owns_hook(item, app):
+                    kept.append(item)
+                elif remove or found:
+                    modified = True
+                else:
+                    replacement = {**item, "command": hook_command(app)}
+                    kept.append(replacement)
+                    modified |= replacement != item
+                    found = True
+            if kept or not remove:
+                remaining.append({**group, "hooks": kept})
+        if not remove and not found:
+            remaining.append({"hooks": [{"type": "command",
                 "command": hook_command(app), "timeout": 3}]})
+            modified = True
+        if modified:
+            hooks[event] = remaining
             changed.append(event)
     return document, changed
 
@@ -164,7 +170,7 @@ def main():
             run("/usr/bin/systemctl", "--user", "daemon-reload")
             if Path("/usr/bin/omarchy").exists():
                 run("/usr/bin/omarchy", "shell", "shell", "rescanPlugins", check=False)
-            print("Paceman desktop and its Codex hooks removed. Pairings, data, Tailscale routes and unrelated hooks preserved.")
+            print("Paceman Omarchy source and its Codex hooks removed. Pairings, data, Tailscale routes and unrelated hooks preserved.")
             return
         if sys.version_info < (3, 11):
             raise ValueError("Python 3.11 or later is required")
@@ -172,11 +178,11 @@ def main():
         hooks_document, changed_hooks = hook_document(hooks_path, app)
         run("/usr/bin/systemctl", "--user", "show-environment")
         if not args.no_bar:
-            run("/usr/bin/omarchy", "plugin", "validate", str(ROOT / "desktop/plugin"))
+            run("/usr/bin/omarchy", "plugin", "validate", str(ROOT / "omarchy/plugin"))
             run("/usr/bin/omarchy", "shell", "shell", "ping")
             directory(plugin)
         # Validate code before stopping an existing installation.
-        run("/usr/bin/python3", "-I", str(ROOT / "desktop/launch.py"), "--help")
+        run("/usr/bin/python3", "-I", str(ROOT / "service/launch.py"), "--help")
         unit_content = render_unit(app, state)
         push_unit_content = render_unit(app, state, PUSH_SERVICE)
         started_install = time.time()
@@ -188,18 +194,18 @@ def main():
         with socket.socket() as probe:
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             probe.bind(("127.0.0.1", 8765))
-        for package in ("service", "desktop"):
+        for package in ("service", "omarchy"):
             for source in (ROOT / package).glob("*.py"):
                 if source.name != "install.py":
                     write(app / package / source.name, source.read_bytes())
         for name in ("CODEX_HOOK_UPSTREAM.md", "OMARCHY_WATCH_CODEX_LICENSE"):
-            write(app / "desktop" / name, (ROOT / "desktop" / name).read_bytes())
-        write(ctl, (ROOT / "desktop/pacemanctl").read_bytes(), 0o755)
+            write(app / "omarchy" / name, (ROOT / "omarchy" / name).read_bytes())
+        write(ctl, (ROOT / "omarchy/pacemanctl").read_bytes(), 0o755)
         write(unit, unit_content.encode())
         write(push_unit, push_unit_content.encode())
         if not args.no_bar:
             for name in ("manifest.json", "BarWidget.qml", "PanelContent.qml", "ConnectionRow.qml", "PacemanMark.qml", "PanelModel.js", "PairingOverlay.qml"):
-                write(plugin / name, (ROOT / "desktop/plugin" / name).read_bytes())
+                write(plugin / name, (ROOT / "omarchy/plugin" / name).read_bytes())
         run("/usr/bin/systemctl", "--user", "daemon-reload")
         paused = (state / "sharing-paused").exists()
         if paused:
@@ -225,6 +231,9 @@ def main():
             run("/usr/bin/omarchy", "restart", "shell")
         if changed_hooks:
             write(hooks_path, (json.dumps(hooks_document, indent=2) + "\n").encode(), 0o600)
+        legacy = app / "desktop"
+        if legacy.is_dir() and not legacy.is_symlink():
+            shutil.rmtree(legacy)
         print("Paceman updated; sharing remains off." if paused else
               "Paceman is running and starts at login. Open its bar panel or run pacemanctl status.")
         print("Review Paceman's Codex hooks with /hooks; Codex calls each entry Hook 1.")
