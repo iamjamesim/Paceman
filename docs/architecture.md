@@ -22,7 +22,7 @@ The two event adapters feed the same source contract:
 | Platform | Event input | Session liveness |
 | --- | --- | --- |
 | Mac | `service/macos.py` receives reduced lifecycle events from reviewed Codex hooks. | Hook-observed; sessions clear on source restart. |
-| Omarchy | `service/omarchy.py` receives Paceman's reviewed Codex hooks on a local socket; the older Omarchy Watch companion remains compatible. | `service/processes.py` verifies the sending Codex process and reconciles its identity after restart. |
+| Omarchy | `service/omarchy.py` receives Paceman's reviewed Codex hooks on a local socket. | `service/processes.py` verifies the sending Codex process and reconciles its identity after restart. |
 
 Both adapters treat a completed turn as Finished. Late input or work events from
 that same turn cannot reopen it; a new turn may start work again.
