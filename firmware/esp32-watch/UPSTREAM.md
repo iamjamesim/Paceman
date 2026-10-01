@@ -3,9 +3,22 @@
 Source: https://github.com/iamjamesim/omarchy-watch
 Commit: `eb2d56e63cd4b2dea98557f897ce1bca6524b8fd` (v0.6.1)
 Imported: 2026-09-17
-License: MIT; the original license is retained as `UPSTREAM_LICENSE`, alongside
-adapted third-party notices. Paceman-authored additions use the repository's
-Apache License 2.0.
+License: imported files, including Paceman's changes to them, remain MIT. The
+original license is retained as `UPSTREAM_LICENSE`.
+
+The MIT files are the source, build, simulator, and release files under
+`firmware/` and `simulator/`, plus the three scripts under `tools/`, except:
+
+- New Paceman files under Apache License 2.0: `firmware/main/watch_ancs.c`,
+  `firmware/main/watch_ancs.h`, `firmware/main/watch_ancs_parser.h`,
+  `simulator/test_ancs.c`, and `firmware/main/fonts/paceman_32_agent.c`.
+- Generated `firmware/main/fonts/jetbrains_mono_*.c` arrays carry the font and
+  glyph licenses in `THIRD_PARTY_NOTICES.md`; `firmware/main/fonts-OFL.txt`
+  contains the font license.
+
+This package's root `README.md` and `UPSTREAM.md` are Paceman documentation
+under Apache License 2.0. The adapted `.gitignore` and `THIRD_PARTY_NOTICES.md`
+remain MIT; `UPSTREAM_LICENSE` is the original MIT license text.
 
 Imported firmware, simulator, font generation, rendering and release tools.
 The original relative source layout is preserved inside this device package.

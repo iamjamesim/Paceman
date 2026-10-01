@@ -15,9 +15,11 @@ the BLE protocol and pairing identity remain compatible with that firmware.
 See `UPSTREAM.md` for provenance and the root [development guide](../../docs/development.md) for builds.
 Do not erase flash for routine updates: NVS contains the phone bond and ownership.
 
-Paceman-authored code uses the root [Apache License 2.0](../../LICENSE).
-Imported Omarchy Watch code retains its [MIT license](UPSTREAM_LICENSE) and
-[third-party notices](THIRD_PARTY_NOTICES.md).
+New Paceman code uses the root [Apache License 2.0](../../LICENSE).
+Imported Omarchy Watch files, including Paceman's changes to them, retain their
+[MIT license](UPSTREAM_LICENSE). Generated fonts have separate
+[third-party notices](THIRD_PARTY_NOTICES.md). See [UPSTREAM.md](UPSTREAM.md)
+for the file boundary.
 
 Run tools from this device-package root. `tools/package-release.sh` reads the
 version from firmware/CMakeLists.txt and verifies the BLE identity version before

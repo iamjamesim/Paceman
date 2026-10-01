@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 import copy
 import datetime as dt
 import json
@@ -91,4 +92,3 @@ class AllowanceTests(unittest.TestCase):
     def test_extra_fields_are_ignored(self):
         self.record["newField"] = "irrelevant"
         self.assertEqual(self.read()["remaining"], 79)
-

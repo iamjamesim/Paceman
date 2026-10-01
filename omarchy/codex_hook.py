@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """Forward Codex lifecycle events to Paceman.
 
 Adapted from Omarchy Watch for Codex under MIT; see CODEX_HOOK_UPSTREAM.md and

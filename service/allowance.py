@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Omarchy allowance record adapter, adapted from Omarchy Watch (MIT).
 
 Reads the existing agents-panel output only. No network polling, credentials,
