@@ -139,10 +139,13 @@ struct CompanionHome: View {
                 Image(systemName: "laptopcomputer").font(.system(size: 18, weight: .medium)).foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 9) {
-                Text("Connect your agents").font(theme.monospaced ? theme.font(25, emphasis: true) : .title2.weight(.semibold)).tracking(-0.8).fixedSize(horizontal: false, vertical: true)
-                Text("Connect the computer running your agents.").font(.subheadline).foregroundStyle(theme.secondaryInk).fixedSize(horizontal: false, vertical: true)
+                Text("Connect a computer").font(theme.monospaced ? theme.font(25, emphasis: true) : .title2.weight(.semibold)).tracking(-0.8).fixedSize(horizontal: false, vertical: true)
+                Text("Install Paceman on the computer where you use Codex, then connect it here.")
+                    .font(.subheadline).foregroundStyle(theme.secondaryInk).fixedSize(horizontal: false, vertical: true)
             }
             CompanionButton(title: "Connect computer", theme: theme, symbol: "plus") { open(.pairing) }
+            Link("Setup guide", destination: SetupGuide.url)
+                .font(.subheadline.weight(.medium)).allowsHitTesting(!presentation.preview)
         }.padding(23).background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
             .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }

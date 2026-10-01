@@ -162,11 +162,23 @@ test('last-contact copy stays stable across recency and sharing states', () => {
 
 test('empty-panel guidance follows the available pairing action', () => {
   const cases = [
-    [{}, 'On your iPhone, open Paceman → Connect computer → Scan QR code.'],
+    [{}, 'Install Paceman on your iPhone, then use the QR button above.'],
     [{sharingEnabled: false}, 'Turn on sharing to connect your phone.'],
     [{updatedAt: now - 20}, 'Restart Paceman to connect your phone.']
   ];
   for (const [overrides, expected] of cases) {
     assert.equal(present({}, overrides).guidance, expected);
   }
+});
+
+test('new installations explain how to start receiving Codex activity', () => {
+  const phone = [{ id: 'phone-1', name: 'iPhone', platform: 'ios' }];
+  const unpaired = present({ needs_input: 0, working: 0, finished: 0 }, {lastAgentEventAt: 0});
+  assert.equal(unpaired.activityGuidance, '');
+  const empty = present({ needs_input: 0, working: 0, finished: 0 }, {clients: phone, lastAgentEventAt: 0});
+  assert.equal(empty.activityGuidance, "Review Paceman's hooks in Codex with /hooks, then start a new local task.");
+  const observed = present({ needs_input: 0, working: 0, finished: 0 }, {clients: phone, lastAgentEventAt: now - 2});
+  assert.equal(observed.activityGuidance, '');
+  const paused = present({ needs_input: 0, working: 0, finished: 0 }, {clients: phone, sharingEnabled: false});
+  assert.equal(paused.activityGuidance, '');
 });

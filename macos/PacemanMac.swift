@@ -2,6 +2,10 @@ import SwiftUI
 import CoreImage.CIFilterBuiltins
 import ServiceManagement
 
+private enum SetupGuide {
+    static let url = URL(string: "https://github.com/iamjamesim/paceman#get-started")!
+}
+
 private struct Connection: Decodable, Identifiable {
     let id: String
     let name: String
@@ -156,6 +160,7 @@ private struct PairingView: View {
             Text("On your iPhone, open Paceman → Connect computer → Scan QR code.")
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Link("Setup guide", destination: SetupGuide.url).font(.subheadline)
             if let qr {
                 Image(nsImage: qr).resizable().interpolation(.none).scaledToFit()
                     .frame(width: 230, height: 230)
@@ -312,10 +317,13 @@ private struct Panel: View {
                         ScrollView { connectionRows(clients) }.frame(maxHeight: 320)
                     } else { connectionRows(clients) }
                 } else {
-                    Text(!model.status.sharingEnabled ? "Turn on Sharing to connect your phone."
-                         : !model.status.running ? "Restart Paceman to connect your phone."
-                         : "Connect your phone with the QR code above.")
-                        .font(.subheadline).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(!model.status.sharingEnabled ? "Turn on Sharing to connect your phone."
+                             : !model.status.running ? "Restart Paceman to connect your phone."
+                             : "Install Paceman on your iPhone, then use the QR button above.")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        Link("Setup guide", destination: SetupGuide.url).font(.subheadline)
+                    }
                 }
             }
             Divider()

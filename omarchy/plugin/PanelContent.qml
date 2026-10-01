@@ -22,6 +22,7 @@ PanelKeyCatcher {
   onCursorChanged: {
     if (cursor === "pair" || cursor === "sharing") revealRequested(hero)
     else if (cursor === "restart") revealRequested(restartButton)
+    else if (cursor === "help") revealRequested(setupGuideButton)
   }
   implicitHeight: content.implicitHeight
   signal sharingRequested(bool enabled)
@@ -39,6 +40,7 @@ PanelKeyCatcher {
   }
   function targets() {
     var items = busy ? [] : (view.running && view.sharing ? ["pair", "sharing"] : ["sharing"])
+    if (view.connections.length === 0 && !busy) items.push("help")
     view.connections.forEach(function(client, index) {
       items.push("phone:" + client.id)
       if ((expandedClient === client.id || (phoneExpanded && index === 0)) && client.canRemove && !busy) {
@@ -60,6 +62,7 @@ PanelKeyCatcher {
       if (action === "sharing") sharingRequested(!view.sharing)
       else if (action === "pair") pairRequested()
       else if (action === "restart") restartRequested()
+      else if (action === "help") Qt.openUrlExternally("https://github.com/iamjamesim/paceman#get-started")
       else if (action === "remove") { removalClient = id; cursor = "cancel:" + id }
       else if (action === "cancel") { removalClient = ""; cursor = "remove:" + id }
       else if (action === "confirm" && removalClient === id) removeRequested(id)
@@ -179,6 +182,19 @@ PanelKeyCatcher {
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
         }
+        Button {
+          id: setupGuideButton
+          Layout.fillWidth: true
+          text: "SETUP GUIDE"
+          bordered: true
+          enabled: !root.busy
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          hasCursor: root.cursor === "help"
+          onHovered: function(on) { if (on) root.cursor = "help" }
+          onClicked: root.activate("help")
+          Accessible.name: "Setup guide"
+        }
       }
       Button {
         id: restartButton
@@ -280,6 +296,15 @@ PanelKeyCatcher {
         Layout.fillWidth: true
         visible: text !== ""
         text: root.view.activityBreakdown
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+      Text {
+        Layout.fillWidth: true
+        visible: text !== ""
+        text: root.view.activityGuidance
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption

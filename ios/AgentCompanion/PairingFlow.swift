@@ -1,5 +1,9 @@
 import SwiftUI
 
+enum SetupGuide {
+    static let url = URL(string: "https://github.com/iamjamesim/paceman#get-started")!
+}
+
 struct PairingFlow: View {
     @ObservedObject var model: CompanionModel
     let theme: CompanionTheme
@@ -24,7 +28,10 @@ struct PairingFlow: View {
                     if reconnecting {
                         Text("Scanning a fresh QR code renews this phone’s access. Your watch stays paired.").font(.subheadline).foregroundStyle(theme.secondaryInk)
                     }
-                    Text("Keep Tailscale connected on your phone and computer.").font(.subheadline).foregroundStyle(theme.secondaryInk)
+                    Text("Tailscale privately connects your phone to your computer. Both need to be on the same Tailscale network.")
+                        .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                    Link("Setup guide", destination: SetupGuide.url)
+                        .font(.subheadline.weight(.medium)).allowsHitTesting(!preview)
                 }
                 if let parsed {
                     VStack(alignment: .leading, spacing: 16) {

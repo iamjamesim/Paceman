@@ -19,6 +19,17 @@ unverified. See [known limitations](docs/readiness-gaps.md).
 2. Install a source on an [Apple Silicon Mac](docs/macos.md) or [Omarchy 4.0+ desktop](docs/omarchy.md).
 3. Install Tailscale on phone and computer, configure a private Serve route on the computer, then scan its pairing code in Paceman. The platform guides cover hook review and the first real activity event.
 
+## Setup help
+
+Tailscale gives the phone a private connection to your computer. Both devices
+must join the same Tailscale network. Paceman also needs a private Serve route
+on the computer. The [Mac](docs/macos.md) and [Omarchy](docs/omarchy.md) guides
+show how to set it up.
+
+- **No pairing code?** Turn on Sharing and check the computer's Tailscale Serve route.
+- **The phone cannot connect?** Check Tailscale on both devices, keep the computer awake, and scan a fresh code.
+- **Connected, but no activity?** Review Paceman's Codex hooks on the computer, then start a new local Codex task.
+
 Locked-phone notifications use the [project-operated APNs relay](docs/push-relay.md),
 which keeps the signing key off Macs. Public enrollment controls and packaged
 Mac distribution remain [release work](docs/readiness-gaps.md). The Apple Watch

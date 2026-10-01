@@ -72,9 +72,11 @@ function present(state, now) {
     subtitle: !sharing ? "SHARING OFF" : !running ? "SHARING UNAVAILABLE" : "SHARING ACTIVITY",
     guidance: !sharing ? "Turn on sharing to connect your phone."
       : !running ? "Restart Paceman to connect your phone."
-      : "On your iPhone, open Paceman → Connect computer → Scan QR code.",
+      : "Install Paceman on your iPhone, then use the QR button above.",
     activityTitle: activity.title,
     activityBreakdown: activity.breakdown,
+    activityGuidance: paired && running && sharing && Number(state.lastAgentEventAt || 0) <= 0 && state.sessions === 0
+      ? "Review Paceman's hooks in Codex with /hooks, then start a new local task." : "",
     activity: !sharing ? "Paused" : !running ? "Unavailable" : activity.label
   }
 }
