@@ -69,7 +69,7 @@ struct PairingFlow: View {
                 if let error { Label(error, systemImage: "exclamationmark.circle").font(.subheadline).foregroundStyle(theme.ink) }
                 CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
                     .allowsHitTesting(!preview)
-            }.padding(.horizontal, 26).padding(.bottom, 30)
+            }.padding(.horizontal, 24).padding(.bottom, 30)
         }.background(CompanionCanvas(theme: theme)).foregroundStyle(theme.ink)
             .navigationTitle(reconnecting ? "Reconnect computer" : "Connect computer").navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $scanner) {
@@ -109,14 +109,14 @@ struct NotificationSetup: View {
                 } else {
                     NotificationDeliveryControls(theme: theme, preview: preview)
                 }
-            }.padding(26)
+            }.padding(24)
         }.foregroundStyle(theme.ink).background(theme.canvas)
             .navigationTitle("Watch notifications")
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
                 if let done {
                     completionActions(done)
-                        .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
+                        .padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12)
                         .background(theme.canvas)
                 }
             }

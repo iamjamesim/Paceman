@@ -51,10 +51,10 @@ struct LiveActivitiesDetail: View {
                         }
                     }
                     .padding(.horizontal, 16)
-                    .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 21))
-                    .overlay(RoundedRectangle(cornerRadius: 21).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
+                    .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
                 }
-            }.padding(.horizontal, 26).padding(.top, 22).padding(.bottom, 30)
+            }.padding(.horizontal, 24).padding(.top, 22).padding(.bottom, 30)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Live Activities").navigationBarTitleDisplayMode(.inline)
     }

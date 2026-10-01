@@ -57,7 +57,7 @@ struct CompanionHome: View {
                         Text("Design preview · sample activity").font(.caption)
                             .foregroundStyle(theme.secondaryInk).padding(.top, 22)
                     }
-                }.padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 34)
+                }.padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 34)
             }
             .refreshable { if !presentation.preview { await model.refreshAll() } }
             .onAppear {
@@ -126,16 +126,16 @@ struct CompanionHome: View {
         }
         .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
         .padding(.horizontal, 12)
-        .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 21))
-        .overlay(RoundedRectangle(cornerRadius: 21).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
-        .contentShape(RoundedRectangle(cornerRadius: 21))
+        .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
+        .contentShape(RoundedRectangle(cornerRadius: 20))
     }
 
     private var agentSetup: some View {
         VStack(alignment: .leading, spacing: 21) {
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 12) {
-                    Text("Connect a computer").font(theme.monospaced ? theme.font(25, emphasis: true) : .title2.weight(.semibold)).tracking(-0.8).fixedSize(horizontal: false, vertical: true)
+                    Text("Connect a computer").font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold)).tracking(-0.8).fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                     if !typeSize.isAccessibilitySize {
                         Image(systemName: "laptopcomputer").font(.system(size: 18, weight: .medium))
@@ -148,8 +148,8 @@ struct CompanionHome: View {
             CompanionButton(title: "Connect computer", theme: theme, symbol: "plus") { open(.pairing) }
             CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
                 .allowsHitTesting(!presentation.preview)
-        }.padding(23).background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
-            .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
+        }.padding(24).background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 24))
+            .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
 
     private func computerCard(_ paired: PairedSource) -> some View {
@@ -243,8 +243,8 @@ struct CompanionHome: View {
         }
         .foregroundStyle(theme.ink)
         .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 20)
-        .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
-        .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
+        .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
 
     private func activityHeadline(_ state: ActivityState, historical: Bool) -> some View {

@@ -53,7 +53,7 @@ struct WeatherSettings: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 26).padding(.top, 28)
+            .padding(.horizontal, 24).padding(.top, 28)
         }
         .foregroundStyle(theme.ink).background(theme.canvas)
         .safeAreaInset(edge: .bottom) {
@@ -96,7 +96,7 @@ struct WeatherSettings: View {
                     .font(.subheadline).foregroundStyle(theme.ink)
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
-            .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
+            .padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12)
             .background(theme.canvas)
         }
     }

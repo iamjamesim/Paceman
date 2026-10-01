@@ -66,7 +66,7 @@ struct ComputerDetail: View {
                 DeviceRemovalButton(title: removing ? "Removing…" : "Remove computer", theme: theme) { remove = true }
                     .disabled(removing || paired == nil).allowsHitTesting(!presentation.preview)
                 if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.secondaryInk) }
-            }.padding(.horizontal, 26).padding(.bottom, 30)
+            }.padding(.horizontal, 24).padding(.bottom, 30)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
             .alert("Display name", isPresented: $rename) {
@@ -158,10 +158,10 @@ struct WatchIntroduction: View {
                     Text("Got a similar ESP32-S3 board? Your agent can adapt the firmware while preserving Paceman’s Bluetooth protocol.")
                         .font(.footnote).lineSpacing(3).foregroundStyle(theme.secondaryInk)
                 }
-            }.padding(.horizontal, 26).padding(.bottom, 30)
+            }.padding(.horizontal, 24).padding(.bottom, 30)
         }.safeAreaInset(edge: .bottom) {
             CompanionButton(title: "Connect your watch", theme: theme, action: continueSetup)
-                .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
+                .padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12)
                 .background(theme.canvas)
         }.foregroundStyle(theme.ink).background(theme.canvas)
             .navigationTitle("Paceman Watch").navigationBarTitleDisplayMode(.inline)
@@ -230,15 +230,15 @@ struct WatchDetail: View {
                 } else {
                     pairingGuide
                 }
-            }.padding(.horizontal, 26).padding(.bottom, 30)
+            }.padding(.horizontal, 24).padding(.bottom, 30)
         }.safeAreaInset(edge: .bottom) {
             if !paired {
                 pairingActions
-                    .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
+                    .padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12)
                     .background(theme.canvas)
             } else if justPaired || (preview && previewComplete) {
                 pairingCompletionActions
-                    .padding(.horizontal, 26).padding(.top, 14).padding(.bottom, 12)
+                    .padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12)
                     .background(theme.canvas)
             }
         }.foregroundStyle(theme.ink).background(theme.canvas)
@@ -488,7 +488,7 @@ struct WatchUpdateTroubleshooting: View {
                     Text("Don’t swipe Paceman away from the app switcher.")
                 }.font(.footnote).lineSpacing(2).foregroundStyle(theme.secondaryInk)
                     .padding(.top, 2)
-            }.padding(.horizontal, 26).padding(.vertical, 28)
+            }.padding(.horizontal, 24).padding(.vertical, 28)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Watch updates").navigationBarTitleDisplayMode(.inline)
             .task { if !preview { await push.sync() } }

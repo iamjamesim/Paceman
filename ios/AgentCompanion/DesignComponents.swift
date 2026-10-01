@@ -22,7 +22,7 @@ struct CompanionButton: View {
                 if let symbol { Image(systemName: symbol) }
                 Text(title).font(.body.weight(.semibold))
             }.frame(maxWidth: .infinity).padding(.vertical, 18)
-                .foregroundStyle(theme.canvas).background(theme.ink, in: RoundedRectangle(cornerRadius: 19))
+                .foregroundStyle(theme.canvas).background(theme.ink, in: RoundedRectangle(cornerRadius: 20))
         }.buttonStyle(.plain)
     }
 }
@@ -36,7 +36,7 @@ struct CompanionSecondaryButton: View {
             Text(title).font(.body.weight(.semibold))
                 .frame(maxWidth: .infinity).padding(.vertical, 18)
                 .foregroundStyle(theme.ink)
-                .background(theme.ink.opacity(0.07), in: RoundedRectangle(cornerRadius: 19))
+                .background(theme.ink.opacity(0.07), in: RoundedRectangle(cornerRadius: 20))
         }.buttonStyle(.plain)
     }
 }
