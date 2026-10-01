@@ -154,18 +154,27 @@ class ProcessTrackingTests(unittest.TestCase):
                 if fd is not None:
                     os.close(fd)
 
-    def test_detached_process_and_quiet_completion_survive_age_and_restart(self):
+    def test_detached_process_binding_survives_completion_expiry_and_restart(self):
         owner = self.spawn()
         before = self.event(owner, 'completed')
         self.assertEqual(os.getsid(owner.pid), owner.pid)
         with self.store.connect() as db:
             db.execute('UPDATE omarchy_sessions SET updated=0')
         self.source.tick(force=True)
+        expired = self.store.snapshot()
+        self.assertEqual(expired['state'], 'idle')
+        self.assertEqual(expired['sessions'], [])
+        self.assertNotEqual(expired['eventID'], before['eventID'])
         self.restart()
         after = self.store.snapshot()
-        self.assertEqual(after['state'], 'finished')
-        self.assertEqual(after['sessions'], before['sessions'])
-        self.assertEqual(after['eventID'], before['eventID'])
+        self.assertEqual(after['state'], 'idle')
+        self.assertEqual(after['sessions'], [])
+        self.assertEqual(after['eventID'], expired['eventID'])
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT pid FROM omarchy_processes').fetchone()[0], owner.pid)
+        resumed = self.event(owner, 'working', turn='turn-2')
+        self.assertEqual(resumed['state'], 'working')
+        self.assertEqual(resumed['sessions'][0]['id'], before['sessions'][0]['id'])
 
     def test_restart_reconciles_process_that_exited_while_source_was_down(self):
         owner = self.spawn()

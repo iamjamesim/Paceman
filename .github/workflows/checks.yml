@@ -16,5 +16,5 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - run: python -m pip install -r requirements-push.txt
+      - run: python -m pip install -r requirements-relay.txt
       - run: bash scripts/check.sh
