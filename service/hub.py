@@ -87,6 +87,10 @@ class Store:
                 CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
                     at REAL NOT NULL, state TEXT NOT NULL, label TEXT NOT NULL,
                     payload TEXT, kind TEXT NOT NULL DEFAULT 'activity');
+                CREATE TRIGGER IF NOT EXISTS bound_events AFTER INSERT ON events BEGIN
+                    DELETE FROM events WHERE seq <= NEW.seq - 1024
+                        AND seq != (SELECT MAX(seq) FROM events WHERE kind='activity');
+                END;
                 CREATE TABLE IF NOT EXISTS schedule(id INTEGER PRIMARY KEY, due REAL NOT NULL,
                     state TEXT NOT NULL, fired INTEGER NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS live_activities(
@@ -135,6 +139,9 @@ class Store:
             if db.execute("SELECT COUNT(*) FROM events").fetchone()[0] == 0:
                 db.execute("INSERT INTO events(at,state,label) VALUES (?,?,?)",
                            (time.time(), "idle", "Initial synthetic state"))
+            # Upgrade existing databases without resetting their monotonic revisions.
+            db.execute("DELETE FROM events WHERE seq <= (SELECT MAX(seq) - 1024 FROM events) "
+                       "AND seq != (SELECT MAX(seq) FROM events WHERE kind='activity')")
 
     @contextmanager
     def connect(self):

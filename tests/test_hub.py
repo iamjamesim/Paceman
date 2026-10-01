@@ -57,6 +57,45 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(a["changedAt"], b["changedAt"])
         self.assertEqual(a["state"], "needs_input")
 
+    def test_event_history_is_bounded_without_resetting_snapshot_or_push_cursor(self):
+        from service.push import Worker
+        from tests.test_push import FakeSender
+        invitation = self.store.invite("https://test.example")
+        client = self.store.redeem(invitation["invitation"], device=device())
+        now = time.time()
+        with self.store.connect() as db:
+            previous_activity = db.execute("SELECT MAX(seq) FROM events").fetchone()[0]
+            pending_activity = db.execute("INSERT INTO events(at,state,label) VALUES (?,?,?)",
+                                          (now, "working", "Current activity")).lastrowid
+            db.execute("INSERT INTO push_devices(client_id,token,environment,cursor) VALUES (?,?,?,?)",
+                       (client["clientID"], "ab" * 32, "development", previous_activity))
+            for revision in range(1100):
+                db.execute("INSERT INTO events(at,state,label,kind) VALUES (?,?,?,?)",
+                           (now, "working", "Allowance changed", "allowance"))
+            rows = db.execute("SELECT seq,kind FROM events ORDER BY seq").fetchall()
+            cursor = db.execute("SELECT cursor FROM push_devices").fetchone()[0]
+        self.assertLessEqual(len(rows), 1025)
+        self.assertEqual(rows[0]["seq"], pending_activity)
+        self.assertEqual(rows[0]["kind"], "activity")
+        self.assertEqual(cursor, previous_activity)
+        self.assertEqual(Store(self.store.path).snapshot()["revision"], rows[-1]["seq"])
+        sender = FakeSender()
+        Worker(Store(self.store.path), sender, Path(self.temp.name) / "push.jsonl").step(now)
+        self.assertEqual(len(sender.calls), 1)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT cursor FROM push_devices").fetchone()[0], pending_activity)
+
+    def test_existing_event_history_is_pruned_on_upgrade(self):
+        with self.store.connect() as db:
+            db.execute("DROP TRIGGER bound_events")
+            db.executemany("INSERT INTO events(at,state,label,kind) VALUES (?,?,?,?)",
+                           [(revision, "idle", "Allowance changed", "allowance") for revision in range(1100)])
+        Store(self.store.path)
+        with self.store.connect() as db:
+            rows = db.execute("SELECT seq,kind FROM events ORDER BY seq").fetchall()
+        self.assertLessEqual(len(rows), 1025)
+        self.assertEqual(rows[0]["kind"], "activity")
+
     def test_legacy_local_metadata_is_not_exported(self):
         with self.store.connect() as db:
             db.execute("UPDATE events SET payload=? WHERE seq=1", (

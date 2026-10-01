@@ -41,6 +41,6 @@ restart; Mac clears hook-only sessions until another hook arrives.
 - The phone and custom watch may be reachable while a computer is not, or vice
   versa. Each surface reports its own link without inferring the other.
 
-The source prunes old untracked sessions after 24 hours. Its events table still
-has no retention limit; bounded retention must preserve the current snapshot
-and push cursors before external release. See [known gaps](readiness-gaps.md).
+The source prunes old untracked sessions after 24 hours. Its events table keeps
+the latest 1,024 revisions and the most recent activity event. Revisions remain
+monotonic, and push cursors keep their values when older rows are removed.
