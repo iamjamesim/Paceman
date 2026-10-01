@@ -23,6 +23,8 @@ The Mac enrolls with a source credential; the phone registers its own token with
 
 The worker retries transient relay failures until the event's five-minute limit. Only one worker can hold a source database's push lock.
 
+For a rejected Live Activity start token (`BadDeviceToken`, `DeviceTokenNotForTopic`, or HTTP 410), the source keeps that phone's token, environment, rejection reason, and rejection time. It waits 24 hours before trying the same token again; registering a different token or environment replaces the rejected row and can be tried immediately. The source log records the token fingerprint and APNs request ID without recording the token. ActivityKit controls token replacement, so re-registering the same rejected token does not repair it.
+
 ## Development-only direct APNs
 
 The older direct sender remains temporarily for existing personal and Omarchy development setups. It is not a public install path: each configured source needs a private APNs `.p8` key. Its JSON config belongs outside this repository, readable only by its owner. The team, topic, and environment must match the signed iPhone app; Debug uses `development` and Release uses `production`.
@@ -31,7 +33,7 @@ The older direct sender remains temporarily for existing personal and Omarchy de
 {
   "teamID": "TEAMID1234",
   "keyID": "KEYID12345",
-  "topic": "ai.paceman.app",
+  "topic": "ai.paceman.app.dev",
   "environment": "development",
   "keyPath": "AuthKey_KEYID12345.p8"
 }

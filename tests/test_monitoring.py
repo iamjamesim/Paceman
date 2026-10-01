@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from tests.identity import device
 from service.hub import Store
@@ -40,6 +41,8 @@ class MonitoringTests(unittest.TestCase):
             for table in ('live_activities', 'live_activity_starts'):
                 self.assertIn('alert_cursor',
                               {row[1] for row in db.execute(f'PRAGMA table_info({table})')})
+            self.assertTrue({'rejected_reason', 'rejected_at'} <=
+                            {row[1] for row in db.execute('PRAGMA table_info(live_activity_starts)')})
             self.assertEqual(db.execute("SELECT activity_id,cursor,alert_cursor FROM live_activities "
                                         "WHERE client_id='paired-phone'").fetchone(),
                              ('activity-1', 7, 0))
@@ -287,6 +290,59 @@ class MonitoringTests(unittest.TestCase):
         self.store.emit('working')
         self.worker.step(now + 4)
         self.assertEqual(len([call for call in self.sender.calls if call[1]['aps']['event'] == 'start']), 2)
+
+    def test_rejected_start_token_stays_recorded_until_replaced(self):
+        now = time.time()
+        registration = {'action': 'register-start', 'deviceToken': 'cd' * 32,
+                        'environment': 'production'}
+        self.store.live_activity(self.credential, registration)
+        self.store.emit('working')
+        self.sender.result = Result(400, 'BadDeviceToken', 'test-apns-id')
+        self.worker.step(now + 1)
+        with self.store.connect() as db:
+            row = db.execute('SELECT token,environment,rejected_reason,rejected_at,next_attempt '
+                             'FROM live_activity_starts').fetchone()
+        self.assertEqual((row['token'], row['environment'], row['rejected_reason']),
+                         ('cd' * 32, 'production', 'BadDeviceToken'))
+        self.assertEqual(row['rejected_at'], now + 1)
+        self.assertEqual(row['next_attempt'], now + 1 + 24 * 3600)
+
+        self.store.live_activity(self.credential, registration)
+        self.store.emit('idle')
+        self.worker.step(now + 2)
+        self.store.emit('working')
+        self.worker.step(now + 3)
+        self.assertEqual(len(self.sender.calls), 1)
+
+        self.store.live_activity(self.credential, {**registration, 'deviceToken': 'ef' * 32})
+        self.sender.result = Result(200, 'Accepted', 'next-apns-id')
+        self.worker.step(now + 4)
+        self.assertEqual(len(self.sender.calls), 2)
+        self.assertEqual(self.sender.calls[-1][0]['token'], 'ef' * 32)
+        with self.store.connect() as db:
+            row = db.execute('SELECT rejected_reason,rejected_at FROM live_activity_starts').fetchone()
+        self.assertIsNone(row['rejected_reason'])
+        self.assertIsNone(row['rejected_at'])
+
+    def test_rejected_start_token_can_recover_after_configuration_fix(self):
+        now = time.time()
+        self.store.live_activity(self.credential, {
+            'action': 'register-start', 'deviceToken': 'cd' * 32,
+            'environment': 'production'})
+        self.store.emit('working')
+        self.sender.result = Result(400, 'DeviceTokenNotForTopic', 'first-apns-id')
+        self.worker.step(now + 1)
+        self.store.emit('idle')
+        self.worker.step(now + 2)
+        self.store.emit('working')
+        self.sender.result = Result(200, 'Accepted', 'next-apns-id')
+        with patch('service.hub.time.time', return_value=now + 24 * 3600 + 1):
+            self.worker.step(now + 24 * 3600 + 2)
+        self.assertEqual(len(self.sender.calls), 2)
+        with self.store.connect() as db:
+            row = db.execute('SELECT rejected_reason,rejected_at FROM live_activity_starts').fetchone()
+        self.assertIsNone(row['rejected_reason'])
+        self.assertIsNone(row['rejected_at'])
 
     def test_orphan_recovery_restarts_unchanged_work_only_for_matching_activity(self):
         now = time.time()

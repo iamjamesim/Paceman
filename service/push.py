@@ -547,7 +547,8 @@ class Worker:
             # A successful remote start reserves this source for one active run.
             # The update token may arrive later; revisions must not start copies.
             with self.store.connect() as db:
-                db.execute("UPDATE live_activity_starts SET cursor=?,next_attempt=0",
+                db.execute("UPDATE live_activity_starts SET cursor=?,"
+                           "next_attempt=CASE WHEN rejected_reason IS NULL THEN 0 ELSE next_attempt END",
                            (snapshot["revision"],))
             return
         if (snapshot["state"] not in ("working", "needs_input", "failed")
@@ -585,16 +586,19 @@ class Worker:
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             with self.store.connect() as db:
                 if invalid:
-                    db.execute("DELETE FROM live_activity_starts WHERE client_id=? AND token=?",
-                               (device["client_id"], device["token"]))
+                    db.execute("UPDATE live_activity_starts SET rejected_reason=?,rejected_at=?,next_attempt=? "
+                               "WHERE client_id=? AND token=? AND environment=?",
+                               (result.reason, now, now + 24 * 3600, device["client_id"], device["token"],
+                                device["environment"]))
                 else:
                     delay = 8 * 3600 if accepted else min(300, 15 * 2 ** min(device["attempts"], 5))
-                    db.execute("UPDATE live_activity_starts SET cursor=?,next_attempt=?,attempts=?,alert_cursor=? "
-                               "WHERE client_id=? AND token=?",
+                    db.execute("UPDATE live_activity_starts SET cursor=?,next_attempt=?,attempts=?,"
+                               "alert_cursor=?,rejected_reason=NULL,rejected_at=NULL "
+                               "WHERE client_id=? AND token=? AND environment=?",
                                (snapshot["revision"] if accepted else device["cursor"], now + delay,
                                 0 if accepted else device["attempts"] + 1,
                                 event["seq"] if accepted and alert_event else device["alert_cursor"],
-                                device["client_id"], device["token"]))
+                                device["client_id"], device["token"], device["environment"]))
             self.log({"at": now, "stage": "live_activity_start_accepted" if accepted else "live_activity_start_failed",
                       "revision": snapshot["revision"], "clientID": device["client_id"],
                       "environment": device["environment"],

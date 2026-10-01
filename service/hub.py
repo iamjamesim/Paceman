@@ -99,7 +99,8 @@ class Store:
                     client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
                     cursor INTEGER NOT NULL DEFAULT 0, next_attempt REAL NOT NULL DEFAULT 0,
                     attempts INTEGER NOT NULL DEFAULT 0,
-                    alert_cursor INTEGER NOT NULL DEFAULT 0);
+                    alert_cursor INTEGER NOT NULL DEFAULT 0,
+                    rejected_reason TEXT, rejected_at REAL);
                 CREATE TABLE IF NOT EXISTS push_devices(
                     client_id TEXT PRIMARY KEY, token TEXT NOT NULL, environment TEXT NOT NULL,
                     cursor INTEGER NOT NULL, next_attempt REAL NOT NULL DEFAULT 0,
@@ -116,6 +117,11 @@ class Store:
             for table in ("live_activities", "live_activity_starts"):
                 if "alert_cursor" not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN alert_cursor INTEGER NOT NULL DEFAULT 0")
+            start_columns = {row[1] for row in db.execute("PRAGMA table_info(live_activity_starts)")}
+            if "rejected_reason" not in start_columns:
+                db.execute("ALTER TABLE live_activity_starts ADD COLUMN rejected_reason TEXT")
+            if "rejected_at" not in start_columns:
+                db.execute("ALTER TABLE live_activity_starts ADD COLUMN rejected_at REAL")
             if "mode" in {row[1] for row in db.execute("PRAGMA table_info(push_devices)")}:
                 db.execute("ALTER TABLE push_devices DROP COLUMN mode")
             if "recovery_sends" not in {row[1] for row in db.execute("PRAGMA table_info(watch_push_devices)")}:
