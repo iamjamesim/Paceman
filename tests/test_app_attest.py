@@ -76,11 +76,21 @@ class AppAttestTests(unittest.TestCase):
         signature = self.device_key.sign(signed, ec.ECDSA(hashes.SHA256()))
         return encoded(cbor2.dumps({"authenticatorData": auth, "signature": signature}))
 
-    def assertion_with_extensions(self, category):
-        extensions = cbor2.dumps({"apple_validation_category_01": category.to_bytes(4, "little"),
-                                  "apple_bundle_version_01": "1"})
+    def assertion_with_extensions(self, category, *, flags=0, extensions=None):
+        extensions = cbor2.dumps(extensions if extensions is not None else {
+            "apple_validation_category_01": category.to_bytes(4, "little"),
+            "apple_bundle_version_01": "1"})
         # iOS 27 may append this map while leaving the ED flag clear.
-        auth = hashlib.sha256(APP_ID.encode()).digest() + b"\x00" + struct.pack(">I", 1) + extensions
+        auth = hashlib.sha256(APP_ID.encode()).digest() + bytes([flags]) + struct.pack(">I", 1) + extensions
+        signed = auth + hashlib.sha256(self.challenge.encode()).digest()
+        signature = self.device_key.sign(signed, ec.ECDSA(hashes.SHA256()))
+        return encoded(cbor2.dumps({"authenticatorData": auth, "signature": signature}))
+
+    def assertion_with_credential(self, *, credential=None):
+        key_id = base64.urlsafe_b64decode(self.key_id + "=") if credential is None else credential
+        extensions = cbor2.dumps({"apple_validation_category_01": (2).to_bytes(4, "little")})
+        auth = (hashlib.sha256(APP_ID.encode()).digest() + b"\x40" + struct.pack(">I", 1)
+                + b"appattest" + b"\0" * 7 + struct.pack(">H", 32) + key_id + self.cose + extensions)
         signed = auth + hashlib.sha256(self.challenge.encode()).digest()
         signature = self.device_key.sign(signed, ec.ECDSA(hashes.SHA256()))
         return encoded(cbor2.dumps({"authenticatorData": auth, "signature": signature}))
@@ -121,6 +131,25 @@ class AppAttestTests(unittest.TestCase):
         with self.assertRaises(InvalidAttestation):
             self.verifier.assert_key(self.assertion_with_extensions(3), public,
                                      self.challenge, "production", 0)
+
+    def test_assertion_credential_bit_with_validation_extensions(self):
+        public = self.verifier.attest(self.attestation(), self.key_id, self.challenge,
+                                      "production", now=NOW)
+        self.assertEqual(self.verifier.assert_key(self.assertion_with_extensions(2, flags=0x40),
+                                                  public, self.challenge, "production", 0), 1)
+        for proof in (self.assertion_with_extensions(3, flags=0x40),
+                      self.assertion_with_extensions(2, flags=0x40, extensions={"unknown": 1})):
+            with self.subTest(proof=proof[:20]), self.assertRaises(InvalidAttestation):
+                self.verifier.assert_key(proof, public, self.challenge, "production", 0)
+
+    def test_assertion_credential_block_must_match_attested_key(self):
+        public = self.verifier.attest(self.attestation(), self.key_id, self.challenge,
+                                      "production", now=NOW)
+        self.assertEqual(self.verifier.assert_key(self.assertion_with_credential(), public,
+                                                  self.challenge, "production", 0), 1)
+        with self.assertRaises(InvalidAttestation):
+            self.verifier.assert_key(self.assertion_with_credential(credential=b"x" * 32),
+                                     public, self.challenge, "production", 0)
 
 
 if __name__ == "__main__":
