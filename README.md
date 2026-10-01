@@ -11,7 +11,7 @@ private Tailscale HTTPS.
 Paceman is a **developer alpha**, installed from source. Mac Codex desktop and
 Mac CLI hooks and the Omarchy Codex CLI companion have been exercised on development
 devices. Omarchy Codex desktop and broader background delivery remain
-unverified. See [known limitations](docs/readiness-gaps.md).
+unverified.
 
 ## Get started
 
@@ -31,10 +31,8 @@ show how to set it up.
 - **Connected, but no activity?** Review Paceman's Codex hooks on the computer, then start a new local Codex task.
 
 Locked-phone notifications use the [project-operated APNs relay](docs/push-relay.md),
-which keeps the signing key off Macs. Public enrollment controls and packaged
-Mac distribution remain [release work](docs/readiness-gaps.md). The Apple Watch
-app requires watchOS 11 or later. The [ESP32 watch](firmware/esp32-watch/README.md)
-is optional.
+which keeps the signing key off Macs. The Apple Watch app requires watchOS 11
+or later. The [ESP32 watch](firmware/esp32-watch/README.md) is optional.
 
 ## Repository
 
@@ -60,4 +58,3 @@ start with the [development guide](docs/development.md) for builds and tests.
 - [Push delivery](docs/push-delivery.md): APNs paths and delivery limits.
 - [APNs relay](docs/push-relay.md): deployment and pairing.
 - [Bluetooth lifecycle](docs/bluetooth-lifecycle.md): watch reconnection and readiness.
-- [Known limitations](docs/readiness-gaps.md): supported scope and open gaps.
