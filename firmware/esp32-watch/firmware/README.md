@@ -48,6 +48,8 @@ partition map even though the board is sold with 32 MB flash.
 
 ## Build
 
+Run from the device-package root (`firmware/esp32-watch/`):
+
 ```bash
 cd firmware
 . /path/to/esp-idf/export.sh
@@ -55,13 +57,13 @@ idf.py build
 ```
 
 The device UI and host preview renderer share `main/watch_face_layout.c` and
-`main/watch_allowance_layout.c`. From the device-package root (`firmware/esp32-watch/`), run
+`main/watch_allowance_layout.c`. From the device-package root, run
 `./tools/render-watchface.sh` after the
-first firmware configure/build; see `simulator/README.md` for details.
+first firmware configure/build; see the [simulator guide](../simulator/README.md) for details.
 
 ## Prebuilt release bundle
 
-A bundle made with `tools/package-release.sh` includes the bootloader,
+A bundle made with the package's [release script](../tools/package-release.sh) includes the bootloader,
 partition table, and application as three separate binaries, plus a `flash.sh`
 helper, license and provenance notices, and SHA-256 checksums. Install
 Espressif's `esptool`, extract the bundle, and run:

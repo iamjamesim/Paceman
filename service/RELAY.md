@@ -6,7 +6,7 @@ The project operates the APNs relay and keeps its signing key off users' Macs. M
 
 These steps are for the Paceman service operator. A fork can run its own relay with its own signed app and matching Apple Developer credentials; a different team's APNs key cannot send to the public Paceman app.
 
-1. Deploy `Dockerfile.relay` as a paid Web Service. Set its health check to `/healthz`.
+1. Deploy the repository's [Dockerfile.relay](../Dockerfile.relay) as a paid Web Service. Set its health check to `/healthz`.
 2. Create paid Render Postgres in the same region. Set the Web Service's `DATABASE_URL` to its **internal** URL. The relay creates its tables on startup; no manual SQL or `sources.json` is needed.
 3. Add Secret Files named `apns-sandbox.p8`, `apns-production.p8`, and `apns.json`. The JSON file must contain both APNs environments, using your Apple team and the corresponding key IDs:
 
@@ -29,7 +29,7 @@ These steps are for the Paceman service operator. A fork can run its own relay w
 
 ## Connect a Mac
 
-After [installing the Mac source](../macos/README.md), point it at the project-operated relay:
+After [installing the Mac source](../macos/README.md), run this from the repository root to point it at the project-operated relay:
 
 ```sh
 python3 -m macos.install_push --relay-url https://relay.paceman.ai
@@ -37,7 +37,7 @@ python3 -m macos.install_push --relay-url https://relay.paceman.ai
 
 The installer creates a source credential. Pair the iPhone with a fresh QR code, even if it was paired before. The paired iPhone activates the source with Apple's App Attest service; there are no operator-issued invites. Changing relay hosts also requires a fresh pairing.
 
-For an installed Omarchy source, run `python3 -m omarchy.install_push --relay-url https://relay.paceman.ai` from the checkout. Its user push service follows Sharing and uses the same relay for Debug and TestFlight phones. Pair the phone again after configuring or changing the relay address.
+For an installed Omarchy source, run `python3 -m omarchy.install_push --relay-url https://relay.paceman.ai` from the repository root. Its user push service follows Sharing and uses the same relay for Debug and TestFlight phones. Pair the phone again after configuring or changing the relay address.
 
 ## Check and revoke
 

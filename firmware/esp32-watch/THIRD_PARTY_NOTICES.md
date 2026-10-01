@@ -4,7 +4,7 @@ The `jetbrains_mono_*.c` arrays under `firmware/main/fonts/` are bitmap subsets
 produced from JetBrains Mono Nerd Font 3.5.0 with `lv_font_conv` 1.5.3. They
 are checked in so firmware builds do not require Node.js or host fonts.
 `paceman_32_agent.c` is Paceman's own activity face, generated from
-`scripts/make-watch-robot-font.swift`.
+the repository's [font generator](../../scripts/make-watch-robot-font.swift).
 
 - JetBrains Mono is copyright the JetBrains Mono Project Authors and licensed
   under the SIL Open Font License 1.1. A copy is included at

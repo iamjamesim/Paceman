@@ -4,7 +4,7 @@ The Mac client has one **Paceman** background item for the local source and opti
 
 ## Install and pair
 
-Use Python 3.11+ installed outside the checkout, Xcode, and an Apple Silicon Mac:
+From the repository root, use Python 3.11+ installed outside the checkout, Xcode, and an Apple Silicon Mac:
 
 ```sh
 python3 -m macos.install
