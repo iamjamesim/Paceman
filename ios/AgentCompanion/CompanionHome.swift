@@ -133,13 +133,15 @@ struct CompanionHome: View {
 
     private var agentSetup: some View {
         VStack(alignment: .leading, spacing: 21) {
-            HStack {
-                Eyebrow(text: "Agents", theme: theme)
-                Spacer()
-                Image(systemName: "laptopcomputer").font(.system(size: 18, weight: .medium)).foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
-            }
             VStack(alignment: .leading, spacing: 9) {
-                Text("Connect a computer").font(theme.monospaced ? theme.font(25, emphasis: true) : .title2.weight(.semibold)).tracking(-0.8).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 12) {
+                    Text("Connect a computer").font(theme.monospaced ? theme.font(25, emphasis: true) : .title2.weight(.semibold)).tracking(-0.8).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    if !typeSize.isAccessibilitySize {
+                        Image(systemName: "laptopcomputer").font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
+                    }
+                }
                 Text("Install Paceman on the computer where you use Codex, then connect it here.")
                     .font(.subheadline).foregroundStyle(theme.secondaryInk).fixedSize(horizontal: false, vertical: true)
             }
