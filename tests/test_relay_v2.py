@@ -95,6 +95,19 @@ class RelayV2Tests(unittest.TestCase):
         self.assertTrue(self.registry.source_authorized(self.source_id, self.source_secret))
         self.assertEqual(len(self.sender.calls), 1)
 
+    def test_rejected_attestation_logs_reason_without_pairing_secrets(self):
+        fields = {"sourceID": self.source_id, "sourceCredentialHash": digest(self.source_secret),
+                  "clientID": self.client_id, "clientCredentialHash": digest(self.client_secret),
+                  "keyID": "a" * 43, "environment": "production"}
+        status, challenge = self.call("/v2/attest/challenge", fields)
+        self.assertEqual(status, 200)
+        with self.assertLogs("paceman.relay", level="WARNING") as logs:
+            status, _ = self.call("/v2/attest/approve", {**fields, **challenge, "proof": "invalid"})
+        self.assertEqual(status, 403)
+        self.assertIn("pairing_approval_rejected reason=Invalid proof", logs.output[0])
+        self.assertNotIn(self.source_secret, logs.output[0])
+        self.assertNotIn(self.client_secret, logs.output[0])
+
     def test_exact_mac_pairing_and_token_are_required(self):
         self.approve()
         self.bind()

@@ -245,8 +245,10 @@ class RelayApp:
             except PermissionError:
                 LOG.warning("pairing_approval_denied")
                 return answer("403 Forbidden", {"error": "PairingDenied"})
-            except ValueError:
-                LOG.warning("pairing_approval_rejected")
+            except ValueError as error:
+                # The verifier and registry raise fixed, data-free reasons here.
+                # Keep credentials, challenges, and proof bytes out of logs.
+                LOG.warning("pairing_approval_rejected reason=%s", error)
                 return answer("403 Forbidden", {"error": "InvalidAttestation"})
             LOG.info("pairing_approval_accepted")
             return answer("200 OK", {"approved": True})
