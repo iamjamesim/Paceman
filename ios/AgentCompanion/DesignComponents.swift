@@ -41,6 +41,25 @@ struct CompanionSecondaryButton: View {
     }
 }
 
+struct CompanionExternalLink: View {
+    let title: String
+    let url: URL
+    let theme: CompanionTheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        Link(destination: url) {
+            HStack(spacing: 6) {
+                Text(title)
+                Image(systemName: "arrow.up.right").accessibilityHidden(true)
+            }
+            .font(.subheadline.weight(.medium))
+            .frame(maxWidth: .infinity, minHeight: typeSize.isAccessibilitySize ? 44 : 28, alignment: .leading)
+        }
+        .foregroundStyle(theme.tint)
+    }
+}
+
 struct CompanionRule: View {
     let theme: CompanionTheme
     var body: some View { Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5) }

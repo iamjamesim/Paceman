@@ -144,8 +144,8 @@ struct CompanionHome: View {
                     .font(.subheadline).foregroundStyle(theme.secondaryInk).fixedSize(horizontal: false, vertical: true)
             }
             CompanionButton(title: "Connect computer", theme: theme, symbol: "plus") { open(.pairing) }
-            Link("Setup guide", destination: SetupGuide.url)
-                .font(.subheadline.weight(.medium)).allowsHitTesting(!presentation.preview)
+            CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
+                .allowsHitTesting(!presentation.preview)
         }.padding(23).background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 25))
             .overlay(RoundedRectangle(cornerRadius: 25).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }

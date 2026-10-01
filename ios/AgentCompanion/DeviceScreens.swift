@@ -184,13 +184,7 @@ struct WatchIntroduction: View {
     }
 
     private func resourceLink(_ title: String, url: String) -> some View {
-        Link(destination: URL(string: url)!) {
-            HStack(spacing: 6) {
-                Text(title)
-                Image(systemName: "arrow.up.right").accessibilityHidden(true)
-            }.font(.subheadline.weight(.medium))
-                .frame(maxWidth: .infinity, minHeight: typeSize.isAccessibilitySize ? 44 : 28, alignment: .leading)
-        }
+        CompanionExternalLink(title: title, url: URL(string: url)!, theme: theme)
     }
 }
 

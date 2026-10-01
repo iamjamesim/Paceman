@@ -17,7 +17,7 @@ unverified. See [known limitations](docs/readiness-gaps.md).
 
 1. [Build the iPhone app](docs/development.md#iphone-and-live-activities-mac) with Xcode for iOS 18 or later.
 2. Install a source on an [Apple Silicon Mac](docs/macos.md) or [Omarchy 4.0+ desktop](docs/omarchy.md).
-3. Install Tailscale on phone and computer, configure a private Serve route on the computer, then scan its pairing code in Paceman. The platform guides cover hook review and the first real activity event.
+3. Install [Tailscale](https://tailscale.com/download) on phone and computer, configure a private Serve route on the computer, then scan its pairing code in Paceman. The platform guides cover hook review and the first real activity event.
 
 ## Setup help
 

@@ -13,6 +13,7 @@ struct PairingFlow: View {
     @State private var invitation = ""
     @State private var parsed: Invitation?
     @State private var error: String?
+    @State private var showingTailscaleInfo = false
     private var reconnecting: Bool {
         parsed.map { value in model.pairedSources.contains { $0.sourceID == value.sourceID } }
             ?? (preview && ProcessInfo.processInfo.arguments.contains("--screen=reconnect"))
@@ -28,10 +29,19 @@ struct PairingFlow: View {
                     if reconnecting {
                         Text("Scanning a fresh QR code renews this phone’s access. Your watch stays paired.").font(.subheadline).foregroundStyle(theme.secondaryInk)
                     }
-                    Text("Tailscale privately connects your phone to your computer. Both need to be on the same Tailscale network.")
+                    Text("Make sure your phone and computer are on the same Tailscale network.")
                         .font(.subheadline).foregroundStyle(theme.secondaryInk)
-                    Link("Setup guide", destination: SetupGuide.url)
-                        .font(.subheadline.weight(.medium)).allowsHitTesting(!preview)
+                    DisclosureGroup("Why Tailscale?", isExpanded: $showingTailscaleInfo) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Tailscale lets your phone reach Paceman on your computer without exposing Paceman to the public internet.")
+                                .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                            CompanionExternalLink(title: "Get Tailscale for iPhone", url: URL(string: "https://tailscale.com/download/ios")!, theme: theme)
+                                .allowsHitTesting(!preview)
+                        }.padding(.top, 8)
+                    }
+                    .font(.subheadline.weight(.medium)).tint(theme.tint)
+                    CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
+                        .allowsHitTesting(!preview)
                 }
                 if let parsed {
                     VStack(alignment: .leading, spacing: 16) {
