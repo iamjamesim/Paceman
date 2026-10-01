@@ -69,6 +69,37 @@ final class Diagnostics {
         append(entry)
     }
 
+    func recordSupportSnapshot(sources: [(id: String, connection: String,
+                                         lastContact: Date?, activity: ActivityState?)],
+                               watchPaired: Bool, lastBLEWriteAccepted: Date?,
+                               pushStep: String, pushRegistered: Bool, awaitingPushToken: Bool) {
+        let sourceEntries: [[String: Any]] = sources.map { source in
+            var entry: [String: Any] = ["sourceSupportID": fingerprint(source.id),
+                                        "connection": source.connection]
+            if let contact = source.lastContact { entry["lastContactAt"] = contact.timeIntervalSince1970 }
+            if let activity = source.activity { entry["lastSnapshotActivity"] = activity.rawValue }
+            return entry
+        }
+        var entry: [String: Any] = [
+            "at": Date().timeIntervalSince1970,
+            "uptime": ProcessInfo.processInfo.systemUptime,
+            "stage": "support_snapshot",
+            "appVersion": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+            "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+            "watchPaired": watchPaired,
+            "pushStep": pushStep,
+            "pushRegistered": pushRegistered,
+            "awaitingPushToken": awaitingPushToken,
+            "sources": sourceEntries,
+        ]
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        entry["osVersion"] = "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
+        if let delivered = lastBLEWriteAccepted {
+            entry["lastBLEWriteAcceptedAt"] = delivered.timeIntervalSince1970
+        }
+        append(entry)
+    }
+
     private func fingerprint(_ value: String) -> String {
         let digest = SHA256.hash(data: Data(value.utf8))
         return String(digest.map { String(format: "%02x", $0) }.joined().prefix(12))

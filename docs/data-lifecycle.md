@@ -44,3 +44,9 @@ restart; Mac clears hook-only sessions until another hook arrives.
 The source prunes old untracked sessions after 24 hours. Its events table keeps
 the latest 1,024 revisions and the most recent activity event. Revisions remain
 monotonic, and push cursors keep their values when older rows are removed.
+
+Support reports are shared only when the user chooses to export them. The iPhone
+shares its bounded local diagnostic log with a current connection snapshot. The
+Mac menu app saves a report with source and hook status plus recent notification
+outcomes. Both use the same hashed source support ID for matching reports;
+neither report includes credentials, prompts, computer names, or raw push tokens.

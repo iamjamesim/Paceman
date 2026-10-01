@@ -50,12 +50,22 @@ struct TransportDiagnostics: View {
             #endif
             Section {
                 LabeledContent("Version", value: version)
-                ShareLink("Export diagnostic log", item: Diagnostics.shared.url)
+                ShareLink("Share support report", item: Diagnostics.shared.url)
             } footer: {
-                Text("Includes event timing and technical identifiers. Share only when requesting help.")
+                Text("Includes connection timing and technical identifiers. It excludes prompts, credentials, and computer names. Share only when requesting help.")
             }
         }
         .navigationTitle("Diagnostics")
-        .onAppear { model.monitoring.captureStartTokenDiagnostics() }
+        .onAppear {
+            model.monitoring.captureStartTokenDiagnostics()
+            Diagnostics.shared.recordSupportSnapshot(sources: model.pairedSources.map { source in
+                (id: source.sourceID, connection: model.connectionState(source.sourceID).rawValue,
+                 lastContact: model.lastContacts[source.sourceID],
+                 activity: model.snapshots[source.sourceID]?.state)
+            }, watchPaired: model.watch.paired, lastBLEWriteAccepted: model.watch.lastDelivered,
+               pushStep: PushCoordinator.shared.deliveryStep.rawValue,
+               pushRegistered: PushCoordinator.shared.registered,
+               awaitingPushToken: PushCoordinator.shared.awaitingToken)
+        }
     }
 }
