@@ -1,6 +1,7 @@
 import SwiftUI
 import CoreImage.CIFilterBuiltins
 import ServiceManagement
+import UniformTypeIdentifiers
 
 private enum SetupGuide {
     static let url = URL(string: "https://github.com/iamjamesim/paceman#get-started")!
@@ -119,6 +120,28 @@ private final class PanelModel: ObservableObject {
         run(["uninstall", "--yes"]) { _ in NSApplication.shared.terminate(nil) }
     }
 
+    func saveSupportReport() {
+        run(["support"]) { contents in
+            guard let data = contents.data(using: .utf8) else {
+                self.message = "Could not prepare the support report."
+                return
+            }
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = "Paceman-Mac-support.json"
+            panel.allowedContentTypes = [.json]
+            panel.begin { result in
+                guard result == .OK, let url = panel.url else { return }
+                do {
+                    try data.write(to: url, options: .atomic)
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+                    self.message = "Support report saved. Attach it when asking for help."
+                } catch {
+                    self.message = "Could not save the support report."
+                }
+            }
+        }
+    }
+
     var opensAtLogin: Bool {
         loginStatus == .enabled || loginStatus == .requiresApproval
     }
@@ -178,32 +201,41 @@ private struct ManagementView: View {
     @State private var confirmingUninstall = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Paceman on this Mac").font(.title2.weight(.semibold))
-            Text("One background item shares local Codex activity with your paired phones and sends iPhone notifications when configured.")
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Turn off Sharing in the menu bar to stop it while keeping your pairings and settings.")
-                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Toggle("Open menu app at login", isOn: Binding(
-                get: { model.opensAtLogin }, set: { model.setOpenAtLogin($0) }))
-            if model.loginStatus == .requiresApproval {
-                Text("Allow Paceman in System Settings → General → Login Items & Extensions.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Text("Uninstall removes the Mac app, background item, Paceman’s Codex hooks, local pairings, and APNs key. The iPhone app and Tailscale stay installed.")
-                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let message = model.message {
-                Text(message).font(.caption).foregroundStyle(.red)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Paceman on this Mac").font(.title2.weight(.semibold))
+                Text("One background item shares local Codex activity with your paired phones and sends iPhone notifications when configured.")
                     .fixedSize(horizontal: false, vertical: true)
-            }
-            HStack {
-                Button("Done") { model.showingManagement = false }.keyboardShortcut(.defaultAction)
-                Spacer()
-                Button("Uninstall Paceman…", role: .destructive) { confirmingUninstall = true }
+                Text("Turn off Sharing in the menu bar to stop it while keeping your pairings and settings.")
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Toggle("Open menu app at login", isOn: Binding(
+                    get: { model.opensAtLogin }, set: { model.setOpenAtLogin($0) }))
+                if model.loginStatus == .requiresApproval {
+                    Text("Allow Paceman in System Settings → General → Login Items & Extensions.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Button("Save support report…") { model.saveSupportReport() }
                     .disabled(model.busy)
+                Text("Includes connection timing and notification results. It excludes prompts, credentials, and computer names.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Uninstall removes the Mac app, background item, Paceman’s Codex hooks, local pairings, and APNs key. The iPhone app and Tailscale stay installed.")
+                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if let message = model.message {
+                    Text(message).font(.caption).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Button("Done") { model.showingManagement = false }.keyboardShortcut(.defaultAction)
+                    Spacer()
+                    Button("Uninstall Paceman…", role: .destructive) { confirmingUninstall = true }
+                        .disabled(model.busy)
+                }
             }
+            .padding(24)
         }
-        .padding(24).frame(width: 390)
+        .frame(width: 390)
+        .frame(maxHeight: 600)
         .onAppear { model.loginStatus = SMAppService.mainApp.status }
         .onExitCommand { model.showingManagement = false }
         .confirmationDialog("Remove Paceman from this Mac?", isPresented: $confirmingUninstall) {

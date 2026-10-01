@@ -134,13 +134,22 @@ def remove_access(client_id):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "pair", "share-on", "share-off", "restart", "remove-access", "uninstall"))
+    parser.add_argument("command", choices=("status", "support", "pair", "share-on", "share-off", "restart", "remove-access", "uninstall"))
     parser.add_argument("--client-id")
     parser.add_argument("--yes", action="store_true", help="Confirm complete Mac uninstall")
     args = parser.parse_args()
     try:
         if args.command == "status":
             print(json.dumps(status(), separators=(",", ":")))
+        elif args.command == "support":
+            from macos.support import report
+            app = Path.home() / "Applications/Paceman.app"
+            try:
+                current_status = status()
+            except sqlite3.Error:
+                current_status = {"running": False, "sharingEnabled": not (ROOT / "sharing-paused").exists(),
+                                  "missingHooks": missing_hooks()}
+            print(json.dumps(report(ROOT, current_status, app), separators=(",", ":")))
         elif args.command == "pair":
             pairing()
         elif args.command in ("share-on", "share-off"):
