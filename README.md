@@ -19,20 +19,19 @@ unverified.
 2. Install a source on an [Apple Silicon Mac](macos/README.md) or [Omarchy 4.0+ desktop](omarchy/README.md).
 3. Install [Tailscale](https://tailscale.com/download) on phone and computer, configure a private Serve route on the computer, then scan its pairing code in Paceman. The platform guides cover hook review and the first real activity event.
 
-## Setup help
+Locked-phone notifications use an optional source push worker and APNs relay.
+The Apple Watch app requires watchOS 11 or later;
+the [ESP32 watch](firmware/esp32-watch/README.md) is optional.
 
-Tailscale gives the phone a private connection to your computer. Both devices
-must join the same Tailscale network. Paceman also needs a private Serve route
-on the computer. The [Mac](macos/README.md) and [Omarchy](omarchy/README.md) guides
-show how to set it up.
+## Understand the system
 
-- **No pairing code?** Turn on Sharing and check the computer's Tailscale Serve route.
-- **The phone cannot connect?** Check Tailscale on both devices, keep the computer awake, and scan a fresh code.
-- **Connected, but no activity?** Review Paceman's Codex hooks on the computer, then start a new local Codex task.
+Start with [architecture](docs/architecture.md) for the end-to-end flow. Then read
+[data and lifecycle](docs/data-lifecycle.md) for what survives outages and
+[push delivery](docs/push-delivery.md) for updates while the phone is asleep.
 
-Locked-phone notifications use the [project-operated APNs relay](service/RELAY.md),
-which keeps the signing key off Macs. The Apple Watch app requires watchOS 11
-or later. The [ESP32 watch](firmware/esp32-watch/README.md) is optional.
+For exact formats, use the [protocol](docs/protocol.md). The
+[ESP32 watch connection](firmware/esp32-watch/CONNECTION.md) covers its
+Bluetooth recovery; [relay setup](service/RELAY.md) is for operators.
 
 ## Repository
 
@@ -46,16 +45,7 @@ or later. The [ESP32 watch](firmware/esp32-watch/README.md) is optional.
 | `tests/`, `scripts/` | Portable checks and development tools |
 
 The ESP32 package derives from [Omarchy Watch](https://github.com/iamjamesim/omarchy-watch).
-Its [provenance](firmware/esp32-watch/UPSTREAM.md) and
-[third-party notices](THIRD_PARTY_NOTICES.md) are retained. Contributors can
-start with the [development guide](docs/development.md) for builds and tests.
-
-## Understand the system
-
-Start with [architecture](docs/architecture.md) for the end-to-end flow. Then read
-[data and lifecycle](docs/data-lifecycle.md) for what survives outages and
-[push delivery](docs/push-delivery.md) for updates while the phone is asleep.
-
-For exact formats, use the [protocol](docs/protocol.md). The
-[ESP32 watch connection](firmware/esp32-watch/CONNECTION.md) covers its
-Bluetooth recovery; [relay setup](service/RELAY.md) is for operators.
+Its [provenance](firmware/esp32-watch/UPSTREAM.md) is retained. New Paceman code
+uses [Apache 2.0](LICENSE); imported code and assets have
+[third-party notices](THIRD_PARTY_NOTICES.md). Contributors can start with the
+[development guide](docs/development.md) for builds and tests.
