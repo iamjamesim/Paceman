@@ -36,3 +36,5 @@ These identifiers are examples. `keyPath` can be absolute or relative to the con
 ## Delivery boundaries
 
 `apns_accepted` and `live_activity_start_accepted` mean Apple accepted a send. They do not confirm notification presentation, iPhone execution, Bluetooth delivery, or watch rendering. Tailscale reachability, iPhone notification permission, watch notification sharing, Bluetooth proximity, Focus, and system scheduling affect the path. Force-quitting the app is not a supported automatic-wake strategy.
+
+Live Activity alerts can also appear on a paired Apple Watch. Paceman packages the same four alert sounds in its iPhone and Apple Watch apps, but neither an APNs acceptance nor a simulator build proves that the physical Watch played a sound or haptic. Verify an alerting state change with the iPhone locked and the Watch worn and unlocked; record Watch presentation, sound, and haptic separately.

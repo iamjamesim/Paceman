@@ -57,6 +57,10 @@
 		F0A000000000000000000005 /* ../Resources/Sounds/PacemanFinished.wav in Resources */ = {isa = PBXBuildFile; fileRef = F0A000000000000000000002 /* ../Resources/Sounds/PacemanFinished.wav */; };
 		F0A000000000000000000006 /* ../Resources/Sounds/PacemanFailed.wav in Resources */ = {isa = PBXBuildFile; fileRef = F0A000000000000000000003 /* ../Resources/Sounds/PacemanFailed.wav */; };
 		F0A000000000000000000008 /* ../Resources/Sounds/PacemanWorking.wav in Resources */ = {isa = PBXBuildFile; fileRef = F0A000000000000000000007 /* ../Resources/Sounds/PacemanWorking.wav */; };
+		F0A000000000000000000009 /* ../Resources/Sounds/PacemanInput.wav in Resources */ = {isa = PBXBuildFile; fileRef = F0A00000000000000000000D /* ../Resources/Sounds/PacemanInput.wav */; };
+		F0A00000000000000000000A /* ../Resources/Sounds/PacemanFinished.wav in Resources */ = {isa = PBXBuildFile; fileRef = F0A00000000000000000000E /* ../Resources/Sounds/PacemanFinished.wav */; };
+		F0A00000000000000000000B /* ../Resources/Sounds/PacemanFailed.wav in Resources */ = {isa = PBXBuildFile; fileRef = F0A00000000000000000000F /* ../Resources/Sounds/PacemanFailed.wav */; };
+		F0A00000000000000000000C /* ../Resources/Sounds/PacemanWorking.wav in Resources */ = {isa = PBXBuildFile; fileRef = F0A000000000000000000010 /* ../Resources/Sounds/PacemanWorking.wav */; };
 		F2E4C04882C6027046BD5713 /* ../Shared/CompanionTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0A0DB42DFD68EEE9C6F1ACA /* ../Shared/CompanionTheme.swift */; };
 		F61079DCD2F16853DBF4558A /* WeatherSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61391C5AF8BA1F3362482CC8 /* WeatherSettings.swift */; };
 		F9A9D3E63B8A94A6BC3C2F1A /* QRScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D485593EF3F215E9037FD0C /* QRScanner.swift */; };
@@ -184,6 +188,10 @@
 		F0A000000000000000000002 /* ../Resources/Sounds/PacemanFinished.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanFinished.wav; sourceTree = "<group>"; };
 		F0A000000000000000000003 /* ../Resources/Sounds/PacemanFailed.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanFailed.wav; sourceTree = "<group>"; };
 		F0A000000000000000000007 /* ../Resources/Sounds/PacemanWorking.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanWorking.wav; sourceTree = "<group>"; };
+		F0A00000000000000000000D /* ../Resources/Sounds/PacemanInput.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanInput.wav; sourceTree = "<group>"; };
+		F0A00000000000000000000E /* ../Resources/Sounds/PacemanFinished.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanFinished.wav; sourceTree = "<group>"; };
+		F0A00000000000000000000F /* ../Resources/Sounds/PacemanFailed.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanFailed.wav; sourceTree = "<group>"; };
+		F0A000000000000000000010 /* ../Resources/Sounds/PacemanWorking.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanWorking.wav; sourceTree = "<group>"; };
 		F41016C8973BBFBD9F46452C /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -304,6 +312,10 @@
 				AAA000000000000000000003 /* PacemanWatchApp.swift */,
 				AAA000000000000000000004 /* ../Shared/WatchAllowanceSnapshot.swift */,
 				AAA00000000000000000000B /* Assets.xcassets */,
+				F0A00000000000000000000D /* ../Resources/Sounds/PacemanInput.wav */,
+				F0A00000000000000000000E /* ../Resources/Sounds/PacemanFinished.wav */,
+				F0A00000000000000000000F /* ../Resources/Sounds/PacemanFailed.wav */,
+				F0A000000000000000000010 /* ../Resources/Sounds/PacemanWorking.wav */,
 			);
 			path = PacemanWatch;
 			sourceTree = "<group>";
@@ -479,6 +491,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				BBB000000000000000000009 /* Assets.xcassets in Resources */,
+				F0A000000000000000000009 /* ../Resources/Sounds/PacemanInput.wav in Resources */,
+				F0A00000000000000000000A /* ../Resources/Sounds/PacemanFinished.wav in Resources */,
+				F0A00000000000000000000B /* ../Resources/Sounds/PacemanFailed.wav in Resources */,
+				F0A00000000000000000000C /* ../Resources/Sounds/PacemanWorking.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
