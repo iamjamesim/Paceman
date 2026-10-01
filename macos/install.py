@@ -385,7 +385,7 @@ def _finish_install(staged_app: Path):
         print("The Mac background item also runs the configured iPhone notification worker.")
     else:
         print("To deliver iPhone notifications, run:")
-        print("python3 -m macos.install_push --relay-url https://YOUR-RENDER-SERVICE.onrender.com")
+        print(f"{shlex.quote(PYTHON)} -m macos.install_push --relay-url https://relay.paceman.ai")
         print("The installer generates a private source credential. See docs/macos.md for verification.")
     paired = 0
     database_path = ROOT / "data/hub.sqlite3"

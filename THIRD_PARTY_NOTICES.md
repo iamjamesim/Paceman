@@ -32,8 +32,9 @@ their source and licenses are supplied by their respective distributions.
 ESP-IDF managed components are specified by the watch's idf_component.yml and
 dependencies.lock; downloaded dependencies are not committed here.
 
-Third-party licenses apply to their respective components. Paceman's original
-code does not yet have a repository-wide public license.
+Paceman-authored code, documentation, and original artwork are licensed under
+the repository's Apache License 2.0. Third-party code, fonts, and assets retain
+their own licenses as noted here and in their accompanying license files.
 
 Paceman's activity expressions use the Material Design Icons
 [robot-excited](https://pictogrammers.com/library/mdi/icon/robot-excited/) and

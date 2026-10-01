@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "$0")/.."
-python3 -W error::ResourceWarning -m unittest discover -s tests -v
+python=${PYTHON:-}
+if [[ -z $python ]]; then
+  if [[ -x .venv/bin/python ]]; then
+    python=.venv/bin/python
+  else
+    python=python3
+  fi
+fi
+if ! "$python" -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+  echo 'Checks require Python 3.11 or newer. Set PYTHON to a supported interpreter.' >&2
+  exit 1
+fi
+"$python" -W error::ResourceWarning -m unittest discover -s tests -v
 check_dir=$(mktemp -d)
 trap 'rm -rf "$check_dir"' EXIT
 watch=firmware/esp32-watch

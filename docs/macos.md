@@ -50,10 +50,10 @@ If it does not, inspect the pending hook rows and installed command. Report inst
 Pairing and hooks do not configure APNs. Configure the per-user sender with Paceman's [project-operated relay](push-relay.md) before pairing the phone. The relay keeps the APNs key, and the installer generates a source-specific credential:
 
 ```sh
-python3 -m macos.install_push --relay-url https://YOUR-RENDER-SERVICE.onrender.com
+python3 -m macos.install_push --relay-url https://relay.paceman.ai
 ```
 
-The installer saves the source credential in an owner-only file at `~/Library/Application Support/Paceman/private/apns.json` and starts the sender within the same background item. If the phone was already paired, renew pairing with a fresh QR code so it learns the relay URL. Confirm `dev.paceman.source` is running with `launchctl print`, then inspect the destination's `last_result` and `push-delivery.jsonl` for a recent `apns_accepted` (status 200). Ask the user to confirm a **new notification on the physical iPhone**. Apple acceptance and phone display are separate checks. Live Activity starts are logged separately as `live_activity_start_accepted`. See [push delivery](push-delivery.md) for watch and locked-phone checks.
+Use the Python 3.11+ command printed by the source installer if `python3` on your Mac is older. The installer saves the source credential in an owner-only file at `~/Library/Application Support/Paceman/private/apns.json` and starts the sender within the same background item. If the phone was already paired, renew pairing with a fresh QR code so it learns the relay URL. Confirm `dev.paceman.source` is running with `launchctl print`, then inspect the destination's `last_result` and `push-delivery.jsonl` for a recent `apns_accepted` (status 200). Ask the user to confirm a **new notification on the physical iPhone**. Apple acceptance and phone display are separate checks. Live Activity starts are logged separately as `live_activity_start_accepted`. See [push delivery](push-delivery.md) for watch and locked-phone checks.
 
 ## Control and removal
 

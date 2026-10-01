@@ -13,7 +13,7 @@ For real desktop events, use [Omarchy installation](desktop.md).
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-push.txt
-PATH="$PWD/.venv/bin:$PATH" bash scripts/check.sh
+bash scripts/check.sh
 .venv/bin/python -m service.hub serve
 ```
 
@@ -74,9 +74,7 @@ the new identifier installs as a separate app from older development builds;
 pair its phone and watch again, and register new push tokens with the matching
 APNs topic.
 
-The project generator currently covers the iPhone app, tests, and iPhone widget.
-Do not rerun it on the current project: it would remove the Watch targets. Add
-new Swift files in Xcode until the generator supports them. Regenerate the icon with
+Add new Swift files in Xcode. Regenerate the icon with
 `swift scripts/make-app-icon.swift ios/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png`
 only when its design changes.
 

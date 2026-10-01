@@ -32,12 +32,12 @@ These steps are for the Paceman service operator. A fork can run its own relay w
 After [installing the Mac source](macos.md), point it at the project-operated relay:
 
 ```sh
-python3 -m macos.install_push --relay-url https://YOUR-SERVICE.onrender.com
+python3 -m macos.install_push --relay-url https://relay.paceman.ai
 ```
 
 The installer creates a source credential. Pair the iPhone with a fresh QR code, even if it was paired before. Changing relay hosts also requires a fresh pairing.
 
-For an installed Omarchy source, run `python3 -m desktop.install_push --relay-url https://YOUR-SERVICE.onrender.com` from the checkout. Its user push service follows Sharing and uses the same relay for Debug and TestFlight phones. Pair the phone again after configuring or changing the relay address.
+For an installed Omarchy source, run `python3 -m desktop.install_push --relay-url https://relay.paceman.ai` from the checkout. Its user push service follows Sharing and uses the same relay for Debug and TestFlight phones. Pair the phone again after configuring or changing the relay address.
 
 ## Check and revoke
 
