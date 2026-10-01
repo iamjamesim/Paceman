@@ -207,8 +207,14 @@ class AppAttestVerifier:
         try:
             key = serialization.load_der_public_key(public_der)
             _public_bytes(key)
-            key.verify(value["signature"], auth_data + hashlib.sha256(challenge.encode()).digest(),
-                       ec.ECDSA(hashes.SHA256()))
+        except (ValueError, InvalidAttestation) as error:
+            raise InvalidAttestation("Invalid stored App Attest key") from error
+        # Apple first hashes the authenticator data and client data hash into
+        # a nonce, then uses P-256/SHA-256 to sign that nonce.
+        client_data_hash = hashlib.sha256(challenge.encode()).digest()
+        nonce = hashlib.sha256(auth_data + client_data_hash).digest()
+        try:
+            key.verify(value["signature"], nonce, ec.ECDSA(hashes.SHA256()))
         except (ValueError, InvalidSignature) as error:
-            raise InvalidAttestation("Invalid App Attest assertion") from error
+            raise InvalidAttestation("Invalid App Attest assertion signature") from error
         return counter
