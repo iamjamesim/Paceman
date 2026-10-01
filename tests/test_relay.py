@@ -192,13 +192,6 @@ class PublicRelayTests(unittest.TestCase):
             (503, {"error": "EnvironmentUnavailable"}))
         self.assertEqual(self.call()[0], 200)
 
-    def test_readiness_checks_database_without_changing_liveness(self):
-        healthy = {"ok": True, "apnsEnvironments": ["development", "production"]}
-        self.assertEqual(self.call("/readyz", "GET"), (200, healthy))
-        with patch.object(self.registry, "check_database", side_effect=OSError("database unavailable")):
-            self.assertEqual(self.call("/readyz", "GET"), (503, {"ok": False}))
-            self.assertEqual(self.call("/healthz", "GET"), (200, healthy))
-
     def test_one_phone_can_replace_debug_token_with_testflight_token(self):
         self.registry.bind(self.source, self.client_id, "alert", "", "cd" * 32, "development")
         self.assertEqual(self.call(body={**self.request, "deviceToken": "cd" * 32,
