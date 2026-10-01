@@ -136,7 +136,7 @@
 		0EC3990017A5B1462F8B45ED /* ../Resources/JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/JetBrainsMono-Regular.ttf"; sourceTree = "<group>"; };
 		11D665B35AB2977BAFF84303 /* TransportDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportDiagnostics.swift; sourceTree = "<group>"; };
 		16321946EF3229AC1C8C8EF6 /* SourceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceClient.swift; sourceTree = "<group>"; };
-		18AC41BDE050EFD68C333A1B /* ../Resources/MaterialDesignIcons-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/MaterialDesignIcons-LICENSE.txt"; sourceTree = "<group>"; };
+		18AC41BDE050EFD68C333A1B /* ../Resources/MaterialDesignIcons-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "../Resources/MaterialDesignIcons-LICENSE.txt"; sourceTree = "<group>"; };
 		2FE30F3CCFF8D70208F26CEB /* ../Resources/Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = ../Resources/Assets.xcassets; sourceTree = "<group>"; };
 		34730BE9166078328F7B4C2E /* DeviceScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceScreens.swift; sourceTree = "<group>"; };
 		4063D838A906D1FE650B3271 /* PresentationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresentationModel.swift; sourceTree = "<group>"; };
@@ -144,7 +144,7 @@
 		475442A98D8C435C13330F69 /* Diagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Diagnostics.swift; sourceTree = "<group>"; };
 		4B4246EE710BDB6A05D42EFD /* ../Resources/JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/JetBrainsMono-Regular.ttf"; sourceTree = "<group>"; };
 		4E4A1F447E8A84C824FABEA4 /* ../Resources/JetBrainsMono-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/JetBrainsMono-SemiBold.ttf"; sourceTree = "<group>"; };
-		533E91AE7A7B11C6F2BE02C4 /* ../Resources/JetBrainsMono-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/JetBrainsMono-OFL.txt"; sourceTree = "<group>"; };
+		533E91AE7A7B11C6F2BE02C4 /* ../Resources/JetBrainsMono-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "../Resources/JetBrainsMono-OFL.txt"; sourceTree = "<group>"; };
 		53A0B480E81CE7792FFECD47 /* MonitoringCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringCoordinator.swift; sourceTree = "<group>"; };
 		54B7D4A440EEDD69EDC2A9FD /* CompanionHome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionHome.swift; sourceTree = "<group>"; };
 		5A2527AAAD8BC2B2A1D8145A /* PhoneWeather.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneWeather.swift; sourceTree = "<group>"; };
@@ -178,8 +178,8 @@
 		D2E6D3C202B2837FA88267EB /* DesignComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignComponents.swift; sourceTree = "<group>"; };
 		D379F6C442F8870FB0E79011 /* AgentCompanionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCompanionApp.swift; sourceTree = "<group>"; };
 		D8D53A8619584907B80159C0 /* MonitoringWatchCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringWatchCard.swift; sourceTree = "<group>"; };
-		D9F51782C2ABC2C62BDAB1CB /* ../Resources/MaterialDesignIcons-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/MaterialDesignIcons-LICENSE.txt"; sourceTree = "<group>"; };
-		DFD86C43387ED72496B19CC2 /* ../Resources/JetBrainsMono-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = file; path = "../Resources/JetBrainsMono-OFL.txt"; sourceTree = "<group>"; };
+		D9F51782C2ABC2C62BDAB1CB /* ../Resources/MaterialDesignIcons-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "../Resources/MaterialDesignIcons-LICENSE.txt"; sourceTree = "<group>"; };
+		DFD86C43387ED72496B19CC2 /* ../Resources/JetBrainsMono-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "../Resources/JetBrainsMono-OFL.txt"; sourceTree = "<group>"; };
 		F0A000000000000000000001 /* ../Resources/Sounds/PacemanInput.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanInput.wav; sourceTree = "<group>"; };
 		F0A000000000000000000002 /* ../Resources/Sounds/PacemanFinished.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanFinished.wav; sourceTree = "<group>"; };
 		F0A000000000000000000003 /* ../Resources/Sounds/PacemanFailed.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = ../Resources/Sounds/PacemanFailed.wav; sourceTree = "<group>"; };
@@ -614,9 +614,8 @@
 		058484F8038C94045CD137DC /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APP_GROUP_ID = group.ai.paceman.shared;
-				PACEMAN_DISPLAY_NAME = Paceman;
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				APP_GROUP_ID = group.ai.paceman.shared;
 				CODE_SIGN_ENTITLEMENTS = AgentCompanionWidgets/AgentCompanionWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = ZTG42P5438;
@@ -629,6 +628,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
+				PACEMAN_DISPLAY_NAME = Paceman;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -654,10 +654,8 @@
 		0FE453910DCE5F42D8B54BB1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APP_GROUP_ID = group.ai.paceman.dev.shared;
 				APNS_ENVIRONMENT = development;
-				PACEMAN_DISPLAY_NAME = "Paceman Dev";
-				PACEMAN_URL_SCHEME = "paceman-dev";
+				APP_GROUP_ID = group.ai.paceman.dev.shared;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
 				CODE_SIGN_ENTITLEMENTS = AgentCompanion/AgentCompanion.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -671,6 +669,8 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
+				PACEMAN_DISPLAY_NAME = "Paceman Dev";
+				PACEMAN_URL_SCHEME = "paceman-dev";
 				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.dev;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -745,9 +745,8 @@
 		B1127F7F88A84D322A8B37B0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APP_GROUP_ID = group.ai.paceman.dev.shared;
-				PACEMAN_DISPLAY_NAME = "Paceman Dev";
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				APP_GROUP_ID = group.ai.paceman.dev.shared;
 				CODE_SIGN_ENTITLEMENTS = AgentCompanionWidgets/AgentCompanionWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = ZTG42P5438;
@@ -760,6 +759,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
+				PACEMAN_DISPLAY_NAME = "Paceman Dev";
 				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.dev.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -775,10 +775,8 @@
 		BDAFE18FEB8D1E2F9A70E4E2 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APP_GROUP_ID = group.ai.paceman.shared;
 				APNS_ENVIRONMENT = production;
-				PACEMAN_DISPLAY_NAME = Paceman;
-				PACEMAN_URL_SCHEME = paceman;
+				APP_GROUP_ID = group.ai.paceman.shared;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = AgentCompanion/AgentCompanion.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -792,6 +790,8 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
+				PACEMAN_DISPLAY_NAME = Paceman;
+				PACEMAN_URL_SCHEME = paceman;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -806,10 +806,8 @@
 		EEE000000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APP_GROUP_ID = group.ai.paceman.dev.shared;
 				APNS_ENVIRONMENT = development;
-				IOS_COMPANION_BUNDLE_ID = ai.paceman.app.dev;
-				PACEMAN_DISPLAY_NAME = "Paceman Dev";
+				APP_GROUP_ID = group.ai.paceman.dev.shared;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev;
 				CODE_SIGN_ENTITLEMENTS = PacemanWatch/PacemanWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -817,6 +815,8 @@
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacemanWatch/Info.plist;
+				IOS_COMPANION_BUNDLE_ID = ai.paceman.app.dev;
+				PACEMAN_DISPLAY_NAME = "Paceman Dev";
 				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.dev.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -833,10 +833,8 @@
 		EEE000000000000000000002 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APP_GROUP_ID = group.ai.paceman.shared;
 				APNS_ENVIRONMENT = production;
-				IOS_COMPANION_BUNDLE_ID = ai.paceman.app;
-				PACEMAN_DISPLAY_NAME = Paceman;
+				APP_GROUP_ID = group.ai.paceman.shared;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = PacemanWatch/PacemanWatch.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -844,6 +842,8 @@
 				ENABLE_TESTABILITY = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacemanWatch/Info.plist;
+				IOS_COMPANION_BUNDLE_ID = ai.paceman.app;
+				PACEMAN_DISPLAY_NAME = Paceman;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -859,15 +859,15 @@
 		EEE000000000000000000004 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APP_GROUP_ID = group.ai.paceman.dev.shared;
-				PACEMAN_DISPLAY_NAME = "Paceman Dev";
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				APP_GROUP_ID = group.ai.paceman.dev.shared;
 				CODE_SIGN_ENTITLEMENTS = PacemanWatchWidgets/PacemanWatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = ZTG42P5438;
 				ENABLE_TESTABILITY = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacemanWatchWidgets/Info.plist;
+				PACEMAN_DISPLAY_NAME = "Paceman Dev";
 				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.dev.watchkitapp.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -884,15 +884,15 @@
 		EEE000000000000000000005 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APP_GROUP_ID = group.ai.paceman.shared;
-				PACEMAN_DISPLAY_NAME = Paceman;
 				APPLICATION_EXTENSION_API_ONLY = YES;
+				APP_GROUP_ID = group.ai.paceman.shared;
 				CODE_SIGN_ENTITLEMENTS = PacemanWatchWidgets/PacemanWatchWidgets.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = ZTG42P5438;
 				ENABLE_TESTABILITY = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacemanWatchWidgets/Info.plist;
+				PACEMAN_DISPLAY_NAME = Paceman;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.watchkitapp.widgets;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
