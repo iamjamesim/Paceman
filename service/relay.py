@@ -194,6 +194,13 @@ class RelayApp:
             return [body]
         if environ.get("PATH_INFO") == "/healthz" and environ.get("REQUEST_METHOD") == "GET":
             return answer("200 OK", {"ok": True, "apnsEnvironments": sorted(self.sender.environments)})
+        if environ.get("PATH_INFO") == "/readyz" and environ.get("REQUEST_METHOD") == "GET":
+            try:
+                self.sources.check_database()
+            except Exception:
+                LOG.warning("relay_database_unavailable")
+                return answer("503 Service Unavailable", {"ok": False})
+            return answer("200 OK", {"ok": True, "apnsEnvironments": sorted(self.sender.environments)})
         path, method = environ.get("PATH_INFO"), environ.get("REQUEST_METHOD")
         if (path, method) not in (("/v1/sources", "POST"), ("/v1/sources", "DELETE"),
                                   ("/v1/attest/challenge", "POST"),

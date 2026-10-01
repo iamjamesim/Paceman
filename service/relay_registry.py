@@ -124,6 +124,12 @@ class Registry:
         finally:
             db.close()
 
+    def check_database(self) -> None:
+        """Check that the registry can serve queries without changing stored data."""
+        with self.connection() as db:
+            if db.one("SELECT 1") != (1,):
+                raise RuntimeError("Relay database probe returned an unexpected result")
+
     def create_source(self, source_id: str, credential: str, now: float | None = None,
                       *, legacy: bool = False) -> bool:
         if not valid_uuid(source_id) or not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", credential):

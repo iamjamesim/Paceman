@@ -43,7 +43,17 @@ For an installed Omarchy source, run `python3 -m omarchy.install_push --relay-ur
 
 ## Check and revoke
 
-`/healthz` should list both `development` and `production` under `apnsEnvironments`. After a fresh source event, check `~/Library/Application Support/Paceman/data/push-delivery.jsonl` for APNs `status: 200`, then confirm a **new** update on the physical phone. APNs acceptance alone does not prove display.
+`/healthz` should list both `development` and `production` under `apnsEnvironments`.
+`/readyz` also runs a read-only database query; it returns `503` if Postgres
+cannot answer. Probe both during a deploy. Render continues to use `/healthz`
+until its health-check setting is deliberately changed. Using `/readyz` there
+would make a sustained database outage mark the relay unhealthy and cause Render
+to restart it.
+
+After a fresh source event, check
+`~/Library/Application Support/Paceman/data/push-delivery.jsonl` for APNs
+`status: 200`, then confirm a **new** update on the physical phone. APNs
+acceptance alone does not prove display.
 
 Removing phone access deletes its local destinations and syncs revocation to the relay. Uninstalling a Mac requests source revocation; if the relay is unreachable, the uninstaller reports the source ID for manual cleanup. A revoked ID cannot re-enroll. Postgres stores hashes, never raw credentials or tokens. It also stores attested public keys, assertion counters, and short-lived activation claims. By default, an App Attest key can register up to 20 active sources and the relay accepts up to 500 new source registrations per UTC day. The operator can adjust `PACEMAN_MAX_SOURCES_PER_ATTEST_KEY` and `PACEMAN_DAILY_ENROLLMENT_LIMIT`; the existing 10,000-source total ceiling remains. Relay logs emit `app_attest_activation_accepted`, `app_attest_activation_rejected`, `source_enrollment_accepted`, `source_registration_attestation_required`, `source_registration_limited`, and `push_send_rate_limited` without IDs, credentials, tokens, or request bodies. Set alerts for sustained rejection and rate-limit spikes, and check enrollment counts in Postgres before opening the service broadly.
 
