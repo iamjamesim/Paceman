@@ -218,6 +218,7 @@ private struct Panel: View {
         switch model.status.activity {
         case "working": return "Working"
         case "needs_input": return "Needs input"
+        case "failed": return "Failed"
         case "finished": return "Finished"
         default: return "No active work"
         }
@@ -238,9 +239,9 @@ private struct Panel: View {
     }
 
     private var breakdown: String? {
-        guard model.status.running, (model.status.sessions ?? 0) > 1,
+        guard model.status.running, model.status.sharingEnabled, (model.status.sessions ?? 0) > 1,
               let counts = model.status.sessionCounts else { return nil }
-        let labels = [("needs_input", "need input"), ("working", "working"),
+        let labels = [("needs_input", "need input"), ("failed", "failed"), ("working", "working"),
                       ("finished", "finished"), ("idle", "idle")]
         let parts = labels.compactMap { key, label -> String? in
             guard let count = counts[key], count > 0 else { return nil }
@@ -326,7 +327,8 @@ private struct Panel: View {
                     Text(!model.status.sharingEnabled ? "Paused"
                          : model.status.running ? (activitySetup?.label ?? activity) : "Unavailable")
                         .foregroundStyle(.secondary)
-                    if model.status.running, let state = model.status.activity, state != "idle" {
+                    if model.status.running, model.status.sharingEnabled,
+                       let state = model.status.activity, state != "idle" {
                         MenuActivityRobot(state: state)
                             .frame(width: 21, height: 21)
                             .foregroundStyle(Color(nsColor: .labelColor))
@@ -372,7 +374,8 @@ private struct Panel: View {
                     if model.expanded == connection.id {
                         Text("Paired \(Date(timeIntervalSince1970: connection.pairedAt).formatted(date: .abbreviated, time: .omitted))")
                             .font(.caption).foregroundStyle(.secondary).padding(.leading, 29)
-                        if connection.platform == "ios" && Date().timeIntervalSince1970 - connection.lastContactAt >= 30 {
+                        if connection.platform == "ios" && model.status.sharingEnabled && model.status.running
+                            && Date().timeIntervalSince1970 - connection.lastContactAt >= 30 {
                             Text("Open Paceman on your phone to check for updates.")
                                 .font(.caption).foregroundStyle(.secondary).padding(.leading, 29)
                         }
@@ -409,7 +412,8 @@ private struct MenuActivityRobot: View {
             let bounce = bounceTime < 0.64 ? (1 - cos(bounceTime * .pi / 0.32)) / 2 : 0
             let sway = sin(time * 2 * .pi / 4.2)
             PacemanMark(expression: state == "finished" ? .finished
-                        : state == "needs_input" ? .needsInput : .neutral)
+                        : state == "needs_input" ? .needsInput
+                        : state == "failed" ? .failed : .neutral)
                 .opacity(state == "working" ? 1 - pulse * (155.0 / 255) : 1)
                 .rotationEffect(.degrees(state == "finished" ? sway * 4 : 0))
                 .offset(x: state == "finished" ? sway * 2 : 0,

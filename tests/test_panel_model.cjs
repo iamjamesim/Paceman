@@ -8,7 +8,7 @@ const model = vm.createContext({});
 vm.runInContext(readFileSync(path.join(__dirname, '../omarchy/plugin/PanelModel.js'), 'utf8'), model);
 const now = 1000;
 function present(counts, overrides = {}) {
-  const priority = ['needs_input', 'working', 'finished'];
+  const priority = ['needs_input', 'failed', 'working', 'finished'];
   return model.present({
     running: true, sharingEnabled: true, updatedAt: now,
     pairedPhones: 1, lastPhoneFetchAt: now - 3,
@@ -37,6 +37,21 @@ test('attention takes priority without hiding work', () => {
   assert.equal(value.activityTitle, 'Codex · 2 active');
   assert.equal(value.activity, 'Needs input');
   assert.equal(value.activityBreakdown, '1 needs input · 1 working');
+});
+test('failed turns remain visible alone and in mixed activity', () => {
+  const failed = present({ needs_input: 0, failed: 1, working: 0, finished: 0 });
+  assert.equal(failed.activity, 'Failed');
+  const mixed = present({ needs_input: 0, failed: 1, working: 1, finished: 0 });
+  assert.equal(mixed.activityTitle, 'Codex');
+  assert.equal(mixed.activity, 'Failed');
+  assert.equal(mixed.activityBreakdown, '');
+  const active = present({ needs_input: 0, failed: 1, working: 2, finished: 0 });
+  assert.equal(active.activityTitle, 'Codex · 2 active');
+  assert.equal(active.activity, 'Failed');
+  assert.equal(active.activityBreakdown, '1 failed · 2 working');
+  const verified = present({ needs_input: 0, failed: 1, working: 0, finished: 1, idle: 0 }, { sessionLiveness: 'process' });
+  assert.equal(verified.activityTitle, 'Codex · 2 sessions');
+  assert.equal(verified.activityBreakdown, '1 failed · 1 finished');
 });
 test('one working session and retained completions remain one simple row', () => {
   const value = present({ needs_input: 0, working: 1, finished: 2 });

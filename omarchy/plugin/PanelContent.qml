@@ -230,7 +230,7 @@ PanelKeyCatcher {
             width: parent.width
             height: parent.height
             visible: root.view.running && root.view.sharing
-              && ["working", "needs_input", "finished"].indexOf(root.sourceState.activity) >= 0
+              && ["working", "needs_input", "failed", "finished"].indexOf(root.sourceState.activity) >= 0
             expression: root.sourceState.activity
             ink: root.foreground
             property real bounceOffset: 0

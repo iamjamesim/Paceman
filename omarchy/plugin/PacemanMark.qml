@@ -62,6 +62,18 @@ Item {
             ctx.quadraticCurveTo(center, 257, center + 65, 380)
             ctx.stroke()
           }
+        } else if (root.expression === "failed") {
+          ctx.lineWidth = 30
+          ctx.lineCap = "round"
+          ctx.strokeStyle = root.ink
+          for (const center of [274, 446]) {
+            ctx.beginPath()
+            ctx.moveTo(center - 42, 321)
+            ctx.lineTo(center + 42, 405)
+            ctx.moveTo(center + 42, 321)
+            ctx.lineTo(center - 42, 405)
+            ctx.stroke()
+          }
         } else {
           for (const x of [252, 424]) {
             roundedRect(ctx, x, 314, 44, 98, 22)
