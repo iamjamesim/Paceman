@@ -1,14 +1,36 @@
 # Paceman
 
-**Take your agents with you.** Paceman keeps Codex activity visible when you
-leave your desk. See which paired computer is working, needs input, finished,
-or failed on iPhone and in Live Activities, including the Apple Watch Smart
-Stack. The Apple Watch app and complications show Codex allowance; an optional
-experimental ESP32 watch displays the phone-selected activity. Agent work stays
-on the computer, while each local source shares status with the phone over
-private Tailscale HTTPS.
+**Take your agents for a walk.**
 
-Paceman is a **developer alpha**, installed from source. Mac Codex desktop and
+Paceman is a personal gear system for agentic engineering. Agents keep working
+while your attention is elsewhere. Paceman gives that work a quiet presence in
+the gear you take with you, so you can stay in touch without being tied to your
+desk.
+
+Today, Paceman shows Codex status in Live Activities on the iPhone Lock Screen,
+Apple Watch Smart Stack, and Mac menu bar. Apple Watch complications show how
+much Codex usage remains and when it resets.
+
+<p align="center">
+  <a href="docs/images/iphone-live-activity.jpg"><img src="docs/images/iphone-live-activity.jpg" alt="Paceman Live Activity on an iPhone Lock Screen" width="190"></a>
+  <a href="docs/images/apple-watch-smart-stack.jpg"><img src="docs/images/apple-watch-smart-stack.jpg" alt="Paceman in the Apple Watch Smart Stack" width="300"></a>
+</p>
+
+<p align="center">
+  <a href="docs/images/mac-menu-bar-live-activity.png"><img src="docs/images/mac-menu-bar-live-activity.png" alt="Paceman Live Activity in the Mac menu bar with its expanded status panel" width="600"></a>
+</p>
+
+You can also try [Paceman Watch](firmware/esp32-watch/README.md), an experimental
+ESP32-S3 watch built for quick glances at agent activity without the usual
+smartwatch distractions. It’s a working demo of Paceman’s longer-term goal: an
+open system you can extend to the personal gear you choose or build. New devices
+still need custom firmware and iPhone pairing support today.
+
+<p align="center">
+  <a href="docs/images/esp32-watch.jpg"><img src="docs/images/esp32-watch.jpg" alt="Paceman on an experimental ESP32-S3 watch" width="300"></a>
+</p>
+
+Paceman is in **alpha** and currently installed from source. Mac Codex desktop and
 Mac CLI hooks and the Omarchy Codex CLI companion have been exercised on development
 devices. Omarchy Codex desktop and broader background delivery remain
 unverified.
@@ -21,8 +43,7 @@ unverified.
 
 The Mac and Omarchy installers configure the [APNs relay](service/RELAY.md) for
 locked-phone notifications by default; the iPhone must still allow notifications.
-The Apple Watch app requires watchOS 11 or later;
-the [ESP32 watch](firmware/esp32-watch/README.md) is optional.
+The Apple Watch app requires watchOS 11 or later.
 
 ## Understand the system
 
