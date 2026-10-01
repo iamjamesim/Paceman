@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import platform
 import plistlib
+import re
 import sqlite3
 import time
 
@@ -66,6 +67,9 @@ def report(root: Path, status: dict, app: Path, *, now: float | None = None) -> 
                     entry["at"] = item["at"]
                 if type(item.get("status")) is int:
                     entry["status"] = item["status"]
+                reason = item.get("reason")
+                if isinstance(reason, str) and re.fullmatch(r"[A-Za-z]{1,80}", reason):
+                    entry["reason"] = reason
                 delivery.append(entry)
         except (OSError, UnicodeError):
             pass

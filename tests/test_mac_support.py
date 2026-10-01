@@ -27,6 +27,7 @@ class MacSupportReportTests(unittest.TestCase):
                            (client["clientID"], "ab" * 32, "production", 1, "Accepted"))
             log = root / "data/push-delivery.jsonl"
             log.write_text(json.dumps({"at": 100, "stage": "apns_accepted", "status": 200,
+                                       "reason": "Accepted",
                                        "event": secret, "clientID": client["clientID"],
                                        "token": "ab" * 32}) + "\n")
             app = root / "Paceman.app"
@@ -44,7 +45,8 @@ class MacSupportReportTests(unittest.TestCase):
             self.assertEqual(value["source"]["missingHooks"], ["Stop"])
             self.assertFalse(value["source"]["sharingEnabled"])
             self.assertEqual(value["push"]["recentDelivery"],
-                             [{"at": 100, "stage": "apns_accepted", "status": 200}])
+                             [{"at": 100, "stage": "apns_accepted", "status": 200,
+                               "reason": "Accepted"}])
             self.assertEqual(value["push"]["destinations"][0]["kind"], "alert")
             exported = json.dumps(value)
             for private in (secret, client["credential"], client["clientID"],
