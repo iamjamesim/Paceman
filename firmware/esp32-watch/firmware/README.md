@@ -22,7 +22,7 @@ reconnects. The watch applies expiry rules locally; see
 Agent indicators distinguish working, needs input, and completion. Sound is
 enabled by default and toggleable in the Paceman iPhone app. Tapping an input or
 finished indicator persists an acknowledgement revision in NVS and notifies
-the connected phone. See the [phone and watch protocol](../../../docs/protocol.md#iphone-and-custom-watch-ble)
+the connected phone. See the [phone and watch protocol](../../../docs/protocol.md#iphone-and-esp32-watch-ble)
 for state and acknowledgement semantics.
 
 While the native serial/JTAG interface is connected to a USB host, ESP-IDF

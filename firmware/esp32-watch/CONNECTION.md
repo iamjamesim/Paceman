@@ -1,6 +1,6 @@
-# Watch connection lifecycle
+# ESP32 watch connection lifecycle
 
-`Watch updates` is durable user intent. Bluetooth connection objects, discovered
+The iPhone owns this Bluetooth connection. `Watch updates` is durable user intent. Bluetooth connection objects, discovered
 characteristics, subscriptions, and in-flight writes are disposable session
 state. A runtime transport failure must clear and rebuild the session without
 changing that preference.

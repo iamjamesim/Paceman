@@ -4,7 +4,12 @@ Waveshare ESP32-S3-Touch-AMOLED-2.06 device package for Paceman Watch. The
 watch began as [omarchy-watch](https://github.com/iamjamesim/omarchy-watch);
 the BLE protocol and pairing identity remain compatible with that firmware.
 
-- `firmware/`: ESP-IDF 5.5.x project; run `idf.py build` here after activating ESP-IDF.
+For a new unowned watch, open **Settings → Experimental → Paceman Watch** on the
+iPhone and choose **Connect your watch**. Follow the Bluetooth and pairing-code
+prompts. A watch owned by another phone needs a deliberate factory reset first.
+
+- `firmware/`: ESP-IDF 5.5.x project; see its [build and flash guide](firmware/README.md).
+- [Connection lifecycle](CONNECTION.md): iPhone Bluetooth recovery and watch state after reconnection.
 - `simulator/`: host renderer and C tests.
 - `tools/render-watchface.sh`: preview, after firmware configuration downloads LVGL.
 - `tools/package-release.sh`: build and package flash binaries.

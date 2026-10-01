@@ -2,7 +2,7 @@
 
 Each Mac or Omarchy computer is an independent **source**. Its adapter turns
 local agent events into a snapshot. The iPhone pairs with sources separately,
-displays each one, and selects one fresh aggregate for the custom watch. The
+displays each one, and selects one fresh aggregate for the ESP32 watch. The
 source service listens on `127.0.0.1`; the current phone connection uses
 private Tailscale HTTPS.
 
@@ -10,10 +10,10 @@ private Tailscale HTTPS.
 | --- | --- | --- |
 | Source service → Paceman iPhone app | Authenticated HTTPS snapshot | Authoritative agent state and freshness. |
 | Source push worker → authenticated relay → iOS Notification Center | Ordinary APNs alert | Notification event and a hint for the phone app to fetch. |
-| iOS Notification Center → custom watch | Apple ANCS over BLE | Identifies a Paceman notification so the watch can request a fetch; does not forward APNs JSON. |
+| iOS Notification Center → ESP32 watch | Apple ANCS over BLE | Identifies a Paceman notification so the watch can request a fetch; does not forward APNs JSON. |
 | Source push worker → authenticated relay → iPhone Live Activity | ActivityKit APNs | Expiring display copy for the Lock Screen and Dynamic Island. |
 | Source push worker → authenticated relay → Paceman watchOS app | Background APNs | Optional Codex allowance reading; the app then reloads its WidgetKit complications. |
-| Paceman iPhone app ↔ custom watch | Encrypted BLE packets | Phone-selected profile and activity; watch acknowledgement and fetch requests. |
+| Paceman iPhone app ↔ ESP32 watch | Encrypted BLE packets | Phone-selected profile and activity; watch acknowledgement and fetch requests. |
 
 ## Pairing and access
 
@@ -114,7 +114,7 @@ example, an allowance change raised `revision` to 12 without changing activity
 Omarchy has its own `sourceID`, `generation`, and revisions, using this same
 schema. Mac uses hook-observed session liveness and clears sessions on restart;
 Omarchy verifies owning processes locally. Neither sends process identity.
-The phone presents sources separately. For the custom watch it selects among
+The phone presents sources separately. For the ESP32 watch it selects among
 **fresh** sources in this order: needs input, failed, working, finished, idle.
 
 ## Phone notifications and Live Activities
@@ -143,7 +143,7 @@ environment, APNs mode (and ActivityKit ID when applicable), approved payload,
 and approved headers. Removing or re-pairing a phone clears its relay bindings;
 the source worker also syncs removals. The APNs signing key and topic remain on
 the relay. See
-[relay setup](push-relay.md).
+[relay setup](../service/RELAY.md).
 
 An ordinary alert (`apns-push-type: alert`) contains user-visible `aps` text
 and a small `companion` **fetch hint**. Here the alert refers to activity
@@ -172,9 +172,9 @@ stored source URL. The push cannot supply a URL or credential or set watch
 state. `eventID` need not equal `revision`. iOS decides whether and when to
 run the app or display the alert. Working and idle alerts use passive
 presentation, but remain `alert` pushes that can appear in Notification
-Center and reach the custom watch through ANCS. They are not background pushes.
+Center and reach the ESP32 watch through ANCS. They are not background pushes.
 
-**ANCS is a different wire format.** The custom watch receives an eight-byte
+**ANCS is a different wire format.** The ESP32 watch receives an eight-byte
 iOS notification event (`event`, `flags`, `category`, `count`, and a
 session-local notification UID). For example, `00 00 00 01 2a 00 00 00`
 means an added notification with UID 42; it contains none of the APNs JSON.
@@ -188,7 +188,7 @@ See [Apple's ANCS specification](https://developer.apple.com/library/archive/doc
 ActivityKit receives a separate APNs payload (`apns-push-type: liveactivity`)
 with a revisioned, expiring **display copy**. It can update the Live Activity
 without running the app, but does not update the phone's paired snapshot or
-custom watch. An update for snapshot revision 12 looks like:
+ESP32 watch. An update for snapshot revision 12 looks like:
 
 ```json
 {
@@ -251,7 +251,7 @@ Readings from separate Codex accounts are not combined:
 }
 ```
 
-## iPhone and custom-watch BLE
+## iPhone and ESP32 watch BLE
 
 The iPhone owns watch pairing, aggregate selection, and watch revisions.
 Source IDs and revisions do not become Bluetooth identities or revisions.

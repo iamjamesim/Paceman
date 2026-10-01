@@ -1,6 +1,6 @@
 # Architecture
 
-Each Mac or Omarchy computer runs an independent source. The source turns local Codex events into a current snapshot; the iPhone pairs with each source and owns presentation and the experimental watch's Bluetooth connection. Agent prompts, replies and tool arguments remain on the computer.
+Each paired computer reports its own Codex activity. The iPhone fetches that status over private HTTPS, presents each computer separately, and sends one current view to the ESP32 watch. Prompts, replies, and tool arguments stay on the computer.
 
 ```text
        Reviewed Codex hooks
@@ -13,28 +13,27 @@ Each Mac or Omarchy computer runs an independent source. The source turns local 
                                        └── allowance ──► Apple Watch app
 ```
 
-## Computer source
+## From Codex to the phone
 
-`service/hub.py` owns source identity, SQLite state, single-use pairing invitations, client credentials, authenticated snapshots, revisions, client revocation and push destinations. It binds to loopback; Tailscale Serve supplies private HTTPS. Removing a paired client deletes its credential and push destinations together. An installation ID alone cannot replace an existing credential.
+The computer's source listens to reviewed Codex hooks, records current activity in SQLite, and serves authenticated snapshots. It binds to loopback; Tailscale Serve supplies private HTTPS. Pairing creates a credential for that phone. Removing the phone revokes its credential and push destinations together.
 
-The two event adapters feed the same source contract:
+Mac and Omarchy differ in how they know a session is still running:
 
 | Platform | Event input | Session liveness |
 | --- | --- | --- |
-| Mac | `service/macos.py` receives reduced lifecycle events from reviewed Codex hooks. | Hook-observed; sessions clear on source restart. |
-| Omarchy | `service/omarchy.py` receives Paceman's reviewed Codex hooks on a local socket. | `service/processes.py` verifies the sending Codex process and reconciles its identity after restart. |
+| Mac | Reviewed Codex hooks. | Hook-observed; sessions clear on source restart. |
+| Omarchy | Reviewed Codex hooks on a local socket. | Verifies the sending Codex process and reconciles after restart. |
 
-Both adapters treat a completed turn as Finished. Late input or work events from
-that same turn cannot reopen it; a new turn may start work again.
+Both treat a completed turn as Finished; late events cannot reopen that turn. Activity and allowance changes advance the snapshot revision, but allowance alone does not create an activity alert.
 
-Activity and allowance changes advance snapshot revisions. Allowance-only changes keep the activity event ID and do not send an activity alert. `service/status.py` publishes a private runtime heartbeat for the desktop panels; phone contact means an authenticated fetch, not watch delivery.
+The iPhone keeps a last-known snapshot per computer. Old activity can appear as history but is not forwarded as current. Phone contact means an authenticated fetch, not watch delivery.
 
-The production push path sends source events from `service/push.py` through `service/relay.py`. The phone registers its APNs tokens separately; the relay checks both parties and holds the APNs key. Ordinary pushes carry a fetch hint, while ActivityKit pushes carry an expiring display copy. See [push delivery](push-delivery.md) and the [wire protocol](protocol.md).
+## When the phone is asleep
 
-## Phone and watches
+When configured, the source sends notifications through the relay, which holds the APNs key and checks both source and phone credentials. An ordinary push hints that the iPhone should fetch current state; ActivityKit receives an expiring display copy that can update a Live Activity without running the app. See [push delivery](push-delivery.md).
 
-`SourceClient` reads each paired source using its stored credential. `CompanionModel` coordinates fetching, source state and delivery. The iPhone retains a last-known snapshot per source but marks expired activity as historical. It owns the selected theme and chooses one fresh aggregate for the ESP32 watch. The Live Activity extension reads shared presentation preferences; no Home Screen or Lock Screen status widget is shipped.
+## Watches
 
-`WatchLink` owns ESP32 accessory selection, encrypted BLE packets and Core Bluetooth restoration. The watch owns rendering, its bond and owner ID, and the last accepted profile in NVS; current agent activity stays in RAM. A source disconnection does not change watch ownership. The iPhone negotiates profile v1–v5 and activity v1. See [Bluetooth lifecycle](bluetooth-lifecycle.md), [data lifecycle](data-lifecycle.md) and the [BLE protocol](protocol.md#iphone-and-custom-watch-ble).
+The iPhone owns the ESP32 watch's Bluetooth connection and chooses activity from fresh computers. The watch retains its bond, owner, and profile, but keeps current activity only in RAM. Reconnection sends current state rather than replaying missed events. See [Bluetooth lifecycle](../firmware/esp32-watch/CONNECTION.md) and [data lifecycle](data-lifecycle.md).
 
-The Apple Watch app receives optional Codex allowance updates through its own background push path and refreshes complications. It does not share the ESP32 Bluetooth route.
+When configured, the Apple Watch app receives Codex allowance through its own background push path and refreshes its complications. It does not use the ESP32 Bluetooth route. Exact fields and versions are in the [protocol](protocol.md).

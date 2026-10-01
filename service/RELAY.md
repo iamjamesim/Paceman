@@ -1,6 +1,6 @@
 # APNs relay
 
-The project operates the APNs relay and keeps its signing key off users' Macs. Macs enroll with a source credential; paired iPhones register tokens with a separate credential. The relay accepts only registered source, phone, and token combinations and rejects prompts and transcripts. See [push delivery](push-delivery.md) for notification formats.
+The project operates the APNs relay and keeps its signing key off users' Macs. Macs enroll with a source credential; paired iPhones register tokens with a separate credential. The relay accepts only registered source, phone, and token combinations and rejects prompts and transcripts. See [push delivery](../docs/push-delivery.md) for notification formats.
 
 ## Project operator: deploy on Render
 
@@ -29,7 +29,7 @@ These steps are for the Paceman service operator. A fork can run its own relay w
 
 ## Connect a Mac
 
-After [installing the Mac source](macos.md), point it at the project-operated relay:
+After [installing the Mac source](../macos/README.md), point it at the project-operated relay:
 
 ```sh
 python3 -m macos.install_push --relay-url https://relay.paceman.ai
@@ -45,4 +45,4 @@ For an installed Omarchy source, run `python3 -m omarchy.install_push --relay-ur
 
 Removing phone access also removes its relay destinations. Mac uninstall requests source revocation; if the relay is unreachable, it reports the source ID for manual cleanup. Revoked IDs cannot re-enroll. Postgres stores credential and token hashes, App Attest public keys and counters, and expiring claims. Defaults allow 20 active sources per App Attest key and 500 registrations per day; `PACEMAN_MAX_SOURCES_PER_ATTEST_KEY` and `PACEMAN_DAILY_ENROLLMENT_LIMIT` adjust them. Monitor rejection and rate-limit logs without recording credentials or tokens.
 
-Deploy the iPhone build with App Attest before requiring attestation on the relay. Existing registrations keep working; new Mac pairings need the updated phone. Confirm fresh TestFlight pairing and APNs delivery on a physical iPhone. See [protocol](protocol.md#phone-notifications-and-live-activities) for the wire contract.
+Deploy the iPhone build with App Attest before requiring attestation on the relay. Existing registrations keep working; new Mac pairings need the updated phone. Confirm fresh TestFlight pairing and APNs delivery on a physical iPhone. See [protocol](../docs/protocol.md#phone-notifications-and-live-activities) for the wire contract.

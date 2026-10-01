@@ -47,13 +47,13 @@ If it does not, inspect the pending hook rows and installed command. Report inst
 
 ## Enable iPhone notifications
 
-Pairing and hooks do not configure APNs. Configure the per-user sender with Paceman's [project-operated relay](push-relay.md) before pairing the phone. The relay keeps the APNs key, and the installer generates a source-specific credential:
+Pairing and hooks do not configure APNs. Configure the per-user sender with Paceman's [project-operated relay](../service/RELAY.md) before pairing the phone. The relay keeps the APNs key, and the installer generates a source-specific credential:
 
 ```sh
 python3 -m macos.install_push --relay-url https://relay.paceman.ai
 ```
 
-Use the Python 3.11+ command printed by the source installer if needed. The sender shares Paceman's background item and stores its credential in the owner-only `~/Library/Application Support/Paceman/private/apns.json`. Re-pair an already paired phone so it learns the relay URL. Check `~/Library/Application Support/Paceman/data/push-delivery.jsonl` for `apns_accepted` (status 200), then confirm a **new notification on the physical iPhone**. APNs acceptance alone does not prove display. See [push delivery](push-delivery.md) for watch behavior.
+Use the Python 3.11+ command printed by the source installer if needed. The sender shares Paceman's background item and stores its credential in the owner-only `~/Library/Application Support/Paceman/private/apns.json`. Re-pair an already paired phone so it learns the relay URL. Check `~/Library/Application Support/Paceman/data/push-delivery.jsonl` for `apns_accepted` (status 200), then confirm a **new notification on the physical iPhone**. APNs acceptance alone does not prove display. See [push delivery](../docs/push-delivery.md) for ESP32 and Apple Watch delivery.
 
 ## Control and removal
 

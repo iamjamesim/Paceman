@@ -40,13 +40,13 @@ from delivery on an already-connected device; document hardware-only gaps.
 
 # Agent-led Mac installation
 
-When guiding a Mac installation or pairing, follow `docs/macos.md` through hook
+When guiding a Mac installation or pairing, follow `macos/README.md` through hook
 review and a real Codex event check. Running `macos/install.py` and pairing the
 phone do not complete session monitoring. Show the user the exact Paceman hook
 command and what data it sends. For an app user, direct them specifically to
 Codex **Settings → Hooks → User config (All projects)**; for a CLI user, use
 `/hooks` or **Review hooks** at startup. Name the eight Paceman event rows and
-their plain-language purposes from `docs/macos.md`, explain that Codex calls
+their plain-language purposes from `macos/README.md`, explain that Codex calls
 each row **Hook 1**, and show how to expand one to verify the Paceman command.
 Stay with the user while they review the entries. Do not trust hooks on the
 user's behalf or bypass Codex's review. After their review, use a fresh local
@@ -55,7 +55,7 @@ Report the installation as partial if review or the real event check is still
 pending.
 
 For iPhone notifications, pairing and hook delivery are insufficient. Follow
-the Mac APNs step in `docs/macos.md`: locate an existing private config/key
+the Mac APNs step in `macos/README.md`: locate an existing private config/key
 without exposing the key, install the per-user push worker against the paired
 source database, confirm APNs acceptance, and ask the user to confirm a new
 notification on the physical phone. Treat Apple acceptance and phone display

@@ -8,7 +8,7 @@ Use Python 3.11 or newer and a C compiler for the portable checks.
 The live Omarchy adapter uses the standard-library TOML parser. Node.js 18+
 enables the desktop presentation tests; these are skipped when Node is absent.
 Node is not a desktop runtime dependency.
-For real desktop events, use [Omarchy installation](omarchy.md).
+For real desktop events, use [Omarchy installation](../omarchy/README.md).
 
 ```sh
 python3 -m venv .venv
@@ -83,29 +83,15 @@ DEBUG visual fixtures use `--design-preview`, optionally `--neutral` and
 `--screen=setup|activity|offline|watch-setup|watch-confirm|watch-complete|watch-notifications|watch-troubleshooting|settings`.
 Fixtures disable real networking/Bluetooth; release builds ignore these arguments.
 
-## Watch
+## Apple Watch
 
 The Apple Watch app and complications require watchOS 11+.
 
-The supported board is Waveshare ESP32-S3-Touch-AMOLED-2.06. For a fresh unowned
-device, open **Connect your watch** on the phone and follow its Bluetooth prompt.
+## ESP32 watch
 
-For source builds, activate ESP-IDF 5.5.x, then:
-
-```sh
-cd firmware/esp32-watch/firmware
-idf.py build
-idf.py -p YOUR-SERIAL-PORT flash
-```
-
-Use the board's actual USB programming port (`/dev/cu.usbmodem…` on Mac or
-`/dev/ttyACM…` on Linux). Normal flashing preserves NVS. `erase-flash` is a factory
-reset that deletes ownership, bonds and preferences; it is not an update step.
-An existing desktop-owned watch requires deliberate reset or a future transfer flow.
-
-See the [device guide](../firmware/esp32-watch/README.md) for rendering and packaging.
-The full LVGL simulator requires ESP-IDF-managed components, CMake, Ninja and
-ImageMagick. The portable profile/sound tests need only a C compiler.
+For the supported board, pairing, firmware builds, and flashing, use the
+[ESP32 watch guide](../firmware/esp32-watch/README.md). Routine updates preserve
+its ownership and bond; `erase-flash` is a factory reset.
 
 ## Stop and revoke
 

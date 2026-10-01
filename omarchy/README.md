@@ -40,7 +40,9 @@ If port 8443 is free, route private HTTPS to the local source:
 tailscale serve --bg --https=8443 http://127.0.0.1:8765
 ```
 
-Leave Funnel off and do not replace unrelated routes. The installer does not manage them. Use the bar panel's QR button or `pacemanctl pair --open`, then scan from **Connect computer** on iPhone. Invitations expire after five minutes and contain a pairing secret. The phone pairs with the watch separately.
+Leave Funnel off and do not replace unrelated routes. The installer does not manage them. Use the bar panel's QR button or `pacemanctl pair --open`, then scan from **Connect computer** on iPhone. Invitations expire after five minutes and contain a pairing secret. The phone pairs with the ESP32 watch separately.
+
+For locked-phone delivery, configure the optional [relay worker](../service/RELAY.md) after installation. The source installer does not enable it.
 
 Paceman waits five seconds before showing an async input question, keeps it visible after the tool returns, and clears it when the turn ends or a new prompt begins.
 
@@ -64,4 +66,4 @@ Sharing off persists across login and updates. `pacemanctl stop` stops only the 
 bash scripts/uninstall-omarchy.sh
 ```
 
-This removes the installed app, command, services, panel, and Paceman's Codex hooks. It retains source data, phone pairings, unrelated Codex hooks, the separate Omarchy Watch Codex plugin if installed, and Tailscale routes for deliberate cleanup or reinstallation. Configure the optional [relay worker](push-relay.md) after installation for locked-phone delivery; the source installer alone does not enable it.
+This removes the installed app, command, services, panel, and Paceman's Codex hooks. It retains source data, phone pairings, unrelated Codex hooks, the separate Omarchy Watch Codex plugin if installed, and Tailscale routes for deliberate cleanup or reinstallation.

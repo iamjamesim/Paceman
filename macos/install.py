@@ -389,7 +389,7 @@ def _finish_install(staged_app: Path):
     else:
         print("To deliver iPhone notifications, run:")
         print(f"{shlex.quote(PYTHON)} -m macos.install_push --relay-url https://relay.paceman.ai")
-        print("The installer generates a private source credential. See docs/macos.md for verification.")
+        print("The installer generates a private source credential. See macos/README.md for verification.")
     paired = 0
     database_path = ROOT / "data/hub.sqlite3"
     if database_path.is_file():
@@ -423,7 +423,7 @@ def print_hook_review_steps(wrapper: Path):
     print("  Stay with the user, then send a prompt in a fresh local Codex task")
     print("  and verify lastAgentEventAt advances in:")
     print(f'     "{wrapper}" status')
-    print(f"  Until that real event arrives, setup is partial. Full steps: {REPO / 'docs/macos.md'}")
+    print(f"  Until that real event arrives, setup is partial. Full steps: {REPO / 'macos/README.md'}")
 
 
 if __name__ == "__main__":
