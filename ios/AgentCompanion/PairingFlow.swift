@@ -9,6 +9,7 @@ struct PairingFlow: View {
     let theme: CompanionTheme
     var preview = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var scanner = false
     @State private var invitation = ""
     @State private var parsed: Invitation?
@@ -20,28 +21,31 @@ struct PairingFlow: View {
     }
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
-                ComputerIllustration(theme: theme).frame(width: 210).frame(maxWidth: .infinity).padding(.vertical, 28)
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(reconnecting ? "Reconnect your computer" : "Connect your computer").font(theme.monospaced ? theme.font(27, emphasis: true) : .title.weight(.semibold))
+            VStack(alignment: .leading, spacing: 20) {
+                if !typeSize.isAccessibilitySize {
+                    ComputerIllustration(theme: theme).frame(width: 210).frame(maxWidth: .infinity)
+                        .padding(.top, 20).padding(.bottom, 12)
+                }
+                VStack(alignment: .leading, spacing: 0) {
                     Text("Open the Paceman panel on your computer and select the QR button.")
                         .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
                     if reconnecting {
-                        Text("Scanning a fresh QR code renews this phone’s access. Your watch stays paired.").font(.subheadline).foregroundStyle(theme.secondaryInk)
+                        Text("Scanning a fresh QR code renews this phone’s access. Your watch stays paired.")
+                            .font(.subheadline).foregroundStyle(theme.secondaryInk).padding(.top, 12)
                     }
-                    Text("Make sure your phone and computer are on the same Tailscale network.")
-                        .font(.subheadline).foregroundStyle(theme.secondaryInk)
-                    DisclosureGroup("Why Tailscale?", isExpanded: $showingTailscaleInfo) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Tailscale lets your phone reach Paceman on your computer without exposing Paceman to the public internet.")
-                                .font(.subheadline).foregroundStyle(theme.secondaryInk)
-                            CompanionExternalLink(title: "Get Tailscale for iPhone", url: URL(string: "https://tailscale.com/download/ios")!, theme: theme)
-                                .allowsHitTesting(!preview)
-                        }.padding(.top, 8)
-                    }
-                    .font(.subheadline.weight(.medium)).tint(theme.tint)
-                    CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
-                        .allowsHitTesting(!preview)
+                    VStack(alignment: .leading, spacing: 18) {
+                        Text("Make sure your phone and computer are on the same Tailscale network.")
+                            .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                        DisclosureGroup("Why Tailscale?", isExpanded: $showingTailscaleInfo) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Tailscale lets your phone reach Paceman on your computer without exposing Paceman to the public internet.")
+                                    .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                                CompanionExternalLink(title: "Get Tailscale for iPhone", url: URL(string: "https://tailscale.com/download/ios")!, theme: theme)
+                                    .allowsHitTesting(!preview)
+                            }.padding(.top, 12).padding(.bottom, 4)
+                        }
+                        .font(.subheadline.weight(.medium)).tint(theme.tint)
+                    }.padding(.top, 24).padding(.bottom, 8)
                 }
                 if let parsed {
                     VStack(alignment: .leading, spacing: 16) {
@@ -63,6 +67,8 @@ struct PairingFlow: View {
                     CompanionButton(title: "Scan QR code", theme: theme, symbol: "qrcode.viewfinder") { scanner = true }.disabled(preview)
                 }
                 if let error { Label(error, systemImage: "exclamationmark.circle").font(.subheadline).foregroundStyle(theme.ink) }
+                CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
+                    .allowsHitTesting(!preview)
             }.padding(.horizontal, 26).padding(.bottom, 30)
         }.background(CompanionCanvas(theme: theme)).foregroundStyle(theme.ink)
             .navigationTitle(reconnecting ? "Reconnect computer" : "Connect computer").navigationBarTitleDisplayMode(.inline)
