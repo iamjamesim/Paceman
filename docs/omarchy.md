@@ -10,7 +10,7 @@ Requires Python 3.11+, a user systemd session, Omarchy 4.0+, and Tailscale on co
 bash scripts/install-omarchy.sh
 ```
 
-The installer copies Paceman to `~/.local/lib/paceman`, installs `~/.local/bin/pacemanctl`, enables the user service, reloads the bar, and adds seven Paceman commands to `~/.codex/hooks.json`. Re-run to update the source and hook together. `--no-bar` installs the source alone. An update preserves installed pairing data, Sharing choice, and unrelated Codex hooks. A fresh install does not import a checkout's `.runtime` data. The installer disables the old `omarchy-watch.service` if present; it does not remove that application's data or its separate Codex plugin.
+The installer copies Paceman to `~/.local/lib/paceman`, installs `pacemanctl`, enables its user service, reloads the bar, and adds seven commands to `~/.codex/hooks.json`. Re-run to update; `--no-bar` omits the panel. Updates preserve pairing data, Sharing choice, and unrelated hooks. A fresh install ignores checkout `.runtime` data. The installer disables the old `omarchy-watch.service` but leaves its data and Codex plugin.
 
 ## Review Codex hooks
 
@@ -46,7 +46,7 @@ Paceman's hook uses the existing `$XDG_RUNTIME_DIR/omarchy-watch.sock` socket so
 
 ## Panel and control
 
-The panel shows Sharing, paired phones, aggregate activity, and a pairing action. **Last contact** means the phone last fetched an authenticated snapshot; it does not prove watch delivery. A five-second source heartbeat expires after 20 seconds. The panel shows a recovery action only when the source needs one. The panel keeps pairing and last-contact status separate from agent activity.
+The panel shows Sharing, paired phones, activity, and a pairing action. **Last contact** means the phone last fetched a snapshot; it does not prove watch delivery.
 
 ```sh
 pacemanctl status
@@ -64,4 +64,4 @@ Sharing off persists across login and updates. `pacemanctl stop` stops only the 
 bash scripts/uninstall-omarchy.sh
 ```
 
-This removes the installed app, command, services, panel, and Paceman's Codex hooks. It retains source data, phone pairings, unrelated Codex hooks, the separate Omarchy Watch Codex plugin if installed, and Tailscale routes for deliberate cleanup or reinstallation. Configure the optional [relay worker](push-relay.md) after installation for locked-phone delivery; the source installer alone does not enable it. This package remains a local source installer, not a downloadable signed release.
+This removes the installed app, command, services, panel, and Paceman's Codex hooks. It retains source data, phone pairings, unrelated Codex hooks, the separate Omarchy Watch Codex plugin if installed, and Tailscale routes for deliberate cleanup or reinstallation. Configure the optional [relay worker](push-relay.md) after installation for locked-phone delivery; the source installer alone does not enable it.

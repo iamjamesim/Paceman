@@ -1,12 +1,6 @@
 # Push delivery
 
-The optional source worker sends ordinary activity notifications, ActivityKit updates, and optional watchOS allowance updates. Distributed installs send bounded requests through the authenticated relay, which holds the APNs key. Ordinary notifications can reach the experimental ESP32 watch through Apple's Notification Center Service (ANCS). The watch then asks the iPhone to fetch the current authenticated source snapshot and forward it over Bluetooth. The ordinary notification carries a source ID and event hint; ActivityKit receives an expiring display copy. Neither carries a source URL, paired credential, code, prompt, or transcript. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
-
-```text
-Source → authenticated relay → APNs → iPhone notification → ANCS → ESP32 watch request
-                                         → iPhone fetch → Bluetooth state write
-Source → authenticated relay → ActivityKit APNs → iPhone Live Activity
-```
+The source worker sends activity notifications and Live Activity updates through the authenticated relay, which holds the APNs key. It can also push Codex allowance to Apple Watch. An ordinary notification reaches the ESP32 watch through Apple's Notification Center Service (ANCS); the watch asks the iPhone to fetch the current snapshot and forward it over Bluetooth. Activity pushes carry an event hint or expiring display copy, never source credentials, prompts, or transcripts. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
 
 | State | Ordinary notification |
 | --- | --- |
@@ -15,15 +9,13 @@ Source → authenticated relay → ActivityKit APNs → iPhone Live Activity
 
 The worker coalesces activity to the newest snapshot, waits at least ten seconds between attempts, discards events over five minutes old, and retries transient failures with backoff. A process crash can duplicate a send. Appearance-only changes do not send activity alerts. The iPhone always fetches from its stored paired endpoint, not a URL supplied by the push.
 
-For each registered Apple Watch, the same source worker sends a changed allowance reading after its per-destination 20-minute spacing. While the source keeps the reading fresh, it retries an accepted but unchanged reading after 30 minutes, then after two hours, then every four hours. Failed APNs requests retain their existing backoff and do not consume these recovery sends. Mac and Omarchy sources use this same policy. APNs acceptance does not confirm that watchOS processed the background push.
+Apple Watch allowance changes are spaced at least 20 minutes per destination, with periodic recovery sends while the reading remains fresh. APNs acceptance does not prove watchOS processed the push.
 
 ## Authenticated relay
 
 The Mac enrolls with a source credential; the phone registers its own token with its pairing credential. The relay checks both identities, the token, environment, and push mode before calling APNs. Removing a client clears its local destination and syncs the removal to the relay. See [relay setup](push-relay.md) for deployment and revocation, and [protocol](protocol.md#phone-notifications-and-live-activities) for the request contract.
 
-The worker retries transient relay failures until the event's five-minute limit. Only one worker can hold a source database's push lock.
-
-For a rejected Live Activity start token (`BadDeviceToken`, `DeviceTokenNotForTopic`, or HTTP 410), the source keeps that phone's token, environment, rejection reason, and rejection time. It waits 24 hours before trying the same token again; registering a different token or environment replaces the rejected row and can be tried immediately. The source log records the token fingerprint and APNs request ID without recording the token. ActivityKit controls token replacement, so re-registering the same rejected token does not repair it.
+After APNs rejects a Live Activity start token, the source waits 24 hours before retrying that token. A new token or environment can be tried immediately. Re-registering the rejected token does not repair it; ActivityKit controls replacement.
 
 ## Development-only direct APNs
 

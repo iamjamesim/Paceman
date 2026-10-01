@@ -1,6 +1,6 @@
 # Mac installation
 
-The Mac client has one **Paceman** background item for the local source and optional notification sender. The menu-bar app controls Sharing and phone access. It opens at login by default, independently of Sharing. Codex hooks supply activity; the phone connects over private Tailscale HTTPS. This is an agent-led installation from source, not a notarized public build.
+The Mac client has one **Paceman** background item for the local source and optional notification sender. The menu-bar app controls Sharing and phone access. It opens at login by default, independently of Sharing. Codex hooks supply activity; the phone connects over private Tailscale HTTPS.
 
 ## Install and pair
 
@@ -53,12 +53,12 @@ Pairing and hooks do not configure APNs. Configure the per-user sender with Pace
 python3 -m macos.install_push --relay-url https://relay.paceman.ai
 ```
 
-Use the Python 3.11+ command printed by the source installer if `python3` on your Mac is older. The installer saves the source credential in an owner-only file at `~/Library/Application Support/Paceman/private/apns.json` and starts the sender within the same background item. If the phone was already paired, renew pairing with a fresh QR code so it learns the relay URL. Confirm `dev.paceman.source` is running with `launchctl print`, then inspect the destination's `last_result` and `push-delivery.jsonl` for a recent `apns_accepted` (status 200). Ask the user to confirm a **new notification on the physical iPhone**. Apple acceptance and phone display are separate checks. Live Activity starts are logged separately as `live_activity_start_accepted`. See [push delivery](push-delivery.md) for watch and locked-phone checks.
+Use the Python 3.11+ command printed by the source installer if needed. The sender shares Paceman's background item and stores its credential in the owner-only `~/Library/Application Support/Paceman/private/apns.json`. Re-pair an already paired phone so it learns the relay URL. Check `~/Library/Application Support/Paceman/data/push-delivery.jsonl` for `apns_accepted` (status 200), then confirm a **new notification on the physical iPhone**. APNs acceptance alone does not prove display. See [push delivery](push-delivery.md) for watch behavior.
 
 ## Control and removal
 
-**Sharing off** stops both source and sender while preserving hooks, pairing, and push configuration. **Manage Paceman… → Open menu app at login** is separate, so the menu can remain available while sharing is paused. A phone's **Remove access…** revokes only that phone. **Manage Paceman… → Uninstall Paceman…** removes the background item, menu app, Paceman hooks, local pairing data, and relay credential. Remove a dedicated Tailscale Serve route separately. An Apple Development or ad hoc signature used for local builds is not a Developer ID signature or notarization.
+**Sharing off** pauses the source and sender but keeps hooks, pairing, and push configuration. **Manage Paceman… → Open menu app at login** is separate, so the menu remains available while sharing is paused. **Remove access…** revokes one phone. **Manage Paceman… → Uninstall Paceman…** removes the app, background item, hooks, pairing data, and relay credential; remove a dedicated Tailscale Serve route separately. Local Apple Development or ad hoc signatures are not Developer ID signatures or notarization.
 
 ## Coverage limits
 
-The hook adapter cannot confirm that an async question was answered while a turn is running: a later user message is a proxy, and an unrelated message can clear attention early. A completed turn clears its outstanding async question. A missing `SessionEnd` can leave a finished row visible for up to ten minutes. Mac hooks do not have Linux process-ownership proof. The source can read Codex allowance through a short-lived local App Server process every five minutes; it sends only remaining percentage, window type, observation time, and reset time to the phone.
+An unrelated user message can clear async-question attention early; a completed turn clears it. Without `SessionEnd`, a Finished row can remain for up to ten minutes. Mac hooks cannot verify process ownership. The source reads Codex allowance through a short-lived local App Server every five minutes and sends only the percentage, window, observation time, and reset time.
