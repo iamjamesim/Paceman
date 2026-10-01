@@ -232,7 +232,9 @@ uses a different token, `apns-push-type: widgets`, and
 watchOS 11. It requests a timeline reload; the current complication reads
 allowance data stored by the watch app, so a reload alone would not supply
 a new reading. The phone can also forward a selected reading through
-WatchConnectivity. Neither path produces a verified cross-machine account total:
+WatchConnectivity. It prefers a recent reading from a connected source in
+pairing order; the watchOS background push comes from the first paired source.
+Readings from separate Codex accounts are not combined:
 
 ```json
 {
