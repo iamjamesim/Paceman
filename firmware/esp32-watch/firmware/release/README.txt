@@ -22,6 +22,7 @@ Files:
 
 Verify the files before flashing:
   sha256sum -c SHA256SUMS
+  On macOS: shasum -a 256 -c SHA256SUMS
 
 Source and documentation:
   https://github.com/iamjamesim/paceman

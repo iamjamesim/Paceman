@@ -5,7 +5,7 @@
 `firmware/esp32-watch/` includes code and assets from Omarchy Watch v0.6.1,
 Copyright (c) 2026 Omarchy Watch contributors, under the MIT license.
 The [original license](firmware/esp32-watch/UPSTREAM_LICENSE),
-[font and data notices](firmware/esp32-watch/THIRD_PARTY_NOTICES.md), and
+[font notices](firmware/esp32-watch/THIRD_PARTY_NOTICES.md), and
 [exact source provenance](firmware/esp32-watch/UPSTREAM.md) are included.
 
 The Bluetooth daemon and shell plugin are not imported.
