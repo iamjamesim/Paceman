@@ -97,8 +97,21 @@ def _certificates(encoded: object, root: x509.Certificate, now: datetime) -> x50
     return chain[0]
 
 
-def _credential_data(data: bytes, environment: str, key_id: bytes) -> tuple[bytes, bytes]:
-    if len(data) < 87:
+def _authenticator_data(data: object, app_id: str, *, attestation: bool,
+                        environment: str, key_id: bytes = b"") -> tuple[int, bytes]:
+    if not isinstance(data, bytes) or len(data) < 37:
+        raise InvalidAttestation("Invalid authenticator data")
+    if data[:32] != hashlib.sha256(app_id.encode()).digest():
+        raise InvalidAttestation("App ID mismatch")
+    flags = data[32]
+    counter = struct.unpack(">I", data[33:37])[0]
+    if not attestation:
+        if flags & 0x40:
+            raise InvalidAttestation("Unexpected credential data")
+        remainder = data[37:]
+        _check_extensions(remainder, flags, environment)
+        return counter, data
+    if not flags & 0x40 or counter != 0 or len(data) < 87:
         raise InvalidAttestation("Invalid attested credential")
     expected_aaguid = b"appattestdevelop" if environment == "development" else b"appattest" + b"\0" * 7
     if data[37:53] != expected_aaguid:
@@ -116,48 +129,15 @@ def _credential_data(data: bytes, environment: str, key_id: bytes) -> tuple[byte
             or not isinstance(cose[-2], bytes) or len(cose[-2]) != 32
             or not isinstance(cose[-3], bytes) or len(cose[-3]) != 32):
         raise InvalidAttestation("Invalid credential key")
-    return b"\x04" + cose[-2] + cose[-3], stream.read()
+    _check_extensions(stream.read(), flags, environment)
+    return counter, b"\x04" + cose[-2] + cose[-3]
 
 
-def _authenticator_data(data: object, app_id: str, *, attestation: bool,
-                        environment: str, key_id: bytes = b"",
-                        expected_public: bytes = b"") -> tuple[int, bytes]:
-    if not isinstance(data, bytes) or len(data) < 37:
-        raise InvalidAttestation("Invalid authenticator data")
-    if data[:32] != hashlib.sha256(app_id.encode()).digest():
-        raise InvalidAttestation("App ID mismatch")
-    flags = data[32]
-    counter = struct.unpack(">I", data[33:37])[0]
-    if not attestation:
-        remainder = data[37:]
-        if flags & 0x40:
-            # iOS 27 assertions can carry signed validation extensions with
-            # this bit set. Accept that map, or validate a full credential
-            # block against the key established by the original attestation.
-            if remainder and remainder[0] >> 5 == 5:
-                has_validation_extension = _check_extensions(remainder, flags, environment)
-                if not has_validation_extension:
-                    raise InvalidAttestation("Unexpected credential data")
-            else:
-                public, remainder = _credential_data(data, environment, key_id)
-                if public != expected_public:
-                    raise InvalidAttestation("Credential and assertion key mismatch")
-                _check_extensions(remainder, flags, environment)
-        else:
-            _check_extensions(remainder, flags, environment)
-        return counter, data
-    if not flags & 0x40 or counter != 0 or len(data) < 87:
-        raise InvalidAttestation("Invalid attested credential")
-    public, remainder = _credential_data(data, environment, key_id)
-    _check_extensions(remainder, flags, environment)
-    return counter, public
-
-
-def _check_extensions(remainder: bytes, flags: int, environment: str) -> bool:
+def _check_extensions(remainder: bytes, flags: int, environment: str) -> None:
     if not remainder:
         if flags & 0x80:
             raise InvalidAttestation("Missing authenticator extensions")
-        return False
+        return
     # Apple's iOS 27 samples append extension CBOR even when the ED flag is clear.
     value = _cbor(remainder)
     if not isinstance(value, dict):
@@ -172,7 +152,6 @@ def _check_extensions(remainder: bytes, flags: int, environment: str) -> bool:
             raise InvalidAttestation("Unexpected app validation category")
     if version is not None and (not isinstance(version, str) or not 1 <= len(version) <= 40):
         raise InvalidAttestation("Invalid bundle version")
-    return category is not None
 
 
 class AppAttestVerifier:
@@ -218,17 +197,13 @@ class AppAttestVerifier:
         if (not isinstance(value, dict) or not isinstance(value.get("signature"), bytes)
                 or not isinstance(value.get("authenticatorData"), bytes)):
             raise InvalidAttestation("Invalid assertion object")
-        try:
-            key = serialization.load_der_public_key(public_der)
-            public = _public_bytes(key)
-        except ValueError as error:
-            raise InvalidAttestation("Invalid App Attest assertion key") from error
         counter, auth_data = _authenticator_data(value["authenticatorData"], self.app_ids[environment],
-                                                  attestation=False, environment=environment,
-                                                  key_id=hashlib.sha256(public).digest(), expected_public=public)
+                                                  attestation=False, environment=environment)
         if counter <= previous_counter:
             raise InvalidAttestation("Replayed App Attest assertion")
         try:
+            key = serialization.load_der_public_key(public_der)
+            _public_bytes(key)
             key.verify(value["signature"], auth_data + hashlib.sha256(challenge.encode()).digest(),
                        ec.ECDSA(hashes.SHA256()))
         except (ValueError, InvalidSignature) as error:
