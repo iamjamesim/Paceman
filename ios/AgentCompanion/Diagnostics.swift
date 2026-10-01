@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 final class Diagnostics {
@@ -5,8 +6,16 @@ final class Diagnostics {
     let url: URL
     private let queue = DispatchQueue(label: "companion.diagnostics")
     init() {
-        let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        url = root.appendingPathComponent("transport-test.jsonl")
+        let files = FileManager.default
+        let root = files.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? files.createDirectory(at: root, withIntermediateDirectories: true)
+        let current = root.appendingPathComponent("paceman-diagnostics.jsonl")
+        let previous = files.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("transport-test.jsonl")
+        if !files.fileExists(atPath: current.path), files.fileExists(atPath: previous.path) {
+            try? files.moveItem(at: previous, to: current)
+        }
+        url = current
     }
     func record(_ stage: String, event: String? = nil, state: ActivityState? = nil,
                 revision: UInt32? = nil, sequence: UInt32? = nil, contentAvailable: Bool? = nil) {
@@ -14,11 +23,17 @@ final class Diagnostics {
         // credentials, URLs, or localized error descriptions.
         var entry: [String: Any] = ["at": Date().timeIntervalSince1970,
                                   "uptime": ProcessInfo.processInfo.systemUptime, "stage": stage]
-        if let event { entry["event"] = event }
+        if let event { entry["eventFingerprint"] = fingerprint(event) }
         if let state { entry["state"] = state.rawValue }
         if let revision { entry["watchRevision"] = revision }
         if let sequence { entry["notificationSequence"] = sequence }
         if let contentAvailable { entry["contentAvailable"] = contentAvailable }
+        if stage == "app_launched" {
+            let info = Bundle.main.infoDictionary ?? [:]
+            entry["bundleID"] = Bundle.main.bundleIdentifier ?? "unknown"
+            entry["appVersion"] = info["CFBundleShortVersionString"] as? String ?? "unknown"
+            entry["build"] = info["CFBundleVersion"] as? String ?? "unknown"
+        }
         append(entry)
     }
 
@@ -35,6 +50,28 @@ final class Diagnostics {
 
     func recordBluetoothError(_ stage: String, error: Error?) {
         recordError(stage, error: error)
+    }
+
+    func recordLiveActivityStartToken(_ token: Data?, stage: String) {
+        var entry: [String: Any] = [
+            "at": Date().timeIntervalSince1970,
+            "uptime": ProcessInfo.processInfo.systemUptime,
+            "stage": stage,
+            "bundleID": Bundle.main.bundleIdentifier ?? "unknown",
+            "configuredAPNSEnvironment": Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String ?? "missing",
+            "tokenPresent": token != nil,
+        ]
+        if let token {
+            // The relay hashes the lowercase hex token, not its raw bytes.
+            let hex = token.map { String(format: "%02x", $0) }.joined()
+            entry["tokenFingerprint"] = fingerprint(hex)
+        }
+        append(entry)
+    }
+
+    private func fingerprint(_ value: String) -> String {
+        let digest = SHA256.hash(data: Data(value.utf8))
+        return String(digest.map { String(format: "%02x", $0) }.joined().prefix(12))
     }
 
     private func append(_ entry: [String: Any]) {

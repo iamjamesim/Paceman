@@ -244,6 +244,7 @@ final class MonitoringCoordinator: ObservableObject {
     private func observeSystem() {
         guard activityUpdatesTask == nil else { return }
         startToken = Activity<MonitoringActivity>.pushToStartToken
+        Diagnostics.shared.recordLiveActivityStartToken(startToken, stage: "live_activity_start_token_observed")
         activityUpdatesTask = Task { [weak self] in
             for await activity in Activity<MonitoringActivity>.activityUpdates {
                 guard !Task.isCancelled else { return }
@@ -254,12 +255,19 @@ final class MonitoringCoordinator: ObservableObject {
             for await token in Activity<MonitoringActivity>.pushToStartTokenUpdates {
                 guard !Task.isCancelled else { return }
                 self?.startToken = token
+                Diagnostics.shared.recordLiveActivityStartToken(token, stage: "live_activity_start_token_updated")
                 self?.registeredStartTokens.removeAll()
                 self?.readySourceIDs.removeAll()
                 self?.lastStartAttempts.removeAll()
                 await self?.registerStartTokens()
             }
         }
+    }
+
+    func captureStartTokenDiagnostics() {
+        Diagnostics.shared.recordLiveActivityStartToken(
+            Activity<MonitoringActivity>.pushToStartToken,
+            stage: "live_activity_start_token_diagnostic_snapshot")
     }
 
     private func observe(_ activity: Activity<MonitoringActivity>) {
@@ -361,7 +369,7 @@ final class MonitoringCoordinator: ObservableObject {
                 }
                 registeredStartTokens[source.sourceID] = token
                 readySourceIDs.insert(source.sourceID)
-                Diagnostics.shared.record("live_activity_start_token_registered")
+                Diagnostics.shared.recordLiveActivityStartToken(token, stage: "live_activity_start_token_registered")
             } catch { Diagnostics.shared.recordError("live_activity_start_token_registration_failed", error: error) }
         }
         updateStatus()

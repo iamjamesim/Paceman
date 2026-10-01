@@ -2,24 +2,25 @@ import SwiftUI
 
 struct TransportDiagnostics: View {
     @ObservedObject var model: CompanionModel
+    #if DEBUG
     @ObservedObject private var push = PushCoordinator.shared
+    #endif
+    private var version: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let name = info["CFBundleShortVersionString"] as? String ?? "Unknown"
+        let build = info["CFBundleVersion"] as? String ?? "Unknown"
+        return "\(name) (\(build))"
+    }
 
     var body: some View {
         Form {
+            #if DEBUG
             Section {
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(model.currentActivityState.title).font(.largeTitle.bold())
-                        Text("\(model.pairedSources.count) connected computer\(model.pairedSources.count == 1 ? "" : "s")")
-                            .foregroundStyle(Color.secondary)
-                    }.padding(.vertical, 8)
-                }
-                Text("Finished means a turn ended, not that the agent session closed.").font(.caption).foregroundStyle(.secondary)
-            }
+                Text(model.currentActivityState.title)
+                Text("\(model.pairedSources.count) connected computer\(model.pairedSources.count == 1 ? "" : "s")")
+            } header: { Text("Activity") }
             Section("Live Activities") {
                 Text(model.monitoring.status)
-                Text("One ActivityKit destination is registered per paired computer. A computer starts its activity when agent work begins.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Weather") {
                 Text(model.weather.diagnostic).font(.caption.monospaced()).textSelection(.enabled)
@@ -34,10 +35,6 @@ struct TransportDiagnostics: View {
             }
             Section("Push delivery") {
                 Text(push.status)
-                Text("Notifications trigger watch synchronization through ANCS. Progress is passive; attention states request immediate presentation.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("APNs acceptance, app wake, fetch, and watch write are separate log entries.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Watch") {
                 Text(model.watch.status)
@@ -49,15 +46,16 @@ struct TransportDiagnostics: View {
                 if let date = model.watch.lastDelivered {
                     Text("Last BLE write accepted \(date.formatted(date: .omitted, time: .standard))").font(.caption)
                 }
-                Text("A BLE write acknowledgement confirms receipt, not rendering on the watch.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Test log") {
-                ShareLink("Export timing log", item: Diagnostics.shared.url)
-                Text("Foreground refresh runs every 5 seconds. Watch events also trigger a fetch.")
-                    .font(.caption).foregroundStyle(.secondary)
+            #endif
+            Section {
+                LabeledContent("Version", value: version)
+                ShareLink("Export diagnostic log", item: Diagnostics.shared.url)
+            } footer: {
+                Text("Includes event timing and technical identifiers. Share only when requesting help.")
             }
         }
-        .navigationTitle("Transport lab")
+        .navigationTitle("Diagnostics")
+        .onAppear { model.monitoring.captureStartTokenDiagnostics() }
     }
 }

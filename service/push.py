@@ -536,7 +536,10 @@ class Worker:
                                 event["seq"] if accepted and alert_event else device["alert_cursor"],
                                 device["client_id"], device["token"], device["activity_id"]))
             self.log({"at": now, "stage": "live_activity_apns_accepted" if accepted else "live_activity_apns_failed",
-                      "revision": snapshot["revision"], "status": result.status, "reason": result.reason})
+                      "revision": snapshot["revision"], "clientID": device["client_id"],
+                      "activityID": device["activity_id"], "environment": device["environment"],
+                      "tokenFingerprint": hashlib.sha256(device["token"].encode()).hexdigest()[:12],
+                      "status": result.status, "reason": result.reason, "apnsID": result.apns_id})
 
     def step_live_starts(self, snapshot, now, event):
         if snapshot["state"] == "idle" or (snapshot["state"] in ("finished", "failed")
@@ -571,6 +574,12 @@ class Worker:
                            and snapshot["state"] == event["state"] and now - event["at"] <= 300
                            and device["alert_cursor"] < event["seq"] and not ordinary_alerted else None)
             payload, headers = live_start_notification(snapshot, now, owner["display_name"], alert_event)
+            self.log({"at": now, "stage": "live_activity_start_attempt",
+                      "revision": snapshot["revision"], "clientID": device["client_id"],
+                      "environment": device["environment"],
+                      "tokenFingerprint": hashlib.sha256(device["token"].encode()).hexdigest()[:12],
+                      "apnsID": headers["apns-id"],
+                      "sender": "relay" if isinstance(self.sender, RelaySender) else "direct"})
             result = self.sender.send({**device, "mode": "liveactivity"}, payload, headers, now)
             accepted = result.status == 200
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
@@ -587,7 +596,10 @@ class Worker:
                                 event["seq"] if accepted and alert_event else device["alert_cursor"],
                                 device["client_id"], device["token"]))
             self.log({"at": now, "stage": "live_activity_start_accepted" if accepted else "live_activity_start_failed",
-                      "revision": snapshot["revision"], "status": result.status, "reason": result.reason})
+                      "revision": snapshot["revision"], "clientID": device["client_id"],
+                      "environment": device["environment"],
+                      "tokenFingerprint": hashlib.sha256(device["token"].encode()).hexdigest()[:12],
+                      "status": result.status, "reason": result.reason, "apnsID": result.apns_id})
 
     def log(self, value):
         self.log_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

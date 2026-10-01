@@ -91,15 +91,13 @@ struct CompanionSettings: View {
                     }
                 } header: {
                     Text("Experimental")
-                } footer: {
-                    Text("A fully hackable concept watch built for agentic engineering.")
                 }.listRowBackground(theme.panel)
             }
             Section {
                 NavigationLink(value: FeedDestination.diagnostics) {
-                    Label("Developer tools", systemImage: "wrench.and.screwdriver")
+                    Label("Diagnostics", systemImage: "doc.text.magnifyingglass")
                 }.disabled(presentation.preview)
-            } footer: { Text("Paceman · Prototype") }.listRowBackground(theme.panel)
+            }.listRowBackground(theme.panel)
         }.scrollContentBackground(.hidden).background(theme.canvas).foregroundStyle(theme.ink)
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)
     }
