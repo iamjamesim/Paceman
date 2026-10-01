@@ -1,6 +1,6 @@
 # Mac installation
 
-The Mac client has one **Paceman** background item for the local source and optional notification sender. The menu-bar app controls Sharing and phone access. It opens at login by default, independently of Sharing. Codex hooks supply activity; the phone connects over private Tailscale HTTPS.
+The Mac client has one **Paceman** background item for the local source and notification sender. The menu-bar app controls Sharing and phone access. It opens at login by default, independently of Sharing. Codex hooks supply activity; the phone connects over private Tailscale HTTPS.
 
 ## Install and pair
 
@@ -10,9 +10,11 @@ From the repository root, use Python 3.11+ installed outside the checkout, Xcode
 python3 -m macos.install
 ```
 
-The installer builds the menu app and helper, copies the source to `~/Library/Application Support/Paceman`, installs a per-user background item, and adds eight Paceman commands to `~/.codex/hooks.json`. Re-running it preserves existing pairings, sharing choice, and unrelated hooks. If the selected `python3` is too old, invoke a newer interpreter explicitly. A different Mac architecture needs a matching build target in the installer.
+The installer builds the menu app and helper, copies the source to `~/Library/Application Support/Paceman`, prepares notifications through `https://relay.paceman.ai`, installs a per-user background item, and adds eight Paceman commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; the Mac stores only a source credential. Re-running preserves an existing relay or direct APNs configuration, pairings, Sharing choice, and unrelated hooks. If notification setup fails, the installer reports that the source is installed but notifications are incomplete. If the selected `python3` is too old, invoke a newer interpreter explicitly. A different Mac architecture needs a matching build target in the installer.
 
-Open `~/Applications/Paceman.app` and confirm **Paceman** appears in **System Settings → General → Login Items & Extensions**. Configure a private Tailscale Serve HTTPS route to `http://127.0.0.1:8765`; leave Funnel off. The source binds only to loopback. The installer does not alter Tailscale routes. Use the menu-bar QR button to create a five-minute invitation, then scan it from **Connect computer** on the iPhone. Treat the QR and invitation as pairing secrets.
+For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the installer. Developers managing a direct APNs sender can use `--no-push-setup` and follow [development-only direct APNs](../docs/push-delivery.md#development-only-direct-apns). Neither option is needed for the normal install.
+
+Open `~/Applications/Paceman.app` and confirm **Paceman** appears in **System Settings → General → Login Items & Extensions**. Configure a private Tailscale Serve HTTPS route to `http://127.0.0.1:8765`; leave Funnel off. The source binds only to loopback. The installer does not alter Tailscale routes. Once notification setup has succeeded, use the menu-bar QR button to create a five-minute invitation, then scan it from **Connect computer** on the iPhone. This first pairing includes the relay address. Treat the QR and invitation as pairing secrets.
 
 ## Review Codex hooks
 
@@ -45,15 +47,15 @@ After review, start a **fresh local Codex task** on this Mac and send a prompt. 
 
 If it does not, inspect the pending hook rows and installed command. Report installation as partial until a real event arrives. Hook presence alone does not establish trust or delivery. The app shows **Setup needed** for missing commands, **No activity yet** before its first received event, and **No active work** after an observed session becomes idle.
 
-## Enable iPhone notifications
+## Check iPhone notifications
 
-Pairing and hooks do not configure APNs. Configure the per-user sender with Paceman's [project-operated relay](../service/RELAY.md) before pairing the phone. The relay keeps the APNs key, and the installer generates a source-specific credential:
+The installer prepares the sender through Paceman's [project-operated relay](../service/RELAY.md) before the first pairing. The phone must allow notifications and register its Apple-issued device token. A developer who skipped relay setup or needs to repair it can run:
 
 ```sh
 python3 -m macos.install_push --relay-url https://relay.paceman.ai
 ```
 
-Use the Python 3.11+ command printed by the source installer if needed. The sender shares Paceman's background item and stores its credential in the owner-only `~/Library/Application Support/Paceman/private/apns.json`. Re-pair an already paired phone so it learns the relay URL. Check `~/Library/Application Support/Paceman/data/push-delivery.jsonl` for `apns_accepted` (status 200), then confirm a **new notification on the physical iPhone**. APNs acceptance alone does not prove display. See [push delivery](../docs/push-delivery.md) for ESP32 and Apple Watch delivery.
+Use the Python 3.11+ command printed by the source installer if needed. The sender shares Paceman's background item and stores its credential in the owner-only `~/Library/Application Support/Paceman/private/apns.json`. An already paired phone needs a fresh QR pairing if relay setup was added later. After hook review, start a new local Codex task and check `~/Library/Application Support/Paceman/data/push-delivery.jsonl` for `apns_accepted` (status 200), then confirm a **new notification on the physical iPhone**. APNs acceptance alone does not prove display. See [push delivery](../docs/push-delivery.md) for ESP32 and Apple Watch delivery.
 
 ## Control and removal
 

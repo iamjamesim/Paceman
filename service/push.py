@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 
 from service.hub import Store
 
+DEFAULT_RELAY_URL = "https://relay.paceman.ai"
+
 
 @dataclass(frozen=True)
 class Config:

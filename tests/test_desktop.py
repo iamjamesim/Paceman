@@ -203,8 +203,15 @@ class DesktopInstallTests(unittest.TestCase):
             calls.append(args)
             output = json.dumps({"running": True, "startedAt": time.time()}) if args[-1] == "status" else "ok"
             return subprocess.CompletedProcess(args, 0, output, "")
+        def fake_push_run(args, **kwargs):
+            if args[1:3] == ["-m", "venv"]:
+                python = Path(args[3]) / "bin/python3"
+                python.parent.mkdir(parents=True)
+                python.touch()
+            return subprocess.CompletedProcess(args, 0)
         with patch.object(install, "ROOT", source), patch.object(install.Path, "home", return_value=home), \
              patch.object(install, "run", side_effect=fake_run), \
+             patch.object(install_push.subprocess, "run", side_effect=fake_push_run), \
              patch.dict(os.environ, {"XDG_STATE_HOME": str(home / ".local/state"), "XDG_CONFIG_HOME": str(home / ".config")}), \
              patch.object(install.socket, "socket"):
             with patch("sys.argv", ["install.py", "install"]):
@@ -220,11 +227,15 @@ class DesktopInstallTests(unittest.TestCase):
             for event in install.HOOK_EVENTS:
                 self.assertTrue(any(install.owns_hook(item, home / ".local/lib/paceman")
                     for group in installed_hooks[event] for item in group["hooks"]))
-            self.assertFalse((home / ".local/state/paceman/hub.sqlite3").exists())
+            self.assertTrue((home / ".local/state/paceman/hub.sqlite3").exists())
+            push_config = home / ".local/state/paceman/private/apns.json"
+            self.assertEqual(json.loads(push_config.read_text())["relayURL"], "https://relay.paceman.ai")
+            original_push_config = push_config.read_bytes()
             installed = Store(home / ".local/state/paceman/hub.sqlite3")
             client = installed.redeem(installed.invite("https://test.example")["invitation"], device=device())
             with patch("sys.argv", ["install.py", "install"]):
                 install.main()
+            self.assertEqual(push_config.read_bytes(), original_push_config)
             self.assertEqual(json.loads(hooks.read_text())["hooks"], installed_hooks)
             self.assertTrue(Store(installed.path).authorized(client["credential"]))
             unit = (home / ".config/systemd/user/paceman-source.service").read_text()

@@ -12,6 +12,7 @@ import macos.install as installer
 from macos.install import PYTHON, install_hooks
 from macos.codex_hook import EVENTS, QUESTION_MATCHER
 from macos.control import missing_hooks
+from service.hub import Store
 
 
 class MacInstallTests(unittest.TestCase):
@@ -100,7 +101,18 @@ class MacInstallTests(unittest.TestCase):
     def test_successful_service_start_replaces_install(self):
         self._exercise_replacement()
 
-    def _exercise_replacement(self, fail_start: bool = False, fail_hooks: bool = False):
+    def test_normal_install_prepares_relay_before_first_pairing(self):
+        self._exercise_replacement(relay_url="https://relay.paceman.ai")
+
+    def test_upgrade_preserves_existing_push_configuration(self):
+        self._exercise_replacement(relay_url="https://relay.paceman.ai", existing_push=True)
+
+    def test_failed_push_setup_reports_partial_install(self):
+        self._exercise_replacement(relay_url="https://relay.paceman.ai", fail_push=True)
+
+    def _exercise_replacement(self, fail_start: bool = False, fail_hooks: bool = False,
+                              relay_url: str | None = None, existing_push: bool = False,
+                              fail_push: bool = False):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "home"
             root = home / "Library/Application Support/Paceman"
@@ -133,7 +145,25 @@ class MacInstallTests(unittest.TestCase):
             hooks.parent.mkdir(parents=True)
             hooks.write_text('{"hooks":{},"existing":true}\n')
             old_hooks = hooks.read_bytes()
+            push_config = root / "private/apns.json"
+            preserved_push = None
+            if existing_push:
+                push_config.parent.mkdir()
+                source_id = Store(root / "data/hub.sqlite3").metadata("source_id")
+                preserved_push = json.dumps({"relayURL": "https://custom.example",
+                                             "sourceID": source_id, "credential": "x" * 43}) + "\n"
+                push_config.write_text(preserved_push)
+                (root / "push-venv/bin").mkdir(parents=True)
+                (root / "push-venv/bin/python3").touch()
             bootstraps = []
+            push_calls = []
+
+            def configure_push(*, relay_url):
+                push_calls.append(relay_url)
+                if fail_push:
+                    raise OSError("push dependencies unavailable")
+                push_config.parent.mkdir(exist_ok=True)
+                push_config.write_text(json.dumps({"relayURL": relay_url}))
 
             def command(args, **kwargs):
                 if args[:2] == ["/bin/launchctl", "bootstrap"]:
@@ -154,15 +184,17 @@ class MacInstallTests(unittest.TestCase):
                  patch.object(Path, "home", return_value=home), \
                  patch.object(Path, "replace", replace_path), \
                  patch.object(installer.subprocess, "run", side_effect=command), \
+                 patch("macos.install_push.install", side_effect=configure_push), \
                  patch("builtins.print"):
                 if fail_start:
                     with self.assertRaises(subprocess.CalledProcessError):
-                        installer._finish_install(staged_app)
+                        installer._finish_install(staged_app, relay_url=relay_url)
                 elif fail_hooks:
                     with self.assertRaises(OSError):
-                        installer._finish_install(staged_app)
+                        installer._finish_install(staged_app, relay_url=relay_url)
                 else:
-                    installer._finish_install(staged_app)
+                    ready = installer._finish_install(staged_app, relay_url=relay_url)
+                    self.assertEqual(ready, not fail_push)
 
             failed = fail_start or fail_hooks
             expected = "old" if failed else "new"
@@ -181,6 +213,11 @@ class MacInstallTests(unittest.TestCase):
                 self.assertEqual(len(json.loads(hooks.read_text())["hooks"]), 8)
             self.assertEqual(push_plist.exists(), failed)
             self.assertEqual(len(bootstraps), 3 if failed else 1)
+            if relay_url and not failed:
+                self.assertEqual(push_calls, [] if existing_push else [relay_url])
+                self.assertEqual(push_config.exists(), not fail_push or existing_push)
+                if existing_push:
+                    self.assertEqual(push_config.read_text(), preserved_push)
 
 
 if __name__ == "__main__":

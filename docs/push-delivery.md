@@ -1,6 +1,6 @@
 # Push delivery
 
-The source worker sends activity notifications and Live Activity updates through the authenticated relay, which holds the APNs key. It can also push Codex allowance to Apple Watch. An ordinary notification reaches the ESP32 watch through Apple's Notification Center Service (ANCS); the watch asks the iPhone to fetch the current snapshot and forward it over Bluetooth. Activity pushes carry an event hint or expiring display copy, never source credentials, prompts, or transcripts. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
+By default, the source worker sends activity notifications and Live Activity updates through the authenticated relay, which holds the APNs key. It can also push Codex allowance to Apple Watch. An ordinary notification reaches the ESP32 watch through Apple's Notification Center Service (ANCS); the watch asks the iPhone to fetch the current snapshot and forward it over Bluetooth. Activity pushes carry an event hint or expiring display copy, never source credentials, prompts, or transcripts. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
 
 | State | Ordinary notification |
 | --- | --- |
@@ -19,7 +19,9 @@ After APNs rejects a Live Activity start token, the source waits 24 hours before
 
 ## Development-only direct APNs
 
-The older direct sender remains temporarily for existing personal and Omarchy development setups. It is not a public install path: each configured source needs a private APNs `.p8` key. Its JSON config belongs outside this repository, readable only by its owner. The team, topic, and environment must match the signed iPhone app; Debug uses `development` and Release uses `production`.
+The older direct sender remains temporarily for existing personal and Omarchy development setups. It is not a public install path. The phone gets a device **push token** from Apple automatically; the developer-controlled secret here is an APNs **signing key** (`.p8`). [Apple issues a device token for each app](https://developer.apple.com/documentation/usernotifications/registering-your-app-with-apns) and [associates provider authentication with a developer team and its app topics](https://developer.apple.com/documentation/UserNotifications/establishing-a-token-based-connection-to-apns). Direct sending puts that key on each computer and supports one APNs environment per worker. A developer may use it for a private test build without operating a relay. For a fork distributed outside Paceman's Apple Developer team, use your own relay with your team's key and app signing instead of distributing the key to users' computers. Paceman's relay cannot send to an app signed with another team's app ID.
+
+The JSON config and `.p8` key belong outside this repository; keep the key readable only by its owner (`chmod 600`). The team, topic, and environment must match the signed iPhone app; Debug uses `development` and TestFlight uses `production`.
 
 ```json
 {
@@ -31,7 +33,18 @@ The older direct sender remains temporarily for existing personal and Omarchy de
 }
 ```
 
-These identifiers are examples. `keyPath` can be absolute or relative to the config. The [Mac installer](../macos/README.md#enable-iphone-notifications) installs the sender alongside its paired source. On Omarchy, install `requirements-push.txt` in the provider environment and run `python -m service.push --config CONFIG --data-dir SOURCE_DATA` against the installed paired source database. No public inbound port is needed for the direct setup.
+These identifiers are examples. `keyPath` can be absolute or relative to the config. On Mac, install with `python3 -m macos.install --no-push-setup`, then run `python3 -m macos.install_push --config /absolute/path/to/apns.json`; the key and sender are installed alongside the source.
+
+On Omarchy, install with `bash scripts/install-omarchy.sh --no-push-setup`, then run these commands from the repository root with a private config outside the repository. This is a foreground development worker; stop it when turning Sharing off:
+
+```sh
+python3 -m venv "$HOME/.local/state/paceman/direct-push-venv"
+"$HOME/.local/state/paceman/direct-push-venv/bin/python3" -m pip install -r requirements-push.txt
+cd "$HOME/.local/lib/paceman"
+"$HOME/.local/state/paceman/direct-push-venv/bin/python3" -m service.push --config /absolute/path/to/apns.json --data-dir "$HOME/.local/state/paceman"
+```
+
+Manage that worker's lifetime separately; the normal Omarchy installer manages only the relay sender. No public inbound port is needed for direct sending.
 
 ## Delivery boundaries
 

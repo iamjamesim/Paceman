@@ -54,9 +54,10 @@ Codex task and verify `lastAgentEventAt` advances in `pacemanctl status`.
 Report the installation as partial if review or the real event check is still
 pending.
 
-For iPhone notifications, pairing and hook delivery are insufficient. Follow
-the Mac APNs step in `macos/README.md`: locate an existing private config/key
-without exposing the key, install the per-user push worker against the paired
+For iPhone notifications, pairing and hook delivery are insufficient. The
+normal Mac installer prepares the relay sender before pairing. Follow the Mac
+notification check in `macos/README.md`: preserve any existing private
+config/key without exposing it, verify the per-user push worker against the
 source database, confirm APNs acceptance, and ask the user to confirm a new
 notification on the physical phone. Treat Apple acceptance and phone display
 as separate checks.

@@ -1,6 +1,7 @@
 """Agent-led per-user Mac install; preserves pairing and sharing preference."""
 from __future__ import annotations
 
+import argparse
 from contextlib import closing
 import json
 import os
@@ -15,6 +16,8 @@ import sys
 import tempfile
 
 from macos.codex_hook import QUESTION_MATCHER
+from service.hub import endpoint
+from service.push import DEFAULT_RELAY_URL
 
 REPO = Path(__file__).resolve().parent.parent
 ROOT = Path.home() / "Library/Application Support/Paceman"
@@ -190,9 +193,11 @@ def build_app(destination: Path | None = None):
     print("Paceman signing:", "Apple team identity" if identity != "-" else "ad hoc (unidentified developer)")
 
 
-def install():
+def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: bool = False):
     if sys.version_info < (3, 11):
         raise ValueError("Install Python 3.11 or newer and run this installer with it")
+    if relay_url is not None:
+        relay_url = endpoint(relay_url)
     os.umask(0o077)
     ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
     ROOT.chmod(0o700)
@@ -206,13 +211,16 @@ def install():
     staged_app = staging / "Paceman.app"
     try:
         build_app(staged_app)
-        _finish_install(staged_app)
+        notifications_ready = _finish_install(staged_app, relay_url=relay_url,
+                                              replace_push_config=replace_push_config)
     finally:
         if not (staging / "ROLLBACK_INCOMPLETE").exists():
             shutil.rmtree(staging, ignore_errors=True)
+    return notifications_ready
 
 
-def _finish_install(staged_app: Path):
+def _finish_install(staged_app: Path, *, relay_url: str | None = None,
+                    replace_push_config: bool = False):
     try:
         previous_status = json.loads((ROOT / "status.json").read_text())
         had_activity = previous_status.get("mode") == "macos" and float(previous_status.get("lastAgentEventAt", 0)) > 0
@@ -347,6 +355,43 @@ def _finish_install(staged_app: Path):
                           f"Recovery files were kept at {staging}") from error
         raise
 
+    notifications_ready = True
+    relay_configured_now = False
+    push_config = ROOT / "private/apns.json"
+    if relay_url is not None and (replace_push_config or not push_config.is_file()):
+        try:
+            # A paused source may never have started; create its persistent ID
+            # before configuring push so the first pairing includes the relay.
+            from service.hub import Store
+            from macos import install_push
+            Store(ROOT / "data/hub.sqlite3")
+            install_push.install(relay_url=relay_url)
+            relay_configured_now = True
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            notifications_ready = False
+            print(f"Notification setup is incomplete: {error}", file=sys.stderr)
+            print(f"The Mac source is installed. Retry with {shlex.quote(PYTHON)} -m macos.install_push "
+                  f"--relay-url {shlex.quote(relay_url)}", file=sys.stderr)
+    elif push_config.is_file():
+        try:
+            from service.hub import Store
+            from service.push import Config, RelayConfig
+            raw = json.loads(push_config.read_text())
+            if isinstance(raw, dict) and "relayURL" in raw:
+                relay = RelayConfig.load(raw)
+                if relay.source_id != Store(ROOT / "data/hub.sqlite3").metadata("source_id"):
+                    raise ValueError("Relay source ID does not match this installation")
+            else:
+                Config.load(push_config)
+            if not (ROOT / "push-venv/bin/python3").is_file():
+                raise ValueError("Push worker environment is missing")
+            print("Existing iPhone notification configuration preserved.")
+        except (OSError, ValueError, TypeError) as error:
+            notifications_ready = False
+            print(f"Existing notification setup needs repair: {error}", file=sys.stderr)
+    else:
+        print("Notification setup skipped as requested. Configure a relay before pairing a phone.")
+
     try:
         subprocess.run(["/usr/bin/pkill", "-x", "Paceman"], stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL)
@@ -371,7 +416,7 @@ def _finish_install(staged_app: Path):
         except (OSError, subprocess.SubprocessError) as error:
             print("Open at Login needs attention:", error)
     print(f"Installed {APP}")
-    print("Mac background activity: one Paceman item for the local source and optional iPhone notifications.")
+    print("Mac background activity: one Paceman item for the local source and iPhone notifications when configured.")
     print("The Paceman menu-bar app is open." if opened else f"Open the menu app from {APP}.")
     print("Manage Paceman controls whether the menu app opens at login.")
     print("Its Sharing switch pauses the background item;")
@@ -384,12 +429,8 @@ def _finish_install(staged_app: Path):
     else:
         print("NEXT: Guide the user through Paceman hook review before testing activity.")
         print_hook_review_steps(wrapper)
-    if (ROOT / "private/apns.json").is_file():
+    if notifications_ready and push_config.is_file():
         print("The Mac background item also runs the configured iPhone notification worker.")
-    else:
-        print("To deliver iPhone notifications, run:")
-        print(f"{shlex.quote(PYTHON)} -m macos.install_push --relay-url https://relay.paceman.ai")
-        print("The installer generates a private source credential. See macos/README.md for verification.")
     paired = 0
     database_path = ROOT / "data/hub.sqlite3"
     if database_path.is_file():
@@ -401,9 +442,12 @@ def _finish_install(staged_app: Path):
             pass
     if paired:
         print(f"Phone pairing preserved: {paired} connected installation{'s' if paired != 1 else ''}.")
+        if relay_configured_now:
+            print("Re-pair an existing phone if it was paired before relay setup.")
     else:
         print("NEXT: Configure private Tailscale Serve HTTPS to 127.0.0.1:8765.")
         print("Then click Paceman's QR button and scan it in the iPhone app's Connect computer flow.")
+    return notifications_ready
 
 
 def print_hook_review_steps(wrapper: Path):
@@ -427,8 +471,18 @@ def print_hook_review_steps(wrapper: Path):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--relay-url", help="Use a self-hosted relay instead of the Paceman relay")
+    selection.add_argument("--no-push-setup", action="store_true",
+                           help="Skip automatic relay setup for a developer-managed sender")
+    arguments = parser.parse_args()
     try:
-        install()
+        ready = install(relay_url=None if arguments.no_push_setup else
+                        arguments.relay_url or DEFAULT_RELAY_URL,
+                        replace_push_config=arguments.relay_url is not None)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"Paceman install failed: {error}", file=sys.stderr)
         raise SystemExit(1)
+    if not ready:
+        raise SystemExit(2)

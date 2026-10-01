@@ -38,10 +38,12 @@ def install(config_path: Path | None = None, *, relay_url: str | None = None):
     if config_path is not None:
         config_path = config_path.expanduser().resolve()
     if not (ROOT / "lib/service/push.py").is_file() or not (ROOT / "data/hub.sqlite3").is_file():
-        raise ValueError("Install and pair the Paceman Mac source first")
+        raise ValueError("Install the Paceman Mac source first")
     arguments = plistlib.loads(SOURCE_PLIST.read_bytes()).get("ProgramArguments", []) if SOURCE_PLIST.is_file() else []
     if not arguments or "PacemanBackground" not in arguments[0]:
         raise ValueError("Update the Mac app with macos/install.py before adding notifications")
+    if PLIST.is_file() and plistlib.loads(PLIST.read_bytes()).get("Label") != LABEL:
+        raise ValueError(f"Refusing to replace unrelated background item at {PLIST}")
     if relay_url is not None:
         source_id = Store(ROOT / "data/hub.sqlite3").metadata("source_id")
         previous = json.loads(CONFIG.read_text()) if CONFIG.is_file() else None
@@ -85,29 +87,28 @@ def install(config_path: Path | None = None, *, relay_url: str | None = None):
                  "keyPath": str(KEY)}
         if validated.watch_key_id:
             value.update(watchKeyID=validated.watch_key_id, watchKeyPath=str(WATCH_KEY))
+    python = VENV / "bin/python3"
+    if not python.is_file():
+        subprocess.run([runtime_python(), "-m", "venv", str(VENV)], check=True)
+    subprocess.run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
+                    "-r", str(REPO / "requirements-push.txt")], check=True)
     descriptor, name = tempfile.mkstemp(prefix=".apns-", dir=PRIVATE)
     temporary = Path(name)
     try:
         with os.fdopen(descriptor, "w") as output:
             json.dump(value, output)
             output.write("\n")
+        check = ("from pathlib import Path; from service.push import RelaySender, RelayConfig; "
+                 "import json,sys; RelaySender(RelayConfig.load(json.loads(Path(sys.argv[1]).read_text()))).close()"
+                 if relay else
+                 "from pathlib import Path; from service.push import APNs, Config; "
+                 "import sys; APNs(Config.load(Path(sys.argv[1]))).close()")
+        subprocess.run([str(python), "-c", check, str(temporary)], cwd=ROOT,
+                       env={**os.environ, "PYTHONPATH": str(ROOT / "lib")}, check=True)
         temporary.replace(CONFIG)
     finally:
         temporary.unlink(missing_ok=True)
     CONFIG.chmod(0o600)
-
-    python = VENV / "bin/python3"
-    if not python.is_file():
-        subprocess.run([runtime_python(), "-m", "venv", str(VENV)], check=True)
-    subprocess.run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
-                    "-r", str(REPO / "requirements-push.txt")], check=True)
-    check = ("from pathlib import Path; from service.push import RelaySender, RelayConfig; "
-             "import json; RelaySender(RelayConfig.load(json.loads(Path('private/apns.json').read_text()))).close()"
-             if relay else
-             "from pathlib import Path; from service.push import APNs, Config; "
-             "APNs(Config.load(Path('private/apns.json'))).close()")
-    subprocess.run([str(python), "-c", check], cwd=ROOT,
-                   env={**os.environ, "PYTHONPATH": str(ROOT / "lib")}, check=True)
     if relay:
         # Switching an existing alpha installation must not leave our APNs key behind.
         KEY.unlink(missing_ok=True)
@@ -118,8 +119,6 @@ def install(config_path: Path | None = None, *, relay_url: str | None = None):
             db.execute("UPDATE watch_push_devices SET next_attempt=0,attempts=0")
 
     if PLIST.is_file():
-        if plistlib.loads(PLIST.read_bytes()).get("Label") != LABEL:
-            raise ValueError(f"Refusing to replace unrelated background item at {PLIST}")
         subprocess.run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         PLIST.unlink()

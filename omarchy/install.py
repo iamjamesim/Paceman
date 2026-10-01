@@ -140,6 +140,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("install", "uninstall"))
     parser.add_argument("--no-bar", action="store_true", help="Install the daemon without an Omarchy widget")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--relay-url", help="Use a self-hosted relay instead of the Paceman relay")
+    selection.add_argument("--no-push-setup", action="store_true",
+                           help="Skip automatic relay setup for a developer-managed sender")
     args = parser.parse_args()
     home = Path.home()
     config = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
@@ -174,6 +178,12 @@ def main():
             return
         if sys.version_info < (3, 11):
             raise ValueError("Python 3.11 or later is required")
+        # The install script is launched with -I, which omits the checkout root.
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from service.hub import Store, endpoint
+        from service.push import Config, DEFAULT_RELAY_URL, RelayConfig
+        relay_url = endpoint(args.relay_url or DEFAULT_RELAY_URL)
         directory(hooks_path.parent)
         hooks_document, changed_hooks = hook_document(hooks_path, app)
         run("/usr/bin/systemctl", "--user", "show-environment")
@@ -203,6 +213,33 @@ def main():
         write(ctl, (ROOT / "omarchy/pacemanctl").read_bytes(), 0o755)
         write(unit, unit_content.encode())
         write(push_unit, push_unit_content.encode())
+        notification_error = None
+        relay_setup_attempted = False
+        push_config = state / "private/apns.json"
+        if not args.no_push_setup and (args.relay_url or not push_config.is_file()):
+            relay_setup_attempted = True
+            try:
+                from omarchy import install_push
+                Store(state / "hub.sqlite3")
+                install_push.configure(relay_url, app=app, state=state, restart=False, announce=False)
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                notification_error = str(error)
+        elif push_config.is_file():
+            try:
+                raw = json.loads(push_config.read_text())
+                if isinstance(raw, dict) and "relayURL" in raw:
+                    relay = RelayConfig.load(raw)
+                    if relay.source_id != Store(state / "hub.sqlite3").metadata("source_id"):
+                        raise ValueError("Relay source ID does not match this installation")
+                else:
+                    Config.load(push_config)
+                if not (state / "push-venv/bin/python3").is_file():
+                    raise ValueError("Push worker environment is missing")
+                print("Existing iPhone notification configuration preserved.")
+            except (OSError, ValueError, TypeError) as error:
+                notification_error = f"Existing push configuration needs repair: {error}"
+        else:
+            print("Notification setup skipped as requested. Configure a relay before pairing a phone.")
         if not args.no_bar:
             for name in ("manifest.json", "BarWidget.qml", "PanelContent.qml", "ConnectionRow.qml", "PacemanMark.qml", "PanelModel.js", "PairingOverlay.qml"):
                 write(plugin / name, (ROOT / "omarchy/plugin" / name).read_bytes())
@@ -241,6 +278,17 @@ def main():
         for event, purpose in HOOK_PURPOSES:
             print(f"  {event}: {purpose}")
         print("After review, run a fresh local task and check lastAgentEventAt in pacemanctl status.")
+        if notification_error:
+            print(f"Paceman source is installed, but notification setup is incomplete: {notification_error}",
+                  file=sys.stderr)
+            if relay_setup_attempted:
+                print(f"Retry from this checkout: /usr/bin/python3 -m omarchy.install_push "
+                      f"--relay-url {shlex.quote(relay_url)}", file=sys.stderr)
+            else:
+                print(f"Inspect the preserved configuration at {push_config}.", file=sys.stderr)
+            raise SystemExit(2)
+        if push_config.is_file():
+            print("iPhone notification sender configured. Pair with a fresh QR code if this phone was paired before relay setup.")
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         detail = getattr(error, "stderr", "") or str(error)
         print(f"Paceman installation: {detail.strip()}", file=sys.stderr)

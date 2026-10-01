@@ -19,7 +19,8 @@ unverified.
 2. Install a source on an [Apple Silicon Mac](macos/README.md) or [Omarchy 4.0+ desktop](omarchy/README.md).
 3. Install [Tailscale](https://tailscale.com/download) on phone and computer, configure a private Serve route on the computer, then scan its pairing code in Paceman. The platform guides cover hook review and the first real activity event.
 
-Locked-phone notifications use an optional source push worker and APNs relay.
+The Mac and Omarchy installers configure the [APNs relay](service/RELAY.md) for
+locked-phone notifications by default; the iPhone must still allow notifications.
 The Apple Watch app requires watchOS 11 or later;
 the [ESP32 watch](firmware/esp32-watch/README.md) is optional.
 

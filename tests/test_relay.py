@@ -394,6 +394,25 @@ class PublicRelayTests(unittest.TestCase):
         self.assertEqual(private.stat().st_mode & 0o777, 0o700)
         self.assertEqual((private / "apns.json").stat().st_mode & 0o777, 0o600)
 
+    def test_mac_push_dependency_failure_does_not_publish_config(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "installed"
+            (root / "lib/service").mkdir(parents=True)
+            (root / "lib/service/push.py").touch()
+            Store(root / "data/hub.sqlite3")
+            plist = Path(temporary) / "source.plist"
+            plist.write_bytes(plistlib.dumps({"ProgramArguments": ["/tmp/PacemanBackground"]}))
+            venv = root / "push-venv"
+            (venv / "bin").mkdir(parents=True)
+            (venv / "bin/python3").touch()
+            with (patch.multiple(mac_push, ROOT=root, PRIVATE=root / "private",
+                                 CONFIG=root / "private/apns.json", VENV=venv,
+                                 SOURCE_PLIST=plist, PLIST=Path(temporary) / "absent.plist"),
+                  patch.object(mac_push.subprocess, "run", side_effect=OSError("dependency install failed"))):
+                with self.assertRaises(OSError):
+                    mac_push.install(relay_url="https://relay.example")
+            self.assertFalse((root / "private/apns.json").exists())
+
     def test_mac_uninstall_revokes_source_before_discarding_credential(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

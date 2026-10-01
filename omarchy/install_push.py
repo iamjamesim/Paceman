@@ -11,12 +11,13 @@ from service.hub import Store, endpoint
 from service.push import RelayConfig
 
 
-def configure(relay_url: str):
+def configure(relay_url: str, *, app: Path | None = None, state: Path | None = None,
+              restart: bool = True, announce: bool = True):
     os.umask(0o077)
     relay_url = endpoint(relay_url)
     home = Path.home()
-    app = home / ".local/lib/paceman"
-    state = Path(os.environ.get("XDG_STATE_HOME", home / ".local/state")) / "paceman"
+    app = app or home / ".local/lib/paceman"
+    state = state or Path(os.environ.get("XDG_STATE_HOME", home / ".local/state")) / "paceman"
     config = state / "private/apns.json"
     if not (app / "service/push.py").is_file() or not (state / "hub.sqlite3").is_file():
         raise ValueError("Install Paceman first, then configure its relay")
@@ -36,11 +37,14 @@ def configure(relay_url: str):
         subprocess.run(["/usr/bin/python3", "-m", "venv", str(venv)], check=True)
     subprocess.run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
                     "-r", str(install.ROOT / "requirements-push.txt")], check=True)
+    subprocess.run([str(python), "-c", "from service.push import RelaySender; import httpx"],
+                   cwd=app, check=True)
     install.write(config, (json.dumps(value, separators=(",", ":")) + "\n").encode(), 0o600)
-    if not (state / "sharing-paused").exists():
+    if restart and not (state / "sharing-paused").exists():
         subprocess.run(["/usr/bin/systemctl", "--user", "restart", install.SERVICE], check=True)
-    print("Paceman will send iPhone notifications through the relay while Sharing is on.")
-    print("Pair the phone with a fresh QR code so it learns the relay address.")
+    if announce:
+        print("Paceman will send iPhone notifications through the relay while Sharing is on.")
+        print("Pair the phone with a fresh QR code so it learns the relay address.")
 
 
 def main():
