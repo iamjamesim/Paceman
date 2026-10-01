@@ -297,7 +297,9 @@ class PublicRelayTests(unittest.TestCase):
         paired = store.redeem(invitation["invitation"], device={"installationID": str(uuid.uuid4()),
             "name": "Phone", "platform": "ios"})
 
+        calls = []
         def respond(request):
+            calls.append(request.url.path)
             statuses = []
             raw = request.content
             value = self.app({"PATH_INFO": request.url.path, "REQUEST_METHOD": request.method,
@@ -310,6 +312,12 @@ class PublicRelayTests(unittest.TestCase):
                              httpx.Client(transport=httpx.MockTransport(respond)))
         self.addCleanup(sender.close)
         self.assertTrue(sender.sync_clients(store, 100))
+        self.assertEqual(calls, ["/v1/sources", "/v1/clients"])
+        self.assertTrue(sender.sync_clients(store, 200))
+        self.assertEqual(calls, ["/v1/sources", "/v1/clients"])
+        due = 100 + sender.sync_interval + 1
+        self.assertTrue(sender.sync_clients(store, due))
+        self.assertEqual(calls[-2:], ["/v1/sources", "/v1/clients"])
         self.assertEqual(self.call("/v1/destinations", "PUT", {"sourceID": identity,
             "clientID": paired["clientID"], "mode": "alert", "deviceToken": self.token,
             "environment": "production"}, paired["credential"])[0], 200)
@@ -319,9 +327,40 @@ class PublicRelayTests(unittest.TestCase):
                               "environment": "production"}, payload, headers, 100)
         self.assertEqual(result.status, 200)
         store.revoke(paired["clientID"])
-        self.assertTrue(sender.sync_clients(store, 101))
+        self.assertTrue(sender.sync_clients(store, due + 1))
         self.assertEqual(sender.send({"client_id": paired["clientID"], "token": self.token,
                                       "environment": "production"}, payload, headers, 101).status, 0)
+
+    def test_failed_mac_sync_backs_off_until_pairing_changes(self):
+        import httpx
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        store = Store(Path(temporary.name) / "hub.sqlite3")
+        requests = []
+        healthy = False
+
+        def respond(request):
+            requests.append(request.url.path)
+            return httpx.Response(200 if healthy else 503, json={})
+
+        sender = RelaySender(RelayConfig("https://relay.example", store.metadata("source_id"),
+                                         secrets.token_urlsafe(32)),
+                             httpx.Client(transport=httpx.MockTransport(respond)))
+        self.addCleanup(sender.close)
+        self.assertFalse(sender.sync_clients(store, 100))
+        self.assertFalse(sender.sync_clients(store, 101))
+        self.assertEqual(requests, ["/v1/sources"])
+        self.assertFalse(sender.sync_clients(store, 90))
+        self.assertEqual(requests, ["/v1/sources", "/v1/sources"])
+        invitation = store.invite("https://computer.example")
+        store.redeem(invitation["invitation"], device={"installationID": str(uuid.uuid4()),
+            "name": "Phone", "platform": "ios"})
+        sender.failures = 7
+        self.assertFalse(sender.sync_clients(store, 101))
+        self.assertEqual(sender.failures, 1)
+        healthy = True
+        self.assertTrue(sender.sync_clients(store, sender.next_attempt + 1))
+        self.assertEqual(requests[-2:], ["/v1/sources", "/v1/clients"])
 
     def test_mac_install_generates_source_credential_without_apns_key(self):
         temporary = tempfile.TemporaryDirectory()

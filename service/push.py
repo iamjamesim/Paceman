@@ -103,26 +103,53 @@ class RelaySender:
         self.client = client or httpx.Client(timeout=10, follow_redirects=False, trust_env=False)
         self.last_sync = 0.0
         self.last_clients = None
+        self.attempted_clients = None
+        self.last_attempt_at = None
+        self.failures = 0
+        self.next_attempt = 0.0
+        spread = int(hashlib.sha256(config.source_id.encode()).hexdigest()[:8], 16)
+        self.sync_interval = 3600 + spread % 600
+        self.retry_jitter = spread % 60
+
+    def _backoff(self, now: float) -> None:
+        self.failures += 1
+        self.next_attempt = now + min(120, 2 ** min(self.failures, 7)) + self.retry_jitter
 
     def sync_clients(self, store: Store, now: float) -> bool:
         """Replace server-side paired credentials before allowing any send."""
         with store.connect() as db:
             clients = [{"clientID": row[0], "credentialHash": row[1]}
                        for row in db.execute("SELECT id,hash FROM clients ORDER BY id")]
-        if clients == self.last_clients and now - self.last_sync < 10:
+        # Changed pairings sync on the next worker step; unchanged sources only
+        # reconcile periodically so idle Macs do not load the hosted relay.
+        if clients == self.last_clients and 0 <= now - self.last_sync < self.sync_interval:
             return True
+        if (clients == self.attempted_clients and self.last_attempt_at is not None
+                and self.last_attempt_at <= now < self.next_attempt):
+            return False
+        if (clients != self.attempted_clients
+                or self.last_attempt_at is not None and now < self.last_attempt_at):
+            self.failures = 0
+            self.next_attempt = 0.0
+        self.attempted_clients = clients
+        self.last_attempt_at = now
         headers = {"Authorization": "Bearer " + self.config.credential}
         try:
             created = self.client.post(self.config.url + "/v1/sources",
                                        json={"sourceID": self.config.source_id}, headers=headers)
             if created.status_code != 200:
+                self._backoff(now)
                 return False
             response = self.client.put(self.config.url + "/v1/clients",
                 json={"sourceID": self.config.source_id, "clients": clients}, headers=headers)
         except Exception:
+            self._backoff(now)
             return False
         if response.status_code != 200:
+            self._backoff(now)
             return False
+        self.failures = 0
+        self.next_attempt = 0.0
         self.last_clients, self.last_sync = clients, now
         return True
 

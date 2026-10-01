@@ -35,7 +35,9 @@ After [installing the Mac source](macos.md), point it at the project-operated re
 python3 -m macos.install_push --relay-url https://relay.paceman.ai
 ```
 
-The installer creates a source credential. Pair the iPhone with a fresh QR code, even if it was paired before. Changing relay hosts also requires a fresh pairing.
+The installer creates a source credential. Pair the iPhone with a fresh QR code, even if it was paired before. The paired iPhone activates the source with Apple's App Attest service; there are no operator-issued invites. Changing relay hosts also requires a fresh pairing.
+
+The Mac worker syncs a changed pairing list on its next step. When nothing has changed, it reconciles about once per hour, spread across sources to keep idle traffic low. Failed syncs back off; a new pairing bypasses that wait.
 
 For an installed Omarchy source, run `python3 -m omarchy.install_push --relay-url https://relay.paceman.ai` from the checkout. Its user push service follows Sharing and uses the same relay for Debug and TestFlight phones. Pair the phone again after configuring or changing the relay address.
 
