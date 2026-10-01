@@ -176,7 +176,7 @@ private struct PairingView: View {
     }
 
     var body: some View {
-        VStack(spacing: 17) {
+        VStack(spacing: 16) {
             PacemanMark().frame(width: 38, height: 38)
                 .foregroundStyle(Color(nsColor: .labelColor))
             Text("Connect your phone").font(.title2.weight(.semibold))
@@ -323,7 +323,7 @@ private struct Panel: View {
     }
 
     private var summary: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .center, spacing: 12) {
                 PacemanMark().frame(width: 40, height: 40)
                     .foregroundStyle(Color(nsColor: model.status.running ? .labelColor : .secondaryLabelColor))
@@ -400,7 +400,7 @@ private struct Panel: View {
                         model.expanded = model.expanded == connection.id ? nil : connection.id
                         model.confirming = nil
                     } label: {
-                        HStack(spacing: 9) {
+                        HStack(spacing: 8) {
                             Image(systemName: connection.platform == "ios" ? "iphone" : "personalhotspot")
                                 .frame(width: 20)
                             Text(connection.name).lineLimit(2)
@@ -410,25 +410,25 @@ private struct Panel: View {
                         }
                     }.buttonStyle(.plain)
                     Text(connectionStatus(connection))
-                        .font(.caption).foregroundStyle(.secondary).padding(.leading, 29)
+                        .font(.caption).foregroundStyle(.secondary).padding(.leading, 28)
                     if model.expanded == connection.id {
                         Text("Paired \(Date(timeIntervalSince1970: connection.pairedAt).formatted(date: .abbreviated, time: .omitted))")
-                            .font(.caption).foregroundStyle(.secondary).padding(.leading, 29)
+                            .font(.caption).foregroundStyle(.secondary).padding(.leading, 28)
                         if connection.platform == "ios" && model.status.sharingEnabled && model.status.running
                             && Date().timeIntervalSince1970 - connection.lastContactAt >= 30 {
                             Text("Open Paceman on your phone to check for updates.")
-                                .font(.caption).foregroundStyle(.secondary).padding(.leading, 29)
+                                .font(.caption).foregroundStyle(.secondary).padding(.leading, 28)
                         }
                         if model.confirming == connection.id {
                             Text("Remove access for “\(connection.name)”? Updates from this computer will stop. \(connection.platform == "ios" ? "Your watch stays paired. " : "")A new code is needed to reconnect.")
-                                .font(.caption).fixedSize(horizontal: false, vertical: true).padding(.leading, 29)
+                                .font(.caption).fixedSize(horizontal: false, vertical: true).padding(.leading, 28)
                             HStack {
                                 Button("Cancel") { model.confirming = nil }.keyboardShortcut(.defaultAction)
                                 Button("Remove access", role: .destructive) { model.remove(connection) }
-                            }.padding(.leading, 29)
+                            }.padding(.leading, 28)
                         } else {
                             Button("Remove access…") { model.confirming = connection.id }
-                                .font(.caption).padding(.leading, 29)
+                                .font(.caption).padding(.leading, 28)
                         }
                     }
                 }
