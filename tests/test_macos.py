@@ -1,3 +1,4 @@
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -421,7 +422,7 @@ class MacSourceTests(unittest.TestCase):
             root = Path(temporary)
             root.chmod(0o700)
             store = Store(root / "hub.sqlite3")
-            with sqlite3.connect(store.path) as db:
+            with closing(sqlite3.connect(store.path)) as db, db:
                 db.execute("CREATE TABLE mac_sessions (id TEXT PRIMARY KEY, turn TEXT NOT NULL, "
                            "state TEXT NOT NULL, updated REAL NOT NULL)")
             with MacSource(store, socket_path=root / "hook.sock") as source:

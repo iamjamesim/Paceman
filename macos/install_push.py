@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -113,7 +114,7 @@ def install(config_path: Path | None = None, *, relay_url: str | None = None):
         WATCH_KEY.unlink(missing_ok=True)
 
     if validated and validated.watch_key_id:
-        with sqlite3.connect(ROOT / "data/hub.sqlite3") as db:
+        with closing(sqlite3.connect(ROOT / "data/hub.sqlite3")) as db, db:
             db.execute("UPDATE watch_push_devices SET next_attempt=0,attempts=0")
 
     if PLIST.is_file():

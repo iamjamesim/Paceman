@@ -1,3 +1,4 @@
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -28,7 +29,7 @@ class MonitoringTests(unittest.TestCase):
 
     def test_existing_live_activity_tables_gain_alert_cursor(self):
         path = Path(self.tmp.name) / 'old-live.sqlite3'
-        with sqlite3.connect(path) as db:
+        with closing(sqlite3.connect(path)) as db, db:
             db.execute('CREATE TABLE live_activities (client_id TEXT PRIMARY KEY, activity_id TEXT, '
                        'token TEXT, environment TEXT, cursor INTEGER, expires REAL, '
                        'next_attempt REAL, attempts INTEGER)')
@@ -37,7 +38,7 @@ class MonitoringTests(unittest.TestCase):
             db.execute("INSERT INTO live_activities VALUES ('paired-phone', 'activity-1', 'token', "
                        "'development', 7, 1000, 0, 0)")
         Store(path)
-        with sqlite3.connect(path) as db:
+        with closing(sqlite3.connect(path)) as db, db:
             for table in ('live_activities', 'live_activity_starts'):
                 self.assertIn('alert_cursor',
                               {row[1] for row in db.execute(f'PRAGMA table_info({table})')})

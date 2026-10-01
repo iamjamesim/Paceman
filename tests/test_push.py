@@ -1,3 +1,4 @@
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -37,11 +38,11 @@ class PushWorkerTests(unittest.TestCase):
 
     def test_existing_source_database_adds_per_phone_name(self):
         old = Path(self.tmp.name) / "old.sqlite3"
-        with sqlite3.connect(old) as db:
+        with closing(sqlite3.connect(old)) as db, db:
             db.execute("CREATE TABLE clients(id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL, "
                        "created REAL NOT NULL, last_seen REAL NOT NULL DEFAULT 0)")
         Store(old)
-        with sqlite3.connect(old) as db:
+        with closing(sqlite3.connect(old)) as db, db:
             columns = {row[1] for row in db.execute("PRAGMA table_info(clients)")}
         self.assertIn("display_name", columns)
 

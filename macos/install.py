@@ -1,6 +1,7 @@
 """Agent-led per-user Mac install; preserves pairing and sharing preference."""
 from __future__ import annotations
 
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -393,7 +394,7 @@ def _finish_install(staged_app: Path):
     database_path = ROOT / "data/hub.sqlite3"
     if database_path.is_file():
         try:
-            with sqlite3.connect(f"file:{database_path}?mode=ro", uri=True) as database:
+            with closing(sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)) as database:
                 paired = database.execute("SELECT COUNT(*) FROM clients").fetchone()[0]
         except sqlite3.Error:
             # The source may not have initialized the database if sharing is off.
