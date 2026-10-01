@@ -169,7 +169,7 @@ final class SourceClient {
 
     func removeRelayClient(_ source: PairedSource) async throws {
         do {
-            try await relayCall(source, path: "v1/clients/self", method: "DELETE", fields: [:])
+            try await relayCall(source, path: "v2/clients/self", method: "DELETE", fields: [:])
         } catch let error as HubError where error.isUnauthorized {
             // The source may already have removed this client's relay record.
         }
@@ -198,6 +198,7 @@ final class SourceClient {
 
     func registerPush(_ source: PairedSource, token: String, environment: String,
                       displayName: String? = nil) async throws {
+        try await registerRelayDestination(source, mode: "alert", token: token, environment: environment)
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/push"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
@@ -210,7 +211,6 @@ final class SourceClient {
         guard registration.registered else {
             throw HubError.message("The computer did not confirm notification delivery")
         }
-        try await registerRelayDestination(source, mode: "alert", token: token, environment: environment)
     }
 
     func removePush(_ source: PairedSource) async throws {
@@ -218,10 +218,11 @@ final class SourceClient {
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         _ = try await response(request)
-        try await relayCall(source, path: "v1/destinations", method: "DELETE", fields: ["mode": "alert"])
+        try await relayCall(source, path: "v2/destinations", method: "DELETE", fields: ["mode": "alert"])
     }
 
     func registerWatchPush(_ source: PairedSource, token: String, environment: String) async throws {
+        try await registerRelayDestination(source, mode: "watch", token: token, environment: environment)
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/watch-push"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
@@ -233,39 +234,38 @@ final class SourceClient {
         guard try JSONDecoder().decode(Registration.self, from: data).registered else {
             throw HubError.message("The computer did not confirm Watch delivery")
         }
-        try await registerRelayDestination(source, mode: "watch", token: token, environment: environment)
     }
 
     func registerLiveActivity(_ source: PairedSource, id: String, token: String, environment: String) async throws {
-        try await liveActivityRequest(source, payload: ["activityID": id, "deviceToken": token, "environment": environment])
         try await registerRelayDestination(source, mode: "liveactivity", token: token,
                                            environment: environment, activityID: id)
+        try await liveActivityRequest(source, payload: ["activityID": id, "deviceToken": token, "environment": environment])
     }
 
     func removeLiveActivity(_ source: PairedSource, id: String) async throws {
         try await liveActivityRequest(source, payload: ["activityID": id, "action": "remove"])
-        try await relayCall(source, path: "v1/destinations", method: "DELETE",
+        try await relayCall(source, path: "v2/destinations", method: "DELETE",
                             fields: ["mode": "liveactivity", "activityID": id])
     }
 
     func recoverLiveActivity(_ source: PairedSource, id: String) async throws {
         try await liveActivityRequest(source, payload: ["activityID": id, "action": "recover"])
-        try await relayCall(source, path: "v1/destinations", method: "DELETE",
+        try await relayCall(source, path: "v2/destinations", method: "DELETE",
                             fields: ["mode": "liveactivity", "activityID": id])
     }
 
     func registerLiveActivityStart(_ source: PairedSource, token: String, environment: String,
                                    displayName: String? = nil) async throws {
+        try await registerRelayDestination(source, mode: "liveactivity", token: token,
+                                           environment: environment)
         try await liveActivityRequest(source, payload: ["action": "register-start", "deviceToken": token,
                                                         "environment": environment,
                                                         "displayName": displayName ?? ""])
-        try await registerRelayDestination(source, mode: "liveactivity", token: token,
-                                           environment: environment)
     }
 
     func removeLiveActivityStart(_ source: PairedSource) async throws {
         try await liveActivityRequest(source, payload: ["action": "remove-start"])
-        try await relayCall(source, path: "v1/destinations", method: "DELETE",
+        try await relayCall(source, path: "v2/destinations", method: "DELETE",
                             fields: ["mode": "liveactivity"])
     }
 
@@ -280,9 +280,13 @@ final class SourceClient {
 
     func registerRelayDestination(_ source: PairedSource, mode: String, token: String,
                                   environment: String, activityID: String = "") async throws {
-        var fields = ["mode": mode, "deviceToken": token, "environment": environment]
+        var fields = ["mode": mode, "tokenHash": sha256Hex(token), "environment": environment]
         if !activityID.isEmpty { fields["activityID"] = activityID }
-        try await relayCall(source, path: "v1/destinations", method: "PUT", fields: fields)
+        try await relayCall(source, path: "v2/destinations", method: "PUT", fields: fields)
+    }
+
+    private func sha256Hex(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private func validateRelay(_ url: URL) throws {
@@ -297,22 +301,20 @@ final class SourceClient {
                            fields: [String: String]) async throws {
         guard let relay = source.relayURL else { return }
         try validateRelay(relay)
-        if method == "PUT" {
-            try await AppAttestEnrollment.shared.activate(source: source)
+        guard let sourceHash = source.relayCredentialHash else {
+            throw HubError.message("The computer is missing relay pairing data")
         }
         var request = URLRequest(url: relay.appendingPathComponent(path))
         request.httpMethod = method
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject:
-            fields.merging(["sourceID": source.sourceID, "clientID": source.clientID]) { _, required in required })
-        // Pairing can finish just before the Mac worker syncs the new client's
-        // credential hash. Retry this active registration briefly.
-        for attempt in 0..<3 {
-            do { _ = try await response(request); return }
-            catch let error as HubError where error.isUnauthorized && method == "PUT" && attempt < 2 {
-                try await Task.sleep(nanoseconds: 700_000_000)
-            }
+            fields.merging(["sourceID": source.sourceID, "sourceCredentialHash": sourceHash,
+                            "clientID": source.clientID]) { _, required in required })
+        do { _ = try await response(request) }
+        catch let error as HubError where error.isUnauthorized && method == "PUT" {
+            try await AppAttestEnrollment.shared.activate(source: source)
+            _ = try await response(request)
         }
     }
 
@@ -327,19 +329,28 @@ final class SourceClient {
     }
 }
 
-/// A paired phone activates its computer on the relay before binding APNs tokens.
-/// Existing paired sources without a relay credential hash keep their legacy path.
+/// A paired phone approves its client credential before registering destination hashes.
 actor AppAttestEnrollment {
     static let shared = AppAttestEnrollment()
-    private var activeTask: Task<Void, Error>?
+    private var activeTasks: [String: Task<Void, Error>] = [:]
+    private var latestTask: Task<Void, Error>?
     private let session = URLSession(configuration: .ephemeral, delegate: NoRedirect(), delegateQueue: nil)
 
     func activate(source: PairedSource) async throws {
         guard source.relayURL != nil, source.relayCredentialHash != nil else { return }
-        if let task = activeTask { try await task.value }
-        let task = Task { try await performActivation(source: source) }
-        activeTask = task
-        defer { activeTask = nil }
+        let taskKey = source.sourceID + ":" + source.clientID + ":" + source.credential
+        if let task = activeTasks[taskKey] {
+            try await task.value
+            return
+        }
+        let previous = latestTask
+        let task = Task {
+            if let previous { _ = try? await previous.value }
+            try await performActivation(source: source)
+        }
+        activeTasks[taskKey] = task
+        latestTask = task
+        defer { activeTasks[taskKey] = nil }
         try await task.value
     }
 
@@ -367,18 +378,15 @@ actor AppAttestEnrollment {
         }
         let normalizedKeyID = keyID.replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-        let fields = ["sourceID": source.sourceID, "credentialHash": credentialHash,
+        let clientHash = SHA256.hash(data: Data(source.credential.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let fields = ["sourceID": source.sourceID, "sourceCredentialHash": credentialHash,
+                      "clientID": source.clientID, "clientCredentialHash": clientHash,
                       "keyID": normalizedKeyID, "environment": environment]
-        let challengeData: Data
-        do {
-            challengeData = try await post(relay: relay, path: "v1/attest/challenge", fields: fields)
-        } catch HubError.http(404) {
-            // The previously deployed relay accepts source registration directly.
-            return
-        }
+        let challengeData = try await post(relay: relay, path: "v2/attest/challenge", fields: fields)
         struct Challenge: Decodable { let kind: String; let challenge: String }
         let challenge = try JSONDecoder().decode(Challenge.self, from: challengeData)
-        guard ["attest", "assert"].contains(challenge.kind), challenge.challenge.count <= 512 else {
+        guard ["attest", "assert"].contains(challenge.kind), challenge.challenge.count <= 768 else {
             throw HubError.message("Invalid app verification challenge")
         }
         let hash = Data(SHA256.hash(data: Data(challenge.challenge.utf8)))
@@ -411,7 +419,7 @@ actor AppAttestEnrollment {
         }
         let encoded = proof.base64EncodedString().replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-        _ = try await post(relay: relay, path: "v1/attest/activate",
+        _ = try await post(relay: relay, path: "v2/attest/approve",
                            fields: fields.merging(["kind": challenge.kind, "challenge": challenge.challenge,
                                                    "proof": encoded]) { _, new in new })
     }

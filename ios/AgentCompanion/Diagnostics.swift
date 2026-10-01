@@ -39,13 +39,17 @@ final class Diagnostics {
 
     func recordError(_ stage: String, error: Error?) {
         let nsError = error as NSError?
-        append([
+        var entry: [String: Any] = [
             "at": Date().timeIntervalSince1970,
             "uptime": ProcessInfo.processInfo.systemUptime,
             "stage": stage,
             "errorDomain": nsError?.domain ?? "unknown",
             "errorCode": nsError?.code ?? 0,
-        ])
+        ]
+        if let hubError = error as? HubError, case let .http(status) = hubError {
+            entry["httpStatus"] = status
+        }
+        append(entry)
     }
 
     func recordBluetoothError(_ stage: String, error: Error?) {

@@ -7,6 +7,7 @@ from pathlib import Path
 import plistlib
 import shlex
 import shutil
+import signal
 import subprocess
 import tempfile
 from urllib.request import Request, build_opener, HTTPRedirectHandler
@@ -33,7 +34,7 @@ def revoke_relay_source(config_path: Path) -> str | None:
         if not isinstance(value, dict) or "relayURL" not in value:
             return None
         config = RelayConfig.load(value)
-        request = Request(config.url + "/v1/sources",
+        request = Request(config.url + "/v2/sources",
             data=json.dumps({"sourceID": config.source_id}).encode(), method="DELETE",
             headers={"Authorization": "Bearer " + config.credential,
                      "Content-Type": "application/json"})
@@ -76,6 +77,28 @@ def cleaned_hooks(path: Path | None = None):
     return document if changed else None
 
 
+def stop_menu_app(executable: Path) -> None:
+    """Close only this user's installed Paceman menu process."""
+    if not executable.is_file():
+        return
+    result = subprocess.run(["/usr/bin/pgrep", "-U", str(os.getuid()),
+                             "-f", "-x", str(executable)],
+                            capture_output=True, text=True, timeout=5)
+    if result.returncode == 1:  # The menu app was not open.
+        return
+    if result.returncode != 0:
+        raise OSError("Could not close the Paceman menu app")
+    for value in result.stdout.splitlines():
+        pid = int(value)
+        if pid == os.getppid():
+            # A menu-initiated uninstall closes its parent after reporting success.
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+
 def uninstall():
     if ROOT.is_symlink() or (ROOT.exists() and ROOT.stat().st_uid != os.getuid()):
         raise ValueError("Paceman data directory is not owned by this user")
@@ -92,6 +115,7 @@ def uninstall():
     if login_command.is_file():
         subprocess.run([str(login_command), "--unregister-login"], check=True,
                        capture_output=True, text=True, timeout=20)
+    stop_menu_app(login_command)
 
     for path, label in ((PLIST, LABEL), (PUSH_PLIST, PUSH_LABEL)):
         if path.exists():

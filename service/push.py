@@ -103,68 +103,56 @@ class RelaySender:
         import httpx
         self.config = config
         self.client = client or httpx.Client(timeout=10, follow_redirects=False, trust_env=False)
-        self.last_sync = 0.0
-        self.last_clients = None
-        self.attempted_clients = None
-        self.last_attempt_at = None
-        self.failures = 0
-        self.next_attempt = 0.0
-        spread = int(hashlib.sha256(config.source_id.encode()).hexdigest()[:8], 16)
-        self.sync_interval = 3600 + spread % 600
-        self.retry_jitter = spread % 60
+        self.next_revoke_attempt = 0.0
+        self.revoke_failures = 0
+        self.last_revocations = ()
 
-    def _backoff(self, now: float) -> None:
-        self.failures += 1
-        self.next_attempt = now + min(120, 2 ** min(self.failures, 7)) + self.retry_jitter
-
-    def sync_clients(self, store: Store, now: float) -> bool:
-        """Replace server-side paired credentials before allowing any send."""
+    def revoke_pending(self, store: Store, now: float | None = None) -> None:
+        """Retry local revocations without holding up unrelated push delivery."""
+        now = time.time() if now is None else now
         with store.connect() as db:
-            clients = [{"clientID": row[0], "credentialHash": row[1]}
-                       for row in db.execute("SELECT id,hash FROM clients ORDER BY id")]
-        # Changed pairings sync on the next worker step; unchanged sources only
-        # reconcile periodically so idle Macs do not load the hosted relay.
-        if clients == self.last_clients and 0 <= now - self.last_sync < self.sync_interval:
-            return True
-        if (clients == self.attempted_clients and self.last_attempt_at is not None
-                and self.last_attempt_at <= now < self.next_attempt):
-            return False
-        if (clients != self.attempted_clients
-                or self.last_attempt_at is not None and now < self.last_attempt_at):
-            self.failures = 0
-            self.next_attempt = 0.0
-        self.attempted_clients = clients
-        self.last_attempt_at = now
-        headers = {"Authorization": "Bearer " + self.config.credential}
-        try:
-            created = self.client.post(self.config.url + "/v1/sources",
-                                       json={"sourceID": self.config.source_id}, headers=headers)
-            if created.status_code != 200:
-                self._backoff(now)
-                return False
-            response = self.client.put(self.config.url + "/v1/clients",
-                json={"sourceID": self.config.source_id, "clients": clients}, headers=headers)
-        except Exception:
-            self._backoff(now)
-            return False
-        if response.status_code != 200:
-            self._backoff(now)
-            return False
-        self.failures = 0
-        self.next_attempt = 0.0
-        self.last_clients, self.last_sync = clients, now
-        return True
+            pending = db.execute("SELECT client_id,client_hash FROM relay_revocations").fetchall()
+        batch = tuple(tuple(row) for row in pending)
+        if batch != self.last_revocations:
+            self.next_revoke_attempt = 0.0
+            self.revoke_failures = 0
+            self.last_revocations = batch
+        if now < self.next_revoke_attempt:
+            return
+        failed = False
+        for client_id, client_hash in pending:
+            try:
+                response = self.client.request("DELETE", self.config.url + "/v2/clients",
+                    json={"sourceID": self.config.source_id, "clientID": client_id,
+                          "clientCredentialHash": client_hash},
+                    headers={"Authorization": "Bearer " + self.config.credential})
+            except Exception:
+                failed = True
+                continue
+            if response.status_code == 200:
+                with store.connect() as db:
+                    db.execute("DELETE FROM relay_revocations WHERE client_id=? AND client_hash=?",
+                               (client_id, client_hash))
+            else:
+                failed = True
+        if failed:
+            self.revoke_failures += 1
+            self.next_revoke_attempt = now + min(300, 2 ** min(self.revoke_failures, 8))
+        else:
+            self.revoke_failures = 0
+            self.next_revoke_attempt = 0.0
 
     def send(self, device: dict, payload: dict, headers: dict, now: float) -> Result:
         import httpx
         request = {"sourceID": self.config.source_id, "clientID": device["client_id"],
+                   "clientCredentialHash": device["client_hash"],
                    "deviceToken": device["token"],
                    "environment": device["environment"], "mode": device.get("mode", "alert"),
                    "payload": payload, "headers": headers}
         if request["mode"] == "liveactivity":
             request["activityID"] = device.get("activity_id", "")
         try:
-            response = self.client.post(self.config.url + "/v1/send", json=request,
+            response = self.client.post(self.config.url + "/v2/send", json=request,
                 headers={"Authorization": "Bearer " + self.config.credential})
         except httpx.HTTPError:
             return Result(0, "TransportError", headers["apns-id"])
@@ -385,8 +373,8 @@ class Worker:
     def step(self, now=None):
         now = time.time() if now is None else now
         self.store.tick(now)
-        if isinstance(self.sender, RelaySender) and not self.sender.sync_clients(self.store, now):
-            return
+        if isinstance(self.sender, RelaySender):
+            self.sender.revoke_pending(self.store, now)
         snapshot = self.store.snapshot()
         self.step_live_activities(now, snapshot)
         self.step_watch_allowance(now, snapshot)
@@ -409,7 +397,7 @@ class Worker:
             # Re-check ownership immediately before sending; revocation also removes the destination.
             with self.store.connect() as db:
                 current = db.execute("SELECT * FROM push_devices WHERE client_id=?", (device["client_id"],)).fetchone()
-                owner = db.execute("SELECT display_name FROM clients WHERE id=?", (device["client_id"],)).fetchone()
+                owner = db.execute("SELECT display_name,hash FROM clients WHERE id=?", (device["client_id"],)).fetchone()
                 live_alerted = db.execute(
                     "SELECT 1 FROM live_activities WHERE client_id=? AND alert_cursor>=? "
                     "UNION SELECT 1 FROM live_activity_starts WHERE client_id=? AND alert_cursor>=?",
@@ -418,7 +406,7 @@ class Worker:
                 continue
             payload, headers = notification(source_id, generation, event, now,
                                             owner["display_name"], quiet=bool(live_alerted))
-            result = self.sender.send(device, payload, headers, now)
+            result = self.sender.send({**device, "client_hash": owner["hash"]}, payload, headers, now)
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             retry = result.status in (0, 429, 500, 503) or result.reason == "ExpiredProviderToken"
             minimum = 10
@@ -471,10 +459,11 @@ class Worker:
             with self.store.connect() as db:
                 current = db.execute("SELECT * FROM watch_push_devices WHERE client_id=?",
                                      (device["client_id"],)).fetchone()
-            if current is None or dict(current) != device:
+                owner = db.execute("SELECT hash FROM clients WHERE id=?", (device["client_id"],)).fetchone()
+            if current is None or dict(current) != device or owner is None:
                 continue
             payload, headers = watch_allowance_notification(snapshot["sourceID"], allowance, now)
-            result = self.sender.send({**device, "mode": "watch"}, payload, headers, now)
+            result = self.sender.send({**device, "mode": "watch", "client_hash": owner["hash"]}, payload, headers, now)
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             accepted = result.status == 200
             retryable = result.status in (0, 429, 500, 503) or result.reason in (
@@ -531,7 +520,7 @@ class Worker:
             # A rotated token, replacement activity or revoked pairing invalidates this send.
             with self.store.connect() as db:
                 current = db.execute("SELECT * FROM live_activities WHERE client_id=?", (device["client_id"],)).fetchone()
-                owner = db.execute("SELECT display_name FROM clients WHERE id=?", (device["client_id"],)).fetchone()
+                owner = db.execute("SELECT display_name,hash FROM clients WHERE id=?", (device["client_id"],)).fetchone()
                 ordinary = db.execute("SELECT cursor,last_result FROM push_devices WHERE client_id=?",
                                       (device["client_id"],)).fetchone()
             if not owner or current is None or dict(current) != device:
@@ -546,7 +535,7 @@ class Worker:
                 alert=live_alert(alert_event, owner["display_name"]) if alert_event else None)
             if alert_event:
                 headers["apns-priority"] = "10"
-            result = self.sender.send({**device, "mode": "liveactivity"}, payload, headers, now)
+            result = self.sender.send({**device, "mode": "liveactivity", "client_hash": owner["hash"]}, payload, headers, now)
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             accepted = result.status == 200
             with self.store.connect() as db:
@@ -593,7 +582,7 @@ class Worker:
             with self.store.connect() as db:
                 current = db.execute("SELECT * FROM live_activity_starts WHERE client_id=?", (device["client_id"],)).fetchone()
                 active = db.execute("SELECT 1 FROM live_activities WHERE client_id=?", (device["client_id"],)).fetchone()
-                owner = db.execute("SELECT display_name FROM clients WHERE id=?", (device["client_id"],)).fetchone()
+                owner = db.execute("SELECT display_name,hash FROM clients WHERE id=?", (device["client_id"],)).fetchone()
                 ordinary = db.execute("SELECT cursor,last_result FROM push_devices WHERE client_id=?",
                                       (device["client_id"],)).fetchone()
             if active or current is None or dict(current) != device or owner is None:
@@ -610,7 +599,7 @@ class Worker:
                       "tokenFingerprint": hashlib.sha256(device["token"].encode()).hexdigest()[:12],
                       "apnsID": headers["apns-id"],
                       "sender": "relay" if isinstance(self.sender, RelaySender) else "direct"})
-            result = self.sender.send({**device, "mode": "liveactivity"}, payload, headers, now)
+            result = self.sender.send({**device, "mode": "liveactivity", "client_hash": owner["hash"]}, payload, headers, now)
             accepted = result.status == 200
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             with self.store.connect() as db:

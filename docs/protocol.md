@@ -127,22 +127,29 @@ Push registration is authenticated and scoped to the paired client:
 | `POST /v1/live-activity` | iPhone Live Activity start/update token, or its removal. |
 | `POST /v1/watch-push` | Optional watchOS app background-push token for allowance only. |
 
-The source owns the local registrations and syncs hashed paired-client credentials
-to the relay. The phone separately registers each APNs token with the relay using
-its paired-client credential. The relay stores hashed source credentials and
-source/client/token bindings in PostgreSQL. For a new source, the phone first
-requests a five-minute `POST /v1/attest/challenge` bound to the source ID,
-source credential hash, App Attest key ID, and APNs environment. It returns
-`kind` (`attest` for a new key or `assert` for a known key) and `challenge`.
-The phone submits the Apple proof to `POST /v1/attest/activate`; a valid proof
-grants a 15-minute registration claim. The Mac then calls `POST /v1/sources`
-with its own bearer credential. Existing registered sources continue to work
-without a new claim. Its `POST /v1/send` requires a source
-bearer credential, source and client UUIDs, an exact registered token and
-environment, APNs mode (and ActivityKit ID when applicable), approved payload,
-and approved headers. Removing or re-pairing a phone clears its relay bindings;
-the source worker also syncs removals. The APNs signing key and topic remain on
-the relay. See
+The phone first approves a source/client pairing on the relay. Its five-minute
+`POST /v2/attest/challenge` binds the source ID and relay-credential hash,
+client ID and pairing-credential hash, App Attest key ID, and APNs environment.
+The phone sends the Apple proof to `POST /v2/attest/approve` once for that
+pairing. The relay accepts a pending approval without waiting for a Mac call;
+it does not finalize ownership of the source ID until a matching Mac send.
+
+For each APNs token, the phone uses its pairing credential to register the
+SHA-256 hash of the lowercase token at `PUT /v2/destinations`, then sends the
+raw token to the source's local push endpoint. Token updates need no new App
+Attest proof. The source stores the raw token and its paired client's credential
+hash; the relay stores only hashes. A new token temporarily overlaps the old
+binding for ten minutes so a source update cannot be rejected mid-rotation.
+
+The Mac sends bounded activity through `POST /v2/send` with its relay bearer
+credential, the locally stored client credential hash, and the raw APNs token.
+The relay requires the exact phone-approved source, client, token, environment,
+mode, and ActivityKit ID before calling APNs. The first valid send also confirms
+the source credential. No separate source registration or whole-client-list sync
+is required. Removing or re-pairing a phone deletes its local destination and
+queues a durable relay revocation for the old client credential; the phone can
+also revoke its own approval. The APNs signing key and topic remain on the
+relay. See
 [relay setup](../service/RELAY.md).
 
 An ordinary alert (`apns-push-type: alert`) contains user-visible `aps` text

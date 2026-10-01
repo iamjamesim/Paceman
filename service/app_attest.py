@@ -1,4 +1,4 @@
-"""Verify Apple App Attest proofs for relay source activation.
+"""Verify Apple App Attest proofs for relay pairing approval.
 
 The pinned root is Apple's public App Attestation Root CA certificate, from
 https://www.apple.com/certificateauthority/private/ . Neither APNs tokens nor

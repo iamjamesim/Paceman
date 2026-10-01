@@ -1,6 +1,6 @@
 # APNs relay
 
-The project operates the APNs relay and keeps its signing key off users' computers. A source enrolls with its own credential; paired iPhones register Apple-issued device tokens with a separate credential. To deliver a notification, the relay receives the destination token and bounded activity display data, which can include the computer name and a short workspace label. It rejects prompts and transcripts. See [push delivery](../docs/push-delivery.md) for notification formats.
+The project operates the APNs relay and keeps its signing key off users' computers. A paired iPhone approves a source/client pairing with App Attest and registers hashes of its Apple-issued push tokens. The source keeps the raw tokens. On a send, the relay checks the source credential, paired-client hash, and exact token binding before forwarding bounded activity display data to APNs. It rejects prompts and transcripts. See [push delivery](../docs/push-delivery.md) for notification formats.
 
 ## Project operator: deploy on Render
 
@@ -33,7 +33,7 @@ The normal [Mac](../macos/README.md) and [Omarchy](../omarchy/README.md) install
 
 If a prior install skipped notification setup or needs repair, run `python3 -m macos.install_push --relay-url https://relay.paceman.ai` on Mac or `python3 -m omarchy.install_push --relay-url https://relay.paceman.ai` on Omarchy from the repository root.
 
-Setup creates a source credential. Pair the iPhone with a fresh QR code if it was paired before relay setup or the relay host changed. The paired iPhone activates the source with Apple's App Attest service; there are no operator-issued invites.
+Setup creates a source credential. Pair the iPhone with a fresh QR code if it was paired before relay setup or the relay host changed. The phone approves its pairing with Apple's App Attest service, registers each token hash with the relay, and then gives the raw token to the source. The first authenticated send confirms the source; the Mac worker makes no preliminary registration or client-list sync call.
 
 The Omarchy user push service follows Sharing. Both platforms use the same relay for Debug and TestFlight phones. The phone receives its own APNs device token from Apple; users do not bring a token to installation. A fork signed by a different Apple Developer team needs its own relay and matching APNs key, app IDs, and signing. The project's relay cannot deliver to that fork's app.
 
@@ -41,6 +41,6 @@ The Omarchy user push service follows Sharing. Both platforms use the same relay
 
 `/healthz` should list both `development` and `production` under `apnsEnvironments`. After a fresh source event, check `~/Library/Application Support/Paceman/data/push-delivery.jsonl` on Mac or `~/.local/state/paceman/push-delivery.jsonl` on Omarchy for APNs `status: 200`, then confirm a **new** update on the physical phone. APNs acceptance alone does not prove display.
 
-Removing phone access also removes its relay destinations. Mac uninstall requests source revocation; if the relay is unreachable, it reports the source ID for manual cleanup. Revoked IDs cannot re-enroll. Postgres stores credential and token hashes, App Attest public keys and counters, and expiring claims. Defaults allow 20 active sources per App Attest key and 500 registrations per day; `PACEMAN_MAX_SOURCES_PER_ATTEST_KEY` and `PACEMAN_DAILY_ENROLLMENT_LIMIT` adjust them. Monitor rejection and rate-limit logs without recording credentials or tokens.
+Removing phone access deletes its local destinations and queues an idempotent relay revocation for the old client credential; the worker retries failures. Mac uninstall requests source revocation; if the relay is unreachable, it reports the source ID for manual cleanup. Revoked IDs cannot re-enroll. Postgres stores credential and token hashes, App Attest public keys and counters, pairing approvals, and revocation tombstones. Defaults allow 20 sources per App Attest key and 500 new source approvals per day; `PACEMAN_MAX_SOURCES_PER_ATTEST_KEY` and `PACEMAN_DAILY_ENROLLMENT_LIMIT` adjust them. Monitor rejection and rate-limit logs without recording credentials or tokens.
 
-Deploy the iPhone build with App Attest before requiring attestation on the relay. Existing registrations keep working; new Mac pairings need the updated phone. Confirm fresh TestFlight pairing and APNs delivery on a physical iPhone. See [protocol](../docs/protocol.md#phone-notifications-and-live-activities) for the wire contract.
+Deploy the relay and matching iPhone/Mac source builds together for this test. Confirm fresh TestFlight pairing and APNs delivery on a physical iPhone. See [protocol](../docs/protocol.md#phone-notifications-and-live-activities) for the wire contract.

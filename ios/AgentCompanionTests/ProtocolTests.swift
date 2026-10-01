@@ -4,6 +4,7 @@ import CoreBluetooth
 import CoreLocation
 import WeatherKit
 import MapKit
+import CryptoKit
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
@@ -683,22 +684,30 @@ final class ProtocolTests: XCTestCase {
         let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: id,
                                     invitation: String(repeating: "x", count: 43),
                                     expiresAt: Date().timeIntervalSince1970 + 300)
+        var requestPaths: [String] = []
         let client = stubClient { request in
+            requestPaths.append(request.url?.path ?? "")
             switch request.url?.path {
             case "/v1/pair":
                 return (200, try JSONSerialization.data(withJSONObject: ["schema": 1,
                     "sourceID": id, "clientID": UUID().uuidString, "credential": "phone-secret",
-                    "relayURL": "https://relay.example"]))
+                    "relayURL": "https://relay.example",
+                    "relayCredentialHash": String(repeating: "a", count: 64)]))
             case "/v1/push":
                 XCTAssertEqual(request.url?.host, "test.example")
                 return (200, Data(#"{"registered":true}"#.utf8))
-            case "/v1/destinations":
+            case "/v2/destinations":
                 XCTAssertEqual(request.url?.host, "relay.example")
                 XCTAssertEqual(request.httpMethod, "PUT")
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer phone-secret")
                 let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
                 XCTAssertEqual(body["sourceID"] as? String, id)
+                XCTAssertEqual(body["sourceCredentialHash"] as? String, String(repeating: "a", count: 64))
                 XCTAssertEqual(body["mode"] as? String, "alert")
+                XCTAssertEqual(body["tokenHash"] as? String,
+                               SHA256.hash(data: Data(String(repeating: "ab", count: 32).utf8))
+                                   .map { String(format: "%02x", $0) }.joined())
+                XCTAssertNil(body["deviceToken"])
                 XCTAssertNil(body["prompt"])
                 XCTAssertNil(body["transcript"])
                 return (200, Data(#"{"registered":true}"#.utf8))
@@ -709,6 +718,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(paired.relayURL?.absoluteString, "https://relay.example")
         try await client.registerPush(paired, token: String(repeating: "ab", count: 32),
                                       environment: "production")
+        XCTAssertEqual(requestPaths, ["/v1/pair", "/v2/destinations", "/v1/push"])
     }
 
     func testPushRegistrationRequiresServerConfirmation() async throws {

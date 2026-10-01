@@ -13,7 +13,7 @@ Apple Watch allowance changes are spaced at least 20 minutes per destination, wi
 
 ## Authenticated relay
 
-The Mac enrolls with a source credential; the phone registers its own token with its pairing credential. The relay checks both identities, the token, environment, and push mode before calling APNs. Removing a client clears its local destination and syncs the removal to the relay. See [relay setup](../service/RELAY.md) for deployment and revocation, and [protocol](protocol.md#phone-notifications-and-live-activities) for the request contract.
+The phone approves its pairing with App Attest and registers each APNs token hash using its pairing credential before sending the raw token to the Mac. The Mac's first push presents its source credential and locally stored client hash; the relay checks both against the phone's approved token, environment, and mode before calling APNs. Removing a client clears its local destination and queues relay revocation until acknowledged. See [relay setup](../service/RELAY.md) for deployment and revocation, and [protocol](protocol.md#phone-notifications-and-live-activities) for the request contract.
 
 After APNs rejects a Live Activity start token, the source waits 24 hours before retrying that token. A new token or environment can be tried immediately. Re-registering the rejected token does not repair it; ActivityKit controls replacement.
 

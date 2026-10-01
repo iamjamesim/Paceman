@@ -195,125 +195,127 @@ class RelayApp:
         if environ.get("PATH_INFO") == "/healthz" and environ.get("REQUEST_METHOD") == "GET":
             return answer("200 OK", {"ok": True, "apnsEnvironments": sorted(self.sender.environments)})
         path, method = environ.get("PATH_INFO"), environ.get("REQUEST_METHOD")
-        if (path, method) not in (("/v1/sources", "POST"), ("/v1/sources", "DELETE"),
-                                  ("/v1/attest/challenge", "POST"),
-                                  ("/v1/attest/activate", "POST"),
-                                  ("/v1/clients", "PUT"), ("/v1/clients/self", "DELETE"),
-                                  ("/v1/destinations", "PUT"),
-                                  ("/v1/destinations", "DELETE"), ("/v1/send", "POST")):
+        if isinstance(path, str) and path.startswith("/v2/"):
+            return self.v2(environ, start_response)
+        return answer("404 Not Found", {"error": "NotFound"})
+
+    def v2(self, environ, start_response):
+        def answer(status, value):
+            body = json.dumps(value, separators=(",", ":")).encode()
+            start_response(status, [("Content-Type", "application/json"), ("Content-Length", str(len(body))),
+                                    ("Cache-Control", "no-store")])
+            return [body]
+        path, method = environ.get("PATH_INFO"), environ.get("REQUEST_METHOD")
+        if (path, method) not in (("/v2/attest/challenge", "POST"), ("/v2/attest/approve", "POST"),
+                                  ("/v2/destinations", "PUT"), ("/v2/destinations", "DELETE"),
+                                  ("/v2/clients/self", "DELETE"), ("/v2/clients", "DELETE"),
+                                  ("/v2/sources", "DELETE"), ("/v2/send", "POST")):
             return answer("404 Not Found", {"error": "NotFound"})
         try:
             size = int(environ.get("CONTENT_LENGTH", ""))
-            if not 0 < size <= (32768 if path == "/v1/attest/activate" else 8192):
+            if not 0 < size <= (32768 if path == "/v2/attest/approve" else 8192):
                 raise ValueError
-            raw = environ["wsgi.input"].read(size)
-            value = json.loads(raw, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+            value = json.loads(environ["wsgi.input"].read(size),
+                               parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
         except (TypeError, ValueError, KeyError):
             return answer("400 Bad Request", {"error": "InvalidRequest"})
         if not isinstance(value, dict):
             return answer("400 Bad Request", {"error": "InvalidRequest"})
-        if path in ("/v1/attest/challenge", "/v1/attest/activate"):
+        if path.startswith("/v2/attest/"):
             if self.verifier is None:
                 return answer("503 Service Unavailable", {"error": "AttestationUnavailable"})
-            required = ("sourceID", "credentialHash", "keyID", "environment")
-            if path.endswith("/challenge"):
-                if not exact(value, required):
-                    return answer("400 Bad Request", {"error": "InvalidRequest"})
-                if not isinstance(value["environment"], str) or value["environment"] not in self.sender.environments:
-                    return answer("503 Service Unavailable", {"error": "EnvironmentUnavailable"})
-                try:
-                    kind, challenge = self.sources.challenge(*(value[key] for key in required), self.now())
-                except ValueError:
-                    return answer("400 Bad Request", {"error": "InvalidRequest"})
-                return answer("200 OK", {"kind": kind, "challenge": challenge})
-            if not exact(value, (*required, "kind", "challenge", "proof")):
+            fields = ("sourceID", "sourceCredentialHash", "clientID", "clientCredentialHash",
+                      "keyID", "environment")
+            required = fields if path.endswith("challenge") else (*fields, "kind", "challenge", "proof")
+            if not exact(value, required):
                 return answer("400 Bad Request", {"error": "InvalidRequest"})
+            if (not isinstance(value["environment"], str)
+                    or value["environment"] not in self.sender.environments):
+                return answer("503 Service Unavailable", {"error": "EnvironmentUnavailable"})
+            args = [value[key] for key in fields]
             try:
-                self.sources.attest_key(*(value[key] for key in required),
-                                        value["kind"], value["challenge"], value["proof"],
-                                        self.verifier, self.now())
-            except PermissionError:
-                LOG.warning("app_attest_activation_limited")
-                return answer("429 Too Many Requests", {"error": "EnrollmentLimited"})
-            except ValueError:
-                LOG.warning("app_attest_activation_rejected")
-                return answer("403 Forbidden", {"error": "InvalidAttestation"})
-            LOG.info("app_attest_activation_accepted")
-            return answer("200 OK", {"activated": True})
-        identity = value.get("sourceID") if isinstance(value, dict) else None
-        auth = environ.get("HTTP_AUTHORIZATION", "")
-        candidate = auth.removeprefix("Bearer ") if auth.startswith("Bearer ") else ""
-        if not valid_uuid(identity) or not candidate:
-            return answer("401 Unauthorized", {"error": "Unauthorized"})
-        if path == "/v1/sources" and method == "POST":
-            if not exact(value, ("sourceID",)):
-                return answer("400 Bad Request", {"error": "InvalidRequest"})
-            try:
-                created = self.sources.create_source(identity, candidate, self.now())
+                if path.endswith("challenge"):
+                    kind, challenge = self.sources.pairing_challenge(*args, self.now())
+                    return answer("200 OK", {"kind": kind, "challenge": challenge})
+                self.sources.approve_pairing(*args, value["kind"], value["challenge"],
+                                             value["proof"], self.verifier, self.now())
             except EnrollmentLimited:
-                LOG.warning("source_registration_limited")
+                LOG.warning("pairing_approval_limited")
                 return answer("429 Too Many Requests", {"error": "EnrollmentLimited"})
             except PermissionError:
-                LOG.warning("source_registration_attestation_required")
-                return answer("403 Forbidden", {"error": "AppAttestRequired"})
+                LOG.warning("pairing_approval_denied")
+                return answer("403 Forbidden", {"error": "PairingDenied"})
             except ValueError:
-                return answer("400 Bad Request", {"error": "InvalidRequest"})
-            if not created:
-                LOG.warning("source_registration_rejected")
-            return answer("200 OK" if created else "409 Conflict", {"registered": created})
-        authorized = (self.sources.source_authorized(identity, candidate)
-                      if path in ("/v1/clients", "/v1/send", "/v1/sources")
-                      else self.sources.client_authorized(identity, value.get("clientID"), candidate))
-        if not authorized:
+                LOG.warning("pairing_approval_rejected")
+                return answer("403 Forbidden", {"error": "InvalidAttestation"})
+            LOG.info("pairing_approval_accepted")
+            return answer("200 OK", {"approved": True})
+        source_id, client_id = value.get("sourceID"), value.get("clientID")
+        auth = environ.get("HTTP_AUTHORIZATION", "")
+        credential = auth.removeprefix("Bearer ") if auth.startswith("Bearer ") else ""
+        if not valid_uuid(source_id) or not credential:
             return answer("401 Unauthorized", {"error": "Unauthorized"})
-        if path == "/v1/sources" and method == "DELETE":
+        if path == "/v2/sources":
             if not exact(value, ("sourceID",)):
                 return answer("400 Bad Request", {"error": "InvalidRequest"})
-            self.sources.delete_source(identity)
+            if not self.sources.revoke_approved_source(source_id, credential):
+                return answer("401 Unauthorized", {"error": "Unauthorized"})
             return answer("200 OK", {"revoked": True})
-        if path == "/v1/clients":
-            if not exact(value, ("sourceID", "clients")):
+        if path == "/v2/clients":
+            if not exact(value, ("sourceID", "clientID", "clientCredentialHash")) or not valid_uuid(client_id):
                 return answer("400 Bad Request", {"error": "InvalidRequest"})
-            try:
-                self.sources.sync_clients(identity, value["clients"])
-            except ValueError:
+            client_hash = value["clientCredentialHash"]
+            if not isinstance(client_hash, str) or re.fullmatch(r"[0-9a-f]{64}", client_hash) is None:
                 return answer("400 Bad Request", {"error": "InvalidRequest"})
-            return answer("200 OK", {"synced": True})
-        if path == "/v1/clients/self":
-            if not exact(value, ("sourceID", "clientID")):
-                return answer("400 Bad Request", {"error": "InvalidRequest"})
-            self.sources.delete_client(identity, value["clientID"])
+            if not self.sources.revoke_approved_client(source_id, credential, client_id, client_hash):
+                return answer("401 Unauthorized", {"error": "Unauthorized"})
             return answer("200 OK", {"revoked": True})
-        if path == "/v1/destinations":
-            if not exact(value, ("sourceID", "clientID", "mode"),
-                         ("activityID", "deviceToken", "environment")):
+        if not valid_uuid(client_id):
+            return answer("400 Bad Request", {"error": "InvalidRequest"})
+        source_hash = value.get("sourceCredentialHash")
+        if path != "/v2/send" and (not isinstance(source_hash, str)
+                or re.fullmatch(r"[0-9a-f]{64}", source_hash) is None):
+            return answer("400 Bad Request", {"error": "InvalidRequest"})
+        if path == "/v2/clients/self":
+            if not exact(value, ("sourceID", "sourceCredentialHash", "clientID")):
                 return answer("400 Bad Request", {"error": "InvalidRequest"})
-            activity_id = value.get("activityID", "")
+            if not self.sources.revoke_approved_self(source_id, source_hash, client_id, credential):
+                return answer("401 Unauthorized", {"error": "Unauthorized"})
+            return answer("200 OK", {"revoked": True})
+        if path == "/v2/destinations":
+            required = ("sourceID", "sourceCredentialHash", "clientID", "mode")
+            if not exact(value, (*required, "tokenHash", "environment") if method == "PUT" else required,
+                         ("activityID",)):
+                return answer("400 Bad Request", {"error": "InvalidRequest"})
+            if method == "PUT" and (not isinstance(value["environment"], str)
+                                        or value["environment"] not in self.sender.environments):
+                return answer("503 Service Unavailable", {"error": "EnvironmentUnavailable"})
             try:
                 if method == "PUT":
-                    if not exact(value, ("sourceID", "clientID", "mode", "deviceToken", "environment"),
-                                 ("activityID",)):
-                        raise ValueError
-                    if value["environment"] not in self.sender.environments:
-                        return answer("503 Service Unavailable", {"error": "EnvironmentUnavailable"})
-                    self.sources.bind(identity, value["clientID"], value["mode"], activity_id,
-                                      value["deviceToken"], value["environment"])
+                    bound = self.sources.bind_approved(source_id, source_hash, client_id, credential,
+                        value["mode"], value.get("activityID", ""), value["tokenHash"],
+                        value["environment"], self.now())
                 else:
-                    if not exact(value, ("sourceID", "clientID", "mode"), ("activityID",)):
-                        raise ValueError
-                    self.sources.unbind(identity, value["clientID"], value["mode"], activity_id)
+                    bound = self.sources.unbind_approved(source_id, source_hash, client_id, credential,
+                        value["mode"], value.get("activityID", ""))
             except ValueError:
                 return answer("400 Bad Request", {"error": "InvalidRequest"})
+            if not bound:
+                return answer("401 Unauthorized", {"error": "PairingNotApproved"})
             return answer("200 OK", {"registered": method == "PUT"})
-        if not valid_request(value, identity, self.now()):
+        if not exact(value, ("sourceID", "clientID", "clientCredentialHash", "deviceToken",
+                             "environment", "mode", "payload", "headers"), ("activityID",)):
+            return answer("400 Bad Request", {"error": "InvalidRequest"})
+        send_value = {key: item for key, item in value.items() if key != "clientCredentialHash"}
+        if not valid_request(send_value, source_id, self.now()):
             return answer("400 Bad Request", {"error": "InvalidRequest"})
         if value["environment"] not in self.sender.environments:
             return answer("503 Service Unavailable", {"error": "EnvironmentUnavailable"})
-        if not self.sources.allowed(identity, value["clientID"], value["mode"],
-                                    value["deviceToken"], value["environment"], value.get("activityID", "")):
-            return answer("403 Forbidden", {"error": "DestinationNotRegistered"})
-        if not self.sources.take_send_slot(identity, self.now()):
-            LOG.warning("push_send_rate_limited")
+        if not self.sources.approved_send(source_id, credential, client_id, value["clientCredentialHash"],
+                value["mode"], value.get("activityID", ""), value["deviceToken"],
+                value["environment"], self.now()):
+            return answer("403 Forbidden", {"error": "DestinationNotApproved"})
+        if not self.sources.take_send_slot(source_id, self.now()):
             return answer("429 Too Many Requests", {"error": "RateLimited"})
         result = self.sender.send({"token": value["deviceToken"], "environment": value["environment"],
                                    "mode": value["mode"]}, value["payload"], value["headers"], self.now())

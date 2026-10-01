@@ -82,6 +82,9 @@ class Store:
                 CREATE TABLE IF NOT EXISTS invitations(hash TEXT PRIMARY KEY, expires REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS clients(id TEXT PRIMARY KEY, hash TEXT UNIQUE NOT NULL,
                     created REAL NOT NULL, last_seen REAL NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS relay_revocations(
+                    client_id TEXT NOT NULL, client_hash TEXT NOT NULL,
+                    PRIMARY KEY(client_id,client_hash));
                 CREATE TABLE IF NOT EXISTS client_devices(client_id TEXT PRIMARY KEY,
                     installation_id TEXT UNIQUE NOT NULL, name TEXT NOT NULL, platform TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -185,6 +188,8 @@ class Store:
                 if existing is None or existing[0] != identity[0]:
                     raise PairingConflict("Credential belongs to another installation")
                 client_id = previous[0]
+                old_hash = db.execute("SELECT hash FROM clients WHERE id=?", (client_id,)).fetchone()[0]
+                db.execute("INSERT OR IGNORE INTO relay_revocations VALUES (?,?)", (client_id, old_hash))
                 db.execute("UPDATE clients SET hash=?,last_seen=0 WHERE id=?", (digest(credential), client_id))
                 db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
                 db.execute("DELETE FROM watch_push_devices WHERE client_id=?", (client_id,))
@@ -222,6 +227,9 @@ class Store:
     def revoke(self, client_id: str) -> bool:
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            old = db.execute("SELECT hash FROM clients WHERE id=?", (client_id,)).fetchone()
+            if old:
+                db.execute("INSERT OR IGNORE INTO relay_revocations VALUES (?,?)", (client_id, old[0]))
             db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
             db.execute("DELETE FROM watch_push_devices WHERE client_id=?", (client_id,))
             db.execute("DELETE FROM live_activities WHERE client_id=?", (client_id,))
@@ -235,6 +243,7 @@ class Store:
             client = db.execute("SELECT id FROM clients WHERE hash=?", (digest(credential),)).fetchone()
             if client is None:
                 return False
+            db.execute("INSERT OR IGNORE INTO relay_revocations VALUES (?,?)", (client[0], digest(credential)))
             db.execute("DELETE FROM push_devices WHERE client_id=?", (client[0],))
             db.execute("DELETE FROM watch_push_devices WHERE client_id=?", (client[0],))
             db.execute("DELETE FROM live_activities WHERE client_id=?", (client[0],))

@@ -1,6 +1,9 @@
 import json
+import os
 from pathlib import Path
 import plistlib
+import signal
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -47,10 +50,17 @@ class HookRemovalTests(unittest.TestCase):
             hooks_path.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [
                 {"type": "command", "command": f"python3 '{root / 'lib/macos/codex_hook.py'}'"},
                 {"type": "command", "command": "/bin/echo keep"}]}]}}))
+            def command(args, **_):
+                if args[0] == "/usr/bin/pgrep":
+                    return subprocess.CompletedProcess(args, 0, "123\n456\n", "")
+                return subprocess.CompletedProcess(args, 0, "", "")
+
             with patch.object(mac_uninstall, "ROOT", root), patch.object(mac_uninstall, "APP", app), \
                  patch.object(mac_uninstall, "PLIST", plist), patch.object(mac_uninstall, "HOOKS", hooks_path), \
                  patch.object(mac_uninstall, "PUSH_PLIST", base / "missing-push.plist"), \
-                 patch.object(mac_uninstall.subprocess, "run") as command:
+                 patch.object(mac_uninstall.subprocess, "run", side_effect=command) as calls, \
+                 patch.object(mac_uninstall.os, "getppid", return_value=123), \
+                 patch.object(mac_uninstall.os, "kill") as kill:
                 result = mac_uninstall.uninstall()
             self.assertIn("Removed Paceman", result)
             self.assertFalse(root.exists())
@@ -58,9 +68,12 @@ class HookRemovalTests(unittest.TestCase):
             self.assertFalse(plist.exists())
             self.assertEqual(json.loads(hooks_path.read_text())["hooks"]["Stop"],
                              [{"hooks": [{"type": "command", "command": "/bin/echo keep"}]}])
-            self.assertEqual(command.call_args_list[0].args[0],
+            self.assertEqual(calls.call_args_list[0].args[0],
                              [str(login_command), "--unregister-login"])
-            self.assertEqual(len(command.call_args_list), 2)
+            self.assertEqual(calls.call_args_list[1].args[0],
+                             ["/usr/bin/pgrep", "-U", str(os.getuid()), "-f", "-x", str(login_command)])
+            kill.assert_called_once_with(456, signal.SIGTERM)
+            self.assertEqual(len(calls.call_args_list), 3)
 
 
 if __name__ == "__main__":
