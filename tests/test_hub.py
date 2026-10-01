@@ -161,6 +161,15 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         return client
 
+    def test_pairing_discloses_only_relay_credential_hash_when_configured(self):
+        self.assertNotIn("relayCredentialHash", self.paired())
+        self.server.relay_url = "https://relay.example"
+        self.server.relay_credential_hash = "a" * 64
+        paired = self.paired()
+        self.assertEqual(paired["relayURL"], "https://relay.example")
+        self.assertEqual(paired["relayCredentialHash"], "a" * 64)
+        self.assertNotIn("relayCredential", paired)
+
     def test_notification_registration_survives_worker_restart(self):
         from service.push import Worker
         from tests.test_push import FakeSender

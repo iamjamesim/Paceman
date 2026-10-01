@@ -44,12 +44,17 @@ The source responds with:
   "sourceID": "11111111-1111-4111-8111-111111111111",
   "clientID": "44444444-4444-4444-8444-444444444444",
   "credential": "example-private-credential",
-  "relayURL": "https://relay.example"
+  "relayURL": "https://relay.example",
+  "relayCredentialHash": "64-lowercase-hex-characters"
 }
 ```
 
-`relayURL` is present when the source uses the hosted APNs relay. The phone
-uses it to register its own APNs tokens after pairing. The credential is never
+`relayURL` is present when the source uses the hosted APNs relay. When the
+source has a relay credential, `relayCredentialHash` is its SHA-256 digest;
+the phone uses it to bind App Attest activation to that source before registering
+APNs tokens. The source's relay credential is never sent to the phone. The phone
+uses its separate paired-client credential to register its own APNs tokens.
+The paired-client credential is never
 included in snapshots or pushes. An installation ID
 is a label, not proof of ownership. Re-pairing the same installation requires
 its current credential and a new invitation; it rotates the credential and
@@ -125,7 +130,14 @@ Push registration is authenticated and scoped to the paired client:
 The source owns the local registrations and syncs hashed paired-client credentials
 to the relay. The phone separately registers each APNs token with the relay using
 its paired-client credential. The relay stores hashed source credentials and
-source/client/token bindings in PostgreSQL. Its `POST /v1/send` requires a source
+source/client/token bindings in PostgreSQL. For a new source, the phone first
+requests a five-minute `POST /v1/attest/challenge` bound to the source ID,
+source credential hash, App Attest key ID, and APNs environment. It returns
+`kind` (`attest` for a new key or `assert` for a known key) and `challenge`.
+The phone submits the Apple proof to `POST /v1/attest/activate`; a valid proof
+grants a 15-minute registration claim. The Mac then calls `POST /v1/sources`
+with its own bearer credential. Existing registered sources continue to work
+without a new claim. Its `POST /v1/send` requires a source
 bearer credential, source and client UUIDs, an exact registered token and
 environment, APNs mode (and ActivityKit ID when applicable), approved payload,
 and approved headers. Removing or re-pairing a phone clears its relay bindings;

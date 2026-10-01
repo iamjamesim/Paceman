@@ -413,11 +413,13 @@ class Store:
 class Server(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, store: Store, adapter=None, desktop_status=None, relay_url=None):
+    def __init__(self, address, store: Store, adapter=None, desktop_status=None,
+                 relay_url=None, relay_credential_hash=None):
         self.store = store
         self.adapter = adapter
         self.desktop_status = desktop_status
         self.relay_url = relay_url
+        self.relay_credential_hash = relay_credential_hash
         self.started = time.monotonic()
         self.pair_attempts: list[float] = []
         self.pair_lock = threading.Lock()
@@ -524,6 +526,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if result and self.server.relay_url:
             result["relayURL"] = self.server.relay_url
+            if self.server.relay_credential_hash:
+                result["relayCredentialHash"] = self.server.relay_credential_hash
         self.reply(200 if result else 401, result or {"error": "invitation_expired_or_used"})
 
     def do_DELETE(self):
@@ -578,13 +582,18 @@ def main():
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 parser.error("A source is already running for this data directory")
-            relay_url = None
+            relay_url = relay_credential_hash = None
             if args.relay_config and args.relay_config.is_file():
                 config = json.loads(args.relay_config.read_text())
                 if isinstance(config, dict) and "relayURL" in config:
                     relay_url = endpoint(config["relayURL"])
+                    if (config.get("sourceID") == store.metadata("source_id")
+                            and isinstance(config.get("credential"), str)
+                            and len(config["credential"]) >= 43):
+                        relay_credential_hash = digest(config["credential"])
             server = stack.enter_context(Server(("127.0.0.1", args.port), store,
-                                                relay_url=relay_url))
+                                                relay_url=relay_url,
+                                                relay_credential_hash=relay_credential_hash))
             if args.source == "omarchy":
                 from service.omarchy import OmarchySource
                 try:

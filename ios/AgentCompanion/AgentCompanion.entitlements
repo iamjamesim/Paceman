@@ -10,5 +10,7 @@
 	<string>$(APNS_ENVIRONMENT)</string>
 	<key>com.apple.developer.weatherkit</key>
 	<true/>
+	<key>com.apple.developer.devicecheck.appattest-environment</key>
+	<string>$(APNS_ENVIRONMENT)</string>
 </dict>
 </plist>

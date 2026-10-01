@@ -18,6 +18,22 @@ from service.relay import RelayApp
 from service.relay_registry import Registry, digest
 
 
+class FakeAttestation:
+    def __init__(self):
+        self.counter = 0
+
+    def attest(self, proof, key_id, challenge, environment):
+        if proof != "valid-proof":
+            raise ValueError("Invalid proof")
+        return b"public-key"
+
+    def assert_key(self, proof, public_key, challenge, environment, previous_counter):
+        if proof != "valid-proof" or public_key != b"public-key":
+            raise ValueError("Invalid proof")
+        self.counter += 1
+        return max(previous_counter + 1, self.counter)
+
+
 class FakeAPNs:
     def __init__(self):
         self.calls = []
@@ -35,14 +51,15 @@ class PublicRelayTests(unittest.TestCase):
         self.registry = Registry("sqlite:///" + str(Path(temporary.name) / "relay.sqlite3"))
         self.source, self.other, self.client_id = (str(uuid.uuid4()) for _ in range(3))
         self.source_key, self.other_key, self.phone_key = (secrets.token_urlsafe(32) for _ in range(3))
-        self.registry.create_source(self.source, self.source_key, 100)
-        self.registry.create_source(self.other, self.other_key, 100)
+        self.registry.create_source(self.source, self.source_key, 100, legacy=True)
+        self.registry.create_source(self.other, self.other_key, 100, legacy=True)
         self.registry.sync_clients(self.source, [{"clientID": self.client_id,
                                                   "credentialHash": digest(self.phone_key)}])
         self.token = "ab" * 32
         self.registry.bind(self.source, self.client_id, "alert", "", self.token, "production")
         self.sender = FakeAPNs()
-        self.app = RelayApp(self.sender, self.registry, now=lambda: 100)
+        self.verifier = FakeAttestation()
+        self.app = RelayApp(self.sender, self.registry, now=lambda: 100, verifier=self.verifier)
         payload, headers = notification(self.source, str(uuid.uuid4()),
                                         {"seq": 7, "state": "finished", "at": 100}, 100)
         self.request = {"sourceID": self.source, "clientID": self.client_id,
@@ -62,14 +79,87 @@ class PublicRelayTests(unittest.TestCase):
         return {"sourceID": source or self.source, "clientID": self.client_id, "mode": "alert",
                 "deviceToken": self.token, "environment": "production"}
 
+    def activate(self, source, credential, *, key_id=None, environment="production"):
+        fields = {"sourceID": source, "credentialHash": digest(credential),
+                  "keyID": key_id or "a" * 43, "environment": environment}
+        status, challenge = self.call("/v1/attest/challenge", body=fields)
+        self.assertEqual(status, 200)
+        activation = {**fields, **challenge, "proof": "valid-proof"}
+        self.assertEqual(self.call("/v1/attest/activate", body=activation)[0], 200)
+        return activation
+
     def test_self_registration_and_phone_binding(self):
         third, key = str(uuid.uuid4()), secrets.token_urlsafe(32)
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": third}, credential=key)[0], 403)
+        self.activate(third, key)
         self.assertEqual(self.call("/v1/sources", body={"sourceID": third}, credential=key)[0], 200)
         self.assertEqual(self.call("/v1/sources", body={"sourceID": third}, credential="x" * 43)[0], 409)
         self.assertEqual(self.call("/v1/clients", "PUT", {"sourceID": third,
             "clients": [{"clientID": self.client_id, "credentialHash": digest(self.phone_key)}]}, key)[0], 200)
         self.assertEqual(self.call("/v1/destinations", "PUT", self.binding(third), self.phone_key)[0], 200)
         self.assertTrue(self.registry.allowed(third, self.client_id, "alert", self.token, "production"))
+
+    def test_activation_is_bound_to_source_credential_and_one_challenge(self):
+        source, credential = str(uuid.uuid4()), secrets.token_urlsafe(32)
+        activation = self.activate(source, credential)
+        self.assertEqual(self.call("/v1/attest/activate", body=activation)[0], 403)
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": source},
+                                   credential=secrets.token_urlsafe(32))[0], 403)
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": str(uuid.uuid4())},
+                                   credential=credential)[0], 403)
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": source},
+                                   credential=credential)[0], 200)
+
+    def test_expired_claim_and_wrong_attestation_do_not_register(self):
+        source, credential = str(uuid.uuid4()), secrets.token_urlsafe(32)
+        fields = {"sourceID": source, "credentialHash": digest(credential),
+                  "keyID": "a" * 43, "environment": "production"}
+        status, challenge = self.call("/v1/attest/challenge", body=fields)
+        self.assertEqual(status, 200)
+        self.assertEqual(self.call("/v1/attest/activate", body={**fields, **challenge,
+            "proof": "invalid"})[0], 403)
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": source},
+                                   credential=credential)[0], 403)
+        self.activate(source, credential)
+        self.app.now = lambda: 1000
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": source},
+                                   credential=credential)[0], 403)
+
+    def test_registered_sources_survive_attestation_migration(self):
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": self.source})[0], 200)
+        self.assertEqual(self.call()[0], 200)
+
+    def test_source_limit_is_on_registered_sources_and_revocation_frees_slot(self):
+        sources = []
+        for _ in range(20):
+            source, credential = str(uuid.uuid4()), secrets.token_urlsafe(32)
+            self.activate(source, credential)
+            self.assertEqual(self.call("/v1/sources", body={"sourceID": source},
+                                       credential=credential)[0], 200)
+            sources.append((source, credential))
+        next_source, next_credential = str(uuid.uuid4()), secrets.token_urlsafe(32)
+        self.activate(next_source, next_credential)
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": next_source},
+                                   credential=next_credential)[0], 429)
+        old_source, old_credential = sources[0]
+        self.assertEqual(self.call("/v1/sources", "DELETE", {"sourceID": old_source},
+                                   old_credential)[0], 200)
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": next_source},
+                                   credential=next_credential)[0], 200)
+
+    def test_daily_limit_does_not_consume_claim_or_extra_slot(self):
+        source, credential = str(uuid.uuid4()), secrets.token_urlsafe(32)
+        self.activate(source, credential)
+        with self.registry.connection() as db:
+            db.execute("INSERT INTO relay_daily_enrollment VALUES (?,?)",
+                       (0, self.registry.daily_enrollment_limit))
+        self.assertEqual(self.call("/v1/sources", body={"sourceID": source},
+                                   credential=credential)[0], 429)
+        with self.registry.connection() as db:
+            self.assertEqual(db.one("SELECT registered FROM relay_daily_enrollment WHERE day=0")[0],
+                             self.registry.daily_enrollment_limit)
+            self.assertIsNotNone(db.one("SELECT 1 FROM relay_activation_claims WHERE source_id=?",
+                                        (source,)))
 
     def test_send_requires_source_and_exact_destination(self):
         self.assertEqual(self.call()[0], 200)
@@ -202,6 +292,7 @@ class PublicRelayTests(unittest.TestCase):
         store = Store(Path(temporary.name) / "hub.sqlite3")
         identity = store.metadata("source_id")
         source_key = secrets.token_urlsafe(32)
+        self.activate(identity, source_key)
         invitation = store.invite("https://computer.example")
         paired = store.redeem(invitation["invitation"], device={"installationID": str(uuid.uuid4()),
             "name": "Phone", "platform": "ios"})

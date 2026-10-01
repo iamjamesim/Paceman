@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -13,8 +14,16 @@ import unicodedata
 import uuid
 from wsgiref.simple_server import make_server, WSGIServer
 
+from service.app_attest import AppAttestVerifier
 from service.push import APNs, Config
-from service.relay_registry import Registry, valid_uuid
+from service.relay_registry import EnrollmentLimited, Registry, valid_uuid
+
+
+LOG = logging.getLogger("paceman.relay")
+LOG.setLevel(logging.INFO)
+if not LOG.handlers:
+    LOG.addHandler(logging.StreamHandler())
+LOG.propagate = False
 
 
 class APNsRouter:
@@ -23,6 +32,8 @@ class APNsRouter:
     def __init__(self, senders: dict[str, APNs]):
         self.senders = senders
         self.environments = frozenset(senders)
+        self.app_ids = {environment: f"{sender.config.team_id}.{sender.config.topic}"
+                        for environment, sender in senders.items()}
 
     @classmethod
     def load(cls, path: Path):
@@ -171,8 +182,9 @@ def valid_request(value: object, identity: str, now: float) -> bool:
 
 
 class RelayApp:
-    def __init__(self, sender: APNsRouter, sources: Registry, now=time.time):
-        self.sender, self.sources, self.now = sender, sources, now
+    def __init__(self, sender: APNsRouter, sources: Registry, now=time.time,
+                 verifier: AppAttestVerifier | None = None):
+        self.sender, self.sources, self.now, self.verifier = sender, sources, now, verifier
 
     def __call__(self, environ, start_response):
         def answer(status, value):
@@ -184,18 +196,50 @@ class RelayApp:
             return answer("200 OK", {"ok": True, "apnsEnvironments": sorted(self.sender.environments)})
         path, method = environ.get("PATH_INFO"), environ.get("REQUEST_METHOD")
         if (path, method) not in (("/v1/sources", "POST"), ("/v1/sources", "DELETE"),
+                                  ("/v1/attest/challenge", "POST"),
+                                  ("/v1/attest/activate", "POST"),
                                   ("/v1/clients", "PUT"), ("/v1/clients/self", "DELETE"),
                                   ("/v1/destinations", "PUT"),
                                   ("/v1/destinations", "DELETE"), ("/v1/send", "POST")):
             return answer("404 Not Found", {"error": "NotFound"})
         try:
             size = int(environ.get("CONTENT_LENGTH", ""))
-            if not 0 < size <= 8192:
+            if not 0 < size <= (32768 if path == "/v1/attest/activate" else 8192):
                 raise ValueError
             raw = environ["wsgi.input"].read(size)
             value = json.loads(raw, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
         except (TypeError, ValueError, KeyError):
             return answer("400 Bad Request", {"error": "InvalidRequest"})
+        if not isinstance(value, dict):
+            return answer("400 Bad Request", {"error": "InvalidRequest"})
+        if path in ("/v1/attest/challenge", "/v1/attest/activate"):
+            if self.verifier is None:
+                return answer("503 Service Unavailable", {"error": "AttestationUnavailable"})
+            required = ("sourceID", "credentialHash", "keyID", "environment")
+            if path.endswith("/challenge"):
+                if not exact(value, required):
+                    return answer("400 Bad Request", {"error": "InvalidRequest"})
+                if not isinstance(value["environment"], str) or value["environment"] not in self.sender.environments:
+                    return answer("503 Service Unavailable", {"error": "EnvironmentUnavailable"})
+                try:
+                    kind, challenge = self.sources.challenge(*(value[key] for key in required), self.now())
+                except ValueError:
+                    return answer("400 Bad Request", {"error": "InvalidRequest"})
+                return answer("200 OK", {"kind": kind, "challenge": challenge})
+            if not exact(value, (*required, "kind", "challenge", "proof")):
+                return answer("400 Bad Request", {"error": "InvalidRequest"})
+            try:
+                self.sources.attest_key(*(value[key] for key in required),
+                                        value["kind"], value["challenge"], value["proof"],
+                                        self.verifier, self.now())
+            except PermissionError:
+                LOG.warning("app_attest_activation_limited")
+                return answer("429 Too Many Requests", {"error": "EnrollmentLimited"})
+            except ValueError:
+                LOG.warning("app_attest_activation_rejected")
+                return answer("403 Forbidden", {"error": "InvalidAttestation"})
+            LOG.info("app_attest_activation_accepted")
+            return answer("200 OK", {"activated": True})
         identity = value.get("sourceID") if isinstance(value, dict) else None
         auth = environ.get("HTTP_AUTHORIZATION", "")
         candidate = auth.removeprefix("Bearer ") if auth.startswith("Bearer ") else ""
@@ -206,8 +250,16 @@ class RelayApp:
                 return answer("400 Bad Request", {"error": "InvalidRequest"})
             try:
                 created = self.sources.create_source(identity, candidate, self.now())
+            except EnrollmentLimited:
+                LOG.warning("source_registration_limited")
+                return answer("429 Too Many Requests", {"error": "EnrollmentLimited"})
+            except PermissionError:
+                LOG.warning("source_registration_attestation_required")
+                return answer("403 Forbidden", {"error": "AppAttestRequired"})
             except ValueError:
                 return answer("400 Bad Request", {"error": "InvalidRequest"})
+            if not created:
+                LOG.warning("source_registration_rejected")
             return answer("200 OK" if created else "409 Conflict", {"registered": created})
         authorized = (self.sources.source_authorized(identity, candidate)
                       if path in ("/v1/clients", "/v1/send", "/v1/sources")
@@ -261,6 +313,7 @@ class RelayApp:
                                     value["deviceToken"], value["environment"], value.get("activityID", "")):
             return answer("403 Forbidden", {"error": "DestinationNotRegistered"})
         if not self.sources.take_send_slot(identity, self.now()):
+            LOG.warning("push_send_rate_limited")
             return answer("429 Too Many Requests", {"error": "RateLimited"})
         result = self.sender.send({"token": value["deviceToken"], "environment": value["environment"],
                                    "mode": value["mode"]}, value["payload"], value["headers"], self.now())
@@ -272,8 +325,9 @@ def application(environ, start_response):
     if _app is None:
         with _app_lock:
             if _app is None:
-                _app = RelayApp(APNsRouter.load(Path(os.environ["PACEMAN_APNS_CONFIG"])),
-                                Registry(os.environ["DATABASE_URL"]))
+                router = APNsRouter.load(Path(os.environ["PACEMAN_APNS_CONFIG"]))
+                _app = RelayApp(router, Registry(os.environ["DATABASE_URL"]),
+                                verifier=AppAttestVerifier(router.app_ids))
     return _app(environ, start_response)
 
 
@@ -294,7 +348,8 @@ def main():
     sources = Registry(os.environ["DATABASE_URL"])
     sender = APNsRouter.load(args.apns_config)
     try:
-        with make_server("0.0.0.0", args.port, RelayApp(sender, sources),
+        with make_server("0.0.0.0", args.port, RelayApp(
+                sender, sources, verifier=AppAttestVerifier(sender.app_ids)),
                          server_class=ThreadingWSGIServer) as server:
             server.serve_forever()
     finally:

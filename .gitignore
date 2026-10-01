@@ -15,6 +15,7 @@ ios/build/
 .env.*
 !.env.example
 *.pem
+!service/certs/Apple_App_Attestation_Root_CA.pem
 *.key
 *.p12
 *.mobileprovision

@@ -638,6 +638,26 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
+    func testPairingKeepsRelayHashAndDecodesOlderSavedSources() async throws {
+        let id = UUID().uuidString
+        let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: id,
+                                    invitation: String(repeating: "x", count: 43), expiresAt: Date().timeIntervalSince1970 + 300)
+        let device = ClientDevice(installationID: UUID().uuidString, name: "Phone", platform: "ios")
+        let hash = String(repeating: "a", count: 64)
+        let client = stubClient { _ in
+            (200, try JSONSerialization.data(withJSONObject: ["schema": 1, "sourceID": id,
+                "clientID": "client", "credential": "secret", "relayURL": "https://relay.example",
+                "relayCredentialHash": hash]))
+        }
+        let paired = try await client.pair(invitation, device: device)
+        XCTAssertEqual(paired.relayCredentialHash, hash)
+
+        let older = try JSONSerialization.data(withJSONObject: ["endpoint": "https://test.example",
+            "sourceID": id, "clientID": "client", "credential": "secret",
+            "relayURL": "https://relay.example"])
+        XCTAssertNil(try JSONDecoder().decode(PairedSource.self, from: older).relayCredentialHash)
+    }
+
     func testPairingRejectsUnsupportedSchema() async throws {
         let id = UUID().uuidString
         let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: id,

@@ -131,13 +131,16 @@ struct PairedSource: Codable {
     let clientID: String
     let credential: String
     let relayURL: URL?
+    let relayCredentialHash: String?
 
-    init(endpoint: URL, sourceID: String, clientID: String, credential: String, relayURL: URL? = nil) {
+    init(endpoint: URL, sourceID: String, clientID: String, credential: String,
+         relayURL: URL? = nil, relayCredentialHash: String? = nil) {
         self.endpoint = endpoint
         self.sourceID = sourceID
         self.clientID = clientID
         self.credential = credential
         self.relayURL = relayURL
+        self.relayCredentialHash = relayCredentialHash
     }
 }
 

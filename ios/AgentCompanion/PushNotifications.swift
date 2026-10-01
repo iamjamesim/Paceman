@@ -227,7 +227,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
                 completed += 1
                 Diagnostics.shared.record("push_destination_registered")
             } catch {
-                Diagnostics.shared.record("push_registration_failed")
+                Diagnostics.shared.recordError("push_registration_failed", error: error)
             }
         }
         registered = completed == sources.count

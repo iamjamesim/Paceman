@@ -1,6 +1,8 @@
 import Foundation
 import Security
 import UIKit
+import DeviceCheck
+import CryptoKit
 
 extension ClientDevice {
     @MainActor static func current() throws -> ClientDevice {
@@ -132,6 +134,7 @@ final class SourceClient {
         struct Redemption: Decodable {
             let schema: Int; let sourceID: String; let clientID: String; let credential: String
             let relayURL: URL?
+            let relayCredentialHash: String?
         }
         let result = try JSONDecoder().decode(Redemption.self, from: data)
         guard result.schema == 1, result.sourceID == invitation.sourceID,
@@ -139,9 +142,14 @@ final class SourceClient {
             throw HubError.message("Unsupported pairing response. Update Paceman on this computer.")
         }
         if let relay = result.relayURL { try validateRelay(relay) }
+        if let hash = result.relayCredentialHash,
+           hash.range(of: "^[0-9a-f]{64}$", options: .regularExpression) == nil {
+            throw HubError.message("The computer supplied invalid relay enrollment data")
+        }
         return PairedSource(endpoint: origin, sourceID: result.sourceID,
                             clientID: result.clientID, credential: result.credential,
-                            relayURL: result.relayURL)
+                            relayURL: result.relayURL,
+                            relayCredentialHash: result.relayCredentialHash)
     }
 
     func remove(_ source: PairedSource) async throws {
@@ -289,6 +297,9 @@ final class SourceClient {
                            fields: [String: String]) async throws {
         guard let relay = source.relayURL else { return }
         try validateRelay(relay)
+        if method == "PUT" {
+            try await AppAttestEnrollment.shared.activate(source: source)
+        }
         var request = URLRequest(url: relay.appendingPathComponent(path))
         request.httpMethod = method
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
@@ -312,6 +323,112 @@ final class SourceClient {
             throw HubError.http(http.statusCode)
         }
         guard data.count <= 65536 else { throw HubError.message("Status response too large") }
+        return data
+    }
+}
+
+/// A paired phone activates its computer on the relay before binding APNs tokens.
+/// Existing paired sources without a relay credential hash keep their legacy path.
+actor AppAttestEnrollment {
+    static let shared = AppAttestEnrollment()
+    private var activeTask: Task<Void, Error>?
+    private let session = URLSession(configuration: .ephemeral, delegate: NoRedirect(), delegateQueue: nil)
+
+    func activate(source: PairedSource) async throws {
+        guard source.relayURL != nil, source.relayCredentialHash != nil else { return }
+        if let task = activeTask { try await task.value }
+        let task = Task { try await performActivation(source: source) }
+        activeTask = task
+        defer { activeTask = nil }
+        try await task.value
+    }
+
+    private func performActivation(source: PairedSource, retryInvalidKey: Bool = true) async throws {
+        guard let relay = source.relayURL, let credentialHash = source.relayCredentialHash else { return }
+        guard let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
+              ["development", "production"].contains(environment) else {
+            throw HubError.message("Paceman is missing its notification environment.")
+        }
+        let service = DCAppAttestService.shared
+        guard service.isSupported else {
+            throw HubError.message("This iPhone cannot verify Paceman for relay notifications.")
+        }
+        let storageKey = "app-attest-key-id.\(environment)"
+        let keyID: String
+        if let saved = Vault.load(String.self, key: storageKey) { keyID = saved }
+        else {
+            keyID = try await withCheckedThrowingContinuation { continuation in
+                service.generateKey { value, error in
+                    if let value { continuation.resume(returning: value) }
+                    else { continuation.resume(throwing: error ?? HubError.message("App verification is unavailable")) }
+                }
+            }
+            try Vault.save(keyID, key: storageKey)
+        }
+        let normalizedKeyID = keyID.replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        let fields = ["sourceID": source.sourceID, "credentialHash": credentialHash,
+                      "keyID": normalizedKeyID, "environment": environment]
+        let challengeData: Data
+        do {
+            challengeData = try await post(relay: relay, path: "v1/attest/challenge", fields: fields)
+        } catch HubError.http(404) {
+            // The previously deployed relay accepts source registration directly.
+            return
+        }
+        struct Challenge: Decodable { let kind: String; let challenge: String }
+        let challenge = try JSONDecoder().decode(Challenge.self, from: challengeData)
+        guard ["attest", "assert"].contains(challenge.kind), challenge.challenge.count <= 512 else {
+            throw HubError.message("Invalid app verification challenge")
+        }
+        let hash = Data(SHA256.hash(data: Data(challenge.challenge.utf8)))
+        let proof: Data
+        do {
+            if challenge.kind == "attest" {
+                proof = try await withCheckedThrowingContinuation { continuation in
+                    service.attestKey(keyID, clientDataHash: hash) { value, error in
+                        if let value { continuation.resume(returning: value) }
+                        else { continuation.resume(throwing: error ?? HubError.message("App verification is unavailable")) }
+                    }
+                }
+            } else {
+                proof = try await withCheckedThrowingContinuation { continuation in
+                    service.generateAssertion(keyID, clientDataHash: hash) { value, error in
+                        if let value { continuation.resume(returning: value) }
+                        else { continuation.resume(throwing: error ?? HubError.message("App verification is unavailable")) }
+                    }
+                }
+            }
+        } catch {
+            let deviceError = error as NSError
+            if retryInvalidKey && deviceError.domain == DCErrorDomain &&
+                deviceError.code == DCError.Code.invalidKey.rawValue {
+                try Vault.remove(key: storageKey)
+                try await performActivation(source: source, retryInvalidKey: false)
+                return
+            }
+            throw error
+        }
+        let encoded = proof.base64EncodedString().replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        _ = try await post(relay: relay, path: "v1/attest/activate",
+                           fields: fields.merging(["kind": challenge.kind, "challenge": challenge.challenge,
+                                                   "proof": encoded]) { _, new in new })
+    }
+
+    private func post(relay: URL, path: String, fields: [String: String]) async throws -> Data {
+        var request = URLRequest(url: relay.appendingPathComponent(path))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: fields)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw HubError.message("Paceman could not verify this iPhone for relay notifications.")
+        }
+        guard http.statusCode == 200 else { throw HubError.http(http.statusCode) }
+        guard data.count <= 4096 else {
+            throw HubError.message("Paceman returned too much verification data.")
+        }
         return data
     }
 }
