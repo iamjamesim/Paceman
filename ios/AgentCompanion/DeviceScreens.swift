@@ -29,7 +29,7 @@ struct ComputerDetail: View {
                     if !typeSize.isAccessibilitySize {
                         ComputerIllustration(theme: theme).frame(width: 190).accessibilityHidden(true)
                     }
-                    VStack(spacing: 9) {
+                    VStack(spacing: 8) {
                         Text(presentation.displayName(source: paired, snapshot: paired.flatMap { model.snapshots[$0.sourceID] }))
                             .font(theme.monospaced && !typeSize.isAccessibilitySize ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
                             .fixedSize(horizontal: false, vertical: true)
@@ -66,7 +66,7 @@ struct ComputerDetail: View {
                 DeviceRemovalButton(title: removing ? "Removing…" : "Remove computer", theme: theme) { remove = true }
                     .disabled(removing || paired == nil).allowsHitTesting(!presentation.preview)
                 if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.secondaryInk) }
-            }.padding(.horizontal, 24).padding(.bottom, 30)
+            }.padding(.horizontal, 24).padding(.bottom, 32)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
             .alert("Display name", isPresented: $rename) {
@@ -139,7 +139,7 @@ struct WatchIntroduction: View {
                 if !typeSize.isAccessibilitySize {
                     WatchIllustration(theme: watchTheme, paired: true, timeFormat: .system, state: .working)
                         .frame(width: 90, height: 133)
-                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                        .frame(maxWidth: .infinity).padding(.vertical, 16)
                 }
                 VStack(alignment: .leading, spacing: 16) {
                     Text("A purpose-built watch for agentic engineering")
@@ -158,10 +158,10 @@ struct WatchIntroduction: View {
                     Text("Got a similar ESP32-S3 board? Your agent can adapt the firmware while preserving Paceman’s Bluetooth protocol.")
                         .font(.footnote).lineSpacing(3).foregroundStyle(theme.secondaryInk)
                 }
-            }.padding(.horizontal, 24).padding(.bottom, 30)
+            }.padding(.horizontal, 24).padding(.bottom, 32)
         }.safeAreaInset(edge: .bottom) {
             CompanionButton(title: "Connect your watch", theme: theme, action: continueSetup)
-                .padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12)
+                .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
                 .background(theme.canvas)
         }.foregroundStyle(theme.ink).background(theme.canvas)
             .navigationTitle("Paceman Watch").navigationBarTitleDisplayMode(.inline)
@@ -221,7 +221,7 @@ struct WatchDetail: View {
             VStack(alignment: .leading, spacing: 24) {
                 if (!paired || justPaired || previewComplete) && !typeSize.isAccessibilitySize {
                     WatchIllustration(theme: watchTheme, paired: paired, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133)
-                        .frame(maxWidth: .infinity).padding(.vertical, 14)
+                        .frame(maxWidth: .infinity).padding(.vertical, 16)
                 }
                 if justPaired || (preview && previewComplete) {
                     pairingComplete
@@ -230,15 +230,15 @@ struct WatchDetail: View {
                 } else {
                     pairingGuide
                 }
-            }.padding(.horizontal, 24).padding(.bottom, 30)
+            }.padding(.horizontal, 24).padding(.bottom, 32)
         }.safeAreaInset(edge: .bottom) {
             if !paired {
                 pairingActions
-                    .padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12)
+                    .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
                     .background(theme.canvas)
             } else if justPaired || (preview && previewComplete) {
                 pairingCompletionActions
-                    .padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12)
+                    .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
                     .background(theme.canvas)
             }
         }.foregroundStyle(theme.ink).background(theme.canvas)
@@ -351,7 +351,7 @@ struct WatchDetail: View {
                 if !typeSize.isAccessibilitySize {
                     WatchIllustration(theme: watchTheme, paired: true, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133).accessibilityHidden(true)
                 }
-                VStack(spacing: 9) {
+                VStack(spacing: 8) {
                     Text("Paceman Watch")
                         .font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
                     WatchConnectionSummary(watch: model.watch, theme: theme, previewState: preview ? previewState : nil, centered: true)

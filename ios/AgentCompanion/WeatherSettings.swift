@@ -96,7 +96,7 @@ struct WeatherSettings: View {
                     .font(.subheadline).foregroundStyle(theme.ink)
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
-            .padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12)
+            .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
             .background(theme.canvas)
         }
     }

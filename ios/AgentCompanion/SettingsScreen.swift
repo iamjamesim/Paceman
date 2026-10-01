@@ -14,7 +14,7 @@ struct LiveActivitiesDetail: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 24) {
                 Text("Show agent activity on your Lock Screen and Dynamic Island.")
                     .font(.subheadline).foregroundStyle(theme.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -42,10 +42,10 @@ struct LiveActivitiesDetail: View {
                                 }
                                 .tint(theme.tint)
                                 .disabled(!presentation.preview && monitoring.changingSourceIDs.contains(source.sourceID))
-                                .padding(.vertical, 14)
+                                .padding(.vertical, 16)
                                 if !presentation.preview, let error = monitoring.settingErrors[source.sourceID] {
                                     Text(error).font(.caption).foregroundStyle(theme.secondaryInk)
-                                        .padding(.bottom, 14)
+                                        .padding(.bottom, 16)
                                 }
                             }
                         }
@@ -54,7 +54,7 @@ struct LiveActivitiesDetail: View {
                     .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 20))
                     .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
                 }
-            }.padding(.horizontal, 24).padding(.top, 22).padding(.bottom, 30)
+            }.padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 32)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Live Activities").navigationBarTitleDisplayMode(.inline)
     }

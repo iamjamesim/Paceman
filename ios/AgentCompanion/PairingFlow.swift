@@ -69,7 +69,7 @@ struct PairingFlow: View {
                 if let error { Label(error, systemImage: "exclamationmark.circle").font(.subheadline).foregroundStyle(theme.ink) }
                 CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
                     .allowsHitTesting(!preview)
-            }.padding(.horizontal, 24).padding(.bottom, 30)
+            }.padding(.horizontal, 24).padding(.bottom, 32)
         }.background(CompanionCanvas(theme: theme)).foregroundStyle(theme.ink)
             .navigationTitle(reconnecting ? "Reconnect computer" : "Connect computer").navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $scanner) {
@@ -116,7 +116,7 @@ struct NotificationSetup: View {
             .safeAreaInset(edge: .bottom) {
                 if let done {
                     completionActions(done)
-                        .padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 12)
+                        .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
                         .background(theme.canvas)
                 }
             }
@@ -205,7 +205,7 @@ struct RecommendedNotificationSettings: View {
     let theme: CompanionTheme
     var preview = false
     var body: some View {
-        VStack(alignment: .leading, spacing: 34) {
+        VStack(alignment: .leading, spacing: 32) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Recommended iPhone settings")
                     .font(.title2.weight(.semibold))

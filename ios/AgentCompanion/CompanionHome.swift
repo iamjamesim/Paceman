@@ -28,7 +28,7 @@ struct CompanionHome: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
-                        HStack(spacing: 9) {
+                        HStack(spacing: 8) {
                             PacemanMark().frame(width: 31, height: 31).foregroundStyle(prominentTint)
                             Text("PACEMAN")
                                 .font(.custom("AvenirNext-BoldItalic", fixedSize: 21))
@@ -39,14 +39,14 @@ struct CompanionHome: View {
                         Button { open(.settings) } label: {
                             Image(systemName: "gearshape").font(.system(size: 19, weight: .regular)).frame(width: 44, height: 44)
                         }.buttonStyle(.plain).accessibilityLabel("Settings")
-                    }.padding(.bottom, 34)
+                    }.padding(.bottom, 32)
 
                     if paired || hasWatch {
-                        destinations.padding(.bottom, 27)
+                        destinations.padding(.bottom, 28)
                     }
 
                     if paired {
-                        computersHeading.padding(.bottom, 9)
+                        computersHeading.padding(.bottom, 8)
                         ForEach(model.pairedSources, id: \.sourceID) { paired in
                             computerCard(paired)
                                 .padding(.top, paired.sourceID == model.pairedSources.first?.sourceID ? 0 : 12)
@@ -55,9 +55,9 @@ struct CompanionHome: View {
                     } else { agentSetup }
                     if presentation.preview {
                         Text("Design preview · sample activity").font(.caption)
-                            .foregroundStyle(theme.secondaryInk).padding(.top, 22)
+                            .foregroundStyle(theme.secondaryInk).padding(.top, 24)
                     }
-                }.padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 34)
+                }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 32)
             }
             .refreshable { if !presentation.preview { await model.refreshAll() } }
             .onAppear {
@@ -132,8 +132,8 @@ struct CompanionHome: View {
     }
 
     private var agentSetup: some View {
-        VStack(alignment: .leading, spacing: 21) {
-            VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
                     Text("Connect a computer").font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold)).tracking(-0.8).fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
