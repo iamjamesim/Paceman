@@ -12,12 +12,12 @@ Apple Watch Smart Stack, and Mac menu bar. Apple Watch complications show how
 much Codex usage remains and when it resets.
 
 <p align="center">
-  <a href="docs/images/iphone-live-activity.jpg"><img src="docs/images/iphone-live-activity.jpg" alt="Paceman Live Activity on an iPhone Lock Screen" width="190"></a>
-  <a href="docs/images/apple-watch-smart-stack.jpg"><img src="docs/images/apple-watch-smart-stack.jpg" alt="Paceman in the Apple Watch Smart Stack" width="300"></a>
+  <a href="docs/images/iphone-live-activity.jpg"><img src="docs/images/iphone-live-activity.jpg" alt="Paceman Live Activity on an iPhone Lock Screen" width="192"></a>
+  <a href="docs/images/apple-watch-smart-stack.jpg"><img src="docs/images/apple-watch-smart-stack.jpg" alt="Paceman in the Apple Watch Smart Stack" width="312"></a>
 </p>
 
 <p align="center">
-  <a href="docs/images/mac-menu-bar-live-activity.png"><img src="docs/images/mac-menu-bar-live-activity.png" alt="Paceman Live Activity in the Mac menu bar with its expanded status panel" width="600"></a>
+  <a href="docs/images/mac-menu-bar-live-activity.png"><img src="docs/images/mac-menu-bar-live-activity.png" alt="Paceman Live Activity in the Mac menu bar with its expanded status panel" width="512"></a>
 </p>
 
 You can also try [Paceman Watch](firmware/esp32-watch/README.md), an experimental
