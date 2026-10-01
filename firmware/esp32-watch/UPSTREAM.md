@@ -3,7 +3,9 @@
 Source: https://github.com/iamjamesim/omarchy-watch
 Commit: `eb2d56e63cd4b2dea98557f897ce1bca6524b8fd` (v0.6.1)
 Imported: 2026-09-17
-License: MIT; original LICENSE and third-party notices are retained here.
+License: MIT; the original license is retained as `UPSTREAM_LICENSE`, alongside
+the upstream third-party notices. Paceman-authored additions use the repository's
+Apache License 2.0.
 
 Imported firmware, simulator, font generation, rendering and release tools.
 The original relative source layout is preserved inside this device package.

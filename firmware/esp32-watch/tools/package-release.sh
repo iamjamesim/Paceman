@@ -40,11 +40,13 @@ install -m 0644 "$firmware_dir/build/partition_table/partition-table.bin" "$pack
 install -m 0644 "$firmware_dir/build/omarchy_watch.bin" "$package_dir/paceman_watch.bin"
 install -m 0755 "$firmware_dir/release/flash.sh" "$package_dir/flash.sh"
 sed "s/@VERSION@/$version/g" "$firmware_dir/release/README.txt" >"$package_dir/README.txt"
-for notice in LICENSE THIRD_PARTY_NOTICES.md UPSTREAM.md; do
+install -m 0644 "$repo_dir/../../LICENSE" "$package_dir/LICENSE"
+for notice in UPSTREAM_LICENSE THIRD_PARTY_NOTICES.md UPSTREAM.md; do
   install -m 0644 "$repo_dir/$notice" "$package_dir/$notice"
 done
+install -m 0644 "$firmware_dir/main/fonts-OFL.txt" "$package_dir/fonts-OFL.txt"
 
-(cd "$package_dir" && checksum bootloader.bin partition-table.bin paceman_watch.bin flash.sh README.txt LICENSE THIRD_PARTY_NOTICES.md UPSTREAM.md >SHA256SUMS)
+(cd "$package_dir" && checksum bootloader.bin partition-table.bin paceman_watch.bin flash.sh README.txt LICENSE UPSTREAM_LICENSE THIRD_PARTY_NOTICES.md UPSTREAM.md fonts-OFL.txt >SHA256SUMS)
 (cd "$output_dir" && tar -czf "$archive" "$package_name")
 (cd "$output_dir" && checksum "$package_name.tar.gz" >"$package_name.tar.gz.sha256")
 

@@ -30,4 +30,5 @@ Origin:
   https://github.com/iamjamesim/omarchy-watch
 
 Licenses and provenance:
-  LICENSE, THIRD_PARTY_NOTICES.md, and UPSTREAM.md are included in this bundle.
+  LICENSE (Paceman), UPSTREAM_LICENSE (Omarchy Watch),
+  THIRD_PARTY_NOTICES.md, UPSTREAM.md, and fonts-OFL.txt are included.
