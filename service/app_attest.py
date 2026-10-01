@@ -22,6 +22,8 @@ from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 
 ROOT = Path(__file__).parent / "certs/Apple_App_Attestation_Root_CA.pem"
 NONCE_OID = x509.ObjectIdentifier("1.2.840.113635.100.8.2")
+ATTESTED_CREDENTIAL_DATA_FLAG = 0x40
+EXTENSION_DATA_FLAG = 0x80
 
 
 class InvalidAttestation(ValueError):
@@ -106,12 +108,13 @@ def _authenticator_data(data: object, app_id: str, *, attestation: bool,
     flags = data[32]
     counter = struct.unpack(">I", data[33:37])[0]
     if not attestation:
-        if flags & 0x40:
-            raise InvalidAttestation("Unexpected credential data")
+        # App Attest assertions on iOS 27 can set the WebAuthn AT bit without
+        # carrying a credential block. Apple's assertion validation relies on
+        # the signature over these full bytes, app ID, counter, and challenge.
         remainder = data[37:]
         _check_extensions(remainder, flags, environment)
         return counter, data
-    if not flags & 0x40 or counter != 0 or len(data) < 87:
+    if not flags & ATTESTED_CREDENTIAL_DATA_FLAG or counter != 0 or len(data) < 87:
         raise InvalidAttestation("Invalid attested credential")
     expected_aaguid = b"appattestdevelop" if environment == "development" else b"appattest" + b"\0" * 7
     if data[37:53] != expected_aaguid:
@@ -135,7 +138,7 @@ def _authenticator_data(data: object, app_id: str, *, attestation: bool,
 
 def _check_extensions(remainder: bytes, flags: int, environment: str) -> None:
     if not remainder:
-        if flags & 0x80:
+        if flags & EXTENSION_DATA_FLAG:
             raise InvalidAttestation("Missing authenticator extensions")
         return
     # Apple's iOS 27 samples append extension CBOR even when the ED flag is clear.

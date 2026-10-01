@@ -76,11 +76,10 @@ class AppAttestTests(unittest.TestCase):
         signature = self.device_key.sign(signed, ec.ECDSA(hashes.SHA256()))
         return encoded(cbor2.dumps({"authenticatorData": auth, "signature": signature}))
 
-    def assertion_with_extensions(self, category):
+    def assertion_with_extensions(self, category, *, flags=0):
         extensions = cbor2.dumps({"apple_validation_category_01": category.to_bytes(4, "little"),
                                   "apple_bundle_version_01": "1"})
-        # iOS 27 may append this map while leaving the ED flag clear.
-        auth = hashlib.sha256(APP_ID.encode()).digest() + b"\x00" + struct.pack(">I", 1) + extensions
+        auth = hashlib.sha256(APP_ID.encode()).digest() + bytes([flags]) + struct.pack(">I", 1) + extensions
         signed = auth + hashlib.sha256(self.challenge.encode()).digest()
         signature = self.device_key.sign(signed, ec.ECDSA(hashes.SHA256()))
         return encoded(cbor2.dumps({"authenticatorData": auth, "signature": signature}))
@@ -121,6 +120,30 @@ class AppAttestTests(unittest.TestCase):
         with self.assertRaises(InvalidAttestation):
             self.verifier.assert_key(self.assertion_with_extensions(3), public,
                                      self.challenge, "production", 0)
+
+    def test_ios27_assertion_at_bit_does_not_bypass_validation(self):
+        public = self.verifier.attest(self.attestation(), self.key_id, self.challenge,
+                                      "production", now=NOW)
+        for flags in (0x40, 0xC0):
+            with self.subTest(flags=flags):
+                proof = self.assertion_with_extensions(2, flags=flags)
+                self.assertEqual(self.verifier.assert_key(proof, public, self.challenge,
+                                                          "production", 0), 1)
+                with self.assertRaises(InvalidAttestation):
+                    self.verifier.assert_key(proof, public, self.challenge, "production", 1)
+                with self.assertRaises(InvalidAttestation):
+                    self.verifier.assert_key(proof, public, "wrong challenge", "production", 0)
+                with self.assertRaises(InvalidAttestation):
+                    self.verifier.assert_key(self.assertion_with_extensions(3, flags=flags), public,
+                                             self.challenge, "production", 0)
+                raw = base64.urlsafe_b64decode(proof + "=" * (-len(proof) % 4))
+                altered = cbor2.loads(raw)
+                auth = bytearray(altered["authenticatorData"])
+                auth[32] ^= 0x40
+                altered["authenticatorData"] = bytes(auth)
+                with self.assertRaises(InvalidAttestation):
+                    self.verifier.assert_key(encoded(cbor2.dumps(altered)), public,
+                                             self.challenge, "production", 0)
 
 
 if __name__ == "__main__":
