@@ -1,12 +1,21 @@
-# Known limitations
+# Known behavior and device checks
 
-Paceman is a developer alpha. Mac Codex desktop and CLI hooks and the Omarchy Codex CLI companion have been exercised on development devices. Only Codex activity is implemented. The ESP32 watch is experimental; iPhone and Apple Watch are the main receiving devices.
+Paceman currently tracks Codex activity. The Mac Codex desktop and CLI hooks and the separate Omarchy Codex CLI companion have been exercised on development devices. The ESP32 watch is experimental; the iPhone and Apple Watch are the main receiving devices.
 
-- **Mac activity:** A short-lived CLI task has remained Finished after exit when `SessionEnd` did not arrive. A desktop Computer Use approval has remained Working because no Needs input hook reached Paceman. Hook presence alone does not prove a hook was trusted or delivered. The Mac lacks Omarchy's process-ownership check.
-- **Omarchy activity:** The separate Codex CLI companion has been exercised on Omarchy. Paceman's bundled Linux hook and async-question handling passed synthetic hook-to-source tests on Mac, but its installation, hook review, process ownership, session exit, and allowance still need a fresh Omarchy Codex session. Codex desktop hooks on Omarchy and a physical watch remain unverified.
-- **Background delivery:** Connected locked-phone updates have reached the custom watch, but unattended reconnection, long idle periods, Focus, permission changes, and multiple-source combinations have not all passed physical checks. APNs acceptance is not evidence of visible phone or watch delivery.
-- **Custom-watch freshness:** The firmware cannot yet expire active source activity locally after losing the phone link. It reconciles when the phone reconnects.
-- **Codex allowance:** A reading can reach the phone and custom watch, but reset, unavailable, and desktop-only Mac cases need more validation. Multiple Codex accounts have no shared identity; the phone displays one recent source reading rather than merging accounts. Allowance-only changes wait for a later phone fetch.
-- **Distribution:** The Render relay and Postgres are live. A TestFlight iPhone paired, received updates, and displayed a new push notification. Temporary sources passed live cross-source denial, unbinding, and durable revocation checks without sending a push. App Attest source enrollment and bounded event retention are implemented locally but still need a signed physical-iPhone TestFlight check, a staged relay rollout, and Render alert configuration. Physical TestFlight revocation checks remain. Mac binaries still need Developer ID signing and notarization; installers are source-based developer paths.
+## Behavior limits
 
-See [architecture](architecture.md), [push delivery](push-delivery.md), and [data lifecycle](data-lifecycle.md) for the behavior behind these limits.
+- **Mac sessions:** Mac activity depends on reviewed hooks and cannot independently verify that the sending Codex process is still alive, as Omarchy can. If `SessionEnd` is missing, a completed CLI session can leave a Finished row for up to ten minutes. An observed desktop Computer Use approval remained Working because no Needs input hook reached Paceman. An async question can clear early when an unrelated user message arrives; see [Mac hooks](macos.md).
+- **ESP32 activity freshness:** Weather and allowance expire locally, but the activity packet has no source-freshness lease. If the phone link is lost while an agent is active, the watch can keep showing that state until it reconnects and receives the current aggregate. Reboot clears activity from RAM.
+- **Allowance aggregation:** Separate Codex accounts have no shared identity. The phone selects one recent source reading rather than combining accounts. An allowance-only change advances the source snapshot but does not send an ordinary activity notification, so the iPhone sees it on its next fetch. The Apple Watch has a separate allowance push path; see [push delivery](push-delivery.md).
+
+## Checks still requiring devices
+
+| Path | Check | Already observed |
+| --- | --- | --- |
+| Mac hooks | Review and trust the installed hook rows, then confirm a fresh Codex event reaches the source. Exercise short CLI sessions, desktop approvals, and allowance reset or unavailable states. | Mac desktop and CLI hooks have produced activity. Synthetic lifecycle and allowance tests pass. |
+| Omarchy hooks | In a fresh Omarchy Codex CLI session, verify installation and hook review, process ownership, session exit, and allowance. Check Codex desktop hooks and ESP32 delivery separately if those surfaces are intended to be supported there. | The separate CLI companion has run on Omarchy. The bundled hook and async-question path pass synthetic tests on Mac. |
+| Locked iPhone and ESP32 watch | Confirm delivery while already connected, then separately test unattended reconnection after Bluetooth loss or iOS suspension. Exercise long idle periods, Focus and notification-permission changes, and two active computers. | A connected watch received updates while the phone was locked. |
+| Allowance across receivers | Check reset and unavailable readings on the iPhone and ESP32 watch. On a physical Apple Watch, confirm a changed reading, reset and unavailable state, including a Mac desktop-only source. | A reading reached the iPhone and ESP32 watch. Apple Watch push timing and payloads have automated coverage; APNs acceptance alone does not prove watchOS processed them. |
+| Signed iPhone and relay | On a signed physical iPhone, pair a new source through App Attest, receive a new notification, and verify phone/source removal and relay revocation. | An earlier TestFlight phone paired, received updates, and displayed a push. Temporary sources passed live cross-source denial, unbinding, and durable revocation checks without a push. App Attest enrollment has local tests, not this device check. |
+
+The [relay guide](push-relay.md) tracks deployment and signing steps. [Architecture](architecture.md) and [data lifecycle](data-lifecycle.md) explain the state behind these limits.
