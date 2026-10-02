@@ -61,6 +61,10 @@ Use the Python 3.11+ command printed by the source installer if needed. The send
 
 **Sharing off** pauses the source and sender but keeps hooks, pairing, and push configuration. **Manage Paceman… → Open menu app at login** is separate, so the menu remains available while sharing is paused. **Remove access…** revokes one phone. **Manage Paceman… → Uninstall Paceman…** removes the app, background item, hooks, pairing data, and relay credential; remove a dedicated Tailscale Serve route separately. Local Apple Development or ad hoc signatures are not Developer ID signatures or notarization.
 
+<p align="center">
+  <a href="images/menu-bar-app.png"><img src="images/menu-bar-app.png" alt="Paceman Mac menu-bar app showing Sharing, a paired iPhone, and Codex activity" width="640"></a>
+</p>
+
 ## Coverage limits
 
 An unrelated user message can clear async-question attention early; a completed turn clears it. Without `SessionEnd`, a Finished row can remain for up to ten minutes. Mac hooks cannot verify process ownership. The source reads Codex allowance through a short-lived local App Server every five minutes and sends only the percentage, window, observation time, and reset time.
