@@ -29,10 +29,12 @@ phone update depends on a desktop capability.
 Mac alpha updates use a newer DMG and preserve Application Support data.
 Before a broad stable release, add signed Sparkle updates with separate alpha
 and stable feeds, a user-visible update prompt, and rollback testing. Omarchy
-updates rerun the newer archive. The Mac bundle ID remains
-`dev.paceman.macos` and its source LaunchAgent remains `dev.paceman.source`;
-the internal `dev.` text does not indicate a development signature. Changing
-either ID after distribution would require a login-item/update migration.
+updates rerun the newer archive. The public Mac bundle ID is
+`ai.paceman.macos`, matching the iPhone app's `ai.paceman` namespace. The
+existing source LaunchAgent remains `dev.paceman.source` to preserve its
+service identity and installed data. The installer accepts the earlier
+`dev.paceman.macos` development app and migrates its login registration.
+Freeze the public bundle ID after first distribution.
 
 ## Package and trust boundaries
 
@@ -128,7 +130,8 @@ assets and completing the release gate below.
 1. Run portable and Mac/iOS CI, the candidate package build, Omarchy archive
    extraction, and checksum verification. Record results with the candidate.
 2. On clean standard-user installations of macOS 15, 26, and 27, check fresh
-   install and upgrade, the Paceman Login Items entry, Sharing off/on, private
+   install and upgrade (including the old `dev.paceman.macos` development app),
+   the Paceman Login Items entry, Sharing off/on, private
    route, reviewed hooks and real Codex event, pairing, physical-phone alert,
    restart, and uninstall. Review connected, empty, stale, and multiple-phone
    menu states at normal and accessibility text sizes.

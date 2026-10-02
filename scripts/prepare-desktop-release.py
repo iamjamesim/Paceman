@@ -23,7 +23,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+(?:-alpha\.\d+|-beta\.\d+)?")
-MAC_BUNDLE_ID = "dev.paceman.macos"
+MAC_BUNDLE_ID = "ai.paceman.macos"
+MACHO_MAGIC = {bytes.fromhex(value) for value in ("cffaedfe", "feedfacf", "cafebabe", "bebafeca")}
 
 
 def run(*args: str | Path, **kwargs):
@@ -96,12 +97,25 @@ def verify_mac(dmg: Path, revision: str, version: str, build_number: int,
                     or build.get("pythonVersion") != runtime["version"]
                     or build.get("pythonArchiveSHA256") != runtime["sha256"]):
                 raise ValueError("Mac embedded build provenance does not match release inputs")
-            for name in ("Paceman", "PacemanBackground"):
+            binaries = []
+            for path in app.rglob("*"):
+                if not path.is_file() or path.is_symlink():
+                    continue
+                with path.open("rb") as source:
+                    if source.read(4) in MACHO_MAGIC:
+                        binaries.append(path)
+            if not binaries:
+                raise ValueError("Mac bundle contains no native binaries")
+            for binary in binaries:
                 architectures = subprocess.check_output(
-                    ["/usr/bin/lipo", "-archs", str(app / "Contents/MacOS" / name)],
-                    text=True).split()
+                    ["/usr/bin/lipo", "-archs", str(binary)], text=True).split()
                 if architectures != ["arm64"]:
-                    raise ValueError(f"Unexpected {name} architectures: {architectures}")
+                    raise ValueError(f"Unexpected {binary.name} architectures: {architectures}")
+                build = subprocess.check_output(["/usr/bin/vtool", "-show-build", str(binary)],
+                                                text=True)
+                minimum = re.search(r"\bminos\s+(\d+(?:\.\d+)*)", build)
+                if minimum is None or tuple(map(int, minimum.group(1).split(".")[:2])) > (15, 0):
+                    raise ValueError(f"Native binary exceeds macOS 15 floor: {binary}")
             run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
         finally:
             run("/usr/bin/hdiutil", "detach", "-quiet", mount)

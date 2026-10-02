@@ -43,6 +43,8 @@ private enum InstalledBuild {
     static let controlPath = NSHomeDirectory() + "/Library/Application Support/Paceman/bin/pacemanctl"
     static let markerPath = NSHomeDirectory() + "/Library/Application Support/Paceman/installed-build"
     static let notificationMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/notification-setup-incomplete"
+    static let loginAttentionMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/login-setup-incomplete"
+    static let loginMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/menu-login-configured"
 
     static var needsSetup: Bool {
         let bundled = Bundle.main.bundlePath + "/Contents/Resources/python/bin/python3"
@@ -77,6 +79,10 @@ private final class PanelModel: ObservableObject {
 
     var needsNotificationRepair: Bool {
         FileManager.default.fileExists(atPath: InstalledBuild.notificationMarker)
+    }
+
+    var needsLoginRepair: Bool {
+        FileManager.default.fileExists(atPath: InstalledBuild.loginAttentionMarker)
     }
 
     nonisolated private static var commandPath: String {
@@ -244,6 +250,9 @@ private final class PanelModel: ObservableObject {
             if enabled { try SMAppService.mainApp.register() }
             else { try SMAppService.mainApp.unregister() }
             loginStatus = SMAppService.mainApp.status
+            try? (enabled ? "registered\n" : "disabled\n")
+                .write(toFile: InstalledBuild.loginMarker, atomically: true, encoding: .utf8)
+            try? FileManager.default.removeItem(atPath: InstalledBuild.loginAttentionMarker)
             message = nil
         } catch {
             loginStatus = SMAppService.mainApp.status
@@ -296,9 +305,11 @@ private struct InstallationView: View {
         VStack(alignment: .leading, spacing: 16) {
             PacemanMark().frame(width: 40, height: 40)
                 .foregroundStyle(Color(nsColor: .labelColor))
-            Text(model.needsNotificationRepair ? "Finish setup" : model.isUpdate ? "Update Paceman" : "Install Paceman")
+            Text(model.needsNotificationRepair || model.needsLoginRepair ? "Finish setup" : model.isUpdate ? "Update Paceman" : "Install Paceman")
                 .font(.title2.weight(.semibold))
-            Text(model.needsNotificationRepair
+            Text(model.needsLoginRepair
+                 ? "Paceman was installed, but Open at Login needs another try."
+                 : model.needsNotificationRepair
                  ? "Paceman was installed, but iPhone notification setup needs another try."
                  : model.isUpdate
                  ? "Replace Paceman in your Applications folder. Your phones and Sharing setting will be kept."
@@ -311,7 +322,7 @@ private struct InstallationView: View {
             HStack {
                 Link("Setup guide", destination: SetupGuide.url)
                 Spacer()
-                Button(model.busy ? "Installing…" : model.needsNotificationRepair ? "Retry setup" : model.isUpdate ? "Update Paceman" : "Install Paceman") {
+                Button(model.busy ? "Installing…" : model.needsNotificationRepair || model.needsLoginRepair ? "Retry setup" : model.isUpdate ? "Update Paceman" : "Install Paceman") {
                     model.installBundled()
                 }
                     .disabled(model.busy)
@@ -580,6 +591,10 @@ private struct Panel: View {
             }
             Button("Manage Paceman…") { model.showingManagement = true }
                 .font(.caption)
+            if model.needsLoginRepair {
+                Text("Open at Login needs attention. Set it in Manage Paceman.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let message = model.message {
                 Text(message).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }

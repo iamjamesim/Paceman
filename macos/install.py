@@ -23,10 +23,13 @@ from service.push import DEFAULT_RELAY_URL
 REPO = Path(__file__).resolve().parent.parent
 ROOT = Path.home() / "Library/Application Support/Paceman"
 APP = Path.home() / "Applications/Paceman.app"
+BUNDLE_ID = "ai.paceman.macos"
+LEGACY_BUNDLE_ID = "dev.paceman.macos"
 PLIST = Path.home() / "Library/LaunchAgents/dev.paceman.source.plist"
 LABEL = "dev.paceman.source"
 PUSH_LABEL = "dev.paceman.push"
 PUSH_PLIST = Path.home() / "Library/LaunchAgents/dev.paceman.push.plist"
+LOGIN_ATTENTION = ROOT / "login-setup-incomplete"
 
 
 def signing_identity() -> str | None:
@@ -183,7 +186,7 @@ def build_app(destination: Path | None = None, *, version: str = "0.1",
     subprocess.run(["/usr/bin/iconutil", "-c", "icns", str(iconset), "-o",
                     str(resources / "Paceman.icns")], check=True)
     shutil.rmtree(iconset)
-    info = {"CFBundleIdentifier": "dev.paceman.macos", "CFBundleName": "Paceman",
+    info = {"CFBundleIdentifier": BUNDLE_ID, "CFBundleName": "Paceman",
             "CFBundleDisplayName": "Paceman", "CFBundleExecutable": "Paceman",
             "CFBundleIconFile": "Paceman.icns",
             "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version,
@@ -208,7 +211,7 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
         prebuilt_app = prebuilt_app.expanduser().resolve(strict=True)
         info = prebuilt_app / "Contents/Info.plist"
         if (not info.is_file() or
-                plistlib.loads(info.read_bytes()).get("CFBundleIdentifier") != "dev.paceman.macos" or
+                plistlib.loads(info.read_bytes()).get("CFBundleIdentifier") != BUNDLE_ID or
                 REPO.resolve() != (prebuilt_app / "Contents/Resources/lib").resolve()):
             raise ValueError("The prebuilt app and its installer do not match")
         if not (prebuilt_app / "Contents/Resources/python/bin/python3").is_file():
@@ -221,10 +224,15 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
     ROOT.chmod(0o700)
     (ROOT / "data").mkdir(exist_ok=True, mode=0o700)
     (ROOT / "data").chmod(0o700)
+    legacy_app = False
     if APP.exists():
         info = APP / "Contents/Info.plist"
-        if not info.is_file() or plistlib.loads(info.read_bytes()).get("CFBundleIdentifier") != "dev.paceman.macos":
+        if not info.is_file():
             raise ValueError(f"Refusing to replace another app at {APP}")
+        installed_id = plistlib.loads(info.read_bytes()).get("CFBundleIdentifier")
+        if installed_id not in (BUNDLE_ID, LEGACY_BUNDLE_ID):
+            raise ValueError(f"Refusing to replace another app at {APP}")
+        legacy_app = installed_id == LEGACY_BUNDLE_ID
     staging = Path(tempfile.mkdtemp(prefix=".install-", dir=ROOT))
     staged_app = staging / "Paceman.app"
     try:
@@ -232,11 +240,48 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
             build_app(staged_app)
         else:
             shutil.copytree(prebuilt_app, staged_app, symlinks=True)
-        notifications_ready = _finish_install(staged_app, relay_url=relay_url,
-                                              replace_push_config=replace_push_config,
-                                              open_menu=prebuilt_app is None,
-                                              stop_installed_menu=(prebuilt_app is None or
-                                                                   prebuilt_app != APP))
+        old_menu = APP / "Contents/MacOS/Paceman"
+        login_marker = ROOT / "menu-login-configured"
+        restore_old_login = legacy_app and login_marker.is_file() and \
+            login_marker.read_text().strip() != "disabled"
+        if legacy_app and old_menu.is_file():
+            subprocess.run([str(old_menu), "--unregister-login"], check=True,
+                           capture_output=True, text=True, timeout=20)
+        try:
+            notifications_ready = _finish_install(staged_app, relay_url=relay_url,
+                                                  replace_push_config=replace_push_config,
+                                                  open_menu=prebuilt_app is None,
+                                                  stop_installed_menu=(prebuilt_app is None or
+                                                                       prebuilt_app != APP))
+        except Exception:
+            restored_info = APP / "Contents/Info.plist"
+            try:
+                restored_legacy = (plistlib.loads(restored_info.read_bytes()).get("CFBundleIdentifier")
+                                   == LEGACY_BUNDLE_ID)
+            except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
+                restored_legacy = False
+            if restore_old_login and restored_legacy and old_menu.is_file():
+                try:
+                    subprocess.run([str(old_menu), "--register-login"], check=True,
+                                   capture_output=True, text=True, timeout=20)
+                except (OSError, subprocess.SubprocessError) as error:
+                    (staging / "ROLLBACK_INCOMPLETE").write_text(
+                        f"Old login item needs attention: {error}\n")
+            elif restore_old_login:
+                (staging / "ROLLBACK_INCOMPLETE").write_text(
+                    "Old login item could not be restored with the app.\n")
+            raise
+        if restore_old_login:
+            new_menu = APP / "Contents/MacOS/Paceman"
+            try:
+                subprocess.run([str(new_menu), "--register-login"], check=True,
+                               capture_output=True, text=True, timeout=20)
+                LOGIN_ATTENTION.unlink(missing_ok=True)
+            except (OSError, subprocess.SubprocessError) as error:
+                LOGIN_ATTENTION.write_text("Retry Paceman Open at Login setup.\n")
+                LOGIN_ATTENTION.chmod(0o600)
+                print(f"Open at Login needs attention after bundle ID change: {error}",
+                      file=sys.stderr)
     finally:
         if not (staging / "ROLLBACK_INCOMPLETE").exists():
             shutil.rmtree(staging, ignore_errors=True)
@@ -284,7 +329,7 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                 push_python = str(ROOT / "push-venv/bin/python3")
         except (OSError, ValueError, TypeError):
             pass
-    document = {"Label": LABEL, "AssociatedBundleIdentifiers": ["dev.paceman.macos"],
+    document = {"Label": LABEL, "AssociatedBundleIdentifiers": [BUNDLE_ID],
                 "ProgramArguments": [str(APP / "Contents/MacOS/PacemanBackground"),
                                      PYTHON, str(ROOT), push_python],
                 "WorkingDirectory": str(lib), "RunAtLoad": True, "KeepAlive": True,
@@ -449,17 +494,22 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
         except OSError:
             pass
     login_marker = ROOT / "menu-login-configured"
-    if not login_marker.exists():
+    if not login_marker.exists() or LOGIN_ATTENTION.exists():
         try:
             login = subprocess.run([str(APP / "Contents/MacOS/Paceman"), "--register-login"],
                                    capture_output=True, text=True, timeout=20)
             if login.returncode == 0:
                 login_marker.write_text("registered\n")
                 login_marker.chmod(0o600)
+                LOGIN_ATTENTION.unlink(missing_ok=True)
                 print("Paceman menu app will open at login; change this in Manage Paceman.")
             else:
+                LOGIN_ATTENTION.write_text("Retry Paceman Open at Login setup.\n")
+                LOGIN_ATTENTION.chmod(0o600)
                 print("Open at Login needs attention:", login.stderr.strip() or "registration failed")
         except (OSError, subprocess.SubprocessError) as error:
+            LOGIN_ATTENTION.write_text("Retry Paceman Open at Login setup.\n")
+            LOGIN_ATTENTION.chmod(0o600)
             print("Open at Login needs attention:", error)
     print(f"Installed {APP}")
     print("Mac background activity: one Paceman item for the local source and iPhone notifications when configured.")
