@@ -12,6 +12,7 @@ import macos.install as installer
 from macos.install import PYTHON, install_hooks
 from macos.codex_hook import EVENTS, QUESTION_MATCHER
 from macos.control import missing_hooks
+import macos.control as control
 from service.hub import Store
 
 
@@ -119,6 +120,20 @@ class MacInstallTests(unittest.TestCase):
             document["hooks"]["Stop"] = [{"hooks": [{"type": "command", "command": command}]}]
             config.write_text(json.dumps(document))
             self.assertEqual(missing_hooks(config, script), [])
+
+    def test_status_exposes_installed_hook_command_for_review(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "Paceman"
+            root.mkdir()
+            plist = Path(temporary) / "source.plist"
+            python = Path(temporary) / "Paceman App/python3"
+            plist.write_bytes(plistlib.dumps({"ProgramArguments": ["/app/background", str(python), str(root)]}))
+            with patch.multiple(control, ROOT=root, PLIST=plist), \
+                 patch.object(control, "missing_hooks", return_value=[]):
+                result = control.status()
+            self.assertEqual(result["hookCommand"],
+                             f"{shlex.quote(str(python))} -B "
+                             f"{shlex.quote(str(root / 'lib/macos/codex_hook.py'))}")
 
     def test_failed_service_start_restores_previous_install(self):
         self._exercise_replacement(fail_start=True)

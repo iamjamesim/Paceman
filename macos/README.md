@@ -6,7 +6,7 @@ The Mac client has one **Paceman** background item for the local source and noti
 
 When a signed, notarized Mac release is published, download its **Apple Silicon DMG** from the matching [GitHub release](https://github.com/iamjamesim/paceman/releases). Open `Paceman.app` in the disk image and choose **Install Paceman**. It copies itself to `~/Applications/Paceman.app`, installs the per-user background item and Codex hooks, and prepares the relay sender. During alpha, quit a running Paceman before opening a newer DMG and choosing **Update Paceman**; pairing data and Sharing preference are kept. The prebuilt app includes Python and its relay-client packages, so users do not need Xcode, Homebrew, or a separate Python. It supports Apple Silicon and macOS 15 or newer.
 
-Continue with **Review Codex hooks** below, then configure the private Tailscale route and pair the phone. Do not treat installation as complete until a fresh Codex event appears in `pacemanctl status`. Local dry-run DMGs are ad hoc signed and are not public downloads.
+Continue with **Review Codex hooks** below, then configure the private Tailscale route and pair the phone. The menu app confirms when a fresh Codex event reaches Paceman; a terminal check with `pacemanctl status` is also available. Local dry-run DMGs are ad hoc signed and are not public downloads.
 
 ## Install from source and pair
 
@@ -29,6 +29,8 @@ Installing and pairing do not enable session monitoring. Codex requires the user
 ```sh
 /opt/homebrew/bin/python3 -B '/Users/YOU/Library/Application Support/Paceman/lib/macos/codex_hook.py'
 ```
+
+The Mac menu app also shows **Review Codex hooks…** under Activity during setup. It displays the installed command, the eight event purposes, and whether a new event reached Paceman after you opened the guide. App users can finish this check without running `pacemanctl`.
 
 In the Codex app, open **Settings → Hooks → User config (All projects)**. In the CLI, enter `/hooks` or select **Review hooks** at startup. Codex calls each command **Hook 1**; expand the event row to verify **User config — ~/.codex/hooks.json** and the installed command. The user decides whether to trust each Paceman row individually.
 

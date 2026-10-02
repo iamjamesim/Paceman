@@ -26,9 +26,11 @@ private struct SourceStatus: Decodable {
     let updatedAt: Double?
     let lastAgentEventAt: Double?
     let missingHooks: [String]?
+    let hookCommand: String?
     static let empty = SourceStatus(running: false, sharingEnabled: false, computerName: nil,
                                     activity: nil, sessions: nil, sessionCounts: nil, clients: nil,
-                                    updatedAt: nil, lastAgentEventAt: nil, missingHooks: nil)
+                                    updatedAt: nil, lastAgentEventAt: nil, missingHooks: nil,
+                                    hookCommand: nil)
 }
 
 private struct PairingCode: Identifiable {
@@ -61,6 +63,8 @@ private final class PanelModel: ObservableObject {
     @Published var message: String?
     @Published var pairingCode: PairingCode?
     @Published var showingManagement = false
+    @Published var showingHookReview = false
+    @Published var hookReviewStartedAt: Double = 0
     @Published var loginStatus = SMAppService.mainApp.status
     @Published var expanded: String?
     @Published var confirming: String?
@@ -318,6 +322,63 @@ private struct InstallationView: View {
     }
 }
 
+private struct HookReviewView: View {
+    @ObservedObject var model: PanelModel
+
+    private let events: [(String, String)] = [
+        ("SessionStart", "Shows a new task as idle."),
+        ("UserPromptSubmit", "Shows work after you send a prompt."),
+        ("PermissionRequest", "Shows an approval still pending after five seconds."),
+        ("PreToolUse", "Shows a blocking or async question still pending after five seconds."),
+        ("PostToolUse", "Shows work resuming after a tool finishes."),
+        ("Stop", "Shows a finished turn."),
+        ("Interrupt", "Shows an interrupted turn as idle."),
+        ("SessionEnd", "Removes a closed task."),
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Review Codex hooks").font(.title2.weight(.semibold))
+                Text("In Codex, open Settings → Hooks → User config (All projects). Review each Paceman entry yourself. Codex calls the command in each row “Hook 1”; expand it to compare with this command:")
+                    .fixedSize(horizontal: false, vertical: true)
+                if let command = model.status.hookCommand {
+                    Text(command).font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("The installed command is unavailable. Run the Mac installer again.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(events, id: \.0) { event in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(event.0).font(.subheadline.weight(.medium))
+                        Text(event.1).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text("Each hook sends its event name, opaque task and turn IDs, and possibly a short project label to Paceman on this Mac. That label may appear on your iPhone Lock Screen. It sends no prompts, replies, transcripts, tool arguments, or full project paths.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("After review, start a fresh local Codex task and send a prompt. Paceman checks for the new event automatically.")
+                    .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                Text(model.status.missingHooks?.isEmpty == false ? "Some Paceman hook entries are missing. Run the Mac installer again, then review them in Codex."
+                     : (model.status.lastAgentEventAt ?? 0) > model.hookReviewStartedAt ? "A new Codex event reached Paceman on this Mac."
+                     : "Waiting for a new Codex event.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Link("Setup guide", destination: SetupGuide.url)
+                    Spacer()
+                    Button("Done") { model.showingHookReview = false }.keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(24)
+        }
+        .frame(width: 390)
+        .frame(maxHeight: 600)
+        .onAppear { model.refresh() }
+        .onExitCommand { model.showingHookReview = false }
+    }
+}
+
 private struct ManagementView: View {
     @ObservedObject var model: PanelModel
     @State private var confirmingUninstall = false
@@ -432,6 +493,8 @@ private struct Panel: View {
                 InstallationView(model: model)
             } else if let code = model.pairingCode {
                 PairingView(code: code) { model.pairingCode = nil }
+            } else if model.showingHookReview {
+                HookReviewView(model: model)
             } else if model.showingManagement {
                 ManagementView(model: model)
             } else {
@@ -442,6 +505,7 @@ private struct Panel: View {
         .onDisappear {
             model.pairingCode = nil
             model.showingManagement = false
+            model.showingHookReview = false
         }
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in model.refresh() }
     }
@@ -502,6 +566,13 @@ private struct Panel: View {
                 if let activitySetup {
                     Text(activitySetup.instruction).font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    Button("Review Codex hooks…") {
+                        if model.hookReviewStartedAt == 0 {
+                            model.hookReviewStartedAt = Date().timeIntervalSince1970
+                        }
+                        model.showingHookReview = true
+                    }
+                        .font(.caption)
                 }
                 if model.status.sharingEnabled && !model.status.running {
                     Button("Restart Paceman") { model.run(["restart"]) }.font(.caption)

@@ -6,6 +6,7 @@ from contextlib import closing
 import json
 import os
 from pathlib import Path
+import plistlib
 import shlex
 import shutil
 import socket
@@ -85,6 +86,13 @@ def status():
     value["sharingEnabled"] = not (ROOT / "sharing-paused").exists()
     value["computerName"] = socket.gethostname().split(".")[0]
     value["missingHooks"] = missing_hooks()
+    try:
+        arguments = plistlib.loads(PLIST.read_bytes()).get("ProgramArguments", [])
+        if len(arguments) >= 2 and isinstance(arguments[1], str):
+            value["hookCommand"] = (shlex.quote(arguments[1]) + " -B " +
+                                    shlex.quote(str(ROOT / "lib/macos/codex_hook.py")))
+    except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
+        pass
     return value
 
 

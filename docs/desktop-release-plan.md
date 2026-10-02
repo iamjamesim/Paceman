@@ -54,6 +54,8 @@ client wheels and checks their hashes before signing. It rejects missing
 license texts referenced by the Python build metadata. Review the actual
 shipped files, licenses, dependency advisories, and generated component
 manifest before each public release; hash locks are not vulnerability scans.
+The builder removes pip after installing those wheels; customers do not need
+a package manager inside the app.
 
 The public Mac DMG requires a **Developer ID Application** certificate for
 team `ZTG42P5438`, hardened-runtime signatures on nested code and the app,

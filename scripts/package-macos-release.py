@@ -95,6 +95,13 @@ def install_client_packages(python: Path, wheelhouse: Path | None, scratch: Path
     site = python.parent.parent / "lib/python3.14/site-packages"
     run(python, "-m", "pip", "install", "--no-index", "--find-links", wheelhouse,
         "--require-hashes", "--no-compile", "--target", site, "-r", CLIENT_LOCK)
+    # pip is needed to assemble the package, not to run Paceman. Keep the
+    # customer bundle smaller and avoid shipping an unused package manager.
+    shutil.rmtree(site / "pip")
+    for metadata in site.glob("pip-*.dist-info"):
+        shutil.rmtree(metadata)
+    for name in ("pip", "pip3", "pip3.14"):
+        (python.parent / name).unlink(missing_ok=True)
 
 
 def copy_source(app: Path, revision: str, runtime: dict, label: str):
@@ -140,9 +147,10 @@ def smoke(app: Path, version: str):
     python = app / "Contents/Resources/python/bin/python3"
     library = app / "Contents/Resources/lib"
     env = {**os.environ, "PYTHONPATH": str(library), "PYTHONDONTWRITEBYTECODE": "1"}
-    script = ("import sys, httpx, service.hub, service.push, macos.install; "
+    script = ("import sys, importlib.util, httpx, service.hub, service.push, macos.install; "
               f"assert sys.version.startswith({version!r}); "
-              "assert httpx.__version__ == '0.28.1'")
+              "assert httpx.__version__ == '0.28.1'; "
+              "assert importlib.util.find_spec('pip') is None")
     run(python, "-c", script, cwd=library, env=env)
 
 
