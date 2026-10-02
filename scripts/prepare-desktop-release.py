@@ -7,6 +7,7 @@ Production requires an annotated exact tag, Developer ID, and notarization.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -184,15 +185,19 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--python-archive", type=Path)
     parser.add_argument("--wheelhouse", type=Path)
+    parser.add_argument("--notes-file", type=Path, help="Reviewed user-facing change notes to include")
     signing = parser.add_mutually_exclusive_group(required=True)
     signing.add_argument("--adhoc", action="store_true")
     signing.add_argument("--identity", help="Developer ID Application identity")
     parser.add_argument("--notary-profile", help="Stored notarytool keychain profile")
+    parser.add_argument("--resume", action="store_true", help="Resume preserved production notarization")
     args = parser.parse_args()
     if not VERSION_PATTERN.fullmatch(args.version) or args.build_number < 1:
         parser.error("Specify a valid desktop version and a positive build number")
     if bool(args.identity) != bool(args.notary_profile):
         parser.error("Public release requires both Developer ID identity and notary profile")
+    if args.resume and args.adhoc:
+        parser.error("Only a saved production notarization can be resumed")
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         parser.error("Prepare desktop releases on an Apple Silicon Mac")
     try:
@@ -202,11 +207,24 @@ def main() -> None:
             raise ValueError(f"Output directory already exists: {destination}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         runtime = json.loads((ROOT / "macos/python-runtime.json").read_text())
-        with tempfile.TemporaryDirectory(prefix=".paceman-release-", dir=destination.parent) as directory:
-            staging = Path(directory) / destination.name
-            staging.mkdir()
-            run("bash", ROOT / "scripts/package-omarchy-release.sh", revision,
-                args.version, staging)
+        change_notes = args.notes_file.read_text().strip() if args.notes_file else ""
+        if args.notes_file and not change_notes:
+            raise ValueError("Release notes file is empty")
+        with (destination.parent / f".{destination.name}.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            staging = destination.with_name(f".{destination.name}.pending")
+            state = {"sourceRevision": revision, "version": args.version,
+                     "buildNumber": args.build_number, "adhoc": args.adhoc,
+                     "identity": args.identity, "pythonArchiveSHA256": runtime["sha256"],
+                     "notesSHA256": hashlib.sha256(change_notes.encode()).hexdigest()}
+            if args.resume:
+                if json.loads((staging / "preparation.json").read_text()) != state:
+                    raise ValueError("Pending preparation differs from this checkout or build settings")
+            else:
+                staging.mkdir()
+                (staging / "preparation.json").write_text(json.dumps(state, indent=2) + "\n")
+                run("bash", ROOT / "scripts/package-omarchy-release.sh", revision,
+                    args.version, staging)
             command = [sys.executable, str(ROOT / "scripts/package-macos-release.py"),
                        "--release-label", args.version, "--build-number", str(args.build_number),
                        "--output-dir", str(staging)]
@@ -216,6 +234,8 @@ def main() -> None:
                 command += ["--wheelhouse", str(args.wheelhouse.expanduser().resolve())]
             command += (["--adhoc"] if args.adhoc else
                         ["--identity", args.identity, "--notary-profile", args.notary_profile])
+            if args.resume:
+                command.append("--resume")
             run(*command, cwd=ROOT)
             omarchy = staging / f"Paceman-Omarchy-{args.version}.tar.gz"
             mac = staging / (f"Paceman-macos-arm64-{args.version}"
@@ -241,7 +261,8 @@ def main() -> None:
                         "hostMacOS": platform.mac_ver()[0], "artifacts": files}
             (staging / "release-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
             (staging / "RELEASE-NOTES.md").write_text(
-                release_notes(args.version, revision, files, args.adhoc))
+                (change_notes + "\n\n" if change_notes else "")
+                + release_notes(args.version, revision, files, args.adhoc))
             checksum_files = [omarchy, mac, staging / "release-manifest.json",
                               staging / "RELEASE-NOTES.md"]
             (staging / "SHA256SUMS").write_text(
@@ -251,7 +272,9 @@ def main() -> None:
         print("Local validation candidate; Mac DMG cannot be distributed." if args.adhoc
               else "Signed and notarized candidate; complete the release QA gate before upload.")
     except (OSError, ValueError, subprocess.CalledProcessError, tarfile.TarError) as error:
-        parser.exit(1, f"Desktop release preparation failed: {error}\n")
+        parser.exit(1, f"Desktop release preparation stopped: {error}\n"
+                    "Pending artifacts are retained beside the output directory. "
+                    "Resume a saved Apple submission with the same arguments plus --resume.\n")
 
 
 if __name__ == "__main__":
