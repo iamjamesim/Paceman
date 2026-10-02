@@ -6,7 +6,7 @@ The Mac client has one **Paceman** background item for the local source and noti
 
 When a signed, notarized Mac release is published, download its **Apple Silicon DMG** from the matching [GitHub release](https://github.com/iamjamesim/paceman/releases). Open `Paceman.app` in the disk image and choose **Install Paceman**. It copies itself to `~/Applications/Paceman.app`, installs the per-user background item and Codex hooks, and prepares the relay sender. During alpha, quit a running Paceman before opening a newer DMG and choosing **Update Paceman**; pairing data and Sharing preference are kept. The prebuilt app includes Python and its relay-client packages, so users do not need Xcode, Homebrew, or a separate Python. It supports Apple Silicon and macOS 15 or newer.
 
-The first public Mac build uses bundle ID `ai.paceman.macos`. An existing `dev.paceman.macos` development installation can be replaced in place. The installer migrates its Open at Login registration where possible; check **System Settings → General → Login Items & Extensions** after upgrading. If the menu app reports that Open at Login needs attention, set it in **Manage Paceman…**.
+The first public Mac build uses bundle ID `ai.paceman.macos`. Check **System Settings → General → Login Items & Extensions** after installation. If the menu app reports that Open at Login needs attention, set it in **Manage Paceman…**.
 
 Continue with **Review Codex hooks** below, then configure the private Tailscale route and pair the phone. The menu app confirms when a fresh Codex event reaches Paceman; a terminal check with `pacemanctl status` is also available. Local dry-run DMGs are ad hoc signed and are not public downloads.
 

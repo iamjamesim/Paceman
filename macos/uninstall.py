@@ -104,8 +104,7 @@ def uninstall():
         raise ValueError("Paceman data directory is not owned by this user")
     if APP.exists():
         info = APP / "Contents/Info.plist"
-        if not info.is_file() or plistlib.loads(info.read_bytes()).get("CFBundleIdentifier") not in (
-                "ai.paceman.macos", "dev.paceman.macos"):
+        if not info.is_file() or plistlib.loads(info.read_bytes()).get("CFBundleIdentifier") != "ai.paceman.macos":
             raise ValueError("The app at the Paceman path is not Paceman")
     for path, label in ((PLIST, LABEL), (PUSH_PLIST, PUSH_LABEL)):
         if path.exists() and plistlib.loads(path.read_bytes()).get("Label") != label:

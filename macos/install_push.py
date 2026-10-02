@@ -20,8 +20,6 @@ from macos.install import APP, REPO, ROOT, runtime_python
 from service.hub import Store, endpoint
 from service.push import Config, RelayConfig
 
-LABEL = "dev.paceman.push"
-PLIST = Path.home() / "Library/LaunchAgents/dev.paceman.push.plist"
 PRIVATE = ROOT / "private"
 KEY = PRIVATE / "apns-key.p8"
 CONFIG = PRIVATE / "apns.json"

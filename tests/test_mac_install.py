@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 import plistlib
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -49,75 +48,6 @@ class MacInstallTests(unittest.TestCase):
                  patch.object(installer, "build_app", side_effect=AssertionError("Xcode used")), \
                  patch.object(installer, "_finish_install", side_effect=finish):
                 self.assertTrue(installer.install(prebuilt_app=source))
-
-    def test_legacy_bundle_upgrade_migrates_login_registration(self):
-        self._check_legacy_login_migration("registered\n", expect_register=True)
-
-    def test_legacy_bundle_upgrade_preserves_disabled_login(self):
-        self._check_legacy_login_migration("disabled\n", expect_register=False)
-
-    def test_failed_legacy_bundle_upgrade_restores_login_registration(self):
-        self._check_legacy_login_migration("registered\n", expect_register=True,
-                                           fail_install=True)
-
-    def test_legacy_login_registration_failure_is_visible_for_repair(self):
-        self._check_legacy_login_migration("registered\n", expect_register=True,
-                                           fail_new_login=True)
-
-    def _check_legacy_login_migration(self, marker: str, *, expect_register: bool,
-                                      fail_install: bool = False,
-                                      fail_new_login: bool = False):
-        with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
-            root = base / "data"
-            app = base / "Applications/Paceman.app"
-            old_menu = app / "Contents/MacOS/Paceman"
-            old_menu.parent.mkdir(parents=True)
-            old_menu.touch()
-            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({
-                "CFBundleIdentifier": installer.LEGACY_BUNDLE_ID}))
-            root.mkdir()
-            (root / "menu-login-configured").write_text(marker)
-            calls = []
-
-            def build(staged):
-                menu = staged / "Contents/MacOS/Paceman"
-                menu.parent.mkdir(parents=True)
-                menu.touch()
-                (staged / "Contents/Info.plist").write_bytes(plistlib.dumps({
-                    "CFBundleIdentifier": installer.BUNDLE_ID}))
-
-            def finish(staged, **kwargs):
-                if fail_install:
-                    raise OSError("test install failure")
-                self.assertEqual(plistlib.loads((staged / "Contents/Info.plist").read_bytes())[
-                    "CFBundleIdentifier"], installer.BUNDLE_ID)
-                shutil.rmtree(app)
-                staged.replace(app)
-                return True
-
-            def command(args, **kwargs):
-                installed_id = plistlib.loads((app / "Contents/Info.plist").read_bytes())[
-                    "CFBundleIdentifier"]
-                calls.append((installed_id, args[-1]))
-                if fail_new_login and installed_id == installer.BUNDLE_ID:
-                    raise subprocess.CalledProcessError(1, args, "registration failed")
-                return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
-
-            with patch.multiple(installer, ROOT=root, APP=app, PYTHON=sys.executable,
-                                LOGIN_ATTENTION=root / "login-setup-incomplete"), \
-                 patch.object(installer, "build_app", side_effect=build), \
-                 patch.object(installer, "_finish_install", side_effect=finish), \
-                 patch.object(installer.subprocess, "run", side_effect=command):
-                if fail_install:
-                    with self.assertRaises(OSError):
-                        installer.install()
-                else:
-                    self.assertTrue(installer.install())
-            self.assertEqual((root / "login-setup-incomplete").exists(), fail_new_login)
-            self.assertEqual(calls, [(installer.LEGACY_BUNDLE_ID, "--unregister-login")] +
-                             ([(installer.LEGACY_BUNDLE_ID if fail_install else installer.BUNDLE_ID,
-                                "--register-login")] if expect_register else []))
 
     def test_hook_install_preserves_existing_rules_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -231,8 +161,8 @@ class MacInstallTests(unittest.TestCase):
             home = Path(temporary) / "home"
             root = home / "Library/Application Support/Paceman"
             app = home / "Applications/Paceman.app"
-            plist = home / "Library/LaunchAgents/dev.paceman.source.plist"
-            push_plist = home / "Library/LaunchAgents/dev.paceman.push.plist"
+            plist = home / "Library/LaunchAgents/ai.paceman.source.plist"
+            push_plist = home / "Library/LaunchAgents/ai.paceman.push.plist"
             hooks = home / ".codex/hooks.json"
             repo = Path(temporary) / "repo"
             staging = root / ".install-test"

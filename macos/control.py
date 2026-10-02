@@ -23,8 +23,8 @@ from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint
 
 ROOT = Path.home() / "Library/Application Support/Paceman"
-PLIST = Path.home() / "Library/LaunchAgents/dev.paceman.source.plist"
-LABEL = "dev.paceman.source"
+PLIST = Path.home() / "Library/LaunchAgents/ai.paceman.source.plist"
+LABEL = "ai.paceman.source"
 
 
 def missing_hooks(config_path: Path | None = None, script_path: Path | None = None) -> list[str]:
