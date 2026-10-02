@@ -19,6 +19,8 @@ import sys
 import tempfile
 from urllib.request import urlopen
 
+from notarize_release import notarize
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 RUNTIME_LOCK = ROOT / "macos/python-runtime.json"
@@ -193,6 +195,7 @@ def main():
     signing.add_argument("--adhoc", action="store_true", help="Local dry run; never distribute")
     signing.add_argument("--identity", help="Developer ID Application identity for public release")
     parser.add_argument("--notary-profile", help="notarytool keychain profile; required for public release")
+    parser.add_argument("--resume", action="store_true", help="Resume the saved Apple submission without rebuilding")
     args = parser.parse_args()
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-alpha\.\d+|-beta\.\d+)?", args.release_label):
         parser.error("Release label must be a numeric version with optional alpha or beta suffix")
@@ -200,6 +203,8 @@ def main():
         parser.error("Build number must be positive")
     if bool(args.identity) != bool(args.notary_profile):
         parser.error("Production builds require both Developer ID identity and notary profile")
+    if args.resume and args.adhoc:
+        parser.error("Only a saved production notarization can be resumed")
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         parser.error("Mac release packages must be built on an Apple Silicon Mac")
     marketing_version = args.release_label.split("-")[0]
@@ -208,37 +213,40 @@ def main():
             verify_developer_id(args.identity)
         revision = checkout_revision(args.release_label, adhoc=args.adhoc)
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="paceman-mac-release-") as temporary:
-            scratch = Path(temporary)
-            os.environ["CLANG_MODULE_CACHE_PATH"] = str(scratch / "clang-cache")
-            os.environ["SWIFT_MODULE_CACHE_PATH"] = str(scratch / "swift-cache")
-            archive, runtime = runtime_archive(args.python_archive, scratch)
-            from macos.install import build_app
-            app = scratch / "Paceman.app"
-            build_app(app, version=marketing_version, build_number=str(args.build_number),
-                      minimum_macos=MINIMUM_MACOS, sign=False)
-            python = copy_runtime(archive, app, scratch)
-            install_client_packages(python, args.wheelhouse, scratch)
-            copy_source(app, revision, runtime, args.release_label)
-            smoke(app, runtime["version"])
-            sign_app(app, args.identity or "-", adhoc=args.adhoc)
-            suffix = "-UNSIGNED" if args.adhoc else ""
-            dmg = args.output_dir / f"Paceman-macos-arm64-{args.release_label}{suffix}.dmg"
-            dmg.unlink(missing_ok=True)
-            make_dmg(app, dmg, scratch)
-            if args.notary_profile:
-                run("/usr/bin/xcrun", "notarytool", "submit", dmg, "--keychain-profile",
-                    args.notary_profile, "--wait")
-                run("/usr/bin/xcrun", "stapler", "staple", dmg)
-                run("/usr/bin/xcrun", "stapler", "validate", dmg)
-                run("/usr/sbin/spctl", "--assess", "--type", "open", "--context",
-                    "context:primary-signature", dmg)
-            digest = sha256(dmg)
-            (dmg.with_suffix(dmg.suffix + ".sha256")).write_text(f"{digest}  {dmg.name}\n")
-            print(f"Built {dmg} ({dmg.stat().st_size / 1_000_000:.1f} MB)")
-            print(f"SHA-256 {digest}")
-            if args.adhoc:
-                print("Local dry run only: ad hoc signature, no Developer ID or notarization.")
+        suffix = "-UNSIGNED" if args.adhoc else ""
+        dmg = args.output_dir / f"Paceman-macos-arm64-{args.release_label}{suffix}.dmg"
+        if not args.resume and dmg.exists():
+            raise ValueError("Output already exists; use --resume for a saved Apple submission")
+        if not args.resume:
+            with tempfile.TemporaryDirectory(prefix="paceman-mac-release-") as temporary:
+                scratch = Path(temporary)
+                os.environ["CLANG_MODULE_CACHE_PATH"] = str(scratch / "clang-cache")
+                os.environ["SWIFT_MODULE_CACHE_PATH"] = str(scratch / "swift-cache")
+                archive, runtime = runtime_archive(args.python_archive, scratch)
+                from macos.install import build_app
+                app = scratch / "Paceman.app"
+                build_app(app, version=marketing_version, build_number=str(args.build_number),
+                          minimum_macos=MINIMUM_MACOS, sign=False)
+                python = copy_runtime(archive, app, scratch)
+                install_client_packages(python, args.wheelhouse, scratch)
+                copy_source(app, revision, runtime, args.release_label)
+                smoke(app, runtime["version"])
+                sign_app(app, args.identity or "-", adhoc=args.adhoc)
+                smoke(app, runtime["version"])
+                make_dmg(app, dmg, scratch)
+                if args.identity:
+                    run("/usr/bin/codesign", "--force", "--sign", args.identity, "--timestamp", dmg)
+        if args.notary_profile:
+            notarize(dmg, args.notary_profile, {
+                "sourceRevision": revision, "version": args.release_label,
+                "buildNumber": args.build_number, "identity": args.identity,
+            }, resume=args.resume)
+        digest = sha256(dmg)
+        (dmg.with_suffix(dmg.suffix + ".sha256")).write_text(f"{digest}  {dmg.name}\n")
+        print(f"Built {dmg} ({dmg.stat().st_size / 1_000_000:.1f} MB)")
+        print(f"SHA-256 {digest}")
+        if args.adhoc:
+            print("Local dry run only: ad hoc signature, no Developer ID or notarization.")
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Mac release build failed: {error}\n")
 
