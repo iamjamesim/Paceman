@@ -35,7 +35,8 @@ def codex_binary(*, application_dirs: tuple[Path, ...] | None = None) -> str | N
             except (OSError, ValueError, TypeError):
                 continue
             if isinstance(info, dict) and info.get("CFBundleIdentifier") == "com.openai.codex":
-                candidates.append(str(bundle / "Contents/Resources/codex"))
+                candidates.extend(str(bundle / relative) for relative in (
+                    "Contents/Resources/codex-cli/bin/codex", "Contents/Resources/codex"))
     candidates.extend((shutil.which("codex"), "/opt/homebrew/bin/codex", "/usr/local/bin/codex"))
     for candidate in candidates:
         if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):

@@ -90,6 +90,27 @@ class MacSourceTests(unittest.TestCase):
             with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": ""}):
                 self.assertEqual(codex_binary(application_dirs=(root,)), str(binary.resolve()))
 
+    def test_current_desktop_runtime_precedes_legacy_and_cli(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            bundle = root / "ChatGPT.app" / "Contents"
+            binary = bundle / "Resources/codex-cli/bin/codex"
+            binary.parent.mkdir(parents=True)
+            (bundle / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "com.openai.codex"}))
+            legacy = bundle / "Resources/codex"
+            cli = root / "codex"
+            for path in (binary, legacy, cli):
+                path.write_text("#!/bin/sh\nexit 0\n")
+                path.chmod(0o700)
+            with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": ""}), \
+                    patch("service.codex_limits.shutil.which", return_value=str(cli)):
+                self.assertEqual(codex_binary(application_dirs=(root,)), str(binary.resolve()))
+                binary.chmod(0o600)
+                self.assertEqual(codex_binary(application_dirs=(root,)), str(legacy.resolve()))
+            with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": str(cli)}):
+                binary.chmod(0o700)
+                self.assertEqual(codex_binary(application_dirs=(root,)), str(cli.resolve()))
+
     def test_mac_allowance_is_presentation_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
