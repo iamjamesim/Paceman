@@ -12,14 +12,14 @@ For real desktop events, use [Omarchy installation](../omarchy/README.md).
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-push.txt
+.venv/bin/python -m pip install -r requirements-relay.txt
 bash scripts/check.sh
 .venv/bin/python -m service.hub serve
 ```
 
 The source listens at `127.0.0.1:8765`. It uses ignored `.runtime/` by default.
-The core source uses the standard library; the optional push sender and its tests
-use the dependencies in requirements-push.txt.
+The core source uses the standard library. The full checks include relay tests,
+so install requirements-relay.txt, which includes the optional push dependencies.
 
 ## Private source pairing
 
@@ -62,12 +62,14 @@ bash scripts/check-on-mac.sh
 xcrun simctl list devices available
 xcodebuild -project ios/AgentCompanion.xcodeproj -scheme AgentCompanion \
   -destination 'platform=iOS Simulator,id=SIMULATOR-UDID' \
-  -derivedDataPath .runtime/DerivedData CODE_SIGNING_ALLOWED=NO test
+  -derivedDataPath .runtime/DerivedData test
 ```
 
-Replace SIMULATOR-UDID with an installed simulator. The iPhone app uses
-`ai.paceman.app`; the watch and widget identifiers extend that prefix, and all
-app targets share `group.ai.paceman.shared`. The Xcode project pins Paceman's
+Replace SIMULATOR-UDID with an installed simulator. Keep signing enabled for
+the simulator tests so the Keychain migration test can access secure storage.
+The iPhone app uses `ai.paceman.app`; the watch and widget identifiers extend
+that prefix, and all app targets share `group.ai.paceman.shared`. The Xcode
+project pins Paceman's
 Apple Developer team for app and extension targets but includes no private
 signing keys. Forks need to select their own team and bundle identifiers before
 device signing. A build with a new identifier installs as a separate app from
