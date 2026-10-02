@@ -22,3 +22,4 @@ ios/build/
 *.sqlite3
 *.sqlite3-*
 *.bundle
+dist/

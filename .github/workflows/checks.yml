@@ -38,6 +38,11 @@ jobs:
           with TemporaryDirectory() as directory:
               install.build_app(Path(directory) / "Paceman.app")
           PY
+      - name: Dry-run Mac release package
+        run: |
+          python scripts/package-macos-release.py \
+            --release-label 0.1.0-alpha.1 --build-number 1 \
+            --output-dir "$RUNNER_TEMP/PacemanMacRelease" --adhoc
       - name: Test iPhone app and extensions
         run: |
           simulator_id=$(xcrun simctl list -j devices available | python -c '

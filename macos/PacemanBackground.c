@@ -41,13 +41,13 @@ static pid_t start_child(const char *python, const char *root, int push) {
     close(output);
     close(error);
     if (push) {
-        char *const args[] = {(char *)python, "-m", "service.push", "--config", config,
+        char *const args[] = {(char *)python, "-B", "-m", "service.push", "--config", config,
                               "--data-dir", data, NULL};
         execv(python, args);
     } else {
         char entry[4096];
         snprintf(entry, sizeof(entry), "%s/service/launch.py", lib);
-        char *const args[] = {(char *)python, entry, "--data-dir", data, "serve",
+        char *const args[] = {(char *)python, "-B", entry, "--data-dir", data, "serve",
                               "--source", "macos", "--status-file", status,
                               "--agent-socket", socket_path, "--relay-config", config, NULL};
         execv(python, args);
@@ -57,7 +57,7 @@ static pid_t start_child(const char *python, const char *root, int push) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3) {
+    if (argc != 3 && argc != 4) {
         fprintf(stderr, "Paceman Background needs its Python and data paths.\n");
         return 2;
     }
@@ -70,7 +70,8 @@ int main(int argc, char **argv) {
     if (source_pid < 0) return 1;
     char config[4096], push_python[4096];
     snprintf(config, sizeof(config), "%s/private/apns.json", argv[2]);
-    snprintf(push_python, sizeof(push_python), "%s/push-venv/bin/python3", argv[2]);
+    if (argc == 4) snprintf(push_python, sizeof(push_python), "%s", argv[3]);
+    else snprintf(push_python, sizeof(push_python), "%s/push-venv/bin/python3", argv[2]);
     if (access(config, R_OK) == 0 && access(push_python, X_OK) == 0)
         push_pid = start_child(push_python, argv[2], 1);
 

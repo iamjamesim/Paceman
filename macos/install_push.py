@@ -16,7 +16,7 @@ import tempfile
 
 from macos.install import LABEL as SOURCE_LABEL, PLIST as SOURCE_PLIST
 from macos.install import PUSH_LABEL as LABEL, PUSH_PLIST as PLIST
-from macos.install import REPO, ROOT, runtime_python
+from macos.install import APP, REPO, ROOT, runtime_python
 from service.hub import Store, endpoint
 from service.push import Config, RelayConfig
 
@@ -87,11 +87,18 @@ def install(config_path: Path | None = None, *, relay_url: str | None = None):
                  "keyPath": str(KEY)}
         if validated.watch_key_id:
             value.update(watchKeyID=validated.watch_key_id, watchKeyPath=str(WATCH_KEY))
-    python = VENV / "bin/python3"
-    if not python.is_file():
-        subprocess.run([runtime_python(), "-m", "venv", str(VENV)], check=True)
-    subprocess.run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
-                    "-r", str(REPO / "requirements-push.txt")], check=True)
+    bundled = APP / "Contents/Resources/python/bin/python3"
+    if relay and bundled.is_file():
+        python = bundled
+    else:
+        python = VENV / "bin/python3"
+        if not python.is_file():
+            subprocess.run([runtime_python(), "-m", "venv", str(VENV)], check=True)
+        requirements = "requirements-client.txt" if relay else "requirements-push.txt"
+        arguments = [str(python), "-m", "pip", "install", "--disable-pip-version-check"]
+        if relay:
+            arguments.append("--require-hashes")
+        subprocess.run([*arguments, "-r", str(REPO / requirements)], check=True)
     descriptor, name = tempfile.mkstemp(prefix=".apns-", dir=PRIVATE)
     temporary = Path(name)
     try:
@@ -103,7 +110,7 @@ def install(config_path: Path | None = None, *, relay_url: str | None = None):
                  if relay else
                  "from pathlib import Path; from service.push import APNs, Config; "
                  "import sys; APNs(Config.load(Path(sys.argv[1]))).close()")
-        subprocess.run([str(python), "-c", check, str(temporary)], cwd=ROOT,
+        subprocess.run([str(python), "-B", "-c", check, str(temporary)], cwd=ROOT,
                        env={**os.environ, "PYTHONPATH": str(ROOT / "lib")}, check=True)
         temporary.replace(CONFIG)
     finally:
@@ -122,8 +129,23 @@ def install(config_path: Path | None = None, *, relay_url: str | None = None):
         subprocess.run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         PLIST.unlink()
+    source_document = plistlib.loads(SOURCE_PLIST.read_bytes())
+    source_arguments = source_document.get("ProgramArguments", [])
+    if len(source_arguments) >= 3 and source_arguments[0].endswith("/PacemanBackground"):
+        source_document["ProgramArguments"] = [*source_arguments[:3], str(python)]
+        descriptor, name = tempfile.mkstemp(prefix=".paceman-source-", dir=SOURCE_PLIST.parent)
+        staged_source = Path(name)
+        try:
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(plistlib.dumps(source_document))
+            staged_source.chmod(0o600)
+            staged_source.replace(SOURCE_PLIST)
+        finally:
+            staged_source.unlink(missing_ok=True)
     if not (ROOT / "sharing-paused").exists():
-        subprocess.run(["/bin/launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{SOURCE_LABEL}"],
+        subprocess.run(["/bin/launchctl", "bootout", f"gui/{os.getuid()}/{SOURCE_LABEL}"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(SOURCE_PLIST)],
                        check=True)
     print("iPhone notifications enabled in Paceman's single Mac background item.")
     print("The relay credential is stored in Paceman Application Support; the APNs key remains server-side."

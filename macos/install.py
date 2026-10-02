@@ -10,6 +10,7 @@ import plistlib
 import re
 import shlex
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -100,7 +101,7 @@ def install_hooks(path: Path | None = None):
     if not isinstance(hooks, dict):
         raise ValueError("Existing hooks configuration is not an object")
     script = str(ROOT / "lib/macos/codex_hook.py")
-    command = shlex.quote(PYTHON) + " " + shlex.quote(script)
+    command = shlex.quote(PYTHON) + " -B " + shlex.quote(script)
     changed = []
     for event in HOOK_EVENTS:
         groups = hooks.setdefault(event, [])
@@ -117,7 +118,7 @@ def install_hooks(path: Path | None = None):
                     arguments = shlex.split(item.get("command", ""))
                 except (TypeError, ValueError):
                     continue
-                if len(arguments) == 2 and arguments[1] == script:
+                if len(arguments) in (2, 3) and arguments[-1] == script:
                     installed = True
                     if event == "PreToolUse" and group.get("matcher") != QUESTION_MATCHER:
                         # Matcher belongs to the group. Keep unrelated handlers
@@ -154,16 +155,18 @@ def install_hooks(path: Path | None = None):
     return changed
 
 
-def build_app(destination: Path | None = None):
+def build_app(destination: Path | None = None, *, version: str = "0.1",
+              build_number: str = "1", minimum_macos: str = "13.0",
+              sign: bool = True):
     destination = destination or APP
     executable = destination / "Contents/MacOS/Paceman"
     executable.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["/usr/bin/xcrun", "swiftc", "-O", "-parse-as-library", "-target",
-                    "arm64-apple-macosx13.0", str(REPO / "macos/PacemanMac.swift"),
+                    f"arm64-apple-macosx{minimum_macos}", str(REPO / "macos/PacemanMac.swift"),
                     str(REPO / "ios/Shared/PacemanMark.swift"),
                     "-o", str(executable)], check=True, cwd=REPO)
     subprocess.run(["/usr/bin/xcrun", "clang", "-O2", "-Wall", "-Wextra", "-target",
-                    "arm64-apple-macos13.0", str(REPO / "macos/PacemanBackground.c"),
+                    f"arm64-apple-macos{minimum_macos}", str(REPO / "macos/PacemanBackground.c"),
                     "-o", str(executable.parent / "PacemanBackground")], check=True, cwd=REPO)
     resources = destination / "Contents/Resources"
     resources.mkdir(parents=True, exist_ok=True)
@@ -183,9 +186,12 @@ def build_app(destination: Path | None = None):
     info = {"CFBundleIdentifier": "dev.paceman.macos", "CFBundleName": "Paceman",
             "CFBundleDisplayName": "Paceman", "CFBundleExecutable": "Paceman",
             "CFBundleIconFile": "Paceman.icns",
-            "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.1",
-            "CFBundleVersion": "1", "LSMinimumSystemVersion": "13.0", "LSUIElement": True}
+            "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version,
+            "CFBundleVersion": build_number, "LSMinimumSystemVersion": minimum_macos,
+            "LSUIElement": True}
     (destination / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
+    if not sign:
+        return
     identity = signing_identity() or "-"
     helper = executable.parent / "PacemanBackground"
     subprocess.run(["/usr/bin/codesign", "--force", "--sign", identity, str(helper)], check=True)
@@ -193,9 +199,21 @@ def build_app(destination: Path | None = None):
     print("Paceman signing:", "Apple team identity" if identity != "-" else "ad hoc (unidentified developer)")
 
 
-def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: bool = False):
+def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: bool = False,
+            prebuilt_app: Path | None = None):
+    global PYTHON
     if sys.version_info < (3, 11):
         raise ValueError("Install Python 3.11 or newer and run this installer with it")
+    if prebuilt_app is not None:
+        prebuilt_app = prebuilt_app.expanduser().resolve(strict=True)
+        info = prebuilt_app / "Contents/Info.plist"
+        if (not info.is_file() or
+                plistlib.loads(info.read_bytes()).get("CFBundleIdentifier") != "dev.paceman.macos" or
+                REPO.resolve() != (prebuilt_app / "Contents/Resources/lib").resolve()):
+            raise ValueError("The prebuilt app and its installer do not match")
+        if not (prebuilt_app / "Contents/Resources/python/bin/python3").is_file():
+            raise ValueError("The prebuilt app has no bundled Python runtime")
+        PYTHON = str(APP / "Contents/Resources/python/bin/python3")
     if relay_url is not None:
         relay_url = endpoint(relay_url)
     os.umask(0o077)
@@ -210,9 +228,15 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
     staging = Path(tempfile.mkdtemp(prefix=".install-", dir=ROOT))
     staged_app = staging / "Paceman.app"
     try:
-        build_app(staged_app)
+        if prebuilt_app is None:
+            build_app(staged_app)
+        else:
+            shutil.copytree(prebuilt_app, staged_app, symlinks=True)
         notifications_ready = _finish_install(staged_app, relay_url=relay_url,
-                                              replace_push_config=replace_push_config)
+                                              replace_push_config=replace_push_config,
+                                              open_menu=prebuilt_app is None,
+                                              stop_installed_menu=(prebuilt_app is None or
+                                                                   prebuilt_app != APP))
     finally:
         if not (staging / "ROLLBACK_INCOMPLETE").exists():
             shutil.rmtree(staging, ignore_errors=True)
@@ -220,7 +244,8 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
 
 
 def _finish_install(staged_app: Path, *, relay_url: str | None = None,
-                    replace_push_config: bool = False):
+                    replace_push_config: bool = False, open_menu: bool = True,
+                    stop_installed_menu: bool = True):
     try:
         previous_status = json.loads((ROOT / "status.json").read_text())
         had_activity = previous_status.get("mode") == "macos" and float(previous_status.get("lastAgentEventAt", 0)) > 0
@@ -243,15 +268,25 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     staged_wrapper = staging / "pacemanctl"
     staged_wrapper.write_text((REPO / "macos/launch_control.py").read_text().replace(
-        "#!/usr/bin/python3 -I", f"#!{PYTHON} -I", 1))
+        "#!/usr/bin/python3 -I", f"#!{PYTHON} -IB", 1))
     staged_wrapper.chmod(0o700)
 
     lib = ROOT / "lib"
     bin_dir = ROOT / "bin"
     wrapper = bin_dir / "pacemanctl"
     staged_plist = staging / "source.plist"
+    bundled_python = str(APP / "Contents/Resources/python/bin/python3")
+    push_python = bundled_python if PYTHON == bundled_python else str(ROOT / "push-venv/bin/python3")
+    existing_push_config = ROOT / "private/apns.json"
+    if push_python == bundled_python and existing_push_config.is_file():
+        try:
+            if "relayURL" not in json.loads(existing_push_config.read_text()):
+                push_python = str(ROOT / "push-venv/bin/python3")
+        except (OSError, ValueError, TypeError):
+            pass
     document = {"Label": LABEL, "AssociatedBundleIdentifiers": ["dev.paceman.macos"],
-                "ProgramArguments": [str(APP / "Contents/MacOS/PacemanBackground"), PYTHON, str(ROOT)],
+                "ProgramArguments": [str(APP / "Contents/MacOS/PacemanBackground"),
+                                     PYTHON, str(ROOT), push_python],
                 "WorkingDirectory": str(lib), "RunAtLoad": True, "KeepAlive": True,
                 "StandardOutPath": str(ROOT / "background.log"),
                 "StandardErrorPath": str(ROOT / "background-error.log")}
@@ -383,7 +418,10 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                     raise ValueError("Relay source ID does not match this installation")
             else:
                 Config.load(push_config)
-            if not (ROOT / "push-venv/bin/python3").is_file():
+            worker_arguments = plistlib.loads(PLIST.read_bytes()).get("ProgramArguments", [])
+            worker_python = (worker_arguments[3] if len(worker_arguments) >= 4
+                             else str(ROOT / "push-venv/bin/python3"))
+            if not Path(worker_python).is_file():
                 raise ValueError("Push worker environment is missing")
             print("Existing iPhone notification configuration preserved.")
         except (OSError, ValueError, TypeError) as error:
@@ -392,16 +430,24 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
     else:
         print("Notification setup skipped as requested. Configure a relay before pairing a phone.")
 
-    try:
-        subprocess.run(["/usr/bin/pkill", "-x", "Paceman"], stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
-    except OSError:
-        pass
-    try:
-        opened = subprocess.run(["/usr/bin/open", "-n", "-a", str(APP)],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
-    except OSError:
-        opened = False
+    if stop_installed_menu:
+        executable = str(APP / "Contents/MacOS/Paceman")
+        try:
+            running = subprocess.run(["/usr/bin/pgrep", "-U", str(os.getuid()),
+                                      "-f", "-x", executable], capture_output=True,
+                                     text=True, timeout=5)
+            if running.returncode == 0:
+                for value in running.stdout.splitlines():
+                    os.kill(int(value), signal.SIGTERM)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+    opened = False
+    if open_menu:
+        try:
+            opened = subprocess.run(["/usr/bin/open", "-n", "-a", str(APP)],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+        except OSError:
+            pass
     login_marker = ROOT / "menu-login-configured"
     if not login_marker.exists():
         try:
@@ -447,6 +493,26 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
     else:
         print("NEXT: Configure private Tailscale Serve HTTPS to 127.0.0.1:8765.")
         print("Then click Paceman's QR button and scan it in the iPhone app's Connect computer flow.")
+    installed_build = ROOT / "installed-build"
+    if PYTHON == str(APP / "Contents/Resources/python/bin/python3"):
+        info = plistlib.loads((APP / "Contents/Info.plist").read_bytes())
+        build = str(info["CFBundleVersion"])
+        descriptor, name = tempfile.mkstemp(prefix=".paceman-build-", dir=ROOT)
+        temporary = Path(name)
+        try:
+            with os.fdopen(descriptor, "w") as output:
+                output.write(build + "\n")
+            temporary.replace(installed_build)
+        finally:
+            temporary.unlink(missing_ok=True)
+    else:
+        installed_build.unlink(missing_ok=True)
+    notification_marker = ROOT / "notification-setup-incomplete"
+    if notifications_ready:
+        notification_marker.unlink(missing_ok=True)
+    else:
+        notification_marker.write_text("Retry Paceman notification setup.\n")
+        notification_marker.chmod(0o600)
     return notifications_ready
 
 
@@ -455,7 +521,7 @@ def print_hook_review_steps(wrapper: Path):
     print("  Codex CLI: enter /hooks, or choose Review hooks at startup.")
     print("  Codex calls each row 'Hook 1'. Identify Paceman by expanding the row")
     print("  and checking its source (User config, ~/.codex/hooks.json) and command:")
-    print(f"     {shlex.quote(PYTHON)} {shlex.quote(str(ROOT / 'lib/macos/codex_hook.py'))}")
+    print(f"     {shlex.quote(PYTHON)} -B {shlex.quote(str(ROOT / 'lib/macos/codex_hook.py'))}")
     print("  Review these eight event rows with the user:")
     for event, purpose in HOOK_PURPOSES:
         print(f"     {event}: {purpose}")
@@ -476,11 +542,14 @@ if __name__ == "__main__":
     selection.add_argument("--relay-url", help="Use a self-hosted relay instead of the Paceman relay")
     selection.add_argument("--no-push-setup", action="store_true",
                            help="Skip automatic relay setup for a developer-managed sender")
+    parser.add_argument("--prebuilt-app", type=Path,
+                        help="Install the signed app bundle without Xcode or an external Python")
     arguments = parser.parse_args()
     try:
         ready = install(relay_url=None if arguments.no_push_setup else
                         arguments.relay_url or DEFAULT_RELAY_URL,
-                        replace_push_config=arguments.relay_url is not None)
+                        replace_push_config=arguments.relay_url is not None,
+                        prebuilt_app=arguments.prebuilt_app)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"Paceman install failed: {error}", file=sys.stderr)
         raise SystemExit(1)

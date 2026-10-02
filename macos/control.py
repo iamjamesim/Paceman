@@ -45,7 +45,8 @@ def missing_hooks(config_path: Path | None = None, script_path: Path | None = No
             arguments = shlex.split(item.get("command", ""))
         except (TypeError, ValueError):
             return False
-        return (len(arguments) == 2 and arguments[1] == str(script_path)
+        return (len(arguments) in (2, 3) and arguments[-1] == str(script_path)
+                and (len(arguments) == 2 or arguments[1] == "-B")
                 and Path(arguments[0]).is_file())
 
     missing = []

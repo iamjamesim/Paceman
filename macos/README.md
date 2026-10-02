@@ -2,7 +2,13 @@
 
 The Mac client has one **Paceman** background item for the local source and notification sender. The menu-bar app controls Sharing and phone access. It opens at login by default, independently of Sharing. Codex hooks supply activity; the phone connects over private Tailscale HTTPS.
 
-## Install and pair
+## Prebuilt Mac release
+
+When a signed, notarized Mac release is published, download its **Apple Silicon DMG** from the matching [GitHub release](https://github.com/iamjamesim/paceman/releases). Open `Paceman.app` in the disk image and choose **Install Paceman**. It copies itself to `~/Applications/Paceman.app`, installs the per-user background item and Codex hooks, and prepares the relay sender. During alpha, quit a running Paceman before opening a newer DMG and choosing **Update Paceman**; pairing data and Sharing preference are kept. The prebuilt app includes Python and its relay-client packages, so users do not need Xcode, Homebrew, or a separate Python. It supports Apple Silicon and macOS 15 or newer.
+
+Continue with **Review Codex hooks** below, then configure the private Tailscale route and pair the phone. Do not treat installation as complete until a fresh Codex event appears in `pacemanctl status`. Local dry-run DMGs are ad hoc signed and are not public downloads.
+
+## Install from source and pair
 
 From the repository root, use Python 3.11+ installed outside the checkout, Xcode, and an Apple Silicon Mac:
 
@@ -18,10 +24,10 @@ Open `~/Applications/Paceman.app` and confirm **Paceman** appears in **System Se
 
 ## Review Codex hooks
 
-Installing and pairing do not enable session monitoring. Codex requires the user to review each new or changed hook. The installer prints the **exact command** for this installation: its selected Python interpreter followed by the absolute path to `~/Library/Application Support/Paceman/lib/macos/codex_hook.py`. Compare that printed command with every expanded Paceman row. For example, with Homebrew Python on Apple Silicon, its shape is:
+Installing and pairing do not enable session monitoring. Codex requires the user to review each new or changed hook. The installer prints the **exact command** for this installation: its selected Python interpreter, the `-B` flag, and the absolute path to `~/Library/Application Support/Paceman/lib/macos/codex_hook.py`. Compare that printed command with every expanded Paceman row. In a prebuilt install the interpreter is inside `~/Applications/Paceman.app`; with Homebrew Python on a source install, its shape is:
 
 ```sh
-/opt/homebrew/bin/python3 '/Users/YOU/Library/Application Support/Paceman/lib/macos/codex_hook.py'
+/opt/homebrew/bin/python3 -B '/Users/YOU/Library/Application Support/Paceman/lib/macos/codex_hook.py'
 ```
 
 In the Codex app, open **Settings → Hooks → User config (All projects)**. In the CLI, enter `/hooks` or select **Review hooks** at startup. Codex calls each command **Hook 1**; expand the event row to verify **User config — ~/.codex/hooks.json** and the installed command. The user decides whether to trust each Paceman row individually.

@@ -19,6 +19,34 @@ class MacInstallTests(unittest.TestCase):
     def test_runtime_python_is_outside_checkout(self):
         self.assertFalse(Path(PYTHON).is_relative_to(Path(__file__).resolve().parent.parent))
 
+    def test_prebuilt_install_uses_its_bundled_runtime_without_building(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            source = base / "download/Paceman.app"
+            library = source / "Contents/Resources/lib"
+            (library / "macos").mkdir(parents=True)
+            (library / "macos/install.py").touch()
+            bundled = source / "Contents/Resources/python/bin/python3"
+            bundled.parent.mkdir(parents=True)
+            bundled.touch()
+            (source / "Contents/Info.plist").write_bytes(plistlib.dumps({
+                "CFBundleIdentifier": "dev.paceman.macos"}))
+            installed = base / "Applications/Paceman.app"
+            root = base / "data"
+
+            def finish(staged, **kwargs):
+                self.assertTrue((staged / "Contents/Resources/python/bin/python3").is_file())
+                self.assertEqual(installer.PYTHON,
+                                 str(installed / "Contents/Resources/python/bin/python3"))
+                self.assertFalse(kwargs["open_menu"])
+                return True
+
+            with patch.multiple(installer, ROOT=root, APP=installed, REPO=library,
+                                PYTHON=sys.executable), \
+                 patch.object(installer, "build_app", side_effect=AssertionError("Xcode used")), \
+                 patch.object(installer, "_finish_install", side_effect=finish):
+                self.assertTrue(installer.install(prebuilt_app=source))
+
     def test_hook_install_preserves_existing_rules_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / ".codex/hooks.json"
@@ -52,7 +80,7 @@ class MacInstallTests(unittest.TestCase):
             self.assertIn("Stop", changed)
             self.assertEqual(len(stop), 1)
             self.assertEqual(stop[0]["hooks"][0]["command"],
-                             f"{shlex.quote(PYTHON)} {shlex.quote(str(script))}")
+                             f"{shlex.quote(PYTHON)} -B {shlex.quote(str(script))}")
 
     def test_question_hook_upgrade_preserves_other_handlers_in_shared_group(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -70,7 +98,7 @@ class MacInstallTests(unittest.TestCase):
             self.assertNotIn("matcher", groups[0])
             self.assertEqual(groups[1]["matcher"], QUESTION_MATCHER)
             self.assertEqual(groups[1]["hooks"][0]["command"],
-                             f"{shlex.quote(PYTHON)} {shlex.quote(str(script))}")
+                             f"{shlex.quote(PYTHON)} -B {shlex.quote(str(script))}")
             self.assertEqual(install_hooks(path), [])
 
     def test_missing_hooks_distinguishes_partial_and_complete_install(self):
@@ -203,7 +231,7 @@ class MacInstallTests(unittest.TestCase):
             self.assertEqual((root / "lib/desktop").exists(), failed)
             self.assertFalse((root / "lib/omarchy").exists())
             self.assertEqual((app / "version").read_text(), expected)
-            self.assertEqual((root / "bin/pacemanctl").read_text(), "old" if failed else f"#!{sys.executable} -I\nnew")
+            self.assertEqual((root / "bin/pacemanctl").read_text(), "old" if failed else f"#!{sys.executable} -IB\nnew")
             if failed:
                 self.assertEqual(plist.read_bytes(), old_plist)
                 self.assertEqual(hooks.read_bytes(), old_hooks)
@@ -212,6 +240,8 @@ class MacInstallTests(unittest.TestCase):
                                  str(app / "Contents/MacOS/PacemanBackground"))
                 self.assertEqual(len(json.loads(hooks.read_text())["hooks"]), 8)
             self.assertEqual(push_plist.exists(), failed)
+            self.assertEqual((root / "notification-setup-incomplete").exists(),
+                             fail_push and not failed)
             self.assertEqual(len(bootstraps), 3 if failed else 1)
             if relay_url and not failed:
                 self.assertEqual(push_calls, [] if existing_push else [relay_url])

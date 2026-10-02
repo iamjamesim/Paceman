@@ -1,0 +1,10 @@
+{
+  "version": "3.14.8",
+  "release": "20261001",
+  "architecture": "aarch64-apple-darwin",
+  "flavor": "install_only",
+  "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20261001/cpython-3.14.8%2B20261001-aarch64-apple-darwin-install_only.tar.gz",
+  "sha256": "d565c39e6b6446d62228414ec73798362c998fa26b2921b4b268f4ca909ac3aa",
+  "noticesSourceURL": "https://github.com/astral-sh/python-build-standalone/releases/download/20261001/cpython-3.14.8%2B20261001-aarch64-apple-darwin-pgo%2Blto-full.tar.zst",
+  "noticesSourceSHA256": "1135418d10836dc2ca298391f0a30901015017eacb98a3caf40b1cb29aa405ba"
+}

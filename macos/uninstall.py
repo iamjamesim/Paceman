@@ -67,7 +67,7 @@ def cleaned_hooks(path: Path | None = None):
                     arguments = shlex.split(hook.get("command", "")) if isinstance(hook, dict) else []
                 except (TypeError, ValueError):
                     arguments = []
-                if len(arguments) == 2 and arguments[1] == script:
+                if len(arguments) in (2, 3) and arguments[-1] == script:
                     changed = True
                 else:
                     kept.append(hook)
@@ -138,7 +138,7 @@ def uninstall():
     if ROOT.exists():
         shutil.rmtree(ROOT)
     result = ("Removed Paceman's Mac app, background item, Codex hooks, local pairings, "
-              "and APNs key. The iPhone app, Python, and Tailscale remain installed.")
+              "and APNs key. The iPhone app, other Python installations, and Tailscale remain installed.")
     if relay_revocation_pending:
         result += (" Relay revocation could not be confirmed for source " + relay_revocation_pending
                    + "; ask the project owner to revoke it in the relay database.")
