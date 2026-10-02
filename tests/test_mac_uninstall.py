@@ -42,7 +42,7 @@ class HookRemovalTests(unittest.TestCase):
             (root / "private").mkdir()
             (root / "private/apns-key.p8").write_text("test fixture")
             (app / "Contents").mkdir(parents=True)
-            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "dev.paceman.macos"}))
+            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "ai.paceman.macos"}))
             login_command = app / "Contents/MacOS/Paceman"
             login_command.parent.mkdir()
             login_command.touch()

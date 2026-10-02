@@ -6,6 +6,7 @@ from contextlib import closing
 import json
 import os
 from pathlib import Path
+import plistlib
 import shlex
 import shutil
 import socket
@@ -22,8 +23,8 @@ from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint
 
 ROOT = Path.home() / "Library/Application Support/Paceman"
-PLIST = Path.home() / "Library/LaunchAgents/dev.paceman.source.plist"
-LABEL = "dev.paceman.source"
+PLIST = Path.home() / "Library/LaunchAgents/ai.paceman.source.plist"
+LABEL = "ai.paceman.source"
 
 
 def missing_hooks(config_path: Path | None = None, script_path: Path | None = None) -> list[str]:
@@ -45,7 +46,8 @@ def missing_hooks(config_path: Path | None = None, script_path: Path | None = No
             arguments = shlex.split(item.get("command", ""))
         except (TypeError, ValueError):
             return False
-        return (len(arguments) == 2 and arguments[1] == str(script_path)
+        return (len(arguments) in (2, 3) and arguments[-1] == str(script_path)
+                and (len(arguments) == 2 or arguments[1] == "-B")
                 and Path(arguments[0]).is_file())
 
     missing = []
@@ -84,6 +86,13 @@ def status():
     value["sharingEnabled"] = not (ROOT / "sharing-paused").exists()
     value["computerName"] = socket.gethostname().split(".")[0]
     value["missingHooks"] = missing_hooks()
+    try:
+        arguments = plistlib.loads(PLIST.read_bytes()).get("ProgramArguments", [])
+        if len(arguments) >= 2 and isinstance(arguments[1], str):
+            value["hookCommand"] = (shlex.quote(arguments[1]) + " -B " +
+                                    shlex.quote(str(ROOT / "lib/macos/codex_hook.py")))
+    except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
+        pass
     return value
 
 

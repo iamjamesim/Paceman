@@ -4,7 +4,7 @@ import ServiceManagement
 import UniformTypeIdentifiers
 
 private enum SetupGuide {
-    static let url = URL(string: "https://github.com/iamjamesim/paceman#get-started")!
+    static let url = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md")!
 }
 
 private struct Connection: Decodable, Identifiable {
@@ -26,14 +26,37 @@ private struct SourceStatus: Decodable {
     let updatedAt: Double?
     let lastAgentEventAt: Double?
     let missingHooks: [String]?
+    let hookCommand: String?
     static let empty = SourceStatus(running: false, sharingEnabled: false, computerName: nil,
                                     activity: nil, sessions: nil, sessionCounts: nil, clients: nil,
-                                    updatedAt: nil, lastAgentEventAt: nil, missingHooks: nil)
+                                    updatedAt: nil, lastAgentEventAt: nil, missingHooks: nil,
+                                    hookCommand: nil)
 }
 
 private struct PairingCode: Identifiable {
     let id = UUID()
     let text: String
+}
+
+private enum InstalledBuild {
+    static let appPath = NSHomeDirectory() + "/Applications/Paceman.app"
+    static let controlPath = NSHomeDirectory() + "/Library/Application Support/Paceman/bin/pacemanctl"
+    static let markerPath = NSHomeDirectory() + "/Library/Application Support/Paceman/installed-build"
+    static let notificationMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/notification-setup-incomplete"
+    static let loginAttentionMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/login-setup-incomplete"
+    static let loginMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/menu-login-configured"
+
+    static var needsSetup: Bool {
+        let bundled = Bundle.main.bundlePath + "/Contents/Resources/python/bin/python3"
+        guard FileManager.default.isExecutableFile(atPath: bundled) else { return false }
+        let bundleBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        let installedBuild = try? String(contentsOfFile: markerPath, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return Bundle.main.bundlePath != appPath ||
+            !FileManager.default.fileExists(atPath: controlPath) ||
+            FileManager.default.fileExists(atPath: notificationMarker) ||
+            bundleBuild == nil || installedBuild != bundleBuild
+    }
 }
 
 @MainActor
@@ -42,10 +65,25 @@ private final class PanelModel: ObservableObject {
     @Published var message: String?
     @Published var pairingCode: PairingCode?
     @Published var showingManagement = false
+    @Published var showingHookReview = false
+    @Published var hookReviewStartedAt: Double = 0
     @Published var loginStatus = SMAppService.mainApp.status
     @Published var expanded: String?
     @Published var confirming: String?
     @Published var busy = false
+    @Published var needsInstallation = InstalledBuild.needsSetup
+
+    var isUpdate: Bool {
+        FileManager.default.fileExists(atPath: InstalledBuild.controlPath)
+    }
+
+    var needsNotificationRepair: Bool {
+        FileManager.default.fileExists(atPath: InstalledBuild.notificationMarker)
+    }
+
+    var needsLoginRepair: Bool {
+        FileManager.default.fileExists(atPath: InstalledBuild.loginAttentionMarker)
+    }
 
     nonisolated private static var commandPath: String {
         NSHomeDirectory() + "/Library/Application Support/Paceman/bin/pacemanctl"
@@ -81,6 +119,67 @@ private final class PanelModel: ObservableObject {
                 if result.0, let data = result.1.data(using: .utf8),
                    let state = try? JSONDecoder().decode(SourceStatus.self, from: data) {
                     self.status = state
+                }
+            }
+        }
+    }
+
+    func installBundled() {
+        guard !busy else { return }
+        let resources = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources")
+        let python = resources.appendingPathComponent("python/bin/python3")
+        let library = resources.appendingPathComponent("lib")
+        guard FileManager.default.isExecutableFile(atPath: python.path),
+              FileManager.default.fileExists(atPath: library.appendingPathComponent("macos/install.py").path)
+        else {
+            message = "This copy of Paceman has no installer. Download the Mac release again."
+            return
+        }
+        busy = true
+        message = nil
+        DispatchQueue.global(qos: .userInitiated).async {
+            let process = Process()
+            process.executableURL = python
+            process.arguments = ["-m", "macos.install", "--prebuilt-app", Bundle.main.bundlePath]
+            process.currentDirectoryURL = library
+            var environment = ProcessInfo.processInfo.environment
+            environment["PYTHONPATH"] = library.path
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            process.environment = environment
+            let output = Pipe()
+            process.standardOutput = output
+            process.standardError = output
+            var result = ""
+            var code: Int32 = 1
+            do {
+                try process.run()
+                result = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                process.waitUntilExit()
+                code = process.terminationStatus
+            } catch {
+                result = error.localizedDescription
+            }
+            DispatchQueue.main.async {
+                self.busy = false
+                if code == 0 {
+                    let installed = NSHomeDirectory() + "/Applications/Paceman.app"
+                    let opener = Process()
+                    opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                    opener.arguments = ["-n", "-a", installed]
+                    do {
+                        try opener.run()
+                        opener.waitUntilExit()
+                        if opener.terminationStatus == 0 {
+                            NSApplication.shared.terminate(nil)
+                            return
+                        }
+                    } catch { }
+                    self.message = "Installed Paceman. Open it from your Applications folder."
+                    self.needsInstallation = false
+                } else if code == 2 {
+                    self.message = "Paceman was installed, but notification setup needs attention. Retry installation or open the setup guide."
+                } else {
+                    self.message = result.split(separator: "\n").last.map(String.init) ?? "Installation failed."
                 }
             }
         }
@@ -151,6 +250,9 @@ private final class PanelModel: ObservableObject {
             if enabled { try SMAppService.mainApp.register() }
             else { try SMAppService.mainApp.unregister() }
             loginStatus = SMAppService.mainApp.status
+            try? (enabled ? "registered\n" : "disabled\n")
+                .write(toFile: InstalledBuild.loginMarker, atomically: true, encoding: .utf8)
+            try? FileManager.default.removeItem(atPath: InstalledBuild.loginAttentionMarker)
             message = nil
         } catch {
             loginStatus = SMAppService.mainApp.status
@@ -193,6 +295,98 @@ private struct PairingView: View {
         }
         .padding(28).frame(width: 340)
         .onExitCommand(perform: onDone)
+    }
+}
+
+private struct InstallationView: View {
+    @ObservedObject var model: PanelModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            PacemanMark().frame(width: 40, height: 40)
+                .foregroundStyle(Color(nsColor: .labelColor))
+            Text(model.needsNotificationRepair || model.needsLoginRepair ? "Finish setup" : model.isUpdate ? "Update Paceman" : "Install Paceman")
+                .font(.title2.weight(.semibold))
+            Text(model.needsLoginRepair
+                 ? "Paceman was installed, but Open at Login needs another try."
+                 : model.needsNotificationRepair
+                 ? "Paceman was installed, but iPhone notification setup needs another try."
+                 : model.isUpdate
+                 ? "Replace Paceman in your Applications folder. Your phones and Sharing setting will be kept."
+                 : "Add Paceman to your Applications folder and start its background item. You’ll review its Codex hooks before activity appears.")
+                .fixedSize(horizontal: false, vertical: true)
+            if let message = model.message {
+                Text(message).font(.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Link("Setup guide", destination: SetupGuide.url)
+                Spacer()
+                Button(model.busy ? "Installing…" : model.needsNotificationRepair || model.needsLoginRepair ? "Retry setup" : model.isUpdate ? "Update Paceman" : "Install Paceman") {
+                    model.installBundled()
+                }
+                    .disabled(model.busy)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24).frame(width: 380)
+    }
+}
+
+private struct HookReviewView: View {
+    @ObservedObject var model: PanelModel
+
+    private let events: [(String, String)] = [
+        ("SessionStart", "Shows a new task as idle."),
+        ("UserPromptSubmit", "Shows work after you send a prompt."),
+        ("PermissionRequest", "Shows an approval still pending after five seconds."),
+        ("PreToolUse", "Shows a blocking or async question still pending after five seconds."),
+        ("PostToolUse", "Shows work resuming after a tool finishes."),
+        ("Stop", "Shows a finished turn."),
+        ("Interrupt", "Shows an interrupted turn as idle."),
+        ("SessionEnd", "Removes a closed task."),
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Review Codex hooks").font(.title2.weight(.semibold))
+                Text("In Codex, open Settings → Hooks → User config (All projects). Review each Paceman entry yourself. Codex calls the command in each row “Hook 1”; expand it to compare with this command:")
+                    .fixedSize(horizontal: false, vertical: true)
+                if let command = model.status.hookCommand {
+                    Text(command).font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("The installed command is unavailable. Run the Mac installer again.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(events, id: \.0) { event in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(event.0).font(.subheadline.weight(.medium))
+                        Text(event.1).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text("Each hook sends its event name, opaque task and turn IDs, and possibly a short project label to Paceman on this Mac. That label may appear on your iPhone Lock Screen. It sends no prompts, replies, transcripts, tool arguments, or full project paths.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("After review, start a fresh local Codex task and send a prompt. Paceman checks for the new event automatically.")
+                    .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                Text(model.status.missingHooks?.isEmpty == false ? "Some Paceman hook entries are missing. Run the Mac installer again, then review them in Codex."
+                     : (model.status.lastAgentEventAt ?? 0) > model.hookReviewStartedAt ? "A new Codex event reached Paceman on this Mac."
+                     : "Waiting for a new Codex event.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Link("Setup guide", destination: SetupGuide.url)
+                    Spacer()
+                    Button("Done") { model.showingHookReview = false }.keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(24)
+        }
+        .frame(width: 390)
+        .frame(maxHeight: 600)
+        .onAppear { model.refresh() }
+        .onExitCommand { model.showingHookReview = false }
     }
 }
 
@@ -306,8 +500,12 @@ private struct Panel: View {
 
     var body: some View {
         ZStack {
-            if let code = model.pairingCode {
+            if model.needsInstallation {
+                InstallationView(model: model)
+            } else if let code = model.pairingCode {
                 PairingView(code: code) { model.pairingCode = nil }
+            } else if model.showingHookReview {
+                HookReviewView(model: model)
             } else if model.showingManagement {
                 ManagementView(model: model)
             } else {
@@ -318,6 +516,7 @@ private struct Panel: View {
         .onDisappear {
             model.pairingCode = nil
             model.showingManagement = false
+            model.showingHookReview = false
         }
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in model.refresh() }
     }
@@ -378,6 +577,13 @@ private struct Panel: View {
                 if let activitySetup {
                     Text(activitySetup.instruction).font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    Button("Review Codex hooks…") {
+                        if model.hookReviewStartedAt == 0 {
+                            model.hookReviewStartedAt = Date().timeIntervalSince1970
+                        }
+                        model.showingHookReview = true
+                    }
+                        .font(.caption)
                 }
                 if model.status.sharingEnabled && !model.status.running {
                     Button("Restart Paceman") { model.run(["restart"]) }.font(.caption)
@@ -385,6 +591,10 @@ private struct Panel: View {
             }
             Button("Manage Paceman…") { model.showingManagement = true }
                 .font(.caption)
+            if model.needsLoginRepair {
+                Text("Open at Login needs attention. Set it in Manage Paceman.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let message = model.message {
                 Text(message).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }

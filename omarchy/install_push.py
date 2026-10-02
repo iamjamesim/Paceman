@@ -36,7 +36,7 @@ def configure(relay_url: str, *, app: Path | None = None, state: Path | None = N
     if not python.is_file():
         subprocess.run(["/usr/bin/python3", "-m", "venv", str(venv)], check=True)
     subprocess.run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
-                    "-r", str(install.ROOT / "requirements-push.txt")], check=True)
+                    "--require-hashes", "-r", str(install.ROOT / "requirements-client.txt")], check=True)
     subprocess.run([str(python), "-c", "from service.push import RelaySender; import httpx"],
                    cwd=app, check=True)
     install.write(config, (json.dumps(value, separators=(",", ":")) + "\n").encode(), 0o600)
