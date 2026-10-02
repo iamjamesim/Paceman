@@ -49,11 +49,11 @@ def source_revision(version: str, *, adhoc: bool) -> str:
     if output("git", "status", "--porcelain"):
         raise ValueError("Desktop packages require a clean checkout so both use the same source")
     if not adhoc:
-        tag = f"refs/tags/v{version}"
+        tag = f"refs/tags/desktop-v{version}"
         if output("git", "cat-file", "-t", tag) != "tag":
-            raise ValueError(f"Public release requires annotated tag v{version}")
+            raise ValueError(f"Public release requires annotated tag desktop-v{version}")
         if output("git", "rev-parse", f"{tag}^{{commit}}") != revision:
-            raise ValueError(f"Tag v{version} does not point at HEAD")
+            raise ValueError(f"Tag desktop-v{version} does not point at HEAD")
     return revision
 
 
@@ -147,7 +147,7 @@ def release_notes(version: str, revision: str, files: list[dict], adhoc: bool) -
                       for item in files)
     status = ("LOCAL CANDIDATE ONLY — the Mac DMG is ad hoc signed and must not be uploaded."
               if adhoc else "Developer ID signed and notarized Mac release candidate.")
-    return f"""# Paceman desktop {version}
+    return f"""# Paceman Desktop {version}
 
 {status}
 
@@ -164,7 +164,7 @@ Apple Silicon, macOS 15 or newer. Download the DMG, open Paceman, and choose
 requirements. Review Paceman's eight hooks in Codex **Settings → Hooks → User
 config (All projects)**, configure private Tailscale Serve, then pair the phone.
 Check a fresh Codex event and a new notification on the physical iPhone.
-Updates during alpha use a newer DMG; quit the running menu app first.
+Updates use a newer DMG; quit the running menu app first.
 
 ## Omarchy
 

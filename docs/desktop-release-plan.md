@@ -9,13 +9,14 @@
 
 The Mac floor limits the initial compatibility matrix; current APIs can target
 older systems. Revisit the floor and Intel support when demand justifies testing.
-Both downloads share one annotated desktop tag. iPhone releases are independent;
+Both downloads share an annotated `desktop-vVERSION` tag and a
+**Paceman Desktop VERSION** release. iPhone releases are independent;
 check phone/desktop compatibility before either update. Private GitHub releases
 require repository access.
 
-Mac alpha updates replace the app using a newer DMG and preserve Application
-Support data. Omarchy updates rerun the newer archive. Add signed Sparkle updates
-before broad stable distribution. Keep `ai.paceman.macos` and `ai.paceman.source`
+Mac updates replace the app using a newer DMG and preserve Application
+Support data. Omarchy updates rerun the newer archive. Integrated updates are
+future work. Keep `ai.paceman.macos` and `ai.paceman.source`
 stable after the first release.
 
 The Mac bundle includes the runtime pinned in
@@ -40,7 +41,7 @@ profile in Keychain.
 Run `gh auth login` once if using CLI release automation:
 
 ```sh
-VERSION=0.1.0-alpha.1
+VERSION=0.1.0
 python3 scripts/desktop_release.py prepare "$VERSION" \
   --build-number 1 --notes-file /tmp/paceman-release-notes.md
 ```
@@ -54,10 +55,10 @@ Set `--identity` if there is more than one matching signing identity.
 Check CI in GitHub's web UI, then create the annotated tag and build locally:
 
 ```sh
-VERSION=0.1.0-alpha.1
-git tag -a "v$VERSION" -m "Paceman desktop $VERSION"
+VERSION=0.1.0
+git tag -a "desktop-v$VERSION" -m "Paceman desktop $VERSION"
 python3 scripts/prepare-desktop-release.py \
-  --version "$VERSION" --build-number 1 --output-dir "dist/v$VERSION" \
+  --version "$VERSION" --build-number 1 --output-dir "dist/desktop-v$VERSION" \
   --identity 'Developer ID Application: Chang Hyun Im (ZTG42P5438)' \
   --notary-profile paceman-release --notes-file /tmp/paceman-release-notes.md
 ```
@@ -68,15 +69,15 @@ recreate or move it.
 
 ## Stage and test
 
-**CLI:** run `python3 scripts/desktop_release.py stage "dist/v$VERSION"`.
-It pushes the tag, uploads a draft prerelease, and downloads and verifies the
+**CLI:** run `python3 scripts/desktop_release.py stage "dist/desktop-v$VERSION"`.
+It pushes the tag, uploads a draft release, and downloads and verifies the
 assets. Test the printed `downloaded-*` directory. Repeating `stage` resumes an
 interrupted upload; differing existing assets are rejected.
 
-**Web UI:** push the prepared tag with `git push origin "v$VERSION"`. In GitHub
+**Web UI:** push the prepared tag with `git push origin "desktop-v$VERSION"`. In GitHub
 **Releases → Draft a new release**, select that existing tag, paste the generated
-release notes, mark it as a prerelease, and attach these five files from
-`dist/v$VERSION/`:
+release notes, and attach these five files from
+`dist/desktop-v$VERSION/`:
 
 - `Paceman-macos-arm64-VERSION.dmg`
 - `Paceman-Omarchy-VERSION.tar.gz`
@@ -113,18 +114,20 @@ versions beside the release artifacts:
 **CLI:** `status` lists pending checks; record each observed result with `qa`:
 
 ```sh
-python3 scripts/desktop_release.py status "dist/v$VERSION"
-python3 scripts/desktop_release.py qa "dist/v$VERSION" \
+python3 scripts/desktop_release.py status "dist/desktop-v$VERSION"
+python3 scripts/desktop_release.py qa "dist/desktop-v$VERSION" \
   --check mac-fresh --result passed --notes 'Observed result and OS version'
-python3 scripts/desktop_release.py publish "dist/v$VERSION"
+python3 scripts/desktop_release.py publish "dist/desktop-v$VERSION"
 ```
 
 Publication requires all checks. Only first-release upgrade checks may be
 `not-applicable`. QA is tied to package checksums. `publish` verifies downloads
-before and after publication and keeps the release marked as a prerelease.
+before and after publication. Versions with `-alpha.N` or `-beta.N` are prereleases;
+plain versions such as `0.1.0` are regular releases.
 
 **Web UI:** after completing the same checks, open the saved draft and select
-**Publish release**. Browser publication does not enforce the script's QA gate;
+**Publish release**. Select **This is a pre-release** only for alpha/beta versions.
+Browser publication does not enforce the script's QA gate;
 review the recorded results first. Recheck the published downloads afterward.
 
 Publish the tested files without rebuilding or replacing them. Never move a
@@ -135,7 +138,7 @@ and local QA records stay local. Generated files under `dist/` are ignored by Gi
 
 If Apple is still processing after five minutes, repeat the packaging command
 with `--resume` (do not repeat tag creation). The original DMG and submission ID
-are retained in `dist/.vVERSION.pending/`. If an upload failed before an ID was
+are retained in `dist/.desktop-vVERSION.pending/`. If an upload failed before an ID was
 saved, inspect Apple history before resubmitting. Rejected builds require a fix
 and a new candidate. After a publication network error, recheck the existing
 release instead of replacing its assets.

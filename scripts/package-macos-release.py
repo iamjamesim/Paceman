@@ -47,10 +47,11 @@ def checkout_revision(label: str, *, adhoc: bool) -> str:
     if not adhoc:
         if subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT).strip():
             raise ValueError("Production packages require a clean checkout")
-        tag = subprocess.check_output(["git", "describe", "--tags", "--exact-match"],
-                                      cwd=ROOT, text=True).strip()
-        if tag != f"v{label}":
-            raise ValueError(f"Production checkout must be tagged v{label}; found {tag}")
+        tag = f"refs/tags/desktop-v{label}"
+        if (subprocess.check_output(["git", "cat-file", "-t", tag], cwd=ROOT, text=True).strip() != "tag"
+                or subprocess.check_output(["git", "rev-parse", f"{tag}^{{commit}}"],
+                                           cwd=ROOT, text=True).strip() != revision):
+            raise ValueError(f"Production checkout must match annotated tag desktop-v{label}")
     return revision
 
 
