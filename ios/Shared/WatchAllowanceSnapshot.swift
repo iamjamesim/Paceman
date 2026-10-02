@@ -48,7 +48,9 @@ struct WatchAllowanceSnapshot: Codable, Equatable {
     func resetCountdownDetailed(at date: Date) -> String {
         let minutes = max(1, Int(ceil((resetsAt - date.timeIntervalSince1970) / 60)))
         if minutes >= 1_440 {
-            return "\(minutes / 1_440)d \((minutes % 1_440) / 60)h"
+            let days = minutes / 1_440
+            let hours = (minutes % 1_440) / 60
+            return hours == 0 ? "\(days)d" : "\(days)d \(hours)h"
         }
         if minutes >= 60 { return "\(minutes / 60)h \(minutes % 60)m" }
         return "\(minutes)m"

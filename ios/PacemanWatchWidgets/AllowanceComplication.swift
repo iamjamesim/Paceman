@@ -42,7 +42,7 @@ private struct AllowanceProvider: TimelineProvider {
             for _ in 0..<70 {
                 let remaining = reset.timeIntervalSince(dates.last!)
                 let next: Date
-                if remaining > 86_400 {
+                if remaining >= 86_400 {
                     // Compact day/hour text changes on reset-relative hour boundaries.
                     let wholeHours = Int(remaining / 3_600)
                     next = reset.addingTimeInterval(-Double(wholeHours) * 3_600 + 1)
@@ -60,6 +60,10 @@ private struct AllowanceProvider: TimelineProvider {
             let oneDayBeforeReset = reset.addingTimeInterval(-86_400)
             if oneDayBeforeReset > now && !dates.contains(oneDayBeforeReset) {
                 dates.append(oneDayBeforeReset)
+            }
+            let afterOneDayBoundary = oneDayBeforeReset.addingTimeInterval(1)
+            if afterOneDayBoundary > now && !dates.contains(afterOneDayBoundary) {
+                dates.append(afterOneDayBoundary)
             }
             // The reset state must be present even when the ring's 70-entry batch ends early.
             dates.append(reset)
@@ -138,9 +142,13 @@ private struct AllowanceView: View {
         let reset = Date(timeIntervalSince1970: allowance.resetsAt)
         let remaining = reset.timeIntervalSince(entry.date)
         return Group {
-            if remaining > 86_400 {
+            if remaining >= 86_400 {
                 let hours = Int(remaining / 3_600)
-                Text("\(hours / 24)d \(hours % 24)h")
+                if hours % 24 == 0 {
+                    Text("\(hours / 24)d")
+                } else {
+                    Text("\(hours / 24)d \(hours % 24)h")
+                }
             } else {
                 Text(.dateRange(endingAt: reset), format: positiveNarrowStyle([.hour, .minute]))
             }
@@ -152,9 +160,13 @@ private struct AllowanceView: View {
         let reset = Date(timeIntervalSince1970: allowance.resetsAt)
         let remaining = reset.timeIntervalSince(entry.date)
         return Group {
-            if remaining > 86_400 {
+            if remaining >= 86_400 {
                 let hours = Int(remaining / 3_600)
-                Text("\(hours / 24)d\n\(hours % 24)h")
+                if hours % 24 == 0 {
+                    Text("\(hours / 24)d")
+                } else {
+                    Text("\(hours / 24)d\n\(hours % 24)h")
+                }
             } else {
                 // Keep the original stacked layout while the system updates both units.
                 Text(.dateRange(endingAt: reset), format: positiveNarrowStyle([.hour, .minute]))
@@ -227,7 +239,7 @@ private struct AllowanceView: View {
                     .widgetCurvesContent()
             } else if let value {
                 Group {
-                    if value.resetsAt - entry.date.timeIntervalSince1970 > 86_400 {
+                    if value.resetsAt - entry.date.timeIntervalSince1970 >= 86_400 {
                         resetCountdown(value)
                     } else {
                         Text(Date(timeIntervalSince1970: value.resetsAt), style: .relative)
