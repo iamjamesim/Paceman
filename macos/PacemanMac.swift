@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 private enum SetupGuide {
     static let url = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md")!
-    static let tailscaleURL = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md#connect-your-iphone")!
+    static let phoneSetupURL = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md#connect-your-iphone")!
     static let codexSettings = URL(string: "codex://settings")!
     static var codexApp: URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") }
     static var tailscaleApp: URL? {
@@ -470,6 +470,8 @@ private struct PairingView: View {
             Text("On your iPhone, open Paceman → Connect computer → Scan QR code.")
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            Link("Need the iPhone app?", destination: SetupGuide.phoneSetupURL)
+                .font(.subheadline)
             if let qr {
                 Image(nsImage: qr).resizable().interpolation(.none).scaledToFit()
                     .frame(width: 230, height: 230)
@@ -592,19 +594,17 @@ private struct HookReviewView: View {
                 }
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-                Text("What hooks send").font(.headline)
-                Text("Sent to Paceman on this Mac:").font(.body)
+                Text("What hooks send to Paceman").font(.headline)
                 BulletList(items: [
                     "Event names",
                     "Task and turn IDs",
                     "A short project label, when available",
                 ]).font(.body)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Hooks don’t send prompts, replies, transcripts, tool arguments, or full paths.")
-                    Text("Project labels may appear on your iPhone Lock Screen.")
-                }
-                .font(.body).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("Hooks don’t send prompts, replies, transcripts, tool arguments, or full paths.")
+                    .font(.body).fixedSize(horizontal: false, vertical: true)
+                Text("Project labels may appear on your iPhone Lock Screen.")
+                    .font(.body).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("3. Check activity").font(.headline)
                 Text("Start a new local Codex task on this Mac and send a prompt.")
                     .font(.body).fixedSize(horizontal: false, vertical: true)
@@ -655,7 +655,7 @@ private struct ConnectionSetupView: View {
                         if let app = SetupGuide.tailscaleApp {
                             Button("Open Tailscale") { NSWorkspace.shared.open(app) }
                         }
-                        Link("Tailscale setup", destination: SetupGuide.tailscaleURL)
+                        Link("Tailscale setup", destination: SetupGuide.phoneSetupURL)
                         Spacer()
                         Button("Try again") { model.showPairing() }.disabled(model.busy)
                     }

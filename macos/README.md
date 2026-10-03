@@ -59,6 +59,8 @@ If it does not, inspect the pending hook rows and installed command. Report inst
 
 ## Connect your iPhone
 
+Install Paceman on your iPhone first. If you’re joining the TestFlight test, use your invitation; if you haven’t received it, ask the person who invited you. Developers can [build the iPhone app with Xcode](../docs/development.md#iphone-and-live-activities-mac).
+
 Connect Tailscale on the Mac and iPhone to the same network. Configure a private [Tailscale Serve HTTPS route](https://tailscale.com/docs/reference/tailscale-cli/serve) to `http://127.0.0.1:8765`; leave Funnel off. The source binds only to loopback, and the installer does not alter Tailscale routes. Once notification setup has succeeded, use the menu-bar QR button to create a five-minute invitation. On the iPhone, open **Paceman → Connect computer → Scan QR code**. This first pairing includes the relay address. Treat the QR and invitation as pairing secrets. After reconnecting Tailscale or changing its route, choose **Try again** in Paceman's connection window.
 
 ## Check iPhone notifications
