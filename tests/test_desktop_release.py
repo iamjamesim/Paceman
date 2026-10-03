@@ -29,12 +29,12 @@ class ReleaseTests(unittest.TestCase):
                          "mode": "developer-id-notarized", "artifacts": artifacts}
         release.write_json(self.directory / "release-manifest.json", self.manifest)
         (self.directory / "RELEASE-NOTES.md").write_text("First alpha\n")
-        self.names = self.artifact_names + ["release-manifest.json", "RELEASE-NOTES.md"]
+        self.names = self.artifact_names + ["SHA256SUMS"]
         self.checksums()
 
     def checksums(self):
         (self.directory / "SHA256SUMS").write_text("".join(
-            f"{release.sha256(self.directory / name)}  {name}\n" for name in self.names))
+            f"{release.sha256(self.directory / name)}  {name}\n" for name in self.artifact_names))
 
     def git_output(self, *args):
         if args[1:3] == ("cat-file", "-t"):
@@ -47,7 +47,7 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(release, "output", side_effect=self.git_output):
             manifest, names = release.verify(self.directory, platform_checks=False)
             self.assertEqual(manifest, self.manifest)
-            self.assertEqual(set(names), set(self.names) | {"SHA256SUMS"})
+            self.assertEqual(set(names), set(self.names))
             (self.directory / self.artifact_names[0]).write_bytes(b"different build")
             with self.assertRaisesRegex(ValueError, "Checksum mismatch"):
                 release.verify(self.directory, platform_checks=False)
@@ -65,12 +65,28 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 release.checksum_entries(self.directory)
 
-    def test_qa_cannot_be_reused_after_notes_or_artifacts_change(self):
+    def test_qa_survives_description_edits_but_not_package_changes(self):
         release.write_json(self.directory / "qa.json", release.qa_record(self.directory))
         (self.directory / "RELEASE-NOTES.md").write_text("Changed release conditions\n")
         self.checksums()
+        release.qa_record(self.directory)
+        (self.directory / self.artifact_names[0]).write_bytes(b"different build")
+        self.checksums()
         with self.assertRaisesRegex(ValueError, "different artifacts"):
             release.qa_record(self.directory)
+
+    def test_checksums_exclude_internal_manifest_and_notes(self):
+        with (self.directory / "SHA256SUMS").open("a") as stream:
+            for name in ("release-manifest.json", "RELEASE-NOTES.md"):
+                stream.write(f"{release.sha256(self.directory / name)}  {name}\n")
+        with self.assertRaisesRegex(ValueError, "exactly the two desktop artifacts"):
+            release.verify(self.directory, platform_checks=False)
+
+    def test_package_must_match_local_manifest_even_if_checksums_are_updated(self):
+        (self.directory / self.artifact_names[0]).write_bytes(b"different build")
+        self.checksums()
+        with self.assertRaisesRegex(ValueError, "differs from manifest"):
+            release.verify(self.directory, platform_checks=False)
 
     def test_first_release_may_skip_upgrade_only(self):
         checks = {name: {"result": "passed", "notes": "Observed on test device"}
@@ -126,7 +142,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertFalse(any(call[:3] == ("gh", "release", "edit") for call in calls))
 
     def test_download_mismatch_blocks_verification(self):
-        names = self.names + ["SHA256SUMS"]
+        names = self.names
         def download(*args, **kwargs):
             directory = Path(args[args.index("--dir") + 1])
             for name in names:
@@ -137,6 +153,30 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Downloaded release asset differs"):
                 release.download_check(self.directory, self.manifest, names)
         self.assertFalse((self.directory / "download-verification.json").exists())
+
+    def test_download_verification_uses_local_manifest_without_uploading_it(self):
+        def download(*args, **kwargs):
+            if args[:3] == ("gh", "release", "download"):
+                directory = Path(args[args.index("--dir") + 1])
+                for name in self.names:
+                    (directory / name).write_bytes((self.directory / name).read_bytes())
+        with patch.object(release, "release_view", return_value={
+                "assets": [{"name": name} for name in self.names], "url": "draft"}), \
+             patch.object(release, "run", side_effect=download), \
+             patch.object(release, "output", side_effect=self.git_output):
+            release.download_check(self.directory, self.manifest, self.names)
+        record = json.loads((self.directory / "download-verification.json").read_text())
+        downloaded = Path(record["directory"])
+        self.assertEqual({path.name for path in downloaded.iterdir()}, set(self.names))
+        self.assertEqual(record["checksumsSHA256"], release.sha256(self.directory / "SHA256SUMS"))
+
+    def test_remote_internal_attachment_is_rejected(self):
+        with patch.object(release, "release_view", return_value={"assets": [
+                {"name": name} for name in self.names + ["release-manifest.json"]]}), \
+             patch.object(release, "run") as run:
+            with self.assertRaisesRegex(ValueError, "expected release set"):
+                release.download_check(self.directory, self.manifest, self.names)
+            run.assert_not_called()
 
     def test_prepare_requires_green_ci_before_creating_tag(self):
         args = argparse.Namespace(version=self.version, build_number=1,
@@ -178,7 +218,11 @@ class ReleaseTests(unittest.TestCase):
                     command = run.call_args.args
                     self.assertEqual(command[:4], ("gh", "release", "create", tag))
                     self.assertEqual("--prerelease" in command, "-" in version)
-                    self.assertIn(f"Paceman Desktop {version}", command)
+                    self.assertIn(f"Desktop {version}", command)
+                    notes_index = command.index("--notes-file")
+                    self.assertEqual(command[notes_index + 1], self.directory / "RELEASE-NOTES.md")
+                    self.assertEqual(set(command[notes_index + 2:]),
+                                     {self.directory / name for name in self.names})
                 record = {"checks": {name: {"result": "passed", "notes": "Observed"}
                                      for name in release.QA_CHECKS}}
                 for name in release.UPGRADE_CHECKS:

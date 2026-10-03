@@ -147,7 +147,7 @@ def release_notes(version: str, revision: str, files: list[dict], adhoc: bool) -
                       for item in files)
     status = ("LOCAL CANDIDATE ONLY — the Mac DMG is ad hoc signed and must not be uploaded."
               if adhoc else "Developer ID signed and notarized Mac release candidate.")
-    return f"""# Paceman Desktop {version}
+    return f"""# Desktop {version}
 
 {status}
 
@@ -159,9 +159,10 @@ Source commit: `{revision}`. Both desktop packages were built from this commit.
 
 ## Mac
 
-Apple Silicon, macOS 15 or newer. Download the DMG, open Paceman, and choose
-**Install Paceman**. The app includes Python. Tailscale and Codex are separate
-requirements. Review Paceman's eight hooks in Codex **Settings → Hooks → User
+Apple Silicon, macOS 15 or newer. Open the DMG, drag Paceman into Applications,
+then open Paceman and choose **Set up Paceman**. The app includes Python.
+Tailscale and Codex are separate requirements. Review Paceman's eight hooks in
+Codex **Settings → Hooks → User
 config (All projects)**, configure private Tailscale Serve, then pair the phone.
 Check a fresh Codex event and a new notification on the physical iPhone.
 Updates use a newer DMG; quit the running menu app first.
@@ -185,7 +186,7 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--python-archive", type=Path)
     parser.add_argument("--wheelhouse", type=Path)
-    parser.add_argument("--notes-file", type=Path, help="Reviewed user-facing change notes to include")
+    parser.add_argument("--notes-file", type=Path, help="Reviewed release description; used as supplied")
     signing = parser.add_mutually_exclusive_group(required=True)
     signing.add_argument("--adhoc", action="store_true")
     signing.add_argument("--identity", help="Developer ID Application identity")
@@ -261,10 +262,9 @@ def main() -> None:
                         "hostMacOS": platform.mac_ver()[0], "artifacts": files}
             (staging / "release-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
             (staging / "RELEASE-NOTES.md").write_text(
-                (change_notes + "\n\n" if change_notes else "")
-                + release_notes(args.version, revision, files, args.adhoc))
-            checksum_files = [omarchy, mac, staging / "release-manifest.json",
-                              staging / "RELEASE-NOTES.md"]
+                change_notes + "\n" if change_notes else
+                release_notes(args.version, revision, files, args.adhoc))
+            checksum_files = [omarchy, mac]
             (staging / "SHA256SUMS").write_text(
                 "".join(f"{digest(path)}  {path.name}\n" for path in checksum_files))
             staging.rename(destination)

@@ -72,10 +72,11 @@ def checksum_entries(directory):
     return entries
 
 
-def verify(directory, *, platform_checks=True):
-    """Verify source identity, every upload, and the notarized container."""
+def verify(directory, *, platform_checks=True, manifest=None):
+    """Verify public assets against the local build manifest and release source."""
     entries = checksum_entries(directory)
-    manifest = json.loads((directory / "release-manifest.json").read_text())
+    if manifest is None:
+        manifest = json.loads((directory / "release-manifest.json").read_text())
     version, revision = manifest["version"], manifest["sourceRevision"]
     if not VERSION.fullmatch(version) or not re.fullmatch(r"[a-f0-9]{40}", revision):
         raise ValueError("Invalid release version or source revision")
@@ -87,9 +88,8 @@ def verify(directory, *, platform_checks=True):
     if (len(artifacts) != 2 or {item["name"] for item in artifacts} != expected_artifacts
             or not all(item.get("publicDownload") is True for item in artifacts)):
         raise ValueError("Manifest must identify exactly the two public desktop artifacts")
-    required = expected_artifacts | {"release-manifest.json", "RELEASE-NOTES.md"}
-    if set(entries) != required:
-        raise ValueError("SHA256SUMS must cover exactly both artifacts, manifest, and notes")
+    if set(entries) != expected_artifacts:
+        raise ValueError("SHA256SUMS must cover exactly the two desktop artifacts")
     for item in artifacts:
         path = directory / item["name"]
         if item["sha256"] != entries[path.name] or item["bytes"] != path.stat().st_size:
@@ -106,7 +106,7 @@ def verify(directory, *, platform_checks=True):
         run("/usr/bin/xcrun", "stapler", "validate", dmg)
         run("/usr/sbin/spctl", "--assess", "--type", "open", "--context",
             "context:primary-signature", dmg)
-    return manifest, sorted(required | {"SHA256SUMS"})
+    return manifest, sorted(expected_artifacts | {"SHA256SUMS"})
 
 
 def github_preflight():
@@ -198,7 +198,7 @@ def download_check(directory, manifest, names):
     for name in names:
         if sha256(destination / name) != sha256(directory / name):
             raise ValueError(f"Downloaded release asset differs: {name}")
-    verify(destination)
+    verify(destination, manifest=manifest)
     write_json(directory / "download-verification.json", {
         "checksumsSHA256": sha256(directory / "SHA256SUMS"), "directory": str(destination),
         "checkedAt": datetime.now(timezone.utc).isoformat(), "url": release["url"],
@@ -233,7 +233,7 @@ def stage(directory):
     else:
         run("gh", "release", "create", tag, "--repo", REPOSITORY, "--draft",
             *(["--prerelease"] if "-" in version else []),
-            "--verify-tag", "--title", f"Paceman Desktop {version}",
+            "--verify-tag", "--title", f"Desktop {version}",
             "--notes-file", directory / "RELEASE-NOTES.md", *(directory / name for name in names))
     download_check(directory, manifest, names)
 

@@ -10,7 +10,7 @@
 The Mac floor limits the initial compatibility matrix; current APIs can target
 older systems. Revisit the floor and Intel support when demand justifies testing.
 Both downloads share an annotated `desktop-vVERSION` tag and a
-**Paceman Desktop VERSION** release. iPhone releases are independent;
+**Desktop VERSION** release. iPhone releases are independent;
 check phone/desktop compatibility before either update. Private GitHub releases
 require repository access.
 
@@ -75,17 +75,21 @@ assets. Test the printed `downloaded-*` directory. Repeating `stage` resumes an
 interrupted upload; differing existing assets are rejected.
 
 **Web UI:** push the prepared tag with `git push origin "desktop-v$VERSION"`. In GitHub
-**Releases → Draft a new release**, select that existing tag, paste the generated
-release notes, and attach these five files from
+**Releases → Draft a new release**, select that existing tag, use **Desktop VERSION**
+as the title, paste `RELEASE-NOTES.md` into the description, and attach these three files from
 `dist/desktop-v$VERSION/`:
 
 - `Paceman-macos-arm64-VERSION.dmg`
 - `Paceman-Omarchy-VERSION.tar.gz`
 - `SHA256SUMS`
-- `release-manifest.json`
-- `RELEASE-NOTES.md`
 
-Save the draft. Download all five files into a new directory, confirm the downloaded
+Keep `release-manifest.json` and `RELEASE-NOTES.md` in the local release directory.
+The manifest records build provenance and is used to verify downloaded packages;
+the notes supply the release description. Neither is uploaded as an attachment.
+`SHA256SUMS` covers only the two packages, so editing the description does not
+invalidate package QA.
+
+Save the draft. Download all three files into a new directory, confirm the downloaded
 `SHA256SUMS` matches the local original, then run these checks from that directory:
 
 ```sh
