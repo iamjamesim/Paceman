@@ -504,6 +504,7 @@ private struct InstallationView: View {
                     ])
                 }
                 Text("macOS may show notifications about Paceman’s login and background items.")
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text(!InstalledBuild.isInApplications
