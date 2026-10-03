@@ -470,7 +470,7 @@ private struct PairingView: View {
             Text("On your iPhone, open Paceman → Connect computer → Scan QR code.")
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Link("Need the iPhone app?", destination: SetupGuide.phoneSetupURL)
+            Link("iPhone setup guide", destination: SetupGuide.phoneSetupURL)
                 .font(.subheadline)
             if let qr {
                 Image(nsImage: qr).resizable().interpolation(.none).scaledToFit()

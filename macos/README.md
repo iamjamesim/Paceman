@@ -1,16 +1,113 @@
-# Mac installation
+# Mac setup
 
-The Mac client has one **Paceman** background item for the local source and notification sender. The menu-bar app controls Sharing and phone access. It opens at login by default, independently of Sharing. Codex hooks supply activity; the phone connects over private Tailscale HTTPS.
+For Apple Silicon Macs running macOS 15 or later.
 
-## Prebuilt Mac release
+## Install Paceman
 
-When a signed, notarized Mac release is published, download its **Apple Silicon DMG** from the matching [GitHub release](https://github.com/iamjamesim/paceman/releases). Drag **Paceman** onto **Applications**, then open it from Applications. Its setup window opens automatically; choose **Set up Paceman** to prepare the per-user background item, Codex hooks, and relay sender. For updates, quit Paceman, replace it using the newer DMG, then open it; pairing data and Sharing preference are kept. The prebuilt app includes Python and its relay-client packages, so users do not need Xcode, Homebrew, or a separate Python. It supports Apple Silicon and macOS 15 or newer.
+1. Download the signed Mac DMG from [Releases](https://github.com/iamjamesim/paceman/releases) when available, or use the test build you received.
+2. Open the DMG, drag **Paceman** onto **Applications**, then open it from Applications.
+3. Choose **Set up Paceman**. This starts Paceman at login, enables its background item, and prepares the Codex hooks.
 
-The first public Mac build uses bundle ID `ai.paceman.macos`. Check **System Settings → General → Login Items & Extensions** after installation. If the menu app reports that Open at Login needs attention, set it in **Manage Paceman…**.
+macOS may show notifications about login and background items. You can manage them in **System Settings → General → Login Items & Extensions**. The Mac release includes Python; no separate runtime installation is needed.
 
-Continue with **Review Codex hooks** below, then configure the private Tailscale route and pair the phone. The menu app confirms when a fresh Codex event reaches Paceman; a terminal check with `pacemanctl status` is also available. Local dry-run DMGs are ad hoc signed and are not public downloads.
+## Review Codex hooks
 
-## Install from source and pair
+Hooks let Codex send activity events to Paceman. Review them yourself before trusting them:
+
+1. In Codex, open **Settings → Hooks → User config (All projects)**.
+2. Expand **Hook 1** under each of the eight events listed in Paceman. Click **Trust** only if the command matches the one in Paceman’s setup window.
+3. Start a **new local Codex task** on this Mac and send a prompt. Paceman should show **A new Codex event reached Paceman.**
+
+Keep Paceman’s hook-review window open while checking. If you use the Codex CLI, enter `/hooks` or select **Review hooks** at startup instead.
+
+<details>
+<summary>The eight hooks and what they send</summary>
+
+| Event row | Purpose |
+| --- | --- |
+| `PreToolUse` | Show a pending blocking or async question after five seconds. |
+| `PermissionRequest` | Show pending approval after five seconds. |
+| `PostToolUse` | Resume work after a tool finishes. |
+| `SessionStart` | Show a new task as idle. |
+| `SessionEnd` | Remove a closed session. |
+| `UserPromptSubmit` | Show work after a prompt. |
+| `Stop` | Show a finished turn. |
+| `Interrupt` | Show an interrupted turn as idle. |
+
+
+The command shown in setup uses this installation’s Python runtime, the `-B` flag, and the hook script in your Mac user account. It is generated for your installation. Compare the full command in every Paceman row; don’t run it in a terminal or trust unrelated hooks.
+
+The hooks send event names, opaque task and turn IDs, and an optional short project label to Paceman’s private local socket. They don’t send prompts, replies, transcripts, tool arguments, or full paths. Project labels may appear on your iPhone Lock Screen.
+
+</details>
+
+## Connect your iPhone
+
+1. **Install Paceman on your iPhone** using your TestFlight invitation. If you haven’t received one, ask the person who invited you to test Paceman.
+2. **Connect Tailscale** on your Mac and iPhone to the same Tailscale network. [Get Tailscale](https://tailscale.com/download) if needed.
+3. In Mac setup, choose **Connect iPhone**. You can also use the QR button in Paceman’s menu-bar panel.
+4. On your iPhone, open **Paceman → Connect computer → Scan QR code** and scan the code on your Mac.
+
+Codes expire after five minutes; choose **New code** if needed. Keep the pairing code private.
+
+<details>
+<summary>Paceman asks for a Tailscale Serve route</summary>
+
+The Mac needs a private [Tailscale Serve HTTPS route](https://tailscale.com/docs/reference/tailscale-cli/serve) to `http://127.0.0.1:8765`. Leave Funnel off. Paceman’s installer does not change Tailscale routes. After configuring the route or reconnecting Tailscale, choose **Try again** in Paceman.
+
+</details>
+
+## Check iPhone notifications
+
+Allow notifications when Paceman asks on your iPhone. Then lock the phone and start a new local Codex task on your Mac. Confirm that you receive a **new notification on the phone** when the turn finishes.
+
+Seeing activity on the Mac confirms hook delivery. Receiving it on your locked iPhone checks notification delivery too.
+
+## Control and removal
+
+- **Sharing off** pauses activity tracking and iPhone updates while keeping your pairings.
+- **Manage Paceman… → Open menu app at login** controls whether the menu app opens at login. It is separate from Sharing.
+- **Remove access…** disconnects one phone.
+- **Manage Paceman… → Uninstall Paceman…** removes the Mac app, background item, Paceman hooks, local pairings, and notification credentials. During setup, Uninstall is in the **…** menu. The iPhone app and Tailscale stay installed.
+
+To update, quit Paceman, replace it with the newer app, and reopen it. Pairings and your Sharing choice are kept.
+
+## Troubleshooting and developer details
+
+<details>
+<summary>No Codex activity</summary>
+
+Open **Review Codex hooks…** under Activity in Paceman and recheck each row. **Setup needed** means commands are missing; **No activity yet** means no event has arrived; **No active work** means an observed session is idle.
+
+For a terminal check, start a fresh local task and verify that `lastAgentEventAt` advances:
+
+```sh
+"$HOME/Library/Application Support/Paceman/bin/pacemanctl" status
+```
+
+Hook presence alone does not establish trust or delivery. When helping someone install, leave hook trust to them and report setup as partial until a real event arrives.
+
+</details>
+
+<details>
+<summary>Mac activity works, but iPhone notifications do not</summary>
+
+Check that the iPhone allows Paceman notifications and that Sharing is on. The normal installer prepares notifications through Paceman’s [relay](../service/RELAY.md); retry setup if Paceman reports notification setup is incomplete.
+
+For a technical delivery check, verify the per-user sender is reading the source database and inspect `~/Library/Application Support/Paceman/data/push-delivery.jsonl` for `apns_accepted` (status 200). Confirm a **new notification on the physical phone** separately: Apple accepting a push does not prove the phone displayed it.
+
+The sender shares Paceman’s background item and stores its credential in the owner-only `~/Library/Application Support/Paceman/private/apns.json`. Preserve existing private configuration and keys without exposing them. Developers who skipped relay setup can run:
+
+```sh
+python3 -m macos.install_push --relay-url https://relay.paceman.ai
+```
+
+Use the Python 3.11+ interpreter printed by the source installer if needed. If relay setup was added after pairing, pair the iPhone again. See [push delivery](../docs/push-delivery.md) for more detail.
+
+</details>
+
+<details>
+<summary>Install from source</summary>
 
 From the repository root, use Python 3.11+ installed outside the checkout, Xcode, and an Apple Silicon Mac:
 
@@ -24,63 +121,16 @@ For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the installer.
 
 Open `~/Applications/Paceman.app` and confirm **Paceman** appears in **System Settings → General → Login Items & Extensions**. Continue with hook review and phone connection below.
 
-## Review Codex hooks
 
-Installing and pairing do not enable session monitoring. Codex requires the user to review each new or changed hook. Paceman's setup window shows the **exact command** for this installation: its selected Python interpreter, the `-B` flag, and the absolute path to `~/Library/Application Support/Paceman/lib/macos/codex_hook.py`. Compare that command with every expanded Paceman row. In a prebuilt install the interpreter is inside the installed `Paceman.app`; with Homebrew Python on a source install, its shape is:
+Developers can [build the iPhone app with Xcode](../docs/development.md#iphone-and-live-activities-mac). The public Mac bundle ID is `ai.paceman.macos`. Ad hoc and Apple Development signatures are for testing; public Mac distribution requires Developer ID signing and notarization.
 
-```sh
-/opt/homebrew/bin/python3 -B '/Users/YOU/Library/Application Support/Paceman/lib/macos/codex_hook.py'
-```
+If removing Paceman, remove its dedicated Tailscale Serve route separately.
 
-The Mac menu app also shows **Review Codex hooks…** under Activity during setup. It displays the installed command, the eight event purposes, and whether a new event reached Paceman after you opened the guide. App users can finish this check without running `pacemanctl`.
+</details>
 
-In the Codex app, open **Settings → Hooks → User config (All projects)**. In the CLI, enter `/hooks` or select **Review hooks** at startup. Codex calls each command **Hook 1**; expand the event row to verify **User config — ~/.codex/hooks.json** and the installed command. Review each Paceman row individually. Click **Trust** only if its command matches the one shown by Paceman.
-
-| Event row | Purpose |
-| --- | --- |
-| `PreToolUse` | Show a pending blocking or async question after five seconds. |
-| `PermissionRequest` | Show pending approval after five seconds. |
-| `PostToolUse` | Resume work after a tool finishes. |
-| `SessionStart` | Show a new task as idle. |
-| `SessionEnd` | Remove a closed session. |
-| `UserPromptSubmit` | Show work after a prompt. |
-| `Stop` | Show a finished turn. |
-| `Interrupt` | Show an interrupted turn as idle. |
-
-The hook sends the event name, opaque session and turn IDs, and possibly a short project label to Paceman's private local socket. It sends no prompts, replies, transcripts, tool arguments, or full paths. A project label may appear on the iPhone Lock Screen. Do not trust hooks on the user's behalf or bypass their review.
-
-After review, start a **fresh local Codex task** on this Mac and send a prompt. Verify that the task appears and `lastAgentEventAt` advances:
-
-```sh
-"$HOME/Library/Application Support/Paceman/bin/pacemanctl" status
-```
-
-If it does not, inspect the pending hook rows and installed command. Report installation as partial until a real event arrives. Hook presence alone does not establish trust or delivery. The app shows **Setup needed** for missing commands, **No activity yet** before its first received event, and **No active work** after an observed session becomes idle.
-
-## Connect your iPhone
-
-Install Paceman on your iPhone first. If you’re joining the TestFlight test, use your invitation; if you haven’t received it, ask the person who invited you. Developers can [build the iPhone app with Xcode](../docs/development.md#iphone-and-live-activities-mac).
-
-Connect Tailscale on the Mac and iPhone to the same network. Configure a private [Tailscale Serve HTTPS route](https://tailscale.com/docs/reference/tailscale-cli/serve) to `http://127.0.0.1:8765`; leave Funnel off. The source binds only to loopback, and the installer does not alter Tailscale routes. Once notification setup has succeeded, use the menu-bar QR button to create a five-minute invitation. On the iPhone, open **Paceman → Connect computer → Scan QR code**. This first pairing includes the relay address. Treat the QR and invitation as pairing secrets. After reconnecting Tailscale or changing its route, choose **Try again** in Paceman's connection window.
-
-## Check iPhone notifications
-
-The installer prepares the sender through Paceman's [project-operated relay](../service/RELAY.md) before the first pairing. The phone must allow notifications and register its Apple-issued device token. A developer who skipped relay setup or needs to repair it can run:
-
-```sh
-python3 -m macos.install_push --relay-url https://relay.paceman.ai
-```
-
-Use the Python 3.11+ command printed by the source installer if needed. The sender shares Paceman's background item and stores its credential in the owner-only `~/Library/Application Support/Paceman/private/apns.json`. An already paired phone needs a fresh QR pairing if relay setup was added later. After hook review, start a new local Codex task and check `~/Library/Application Support/Paceman/data/push-delivery.jsonl` for `apns_accepted` (status 200), then confirm a **new notification on the physical iPhone**. APNs acceptance alone does not prove display. See [push delivery](../docs/push-delivery.md) for ESP32 and Apple Watch delivery.
-
-## Control and removal
-
-**Sharing off** pauses the source and sender but keeps hooks, pairing, and push configuration. **Manage Paceman… → Open menu app at login** is separate, so the menu remains available while sharing is paused. **Remove access…** revokes one phone. **Manage Paceman… → Uninstall Paceman…** removes the app, background item, hooks, pairing data, and relay credential; remove a dedicated Tailscale Serve route separately. Local Apple Development or ad hoc signatures are not Developer ID signatures or notarization.
-
-<p align="center">
-  <a href="images/menu-bar-app.png"><img src="images/menu-bar-app.png" alt="Paceman Mac menu-bar app showing Sharing, a paired iPhone, and Codex activity" width="640"></a>
-</p>
-
-## Coverage limits
+<details>
+<summary>Coverage limits</summary>
 
 An unrelated user message can clear async-question attention early; a completed turn clears it. Without `SessionEnd`, a Finished row can remain for up to ten minutes. Mac hooks cannot verify process ownership. The source reads Codex allowance through a short-lived local App Server every five minutes and sends only the percentage, window, observation time, and reset time.
+
+</details>
