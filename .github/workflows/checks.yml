@@ -27,6 +27,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+      - name: Test Mac panel state transitions
+        run: python -m unittest tests.test_mac_panel -v
       - name: Build Mac app and background helper
         run: |
           python - <<'PY'
