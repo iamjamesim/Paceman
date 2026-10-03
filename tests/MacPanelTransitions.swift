@@ -34,9 +34,34 @@ private struct MacPanelTransitions {
         fatalError("Timed out: \(label)")
     }
     @MainActor static func model(_ commands: ControlledCommands) -> PanelModel {
-        PanelModel(command: { commands.execute($0) }, needsSetup: { false })
+        PanelModel(command: { commands.execute($0) }, needsSetup: { false }, progressURL: nil)
     }
     @MainActor static func main() async {
+        // Quitting/closing never marks setup finished. Progress survives a new model/process.
+        do {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let url = folder.appendingPathComponent("setup-step")
+            let c = ControlledCommands()
+            func reopen() -> PanelModel {
+                PanelModel(command: { c.execute($0) }, needsSetup: { false }, progressURL: url)
+            }
+            let hooks = reopen()
+            assert(hooks.shouldPresentSetup && !hooks.connectingPhone)
+            assert(!hooks.continueAfterHookReview())
+            let phone = reopen()
+            assert(phone.shouldPresentSetup && phone.connectingPhone)
+            phone.finishPairingStep() // Finish later, with no phone connected.
+            assert(reopen().connectingPhone && reopen().shouldPresentSetup)
+            phone.refresh(); await until("paired status") { c.count == 1 }; c.reply(0, true, live)
+            await until("paired phone") { phone.status.clients?.count == 1 }
+            phone.finishPairingStep()
+            assert(!reopen().shouldPresentSetup)
+            // Removing the installation's progress restores first-run behavior.
+            try! FileManager.default.removeItem(at: url)
+            assert(reopen().shouldPresentSetup && !reopen().connectingPhone)
+        }
         // Coalesce refreshes and reject a read begun before a Sharing change.
         do {
             let c = ControlledCommands(); let m = model(c)
@@ -113,7 +138,7 @@ private struct MacPanelTransitions {
         do {
             let c = ControlledCommands()
             var setupRequired = true
-            let m = PanelModel(command: { c.execute($0) }, needsSetup: { setupRequired })
+            let m = PanelModel(command: { c.execute($0) }, needsSetup: { setupRequired }, progressURL: nil)
             setupRequired = false
             m.refresh(); await until("welcome read") { c.count == 1 }; c.reply(0, true, live)
             await until("welcome read applied") { m.hasReadStatus }
@@ -134,7 +159,7 @@ private struct MacPanelTransitions {
             let install = ControlledCommands()
             let m = PanelModel(command: { c.execute($0) }, installer: {
                 _ = install.execute(["install"]); return (code, "setup failed")
-            }, needsSetup: { install.count == 0 || code != 0 })
+            }, needsSetup: { install.count == 0 || code != 0 }, progressURL: nil)
             m.installBundled(); m.installBundled()
             await until("single installer") { install.count == 1 }
             assert(m.operation == .installing)

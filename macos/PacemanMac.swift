@@ -79,6 +79,20 @@ private enum InstalledBuild {
     }
 }
 
+private enum SetupStep: String {
+    case hooks, phone, finished
+
+    static let fileURL = URL(fileURLWithPath: NSHomeDirectory())
+        .appendingPathComponent("Library/Application Support/Paceman/setup-step")
+
+    static func load(from url: URL?) -> SetupStep {
+        guard let url, let raw = try? String(contentsOf: url, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines), let step = SetupStep(rawValue: raw)
+        else { return .hooks }
+        return step
+    }
+}
+
 @MainActor
 private final class PanelModel: ObservableObject {
     @Published var status = SourceStatus.empty
@@ -87,7 +101,10 @@ private final class PanelModel: ObservableObject {
     @Published var pairingMessage: String?
     @Published var showingManagement = false
     @Published var hookReviewStartedAt: Double = 0
-    @Published var connectingPhone = false
+    @Published var connectingPhone: Bool
+    @Published private(set) var setupStep: SetupStep
+    var shouldPresentSetup: Bool { needsInstallation || setupStep != .finished }
+    private let progressURL: URL?
     @Published var loginStatus = SMAppService.mainApp.status
     @Published var expanded: String?
     @Published var confirming: String?
@@ -109,11 +126,41 @@ private final class PanelModel: ObservableObject {
 
     init(command: @escaping @Sendable ([String]) -> (Bool, String) = { PanelModel.execute($0) },
          installer: @escaping @Sendable () -> (Int32, String) = { PanelModel.executeInstaller() },
-         needsSetup: @escaping () -> Bool = { InstalledBuild.needsSetup }) {
+         needsSetup: @escaping () -> Bool = { InstalledBuild.needsSetup },
+         progressURL: URL? = SetupStep.fileURL) {
         self.command = command
         self.installer = installer
         self.needsSetup = needsSetup
         self.needsInstallation = needsSetup()
+        self.progressURL = progressURL
+        let step = SetupStep.load(from: progressURL)
+        self.setupStep = step
+        self.connectingPhone = step == .phone
+    }
+
+    private func saveSetupStep(_ step: SetupStep) {
+        setupStep = step
+        // The installer owns this directory; uninstall removes progress with the installation.
+        if let progressURL {
+            try? (step.rawValue + "\n").write(to: progressURL, atomically: true, encoding: .utf8)
+        }
+    }
+
+    func continueAfterHookReview() -> Bool {
+        if status.clients?.contains(where: { $0.platform == "ios" }) == true {
+            saveSetupStep(.finished)
+            return true
+        }
+        if setupStep != .finished { saveSetupStep(.phone) }
+        connectingPhone = true
+        return false
+    }
+
+    func finishPairingStep() {
+        // Closing an unpaired QR or choosing Finish later leaves this step resumable.
+        if status.clients?.contains(where: { $0.platform == "ios" }) == true {
+            saveSetupStep(.finished)
+        }
     }
 
     private func begin(_ next: Operation) -> Bool {
@@ -257,6 +304,7 @@ private final class PanelModel: ObservableObject {
                     // The installer preserves the app already running from Applications.
                     // Continue in this window instead of launching a second process.
                     self.connectingPhone = false
+                    self.saveSetupStep(.hooks)
                     self.hasReadStatus = false
                     self.hookReviewStartedAt = Date().timeIntervalSince1970
                     self.refresh()
@@ -553,7 +601,7 @@ private struct HookReviewView: View {
                     Link("Setup guide", destination: SetupGuide.url)
                     Spacer()
                     if let onContinue {
-                        Button(model.status.clients?.isEmpty == false ? "Done" : "Connect iPhone", action: onContinue)
+                        Button(model.status.clients?.contains(where: { $0.platform == "ios" }) == true ? "Done" : "Connect iPhone", action: onContinue)
                             .keyboardShortcut(.defaultAction)
                     } else {
                         Button("Done") { dismissWindow(id: "setup") }.keyboardShortcut(.defaultAction)
@@ -615,11 +663,13 @@ private struct SetupFlowView: View {
             if model.needsInstallation {
                 InstallationView(model: model)
             } else if model.connectingPhone {
-                ConnectionSetupView(model: model) { dismissWindow(id: "setup") }
+                ConnectionSetupView(model: model) {
+                    model.finishPairingStep()
+                    dismissWindow(id: "setup")
+                }
             } else {
                 HookReviewView(model: model) {
-                    if model.status.clients?.isEmpty == false { dismissWindow(id: "setup") }
-                    else { model.connectingPhone = true }
+                    if model.continueAfterHookReview() { dismissWindow(id: "setup") }
                 }
             }
         }
@@ -1000,10 +1050,39 @@ private struct MenuActivityRobot: View {
     }
 }
 
+private extension Notification.Name {
+    static let reopenPaceman = Notification.Name("ai.paceman.reopen")
+}
+
+private final class PacemanAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        NotificationCenter.default.post(name: .reopenPaceman, object: nil)
+        return false
+    }
+}
+
+private struct PacemanMenuLabel: View {
+    @Environment(\.openWindow) private var openWindow
+    @ObservedObject var model: PanelModel
+    let icon: NSImage
+
+    var body: some View {
+        Image(nsImage: icon).accessibilityLabel("Paceman")
+            .onReceive(NotificationCenter.default.publisher(for: .reopenPaceman)) { _ in
+                if model.shouldPresentSetup {
+                    openWindow(id: "setup")
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                }
+            }
+    }
+}
+
 @main
 struct PacemanMacApp: App {
+    @NSApplicationDelegateAdaptor(PacemanAppDelegate.self) private var delegate
     @StateObject private var model = PanelModel()
-    @State private var presentsSetupAtLaunch = InstalledBuild.needsSetup || CommandLine.arguments.contains("--show-setup")
+    @State private var presentsSetupAtLaunch = InstalledBuild.needsSetup ||
+        SetupStep.load(from: SetupStep.fileURL) != .finished || CommandLine.arguments.contains("--show-setup")
 
     init() {
         let arguments = Array(CommandLine.arguments.dropFirst())
@@ -1060,8 +1139,7 @@ struct PacemanMacApp: App {
         MenuBarExtra {
             Panel(model: model)
         } label: {
-            Image(nsImage: menuBarIcon)
-                .accessibilityLabel("Paceman")
+            PacemanMenuLabel(model: model, icon: menuBarIcon)
         }.menuBarExtraStyle(.window)
         Window("Paceman Setup", id: "setup") {
             SetupFlowView(model: model)
