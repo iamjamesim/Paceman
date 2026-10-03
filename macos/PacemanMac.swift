@@ -505,6 +505,21 @@ private struct SetupFlowView: View {
     }
 }
 
+private struct BulletList: View {
+    let items: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(items, id: \.self) { item in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("•").accessibilityHidden(true)
+                    Text(item).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
 private struct ManagementView: View {
     @ObservedObject var model: PanelModel
     @State private var confirmingUninstall = false
@@ -512,34 +527,54 @@ private struct ManagementView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("Paceman on this Mac").font(.title2.weight(.semibold))
-                Text("One background item shares local Codex activity with your paired phones and sends iPhone notifications when configured.")
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Turn off Sharing in the menu bar to stop it while keeping your pairings and settings.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Toggle("Open menu app at login", isOn: Binding(
-                    get: { model.opensAtLogin }, set: { model.setOpenAtLogin($0) }))
-                if model.loginStatus == .requiresApproval {
-                    Text("Allow Paceman in System Settings → General → Login Items & Extensions.")
+                if !confirmingUninstall {
+                    Text("Paceman on this Mac").font(.title2.weight(.semibold))
+                    Text("One background item shares local Codex activity with your paired phones and sends iPhone notifications when configured.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Turn off Sharing in the menu bar to stop it while keeping your pairings and settings.")
+                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Toggle("Open menu app at login", isOn: Binding(
+                        get: { model.opensAtLogin }, set: { model.setOpenAtLogin($0) }))
+                    if model.loginStatus == .requiresApproval {
+                        Text("Allow Paceman in System Settings → General → Login Items & Extensions.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+                    }
+                    Button("Save support report…") { model.saveSupportReport() }
+                        .disabled(model.busy)
+                    Text("Includes connection timing and notification results. It excludes prompts, credentials, and computer names.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Button("Save support report…") { model.saveSupportReport() }
-                    .disabled(model.busy)
-                Text("Includes connection timing and notification results. It excludes prompts, credentials, and computer names.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Uninstall removes the Mac app, background item, Paceman’s Codex hooks, local pairings, and APNs key. The iPhone app and Tailscale stay installed.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let message = model.message {
                     Text(message).font(.caption).foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                HStack {
-                    Button("Done") { model.showingManagement = false }.keyboardShortcut(.defaultAction)
-                    Spacer()
-                    Button("Uninstall Paceman…", role: .destructive) { confirmingUninstall = true }
-                        .disabled(model.busy)
+                if confirmingUninstall {
+                    Text("Remove Paceman from this Mac?").font(.title2.weight(.semibold))
+                    Text("Uninstall removes:")
+                    BulletList(items: ["Paceman app", "Background item", "Paceman’s Codex hooks",
+                                       "Local pairings", "APNs key"])
+                    Text("The iPhone app and Tailscale stay installed.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("Your iPhone will keep this computer in its list until you remove it there.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Button("Cancel") { confirmingUninstall = false }
+                            .disabled(model.busy)
+                        Spacer()
+                        if model.busy { ProgressView().controlSize(.small) }
+                        Button("Uninstall Paceman", role: .destructive) { model.uninstall() }
+                            .disabled(model.busy)
+                    }
+                } else {
+                    HStack {
+                        Button("Done") { model.showingManagement = false }.keyboardShortcut(.defaultAction)
+                        Spacer()
+                        Button("Uninstall Paceman…", role: .destructive) { confirmingUninstall = true }
+                            .disabled(model.busy)
+                    }
                 }
             }
             .padding(24)
@@ -548,12 +583,6 @@ private struct ManagementView: View {
         .frame(maxHeight: 600)
         .onAppear { model.loginStatus = SMAppService.mainApp.status }
         .onExitCommand { model.showingManagement = false }
-        .confirmationDialog("Remove Paceman from this Mac?", isPresented: $confirmingUninstall) {
-            Button("Uninstall Paceman", role: .destructive) { model.uninstall() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Your iPhone will keep this computer in its list until you remove it there.")
-        }
     }
 }
 
@@ -747,8 +776,13 @@ private struct Panel: View {
                                 .font(.caption).foregroundStyle(.secondary).padding(.leading, 28)
                         }
                         if model.confirming == connection.id {
-                            Text("Remove access for “\(connection.name)”? Updates from this computer will stop. \(connection.platform == "ios" ? "Your watch stays paired. " : "")A new code is needed to reconnect.")
-                                .font(.caption).fixedSize(horizontal: false, vertical: true).padding(.leading, 28)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Remove access for “\(connection.name)”?")
+                                    .fixedSize(horizontal: false, vertical: true)
+                                BulletList(items: ["Updates from this computer will stop.",
+                                                   "A new code is needed to reconnect."] +
+                                           (connection.platform == "ios" ? ["Your watch stays paired."] : []))
+                            }.font(.caption).padding(.leading, 28)
                             HStack {
                                 Button("Cancel") { model.confirming = nil }.keyboardShortcut(.defaultAction)
                                 Button("Remove access", role: .destructive) { model.remove(connection) }
