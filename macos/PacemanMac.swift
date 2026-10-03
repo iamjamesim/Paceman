@@ -593,11 +593,18 @@ private struct HookReviewView: View {
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                 Text("What hooks send").font(.headline)
+                Text("Sent to Paceman on this Mac:").font(.body)
                 BulletList(items: [
-                    "**Sent to Paceman on this Mac:** event names, task and turn IDs, and a short project label when available.",
-                    "**Not sent:** prompts, replies, transcripts, tool arguments, or full paths.",
-                    "**Project labels** may appear on your iPhone Lock Screen.",
+                    "Event names",
+                    "Task and turn IDs",
+                    "A short project label, when available",
                 ]).font(.body)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Hooks don’t send prompts, replies, transcripts, tool arguments, or full paths.")
+                    Text("Project labels may appear on your iPhone Lock Screen.")
+                }
+                .font(.body).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
                 Text("3. Check activity").font(.headline)
                 Text("Start a new local Codex task on this Mac and send a prompt.")
                     .font(.body).fixedSize(horizontal: false, vertical: true)
