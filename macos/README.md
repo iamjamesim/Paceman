@@ -4,7 +4,7 @@ The Mac client has one **Paceman** background item for the local source and noti
 
 ## Prebuilt Mac release
 
-When a signed, notarized Mac release is published, download its **Apple Silicon DMG** from the matching [GitHub release](https://github.com/iamjamesim/paceman/releases). Open `Paceman.app` in the disk image and choose **Install Paceman**. It copies itself to `~/Applications/Paceman.app`, installs the per-user background item and Codex hooks, and prepares the relay sender. During alpha, quit a running Paceman before opening a newer DMG and choosing **Update Paceman**; pairing data and Sharing preference are kept. The prebuilt app includes Python and its relay-client packages, so users do not need Xcode, Homebrew, or a separate Python. It supports Apple Silicon and macOS 15 or newer.
+When a signed, notarized Mac release is published, download its **Apple Silicon DMG** from the matching [GitHub release](https://github.com/iamjamesim/paceman/releases). Drag **Paceman** onto **Applications**, then open it from Applications. Its setup window opens automatically; choose **Set up Paceman** to prepare the per-user background item, Codex hooks, and relay sender. For updates, quit Paceman, replace it using the newer DMG, then open it; pairing data and Sharing preference are kept. The prebuilt app includes Python and its relay-client packages, so users do not need Xcode, Homebrew, or a separate Python. It supports Apple Silicon and macOS 15 or newer.
 
 The first public Mac build uses bundle ID `ai.paceman.macos`. Check **System Settings → General → Login Items & Extensions** after installation. If the menu app reports that Open at Login needs attention, set it in **Manage Paceman…**.
 
@@ -22,11 +22,11 @@ The installer builds the menu app and helper, copies the source to `~/Library/Ap
 
 For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the installer. Developers managing a direct APNs sender can use `--no-push-setup` and follow [development-only direct APNs](../docs/push-delivery.md#development-only-direct-apns). Neither option is needed for the normal install.
 
-Open `~/Applications/Paceman.app` and confirm **Paceman** appears in **System Settings → General → Login Items & Extensions**. Configure a private Tailscale Serve HTTPS route to `http://127.0.0.1:8765`; leave Funnel off. The source binds only to loopback. The installer does not alter Tailscale routes. Once notification setup has succeeded, use the menu-bar QR button to create a five-minute invitation, then scan it from **Connect computer** on the iPhone. This first pairing includes the relay address. Treat the QR and invitation as pairing secrets.
+Open `~/Applications/Paceman.app` and confirm **Paceman** appears in **System Settings → General → Login Items & Extensions**. Continue with hook review and phone connection below.
 
 ## Review Codex hooks
 
-Installing and pairing do not enable session monitoring. Codex requires the user to review each new or changed hook. The installer prints the **exact command** for this installation: its selected Python interpreter, the `-B` flag, and the absolute path to `~/Library/Application Support/Paceman/lib/macos/codex_hook.py`. Compare that printed command with every expanded Paceman row. In a prebuilt install the interpreter is inside `~/Applications/Paceman.app`; with Homebrew Python on a source install, its shape is:
+Installing and pairing do not enable session monitoring. Codex requires the user to review each new or changed hook. Paceman's setup window shows the **exact command** for this installation: its selected Python interpreter, the `-B` flag, and the absolute path to `~/Library/Application Support/Paceman/lib/macos/codex_hook.py`. Compare that command with every expanded Paceman row. In a prebuilt install the interpreter is inside the installed `Paceman.app`; with Homebrew Python on a source install, its shape is:
 
 ```sh
 /opt/homebrew/bin/python3 -B '/Users/YOU/Library/Application Support/Paceman/lib/macos/codex_hook.py'
@@ -56,6 +56,10 @@ After review, start a **fresh local Codex task** on this Mac and send a prompt. 
 ```
 
 If it does not, inspect the pending hook rows and installed command. Report installation as partial until a real event arrives. Hook presence alone does not establish trust or delivery. The app shows **Setup needed** for missing commands, **No activity yet** before its first received event, and **No active work** after an observed session becomes idle.
+
+## Connect your iPhone
+
+Connect Tailscale on the Mac and iPhone to the same network. Configure a private [Tailscale Serve HTTPS route](https://tailscale.com/docs/reference/tailscale-cli/serve) to `http://127.0.0.1:8765`; leave Funnel off. The source binds only to loopback, and the installer does not alter Tailscale routes. Once notification setup has succeeded, use the menu-bar QR button to create a five-minute invitation. On the iPhone, open **Paceman → Connect computer → Scan QR code**. This first pairing includes the relay address. Treat the QR and invitation as pairing secrets. After reconnecting Tailscale or changing its route, choose **Try again** in Paceman's connection window.
 
 ## Check iPhone notifications
 

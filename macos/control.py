@@ -21,6 +21,7 @@ import uuid
 from service.network import private_endpoint
 from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint
+from macos.paths import installed_app
 
 ROOT = Path.home() / "Library/Application Support/Paceman"
 PLIST = Path.home() / "Library/LaunchAgents/ai.paceman.source.plist"
@@ -119,18 +120,32 @@ def sharing(enabled):
         raise
 
 
+def tailscale_binary():
+    # Finder and login items do not inherit the user's shell PATH.
+    candidates = (shutil.which("tailscale"), "/usr/local/bin/tailscale",
+                  "/opt/homebrew/bin/tailscale",
+                  "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+                  str(Path.home() / "Applications/Tailscale.app/Contents/MacOS/Tailscale"))
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    raise ValueError("Install Tailscale, then configure a private Serve route to 127.0.0.1:8765")
+
+
 def pairing():
     if not status()["running"]:
         raise ValueError("Start Paceman before connecting a phone")
-    binary = shutil.which("tailscale")
-    if not binary:
-        raise ValueError("Install Tailscale and configure a private Serve route to 127.0.0.1:8765")
-    route = subprocess.run([binary, "serve", "status", "--json"], check=True,
-                           capture_output=True, text=True, timeout=10)
+    binary = tailscale_binary()
+    try:
+        route = subprocess.run([binary, "serve", "status", "--json"], check=True,
+                               capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ValueError("Tailscale is unavailable. Open Tailscale, reconnect, then try again.") from error
     origin = private_endpoint(json.loads(route.stdout))
     try:
         urllib.request.urlopen(origin + "/v1/snapshot", timeout=10).close()
     except urllib.error.HTTPError as error:
+        error.close()
         if error.code != 401:
             raise ValueError("The private source route is not ready") from error
     invitation = Store(ROOT / "data/hub.sqlite3").invite(endpoint(origin))
@@ -152,7 +167,7 @@ def main():
             print(json.dumps(status(), separators=(",", ":")))
         elif args.command == "support":
             from macos.support import report
-            app = Path.home() / "Applications/Paceman.app"
+            app = installed_app()
             try:
                 current_status = status()
             except sqlite3.Error:

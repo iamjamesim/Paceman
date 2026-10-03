@@ -49,6 +49,26 @@ class MacInstallTests(unittest.TestCase):
                  patch.object(installer, "_finish_install", side_effect=finish):
                 self.assertTrue(installer.install(prebuilt_app=source))
 
+    def test_dragged_app_is_configured_without_replacing_the_running_bundle(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = Path(temporary) / "Applications/Paceman.app"
+            library = app / "Contents/Resources/lib"
+            (library / "macos").mkdir(parents=True)
+            (library / "macos/install.py").touch()
+            python = app / "Contents/Resources/python/bin/python3"
+            python.parent.mkdir(parents=True)
+            python.write_text("bundled runtime")
+            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({
+                "CFBundleIdentifier": installer.BUNDLE_ID}))
+            with patch.multiple(installer, ROOT=Path(temporary) / "data", APP=app,
+                                REPO=library, PYTHON=sys.executable), \
+                 patch.object(installer, "_finish_install", return_value=True) as finish, \
+                 patch.object(installer.shutil, "copytree", side_effect=AssertionError("App recopied")):
+                self.assertTrue(installer.install(prebuilt_app=app))
+            self.assertFalse(finish.call_args.kwargs["replace_app"])
+            self.assertFalse(finish.call_args.kwargs["stop_installed_menu"])
+            self.assertEqual(python.read_text(), "bundled runtime")
+
     def test_hook_install_preserves_existing_rules_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / ".codex/hooks.json"
@@ -154,9 +174,15 @@ class MacInstallTests(unittest.TestCase):
     def test_failed_push_setup_reports_partial_install(self):
         self._exercise_replacement(relay_url="https://relay.paceman.ai", fail_push=True)
 
+    def test_background_setup_leaves_dragged_app_in_place(self):
+        self._exercise_replacement(replace_app=False)
+
+    def test_failed_background_setup_leaves_dragged_app_in_place(self):
+        self._exercise_replacement(replace_app=False, fail_start=True)
+
     def _exercise_replacement(self, fail_start: bool = False, fail_hooks: bool = False,
                               relay_url: str | None = None, existing_push: bool = False,
-                              fail_push: bool = False):
+                              fail_push: bool = False, replace_app: bool = True):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "home"
             root = home / "Library/Application Support/Paceman"
@@ -219,6 +245,8 @@ class MacInstallTests(unittest.TestCase):
             original_replace = Path.replace
 
             def replace_path(path, target):
+                if not replace_app and (path == app or target == app):
+                    raise AssertionError("The running app bundle was moved")
                 if fail_hooks and path == staging / "hooks.json" and target == hooks:
                     raise OSError("hook replacement failed")
                 return original_replace(path, target)
@@ -233,12 +261,12 @@ class MacInstallTests(unittest.TestCase):
                  patch("builtins.print"):
                 if fail_start:
                     with self.assertRaises(subprocess.CalledProcessError):
-                        installer._finish_install(staged_app, relay_url=relay_url)
+                        installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app)
                 elif fail_hooks:
                     with self.assertRaises(OSError):
-                        installer._finish_install(staged_app, relay_url=relay_url)
+                        installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app)
                 else:
-                    ready = installer._finish_install(staged_app, relay_url=relay_url)
+                    ready = installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app)
                     self.assertEqual(ready, not fail_push)
 
             failed = fail_start or fail_hooks
@@ -247,7 +275,7 @@ class MacInstallTests(unittest.TestCase):
                 self.assertEqual((root / "lib" / folder / "version").read_text(), expected)
             self.assertEqual((root / "lib/desktop").exists(), failed)
             self.assertFalse((root / "lib/omarchy").exists())
-            self.assertEqual((app / "version").read_text(), expected)
+            self.assertEqual((app / "version").read_text(), expected if replace_app else "old")
             self.assertEqual((root / "bin/pacemanctl").read_text(), "old" if failed else f"#!{sys.executable} -IB\nnew")
             if failed:
                 self.assertEqual(plist.read_bytes(), old_plist)

@@ -17,12 +17,13 @@ import sys
 import tempfile
 
 from macos.codex_hook import QUESTION_MATCHER
+from macos.paths import installed_app
 from service.hub import endpoint
 from service.push import DEFAULT_RELAY_URL
 
 REPO = Path(__file__).resolve().parent.parent
 ROOT = Path.home() / "Library/Application Support/Paceman"
-APP = Path.home() / "Applications/Paceman.app"
+APP = installed_app()
 BUNDLE_ID = "ai.paceman.macos"
 PLIST = Path.home() / "Library/LaunchAgents/ai.paceman.source.plist"
 LABEL = "ai.paceman.source"
@@ -158,7 +159,7 @@ def install_hooks(path: Path | None = None):
 
 
 def build_app(destination: Path | None = None, *, version: str = "0.1",
-              build_number: str = "1", minimum_macos: str = "13.0",
+              build_number: str = "1", minimum_macos: str = "15.0",
               sign: bool = True):
     destination = destination or APP
     executable = destination / "Contents/MacOS/Paceman"
@@ -232,13 +233,14 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
     try:
         if prebuilt_app is None:
             build_app(staged_app)
-        else:
+        elif prebuilt_app != APP.resolve():
             shutil.copytree(prebuilt_app, staged_app, symlinks=True)
         notifications_ready = _finish_install(staged_app, relay_url=relay_url,
                                               replace_push_config=replace_push_config,
                                               open_menu=prebuilt_app is None,
                                               stop_installed_menu=(prebuilt_app is None or
-                                                                   prebuilt_app != APP))
+                                                                   prebuilt_app != APP.resolve()),
+                                              replace_app=prebuilt_app != APP.resolve())
     finally:
         if not (staging / "ROLLBACK_INCOMPLETE").exists():
             shutil.rmtree(staging, ignore_errors=True)
@@ -247,7 +249,7 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
 
 def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                     replace_push_config: bool = False, open_menu: bool = True,
-                    stop_installed_menu: bool = True):
+                    stop_installed_menu: bool = True, replace_app: bool = True):
     try:
         previous_status = json.loads((ROOT / "status.json").read_text())
         had_activity = previous_status.get("mode") == "macos" and float(previous_status.get("lastAgentEventAt", 0)) > 0
@@ -347,7 +349,8 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
         if (lib / "desktop").exists() or (lib / "desktop").is_symlink():
             replace(None, lib / "desktop", "desktop")
         replace(staged_wrapper, wrapper, "pacemanctl")
-        replace(staged_app, APP, "Paceman.app")
+        if replace_app:
+            replace(staged_app, APP, "Paceman.app")
         replace(staged_plist, PLIST, "source.plist")
         if not (ROOT / "sharing-paused").exists():
             subprocess.run(["/bin/launchctl", "enable", label], check=True)
@@ -500,6 +503,7 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
     else:
         print("NEXT: Configure private Tailscale Serve HTTPS to 127.0.0.1:8765.")
         print("Then click Paceman's QR button and scan it in the iPhone app's Connect computer flow.")
+    (ROOT / "installed-app").write_text(str(APP) + "\n")
     installed_build = ROOT / "installed-build"
     if PYTHON == str(APP / "Contents/Resources/python/bin/python3"):
         info = plistlib.loads((APP / "Contents/Info.plist").read_bytes())

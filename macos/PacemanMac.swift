@@ -5,6 +5,14 @@ import UniformTypeIdentifiers
 
 private enum SetupGuide {
     static let url = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md")!
+    static let tailscaleURL = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md#connect-your-iphone")!
+    static let codexSettings = URL(string: "codex://settings")!
+    static var codexApp: URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") }
+    static var tailscaleApp: URL? {
+        ["/Applications/Tailscale.app", NSHomeDirectory() + "/Applications/Tailscale.app"]
+            .first(where: { FileManager.default.fileExists(atPath: $0) })
+            .map { URL(fileURLWithPath: $0) }
+    }
 }
 
 private struct Connection: Decodable, Identifiable {
@@ -39,7 +47,11 @@ private struct PairingCode: Identifiable {
 }
 
 private enum InstalledBuild {
-    static let appPath = NSHomeDirectory() + "/Applications/Paceman.app"
+    static let appLocations = ["/Applications/Paceman.app", NSHomeDirectory() + "/Applications/Paceman.app"]
+    static var appPath: String {
+        appLocations.contains(Bundle.main.bundlePath) ? Bundle.main.bundlePath : appLocations[0]
+    }
+    static var isInApplications: Bool { appLocations.contains(Bundle.main.bundlePath) }
     static let controlPath = NSHomeDirectory() + "/Library/Application Support/Paceman/bin/pacemanctl"
     static let markerPath = NSHomeDirectory() + "/Library/Application Support/Paceman/installed-build"
     static let notificationMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/notification-setup-incomplete"
@@ -52,9 +64,12 @@ private enum InstalledBuild {
         let bundleBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         let installedBuild = try? String(contentsOfFile: markerPath, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return Bundle.main.bundlePath != appPath ||
+        let installedApp = try? String(contentsOfFile: NSHomeDirectory() + "/Library/Application Support/Paceman/installed-app", encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return !isInApplications || installedApp != appPath ||
             !FileManager.default.fileExists(atPath: controlPath) ||
             FileManager.default.fileExists(atPath: notificationMarker) ||
+            FileManager.default.fileExists(atPath: loginAttentionMarker) ||
             bundleBuild == nil || installedBuild != bundleBuild
     }
 }
@@ -64,18 +79,15 @@ private final class PanelModel: ObservableObject {
     @Published var status = SourceStatus.empty
     @Published var message: String?
     @Published var pairingCode: PairingCode?
+    @Published var pairingMessage: String?
     @Published var showingManagement = false
-    @Published var showingHookReview = false
     @Published var hookReviewStartedAt: Double = 0
+    @Published var connectingPhone = false
     @Published var loginStatus = SMAppService.mainApp.status
     @Published var expanded: String?
     @Published var confirming: String?
     @Published var busy = false
     @Published var needsInstallation = InstalledBuild.needsSetup
-
-    var isUpdate: Bool {
-        FileManager.default.fileExists(atPath: InstalledBuild.controlPath)
-    }
 
     var needsNotificationRepair: Bool {
         FileManager.default.fileExists(atPath: InstalledBuild.notificationMarker)
@@ -120,6 +132,14 @@ private final class PanelModel: ObservableObject {
                    let state = try? JSONDecoder().decode(SourceStatus.self, from: data) {
                     self.status = state
                 }
+                self.loginStatus = SMAppService.mainApp.status
+                if InstalledBuild.isInApplications && !self.busy {
+                    if self.loginStatus == .enabled && self.needsLoginRepair {
+                        try? FileManager.default.removeItem(atPath: InstalledBuild.loginAttentionMarker)
+                        try? "registered\n".write(toFile: InstalledBuild.loginMarker, atomically: true, encoding: .utf8)
+                    }
+                    self.needsInstallation = InstalledBuild.needsSetup
+                }
             }
         }
     }
@@ -162,10 +182,10 @@ private final class PanelModel: ObservableObject {
             DispatchQueue.main.async {
                 self.busy = false
                 if code == 0 {
-                    let installed = NSHomeDirectory() + "/Applications/Paceman.app"
+                    let installed = InstalledBuild.appPath
                     let opener = Process()
                     opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-                    opener.arguments = ["-n", "-a", installed]
+                    opener.arguments = ["-n", "-a", installed, "--args", "--show-setup"]
                     do {
                         try opener.run()
                         opener.waitUntilExit()
@@ -185,7 +205,7 @@ private final class PanelModel: ObservableObject {
         }
     }
 
-    func run(_ args: [String], onSuccess: ((String) -> Void)? = nil) {
+    func run(_ args: [String], onFailure: ((String) -> Void)? = nil, onSuccess: ((String) -> Void)? = nil) {
         guard !busy else { return }
         busy = true
         message = nil
@@ -194,6 +214,7 @@ private final class PanelModel: ObservableObject {
             DispatchQueue.main.async {
                 self.busy = false
                 if result.0 { onSuccess?(result.1) }
+                else if let onFailure { onFailure(result.1) }
                 else { self.message = result.1 }
                 self.refresh()
             }
@@ -201,7 +222,12 @@ private final class PanelModel: ObservableObject {
     }
 
     func showPairing() {
-        run(["pair"]) { text in self.pairingCode = PairingCode(text: text) }
+        guard !busy else { return }
+        pairingCode = nil
+        pairingMessage = nil
+        run(["pair"], onFailure: { self.pairingMessage = $0 }, onSuccess: {
+            self.pairingCode = PairingCode(text: $0)
+        })
     }
 
     func setSharing(_ enabled: Bool) {
@@ -209,18 +235,18 @@ private final class PanelModel: ObservableObject {
     }
 
     func remove(_ connection: Connection) {
-        run(["remove-access", "--client-id", connection.id]) { _ in
+        run(["remove-access", "--client-id", connection.id], onSuccess: { _ in
             self.confirming = nil
             self.expanded = nil
-        }
+        })
     }
 
     func uninstall() {
-        run(["uninstall", "--yes"]) { _ in NSApplication.shared.terminate(nil) }
+        run(["uninstall", "--yes"], onSuccess: { _ in NSApplication.shared.terminate(nil) })
     }
 
     func saveSupportReport() {
-        run(["support"]) { contents in
+        run(["support"], onSuccess: { contents in
             guard let data = contents.data(using: .utf8) else {
                 self.message = "Could not prepare the support report."
                 return
@@ -238,7 +264,7 @@ private final class PanelModel: ObservableObject {
                     self.message = "Could not save the support report."
                 }
             }
-        }
+        })
     }
 
     var opensAtLogin: Bool {
@@ -264,6 +290,7 @@ private final class PanelModel: ObservableObject {
 private struct PairingView: View {
     let code: PairingCode
     let onDone: () -> Void
+    var onRefresh: (() -> Void)? = nil
 
     private var qr: NSImage? {
         let filter = CIFilter.qrCodeGenerator()
@@ -285,13 +312,15 @@ private struct PairingView: View {
             Text("On your iPhone, open Paceman → Connect computer → Scan QR code.")
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Link("Setup guide", destination: SetupGuide.url).font(.subheadline)
             if let qr {
                 Image(nsImage: qr).resizable().interpolation(.none).scaledToFit()
                     .frame(width: 230, height: 230)
             }
-            Text("Code expires in five minutes").font(.caption).foregroundStyle(.secondary)
-            Button("Done", action: onDone).keyboardShortcut(.defaultAction)
+            Text("Codes expire after five minutes").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                if let onRefresh { Button("New code", action: onRefresh) }
+                Button("Done", action: onDone).keyboardShortcut(.defaultAction)
+            }
         }
         .padding(28).frame(width: 340)
         .onExitCommand(perform: onDone)
@@ -305,25 +334,32 @@ private struct InstallationView: View {
         VStack(alignment: .leading, spacing: 16) {
             PacemanMark().frame(width: 40, height: 40)
                 .foregroundStyle(Color(nsColor: .labelColor))
-            Text(model.needsNotificationRepair || model.needsLoginRepair ? "Finish setup" : model.isUpdate ? "Update Paceman" : "Install Paceman")
+            Text(!InstalledBuild.isInApplications ? "Move Paceman to Applications" : "Set up Paceman")
                 .font(.title2.weight(.semibold))
-            Text(model.needsLoginRepair
+            Text(!InstalledBuild.isInApplications
+                 ? "Drag Paceman onto Applications in the disk image, then open it from Applications."
+                 : model.needsLoginRepair
                  ? "Paceman was installed, but Open at Login needs another try."
                  : model.needsNotificationRepair
                  ? "Paceman was installed, but iPhone notification setup needs another try."
-                 : model.isUpdate
-                 ? "Replace Paceman in your Applications folder. Your phones and Sharing setting will be kept."
-                 : "Add Paceman to your Applications folder and start its background item. You’ll review its Codex hooks before activity appears.")
+                 : "Start Paceman’s background item and prepare its Codex hooks. You’ll review the hooks in Codex before activity appears.")
                 .fixedSize(horizontal: false, vertical: true)
             if let message = model.message {
                 Text(message).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if model.needsLoginRepair && model.loginStatus == .requiresApproval {
+                Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+            }
             HStack {
                 Link("Setup guide", destination: SetupGuide.url)
                 Spacer()
-                Button(model.busy ? "Installing…" : model.needsNotificationRepair || model.needsLoginRepair ? "Retry setup" : model.isUpdate ? "Update Paceman" : "Install Paceman") {
-                    model.installBundled()
+                Button(!InstalledBuild.isInApplications ? "Open Applications" : model.busy ? "Setting up…" : model.needsNotificationRepair || model.needsLoginRepair ? "Retry setup" : "Set up Paceman") {
+                    if InstalledBuild.isInApplications {
+                        model.installBundled()
+                    } else {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications"))
+                    }
                 }
                     .disabled(model.busy)
                     .keyboardShortcut(.defaultAction)
@@ -335,12 +371,14 @@ private struct InstallationView: View {
 
 private struct HookReviewView: View {
     @ObservedObject var model: PanelModel
+    var onContinue: (() -> Void)? = nil
+    @Environment(\.dismissWindow) private var dismissWindow
 
     private let events: [(String, String)] = [
         ("SessionStart", "Shows a new task as idle."),
         ("UserPromptSubmit", "Shows work after you send a prompt."),
-        ("PermissionRequest", "Shows an approval still pending after five seconds."),
-        ("PreToolUse", "Shows a blocking or async question still pending after five seconds."),
+        ("PermissionRequest", "Shows approval pending after five seconds."),
+        ("PreToolUse", "Shows a question pending after five seconds."),
         ("PostToolUse", "Shows work resuming after a tool finishes."),
         ("Stop", "Shows a finished turn."),
         ("Interrupt", "Shows an interrupted turn as idle."),
@@ -351,42 +389,119 @@ private struct HookReviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Review Codex hooks").font(.title2.weight(.semibold))
-                Text("In Codex, open Settings → Hooks → User config (All projects). Review each Paceman entry yourself. Codex calls the command in each row “Hook 1”; expand it to compare with this command:")
+                Text("Settings → Hooks → User config (All projects)").font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                if SetupGuide.codexApp != nil {
+                    Button("Open Codex Settings") { NSWorkspace.shared.open(SetupGuide.codexSettings) }
+                }
+                Text("Expand “Hook 1” in each Paceman row and check that its command matches:")
                     .fixedSize(horizontal: false, vertical: true)
                 if let command = model.status.hookCommand {
                     Text(command).font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                    Button("Copy command") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(command, forType: .string)
+                    }
                 } else {
-                    Text("The installed command is unavailable. Run the Mac installer again.")
+                    Text("The installed command is unavailable. Run Paceman setup again.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Text("Review all 8 hooks").font(.headline)
                 ForEach(events, id: \.0) { event in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(event.0).font(.subheadline.weight(.medium))
                         Text(event.1).font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Text("Each hook sends its event name, opaque task and turn IDs, and possibly a short project label to Paceman on this Mac. That label may appear on your iPhone Lock Screen. It sends no prompts, replies, transcripts, tool arguments, or full project paths.")
+                Text("Hooks send event names, opaque task and turn IDs, and sometimes a short project label to Paceman on this Mac. Labels may appear on your iPhone Lock Screen. Prompts, replies, transcripts, tool arguments, and full paths aren’t sent.")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("After review, start a fresh local Codex task and send a prompt. Paceman checks for the new event automatically.")
+                Text("After review, start a fresh local Codex task and send a prompt.")
                     .font(.subheadline).fixedSize(horizontal: false, vertical: true)
-                Text(model.status.missingHooks?.isEmpty == false ? "Some Paceman hook entries are missing. Run the Mac installer again, then review them in Codex."
-                     : (model.status.lastAgentEventAt ?? 0) > model.hookReviewStartedAt ? "A new Codex event reached Paceman on this Mac."
+                Text(model.status.missingHooks?.isEmpty == false ? "Some hooks are missing. Run Paceman setup again, then review them in Codex."
+                     : (model.status.lastAgentEventAt ?? 0) > model.hookReviewStartedAt ? "A new Codex event reached Paceman."
                      : "Waiting for a new Codex event.")
                     .font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Link("Setup guide", destination: SetupGuide.url)
                     Spacer()
-                    Button("Done") { model.showingHookReview = false }.keyboardShortcut(.defaultAction)
+                    if let onContinue {
+                        Button(model.status.clients?.isEmpty == false ? "Done" : "Connect iPhone", action: onContinue)
+                            .keyboardShortcut(.defaultAction)
+                    } else {
+                        Button("Done") { dismissWindow(id: "setup") }.keyboardShortcut(.defaultAction)
+                    }
                 }
             }
             .padding(24)
         }
-        .frame(width: 390)
-        .frame(maxHeight: 600)
+        .frame(width: 560, height: 600)
         .onAppear { model.refresh() }
-        .onExitCommand { model.showingHookReview = false }
+        .onExitCommand { dismissWindow(id: "setup") }
+    }
+}
+
+private struct ConnectionSetupView: View {
+    @ObservedObject var model: PanelModel
+    let onDone: () -> Void
+
+    var body: some View {
+        VStack {
+            if let code = model.pairingCode {
+                PairingView(code: code, onDone: onDone, onRefresh: model.showPairing)
+            } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Connect your iPhone").font(.title2.weight(.semibold))
+                    Text("Tailscale provides the private connection between this Mac and your iPhone.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let message = model.pairingMessage {
+                        Text(message).foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ProgressView("Preparing pairing code…")
+                    }
+                    HStack {
+                        if let app = SetupGuide.tailscaleApp {
+                            Button("Open Tailscale") { NSWorkspace.shared.open(app) }
+                        }
+                        Link("Tailscale setup", destination: SetupGuide.tailscaleURL)
+                        Spacer()
+                        Button("Try again") { model.showPairing() }.disabled(model.busy)
+                    }
+                    Button("Finish later", action: onDone)
+                }
+                .padding(28).frame(width: 420)
+            }
+        }
+        .frame(width: 560, height: 600)
+        .onAppear {
+            model.pairingCode = nil
+            model.showPairing()
+        }
+        .onDisappear { model.pairingCode = nil }
+    }
+}
+
+private struct SetupFlowView: View {
+    @ObservedObject var model: PanelModel
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        VStack {
+            if model.needsInstallation {
+                InstallationView(model: model)
+            } else if model.connectingPhone {
+                ConnectionSetupView(model: model) { dismissWindow(id: "setup") }
+            } else {
+                HookReviewView(model: model) {
+                    if model.status.clients?.isEmpty == false { dismissWindow(id: "setup") }
+                    else { model.connectingPhone = true }
+                }
+            }
+        }
     }
 }
 
@@ -407,6 +522,7 @@ private struct ManagementView: View {
                 if model.loginStatus == .requiresApproval {
                     Text("Allow Paceman in System Settings → General → Login Items & Extensions.")
                         .font(.caption).foregroundStyle(.secondary)
+                    Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
                 }
                 Button("Save support report…") { model.saveSupportReport() }
                     .disabled(model.busy)
@@ -442,6 +558,7 @@ private struct ManagementView: View {
 }
 
 private struct Panel: View {
+    @Environment(\.openWindow) private var openWindow
     @ObservedObject var model: PanelModel
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -502,10 +619,6 @@ private struct Panel: View {
         ZStack {
             if model.needsInstallation {
                 InstallationView(model: model)
-            } else if let code = model.pairingCode {
-                PairingView(code: code) { model.pairingCode = nil }
-            } else if model.showingHookReview {
-                HookReviewView(model: model)
             } else if model.showingManagement {
                 ManagementView(model: model)
             } else {
@@ -514,9 +627,7 @@ private struct Panel: View {
         }
         .onAppear { model.refresh() }
         .onDisappear {
-            model.pairingCode = nil
             model.showingManagement = false
-            model.showingHookReview = false
         }
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in model.refresh() }
     }
@@ -534,7 +645,11 @@ private struct Panel: View {
                         .font(.system(size: 10, weight: .semibold)).tracking(1.6).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button { model.showPairing() } label: { Image(systemName: "qrcode") }
+                Button {
+                    model.connectingPhone = true
+                    openWindow(id: "setup")
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                } label: { Image(systemName: "qrcode") }
                     .help("Connect a phone").disabled(!model.status.running || model.busy)
                 Toggle("Sharing", isOn: Binding(get: { model.status.sharingEnabled },
                                                 set: { model.setSharing($0) }))
@@ -581,7 +696,9 @@ private struct Panel: View {
                         if model.hookReviewStartedAt == 0 {
                             model.hookReviewStartedAt = Date().timeIntervalSince1970
                         }
-                        model.showingHookReview = true
+                        model.connectingPhone = false
+                        openWindow(id: "setup")
+                        NSApplication.shared.activate(ignoringOtherApps: true)
                     }
                         .font(.caption)
                 }
@@ -678,6 +795,7 @@ private struct MenuActivityRobot: View {
 @main
 struct PacemanMacApp: App {
     @StateObject private var model = PanelModel()
+    @State private var presentsSetupAtLaunch = InstalledBuild.needsSetup || CommandLine.arguments.contains("--show-setup")
 
     init() {
         let arguments = Array(CommandLine.arguments.dropFirst())
@@ -731,6 +849,23 @@ struct PacemanMacApp: App {
             Image(nsImage: menuBarIcon)
                 .accessibilityLabel("Paceman")
         }.menuBarExtraStyle(.window)
+        Window("Paceman Setup", id: "setup") {
+            SetupFlowView(model: model)
+            .onAppear {
+                presentsSetupAtLaunch = false
+                model.refresh()
+                if model.hookReviewStartedAt == 0 {
+                    model.hookReviewStartedAt = Date().timeIntervalSince1970
+                }
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            }
+            .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in model.refresh() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in model.refresh() }
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+        .defaultLaunchBehavior(presentsSetupAtLaunch ? .presented : .suppressed)
+        .restorationBehavior(.disabled)
         #endif
     }
 }

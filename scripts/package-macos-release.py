@@ -176,13 +176,35 @@ def sign_app(app: Path, identity: str, *, adhoc: bool):
 
 
 def make_dmg(app: Path, output: Path, scratch: Path):
-    contents = scratch / "dmg-contents"
-    contents.mkdir()
-    shutil.copytree(app, contents / "Paceman.app", symlinks=True)
-    run("/usr/bin/hdiutil", "create", "-quiet", "-volname", "Paceman", "-srcfolder",
-        contents, "-format", "UDZO", "-imagekey", "zlib-level=9", "-o", output)
+    # Construct Finder metadata without scripting Finder or requiring a GUI.
+    tools = scratch / "dmg-tools"
+    run(sys.executable, "-m", "venv", tools)
+    python = tools / "bin/python3"
+    run(python, "-m", "pip", "install", "--quiet", "--disable-pip-version-check",
+        "--require-hashes", "--only-binary=:all:", "-r", ROOT / "scripts/dmgbuild-requirements.txt")
+    settings = {
+        "format": "UDZO", "files": [str(app)],
+        "symlinks": {"Applications": "/Applications"},
+        "background": str(ROOT / "scripts/assets/dmg-background.png"),
+        "window_rect": ((200, 160), (600, 320)), "default_view": "icon-view",
+        "icon_locations": {"Paceman.app": (150, 140), "Applications": (450, 140)},
+        "icon_size": 96, "text_size": 12, "grid_spacing": 80,
+    }
+    run(python, "-c", "import json, sys; from dmgbuild import build_dmg; "
+        "build_dmg(sys.argv[1], 'Paceman', settings=json.loads(sys.argv[2]))",
+        output, json.dumps(settings))
     if output.stat().st_size > MAX_DMG_BYTES:
         raise ValueError(f"DMG is over the {MAX_DMG_BYTES // 1_000_000} MB download budget")
+    # Check the delivered copy too: Finder attributes on a signed app can make
+    # an otherwise valid signature fail after disk-image assembly.
+    mounted = scratch / "dmg-check"
+    mounted.mkdir()
+    run("/usr/bin/hdiutil", "attach", output, "-readonly", "-nobrowse",
+        "-mountpoint", mounted, stdout=subprocess.DEVNULL)
+    try:
+        run("/usr/bin/codesign", "--verify", "--deep", "--strict", mounted / "Paceman.app")
+    finally:
+        run("/usr/bin/hdiutil", "detach", mounted, stdout=subprocess.DEVNULL)
 
 
 def main():
