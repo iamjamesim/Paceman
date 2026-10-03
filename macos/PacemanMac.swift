@@ -350,11 +350,11 @@ private struct InstallationView: View {
         VStack(alignment: .leading, spacing: 16) {
             PacemanMark().frame(width: 40, height: 40)
                 .foregroundStyle(Color(nsColor: .labelColor))
-            Text(!InstalledBuild.isInApplications ? "Move Paceman to Applications" : "Set up Paceman")
+            Text(!InstalledBuild.isInApplications ? "Move Paceman to Applications" : model.needsNotificationRepair ? "Set up Paceman" : "Welcome to Paceman")
                 .font(.title2.weight(.semibold))
             if InstalledBuild.isInApplications && !model.needsNotificationRepair {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("To get started:")
+                    Text("During setup, you’ll:")
                     BulletList(items: [
                         "**Enable Paceman’s background item** to track agent activity.",
                         "**Review the Codex hooks** that report agent events to Paceman.",
