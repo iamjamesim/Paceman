@@ -337,8 +337,6 @@ private struct InstallationView: View {
             Text(!InstalledBuild.isInApplications ? "Move Paceman to Applications" : "Set up Paceman")
                 .font(.title2.weight(.semibold))
             if InstalledBuild.isInApplications && !model.needsNotificationRepair {
-                Text("Take your agents for a walk.")
-                    .fixedSize(horizontal: false, vertical: true)
                 VStack(alignment: .leading, spacing: 8) {
                     Text("To get started:")
                     BulletList(items: [
