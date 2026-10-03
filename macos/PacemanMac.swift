@@ -389,11 +389,13 @@ private struct HookReviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Review Codex hooks").font(.title2.weight(.semibold))
-                Text("Settings → Hooks → User config (All projects)").font(.headline)
+                Text("1. Open Codex Settings").font(.headline)
+                Text("Hooks → User config (All projects)").font(.subheadline)
                     .fixedSize(horizontal: false, vertical: true)
                 if SetupGuide.codexApp != nil {
                     Button("Open Codex Settings") { NSWorkspace.shared.open(SetupGuide.codexSettings) }
                 }
+                Text("2. Review all 8 hooks").font(.headline)
                 Text("Expand “Hook 1” in each Paceman row and check that its command matches:")
                     .fixedSize(horizontal: false, vertical: true)
                 if let command = model.status.hookCommand {
@@ -409,17 +411,24 @@ private struct HookReviewView: View {
                     Text("The installed command is unavailable. Run Paceman setup again.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Review all 8 hooks").font(.headline)
-                ForEach(events, id: \.0) { event in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(event.0).font(.subheadline.weight(.medium))
-                        Text(event.1).font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(events, id: \.0) { event in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(event.0).font(.subheadline.weight(.medium))
+                            Text(event.1).font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
-                Text("Hooks send event names, opaque task and turn IDs, and sometimes a short project label to Paceman on this Mac. Labels may appear on your iPhone Lock Screen. Prompts, replies, transcripts, tool arguments, and full paths aren’t sent.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("After review, start a fresh local Codex task and send a prompt.")
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                Text("What hooks share").font(.subheadline.weight(.medium))
+                BulletList(items: [
+                    "Sent to Paceman on this Mac: event names, opaque task and turn IDs, and an optional short project label.",
+                    "Project labels may appear on your iPhone Lock Screen.",
+                    "Not sent: prompts, replies, transcripts, tool arguments, or full paths.",
+                ]).font(.caption).foregroundStyle(.secondary)
+                Text("3. Check activity").font(.headline)
+                Text("Start a fresh local Codex task and send a prompt.")
                     .font(.subheadline).fixedSize(horizontal: false, vertical: true)
                 Text(model.status.missingHooks?.isEmpty == false ? "Some hooks are missing. Run Paceman setup again, then review them in Codex."
                      : (model.status.lastAgentEventAt ?? 0) > model.hookReviewStartedAt ? "A new Codex event reached Paceman."
