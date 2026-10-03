@@ -24,17 +24,23 @@ private struct Connection: Decodable, Identifiable {
 }
 
 private struct SourceStatus: Decodable {
-    let running: Bool
-    let sharingEnabled: Bool
+    var running: Bool
+    var sharingEnabled: Bool
     let computerName: String?
     let activity: String?
     let sessions: Int?
     let sessionCounts: [String: Int]?
-    let clients: [Connection]?
+    var clients: [Connection]?
     let updatedAt: Double?
     let lastAgentEventAt: Double?
     let missingHooks: [String]?
     let hookCommand: String?
+    func unavailable() -> SourceStatus {
+        var state = self
+        state.running = false
+        return state
+    }
+
     static let empty = SourceStatus(running: false, sharingEnabled: false, computerName: nil,
                                     activity: nil, sessions: nil, sessionCounts: nil, clients: nil,
                                     updatedAt: nil, lastAgentEventAt: nil, missingHooks: nil,
@@ -85,9 +91,38 @@ private final class PanelModel: ObservableObject {
     @Published var loginStatus = SMAppService.mainApp.status
     @Published var expanded: String?
     @Published var confirming: String?
-    @Published var busy = false
-    @Published var needsInstallation = InstalledBuild.needsSetup
-    private(set) var uninstalled = false
+    enum Operation { case idle, installing, command, pairing, savingReport, uninstalling, uninstalled }
+    @Published private(set) var operation = Operation.idle
+    @Published var needsInstallation: Bool
+    @Published private(set) var hasReadStatus = false
+    @Published var confirmingSetupUninstall = false
+    var busy: Bool { operation != .idle }
+    var uninstalled: Bool { operation == .uninstalled }
+    private var revision = 0
+    private var refreshInFlight = false
+    private var pairingGeneration = 0
+    private var pairingPresented = false
+    private var pairingRequested = false
+    private let command: @Sendable ([String]) -> (Bool, String)
+    private let installer: @Sendable () -> (Int32, String)
+    private let needsSetup: () -> Bool
+
+    init(command: @escaping @Sendable ([String]) -> (Bool, String) = { PanelModel.execute($0) },
+         installer: @escaping @Sendable () -> (Int32, String) = { PanelModel.executeInstaller() },
+         needsSetup: @escaping () -> Bool = { InstalledBuild.needsSetup }) {
+        self.command = command
+        self.installer = installer
+        self.needsSetup = needsSetup
+        self.needsInstallation = needsSetup()
+    }
+
+    private func begin(_ next: Operation) -> Bool {
+        guard !busy else { return false }
+        revision += 1 // Status reads started before this action no longer describe the installation.
+        operation = next
+        message = nil
+        return true
+    }
 
     var needsNotificationRepair: Bool {
         FileManager.default.fileExists(atPath: InstalledBuild.notificationMarker)
@@ -144,120 +179,165 @@ private final class PanelModel: ObservableObject {
     }
 
     func refresh() {
-        guard !uninstalled else { return }
+        guard !busy, !refreshInFlight else { return }
+        refreshInFlight = true
+        let requestedRevision = revision
+        let command = self.command
         DispatchQueue.global(qos: .utility).async {
-            let result = Self.execute(["status"])
+            let result = command(["status"])
             DispatchQueue.main.async {
-                guard !self.uninstalled else { return }
+                self.refreshInFlight = false
+                guard !self.busy else { return }
+                guard requestedRevision == self.revision else {
+                    self.refresh()
+                    return
+                }
+                self.hasReadStatus = true
                 if result.0, let data = result.1.data(using: .utf8),
                    let state = try? JSONDecoder().decode(SourceStatus.self, from: data) {
                     self.status = state
+                    if let id = self.expanded, state.clients?.contains(where: { $0.id == id }) != true {
+                        self.expanded = nil
+                        self.confirming = nil
+                    }
+                } else {
+                    // Preserve pairings and the Sharing preference, but never present a failed read as live.
+                    self.status = self.status.unavailable()
                 }
                 self.loginStatus = SMAppService.mainApp.status
-                if InstalledBuild.isInApplications && !self.busy {
+                if InstalledBuild.isInApplications && !self.confirmingSetupUninstall {
                     if self.loginStatus == .enabled && self.needsLoginRepair {
                         try? FileManager.default.removeItem(atPath: InstalledBuild.loginAttentionMarker)
                         try? "registered\n".write(toFile: InstalledBuild.loginMarker, atomically: true, encoding: .utf8)
                     }
-                    self.needsInstallation = InstalledBuild.needsSetup
+                }
+                if !self.confirmingSetupUninstall {
+                    // Only successful setup advances beyond the welcome/retry screen.
+                    self.needsInstallation = self.needsInstallation || self.needsSetup()
                 }
             }
         }
     }
 
-    func installBundled() {
-        guard !busy else { return }
+    nonisolated private static func executeInstaller() -> (Int32, String) {
         let resources = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources")
         let python = resources.appendingPathComponent("python/bin/python3")
         let library = resources.appendingPathComponent("lib")
         guard FileManager.default.isExecutableFile(atPath: python.path),
               FileManager.default.fileExists(atPath: library.appendingPathComponent("macos/install.py").path)
-        else {
-            message = "This copy of Paceman has no installer. Download the Mac release again."
-            return
-        }
-        busy = true
-        message = nil
+        else { return (1, "This copy of Paceman has no installer. Download the Mac release again.") }
+        let process = Process()
+        process.executableURL = python
+        process.arguments = ["-m", "macos.install", "--prebuilt-app", Bundle.main.bundlePath]
+        process.currentDirectoryURL = library
+        var environment = ProcessInfo.processInfo.environment
+        environment["PYTHONPATH"] = library.path
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        process.environment = environment
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        do {
+            try process.run()
+            let result = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            process.waitUntilExit()
+            return (process.terminationStatus, result)
+        } catch { return (1, error.localizedDescription) }
+    }
+
+    func installBundled() {
+        guard begin(.installing) else { return }
+        let installer = self.installer
         DispatchQueue.global(qos: .userInitiated).async {
-            let process = Process()
-            process.executableURL = python
-            process.arguments = ["-m", "macos.install", "--prebuilt-app", Bundle.main.bundlePath]
-            process.currentDirectoryURL = library
-            var environment = ProcessInfo.processInfo.environment
-            environment["PYTHONPATH"] = library.path
-            environment["PYTHONDONTWRITEBYTECODE"] = "1"
-            process.environment = environment
-            let output = Pipe()
-            process.standardOutput = output
-            process.standardError = output
-            var result = ""
-            var code: Int32 = 1
-            do {
-                try process.run()
-                result = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                process.waitUntilExit()
-                code = process.terminationStatus
-            } catch {
-                result = error.localizedDescription
-            }
+            let (code, result) = installer()
             DispatchQueue.main.async {
-                self.busy = false
+                self.operation = .idle
+                self.needsInstallation = code != 0
                 if code == 0 {
-                    let installed = InstalledBuild.appPath
-                    let opener = Process()
-                    opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-                    opener.arguments = ["-n", "-a", installed, "--args", "--show-setup"]
-                    do {
-                        try opener.run()
-                        opener.waitUntilExit()
-                        if opener.terminationStatus == 0 {
-                            NSApplication.shared.terminate(nil)
-                            return
-                        }
-                    } catch { }
-                    self.message = "Installed Paceman. Open it from your Applications folder."
-                    self.needsInstallation = false
+                    // The installer preserves the app already running from Applications.
+                    // Continue in this window instead of launching a second process.
+                    self.connectingPhone = false
+                    self.hasReadStatus = false
+                    self.hookReviewStartedAt = Date().timeIntervalSince1970
+                    self.refresh()
                 } else if code == 2 {
-                    // InstallationView shows the notification retry instruction.
-                    self.message = nil
+                    self.message = nil // InstallationView explains the notification retry.
                 } else {
                     self.message = result.split(separator: "\n").last.map(String.init) ?? "Installation failed."
                 }
+                self.performPendingPairing()
             }
         }
     }
 
     func run(_ args: [String], onFailure: ((String) -> Void)? = nil, onSuccess: ((String) -> Void)? = nil) {
-        guard !busy else { return }
-        busy = true
-        message = nil
+        let next: Operation = args == ["uninstall", "--yes"] ? .uninstalling : args == ["pair"] ? .pairing : .command
+        guard begin(next) else { return }
+        let command = self.command
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Self.execute(args)
+            let result = command(args)
             DispatchQueue.main.async {
-                self.busy = false
+                self.operation = .idle
                 if result.0 { onSuccess?(result.1) }
                 else if let onFailure { onFailure(result.1) }
                 else { self.message = result.1 }
+                self.performPendingPairing()
                 self.refresh()
             }
         }
     }
 
-    func showPairing() {
-        guard !busy else { return }
+    func beginPairing() {
+        pairingPresented = true
+        showPairing()
+    }
+
+    func endPairing() {
+        pairingPresented = false
+        pairingRequested = false
+        pairingGeneration += 1
         pairingCode = nil
         pairingMessage = nil
-        run(["pair"], onFailure: { self.pairingMessage = $0 }, onSuccess: {
+    }
+
+    func showPairing() {
+        guard pairingPresented, !uninstalled else { return }
+        pairingGeneration += 1
+        pairingRequested = true
+        pairingCode = nil
+        pairingMessage = nil
+        performPendingPairing()
+    }
+
+    private func performPendingPairing() {
+        guard pairingPresented, pairingRequested, !busy else { return }
+        pairingRequested = false
+        let generation = pairingGeneration
+        run(["pair"], onFailure: {
+            guard self.pairingPresented, generation == self.pairingGeneration else { return }
+            self.pairingMessage = $0
+        }, onSuccess: {
+            guard self.pairingPresented, generation == self.pairingGeneration else { return }
             self.pairingCode = PairingCode(text: $0)
         })
     }
 
     func setSharing(_ enabled: Bool) {
-        run([enabled ? "share-on" : "share-off"])
+        run([enabled ? "share-on" : "share-off"], onSuccess: { _ in
+            self.status.sharingEnabled = enabled
+            self.status.running = false // The next source read confirms startup/shutdown.
+            if !enabled {
+                self.pairingGeneration += 1
+                self.pairingRequested = false
+                self.pairingCode = nil
+                self.pairingMessage = "Turn on Sharing to connect your iPhone."
+            }
+        })
     }
 
     func remove(_ connection: Connection) {
         run(["remove-access", "--client-id", connection.id], onSuccess: { _ in
+            self.status.clients?.removeAll { $0.id == connection.id }
             self.confirming = nil
             self.expanded = nil
         })
@@ -265,8 +345,8 @@ private final class PanelModel: ObservableObject {
 
     func uninstall(onSuccess: @escaping () -> Void) {
         run(["uninstall", "--yes"], onSuccess: { _ in
-            self.uninstalled = true
-            self.busy = true
+            self.operation = .uninstalled
+            self.endPairing()
             onSuccess()
         })
     }
@@ -277,10 +357,13 @@ private final class PanelModel: ObservableObject {
                 self.message = "Could not prepare the support report."
                 return
             }
+            self.operation = .savingReport
             let panel = NSSavePanel()
             panel.nameFieldStringValue = "Paceman-Mac-support.json"
             panel.allowedContentTypes = [.json]
             panel.begin { result in
+                self.operation = .idle
+                defer { self.performPendingPairing(); self.refresh() }
                 guard result == .OK, let url = panel.url else { return }
                 do {
                     try data.write(to: url, options: .atomic)
@@ -298,6 +381,7 @@ private final class PanelModel: ObservableObject {
     }
 
     func setOpenAtLogin(_ enabled: Bool) {
+        guard !busy else { return }
         do {
             if enabled { try SMAppService.mainApp.register() }
             else { try SMAppService.mainApp.unregister() }
@@ -438,7 +522,8 @@ private struct HookReviewView: View {
                         NSPasteboard.general.setString(command, forType: .string)
                     }
                 } else {
-                    Text("The installed command is unavailable. Run Paceman setup again.")
+                    Text(model.hasReadStatus ? "The installed command is unavailable. Run Paceman setup again."
+                         : "Loading Codex hook details…")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 10) {
@@ -516,18 +601,14 @@ private struct ConnectionSetupView: View {
             }
         }
         .frame(width: 560, height: 600)
-        .onAppear {
-            model.pairingCode = nil
-            model.showPairing()
-        }
-        .onDisappear { model.pairingCode = nil }
+        .onAppear { model.beginPairing() }
+        .onDisappear { model.endPairing() }
     }
 }
 
 private struct SetupFlowView: View {
     @ObservedObject var model: PanelModel
     @Environment(\.dismissWindow) private var dismissWindow
-    @State private var confirmingUninstall = false
 
     var body: some View {
         VStack {
@@ -550,7 +631,7 @@ private struct SetupFlowView: View {
                     Divider()
                     Button("Uninstall Paceman…", role: .destructive) {
                         model.message = nil
-                        confirmingUninstall = true
+                        model.confirmingSetupUninstall = true
                     }
                     .disabled(model.busy || (!InstalledBuild.isInApplications &&
                         !FileManager.default.fileExists(atPath: InstalledBuild.controlPath)))
@@ -562,13 +643,13 @@ private struct SetupFlowView: View {
                 .accessibilityLabel("Setup options")
             }
         }
-        .sheet(isPresented: $confirmingUninstall, onDismiss: {
+        .sheet(isPresented: $model.confirmingSetupUninstall, onDismiss: {
             // SwiftUI must finish dismissing its modal sheet before AppKit can quit.
             if model.uninstalled { NSApplication.shared.terminate(nil) }
         }) {
             UninstallConfirmationView(model: model,
-                onCancel: { confirmingUninstall = false },
-                onUninstalled: { confirmingUninstall = false })
+                onCancel: { model.message = nil; model.confirmingSetupUninstall = false },
+                onUninstalled: { model.confirmingSetupUninstall = false })
                 .padding(24).frame(width: 390)
                 .interactiveDismissDisabled(model.busy)
         }
@@ -636,7 +717,7 @@ private struct ManagementView: View {
                         "Turning off Sharing pauses activity updates and notifications. Your pairings and settings are kept.",
                     ])
                     Toggle("Open menu app at login", isOn: Binding(
-                        get: { model.opensAtLogin }, set: { model.setOpenAtLogin($0) }))
+                        get: { model.opensAtLogin }, set: { model.setOpenAtLogin($0) })).disabled(model.busy)
                     if model.loginStatus == .requiresApproval || model.needsLoginRepair {
                         Text(model.loginStatus == .requiresApproval
                              ? "Allow Paceman in System Settings → General → Login Items & Extensions."
@@ -656,12 +737,15 @@ private struct ManagementView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if confirmingUninstall {
-                    UninstallConfirmationView(model: model, onCancel: { confirmingUninstall = false })
+                    UninstallConfirmationView(model: model, onCancel: { model.message = nil; confirmingUninstall = false })
                 } else {
                     HStack {
                         Button("Done") { model.showingManagement = false }.keyboardShortcut(.defaultAction)
                         Spacer()
-                        Button("Uninstall Paceman…", role: .destructive) { confirmingUninstall = true }
+                        Button("Uninstall Paceman…", role: .destructive) {
+                            model.message = nil
+                            confirmingUninstall = true
+                        }
                             .disabled(model.busy)
                     }
                 }
@@ -743,6 +827,7 @@ private struct Panel: View {
                 summary
             }
         }
+        .disabled(model.confirmingSetupUninstall)
         .onAppear { model.refresh() }
         .onDisappear {
             model.showingManagement = false
@@ -768,7 +853,7 @@ private struct Panel: View {
                     openWindow(id: "setup")
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 } label: { Image(systemName: "qrcode") }
-                    .help("Connect a phone").disabled(!model.status.running || model.busy)
+                    .help("Connect a phone").disabled(!model.status.sharingEnabled || !model.status.running || model.busy)
                 Toggle("Sharing", isOn: Binding(get: { model.status.sharingEnabled },
                                                 set: { model.setSharing($0) }))
                     .labelsHidden().toggleStyle(.switch).disabled(model.busy)
@@ -853,7 +938,7 @@ private struct Panel: View {
                             Image(systemName: model.expanded == connection.id ? "chevron.up" : "chevron.down")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.plain).disabled(model.busy)
                     Text(connectionStatus(connection))
                         .font(.caption).foregroundStyle(.secondary).padding(.leading, 28)
                     if model.expanded == connection.id {
@@ -873,8 +958,8 @@ private struct Panel: View {
                                            (connection.platform == "ios" ? ["Your watch stays paired."] : []))
                             }.font(.caption).padding(.leading, 28)
                             HStack {
-                                Button("Cancel") { model.confirming = nil }.keyboardShortcut(.defaultAction)
-                                Button("Remove access", role: .destructive) { model.remove(connection) }
+                                Button("Cancel") { model.confirming = nil }.keyboardShortcut(.defaultAction).disabled(model.busy)
+                                Button("Remove access", role: .destructive) { model.remove(connection) }.disabled(model.busy)
                             }.padding(.leading, 28)
                         } else {
                             Button("Remove access…") { model.confirming = connection.id }

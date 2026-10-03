@@ -12,6 +12,13 @@ from macos.paths import installed_app
 
 
 class MacPairingTests(unittest.TestCase):
+    def test_pausing_sharing_prevents_pairing_even_with_a_recent_heartbeat(self):
+        with patch.object(control, "status", return_value={"running": True, "sharingEnabled": False}), \
+             patch.object(control, "Store") as store:
+            with self.assertRaisesRegex(ValueError, "Turn on Sharing"):
+                control.pairing()
+            store.assert_not_called()
+
     def test_relocated_bundled_runtime_selects_the_app_that_is_running(self):
         for app in (Path("/Applications/Paceman.app"), Path.home() / "Applications/Paceman.app"):
             with self.subTest(app=app), patch("macos.paths.sys.executable", str(app / "Contents/Resources/python/bin/python3.14")):
@@ -49,7 +56,7 @@ class MacPairingTests(unittest.TestCase):
             "AllowFunnel": {"computer.example.ts.net:443": True}}
         for config in ({}, public_route):
             with self.subTest(config=config), \
-                 patch.object(control, "status", return_value={"running": True}), \
+                 patch.object(control, "status", return_value={"running": True, "sharingEnabled": True}), \
                  patch.object(control, "tailscale_binary", return_value="/usr/local/bin/tailscale"), \
                  patch.object(control.subprocess, "run", return_value=subprocess.CompletedProcess(
                      "tailscale", 0, json.dumps(config))), \
@@ -64,7 +71,7 @@ class MacPairingTests(unittest.TestCase):
                 "/": {"Proxy": "http://127.0.0.1:8765"}}}}}
         disconnected = subprocess.CalledProcessError(1, "tailscale")
         connected = subprocess.CompletedProcess("tailscale", 0, json.dumps(route))
-        with patch.object(control, "status", return_value={"running": True}), \
+        with patch.object(control, "status", return_value={"running": True, "sharingEnabled": True}), \
              patch.object(control, "tailscale_binary", return_value="/usr/local/bin/tailscale"), \
              patch.object(control.subprocess, "run", side_effect=[disconnected, connected]), \
              patch.object(control.urllib.request, "urlopen") as request, \

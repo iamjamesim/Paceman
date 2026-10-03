@@ -133,7 +133,10 @@ def tailscale_binary():
 
 
 def pairing():
-    if not status()["running"]:
+    current = status()
+    if not current["sharingEnabled"]:
+        raise ValueError("Turn on Sharing before connecting your iPhone")
+    if not current["running"]:
         raise ValueError("Start Paceman before connecting a phone")
     binary = tailscale_binary()
     try:
