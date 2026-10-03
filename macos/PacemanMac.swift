@@ -498,11 +498,13 @@ private struct InstallationView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("During setup, you’ll:")
                     BulletList(items: [
-                        "**Enable Paceman’s background item** to track agent activity.",
-                        "**Review the Codex hooks** that report agent events to Paceman.",
+                        "**Start Paceman at login** to track agent activity and send updates automatically.",
+                        "**Review Codex hooks** that send agent events to Paceman.",
                         "**Connect your iPhone** to receive Live Activity updates.",
                     ])
                 }
+                Text("macOS may show notifications about Paceman’s login and background items.")
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Text(!InstalledBuild.isInApplications
                      ? "Drag Paceman onto Applications in the disk image, then open it from Applications."
@@ -514,7 +516,15 @@ private struct InstallationView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
-                Link("Setup guide", destination: SetupGuide.url)
+                if InstalledBuild.isInApplications && !model.needsNotificationRepair {
+                    Button("Login Items & Extensions") {
+                        SMAppService.openSystemSettingsLoginItems()
+                    }
+                    .buttonStyle(.link)
+                    .disabled(model.busy)
+                } else {
+                    Link("Setup guide", destination: SetupGuide.url)
+                }
                 Spacer()
                 Button(!InstalledBuild.isInApplications ? "Open Applications" : model.busy ? "Setting up…" : model.needsNotificationRepair ? "Retry setup" : "Set up Paceman") {
                     if InstalledBuild.isInApplications {
