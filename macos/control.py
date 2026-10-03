@@ -129,7 +129,7 @@ def tailscale_binary():
     for candidate in candidates:
         if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
             return candidate
-    raise ValueError("Install Tailscale, then configure a private Serve route to 127.0.0.1:8765")
+    raise ValueError("Install Tailscale on this Mac, then follow Paceman’s Tailscale setup guide.")
 
 
 def pairing():
@@ -141,13 +141,19 @@ def pairing():
                                capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError) as error:
         raise ValueError("Tailscale is unavailable. Open Tailscale, reconnect, then try again.") from error
-    origin = private_endpoint(json.loads(route.stdout))
+    config = json.loads(route.stdout)
+    try:
+        origin = private_endpoint(config)
+    except ValueError as error:
+        raise ValueError("Tailscale isn’t set up for Paceman yet. Follow the Tailscale setup guide, then try again.") from error
     try:
         urllib.request.urlopen(origin + "/v1/snapshot", timeout=10).close()
     except urllib.error.HTTPError as error:
         error.close()
         if error.code != 401:
-            raise ValueError("The private source route is not ready") from error
+            raise ValueError("Tailscale can’t reach Paceman yet. Check the Tailscale setup guide, then try again.") from error
+    except urllib.error.URLError as error:
+        raise ValueError("Couldn’t connect to Paceman over Tailscale. Check that Tailscale is connected, then try again.") from error
     invitation = Store(ROOT / "data/hub.sqlite3").invite(endpoint(origin))
     print(json.dumps(invitation, separators=(",", ":")))
 

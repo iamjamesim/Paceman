@@ -119,7 +119,7 @@ private final class PanelModel: ObservableObject {
             process.waitUntilExit()
             return (process.terminationStatus == 0, String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
         } catch {
-            return (false, "Paceman is not installed. Run the Mac setup from the project checkout.")
+            return (false, "Paceman’s setup is incomplete. Quit and reopen Paceman to run setup again.")
         }
     }
 
@@ -196,7 +196,8 @@ private final class PanelModel: ObservableObject {
                     self.message = "Installed Paceman. Open it from your Applications folder."
                     self.needsInstallation = false
                 } else if code == 2 {
-                    self.message = "Paceman was installed, but notification setup needs attention. Retry installation or open the setup guide."
+                    // InstallationView shows the notification retry instruction.
+                    self.message = nil
                 } else {
                     self.message = result.split(separator: "\n").last.map(String.init) ?? "Installation failed."
                 }
@@ -307,7 +308,7 @@ private struct PairingView: View {
         VStack(spacing: 16) {
             PacemanMark().frame(width: 38, height: 38)
                 .foregroundStyle(Color(nsColor: .labelColor))
-            Text("Connect your phone").font(.title2.weight(.semibold))
+            Text("Connect your iPhone").font(.title2.weight(.semibold))
             Text("On your iPhone, open Paceman → Connect computer → Scan QR code.")
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -341,15 +342,15 @@ private struct InstallationView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("To get started:")
                     BulletList(items: [
-                        "**Enable Paceman’s background item** to record and share Codex activity.",
-                        "**Review the Codex hooks** Paceman uses to track task activity.",
-                        "**Connect the iPhone** you’ll use to receive activity updates.",
+                        "**Enable Paceman’s background item** to track agent activity.",
+                        "**Review the Codex hooks** that report agent events to Paceman.",
+                        "**Connect your iPhone** to receive Live Activity updates.",
                     ])
                 }
             } else {
                 Text(!InstalledBuild.isInApplications
                      ? "Drag Paceman onto Applications in the disk image, then open it from Applications."
-                     : "Paceman was installed, but iPhone notification setup needs another try.")
+                     : "Paceman is installed. Retry setup to enable iPhone notifications.")
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let message = model.message {
@@ -426,7 +427,7 @@ private struct HookReviewView: View {
                 }
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-                Text("What hooks share").font(.subheadline.weight(.medium))
+                Text("What hooks send").font(.subheadline.weight(.medium))
                 BulletList(items: [
                     "Sent to Paceman on this Mac: event names, opaque task and turn IDs, and an optional short project label.",
                     "Project labels may appear on your iPhone Lock Screen.",
@@ -543,10 +544,10 @@ private struct ManagementView: View {
             VStack(alignment: .leading, spacing: 16) {
                 if !confirmingUninstall {
                     Text("Paceman on this Mac").font(.title2.weight(.semibold))
-                    Text("One background item shares local Codex activity with your paired phones and sends iPhone notifications when configured.")
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Turn off Sharing in the menu bar to stop it while keeping your pairings and settings.")
-                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    BulletList(items: [
+                        "Paceman’s background item tracks agent activity and sends updates to your iPhone.",
+                        "Turning off Sharing pauses activity updates and notifications. Your pairings and settings are kept.",
+                    ])
                     Toggle("Open menu app at login", isOn: Binding(
                         get: { model.opensAtLogin }, set: { model.setOpenAtLogin($0) }))
                     if model.loginStatus == .requiresApproval || model.needsLoginRepair {
@@ -558,9 +559,10 @@ private struct ManagementView: View {
                     }
                     Button("Save support report…") { model.saveSupportReport() }
                         .disabled(model.busy)
-                    Text("Includes connection timing and notification results. It excludes prompts, credentials, and computer names.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    BulletList(items: [
+                        "Includes connection timing and notification results.",
+                        "Excludes prompts, credentials, and computer names.",
+                    ]).font(.caption).foregroundStyle(.secondary)
                 }
                 if let message = model.message {
                     Text(message).font(.caption).foregroundStyle(.red)
@@ -570,7 +572,7 @@ private struct ManagementView: View {
                     Text("Remove Paceman from this Mac?").font(.title2.weight(.semibold))
                     Text("Uninstall removes:")
                     BulletList(items: ["Paceman app", "Background item", "Paceman’s Codex hooks",
-                                       "Local pairings", "APNs key"])
+                                       "Local pairings", "Notification credentials"])
                     Text("The iPhone app and Tailscale stay installed.")
                         .fixedSize(horizontal: false, vertical: true)
                     Text("Your iPhone will keep this computer in its list until you remove it there.")

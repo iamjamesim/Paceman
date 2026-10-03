@@ -42,6 +42,22 @@ class MacPairingTests(unittest.TestCase):
              patch.object(control.os, "access", return_value=True):
             self.assertEqual(control.tailscale_binary(), binary)
 
+    def test_invalid_private_route_does_not_create_an_invitation(self):
+        public_route = {"TCP": {"443": {"HTTPS": True}}, "Web": {
+            "computer.example.ts.net:443": {"Handlers": {
+                "/": {"Proxy": "http://127.0.0.1:8765"}}}},
+            "AllowFunnel": {"computer.example.ts.net:443": True}}
+        for config in ({}, public_route):
+            with self.subTest(config=config), \
+                 patch.object(control, "status", return_value={"running": True}), \
+                 patch.object(control, "tailscale_binary", return_value="/usr/local/bin/tailscale"), \
+                 patch.object(control.subprocess, "run", return_value=subprocess.CompletedProcess(
+                     "tailscale", 0, json.dumps(config))), \
+                 patch.object(control, "Store") as store:
+                with self.assertRaisesRegex(ValueError, "Tailscale setup guide"):
+                    control.pairing()
+                store.assert_not_called()
+
     def test_pairing_retries_after_tailscale_reconnects(self):
         route = {"TCP": {"8443": {"HTTPS": True}}, "Web": {
             "computer.example.ts.net:8443": {"Handlers": {
