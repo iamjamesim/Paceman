@@ -87,6 +87,7 @@ private final class PanelModel: ObservableObject {
     @Published var confirming: String?
     @Published var busy = false
     @Published var needsInstallation = InstalledBuild.needsSetup
+    private(set) var uninstalled = false
 
     var needsNotificationRepair: Bool {
         FileManager.default.fileExists(atPath: InstalledBuild.notificationMarker)
@@ -135,14 +136,19 @@ private final class PanelModel: ObservableObject {
             process.waitUntilExit()
             return (process.terminationStatus == 0, String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
         } catch {
+            if args == ["uninstall", "--yes"] {
+                return (false, "Could not start the uninstaller. Quit Paceman and reopen it from Applications to try again.")
+            }
             return (false, "Paceman’s setup is incomplete. Quit and reopen Paceman to run setup again.")
         }
     }
 
     func refresh() {
+        guard !uninstalled else { return }
         DispatchQueue.global(qos: .utility).async {
             let result = Self.execute(["status"])
             DispatchQueue.main.async {
+                guard !self.uninstalled else { return }
                 if result.0, let data = result.1.data(using: .utf8),
                    let state = try? JSONDecoder().decode(SourceStatus.self, from: data) {
                     self.status = state
@@ -257,8 +263,12 @@ private final class PanelModel: ObservableObject {
         })
     }
 
-    func uninstall() {
-        run(["uninstall", "--yes"], onSuccess: { _ in NSApplication.shared.terminate(nil) })
+    func uninstall(onSuccess: @escaping () -> Void) {
+        run(["uninstall", "--yes"], onSuccess: { _ in
+            self.uninstalled = true
+            self.busy = true
+            onSuccess()
+        })
     }
 
     func saveSupportReport() {
@@ -552,8 +562,13 @@ private struct SetupFlowView: View {
                 .accessibilityLabel("Setup options")
             }
         }
-        .sheet(isPresented: $confirmingUninstall) {
-            UninstallConfirmationView(model: model) { confirmingUninstall = false }
+        .sheet(isPresented: $confirmingUninstall, onDismiss: {
+            // SwiftUI must finish dismissing its modal sheet before AppKit can quit.
+            if model.uninstalled { NSApplication.shared.terminate(nil) }
+        }) {
+            UninstallConfirmationView(model: model,
+                onCancel: { confirmingUninstall = false },
+                onUninstalled: { confirmingUninstall = false })
                 .padding(24).frame(width: 390)
                 .interactiveDismissDisabled(model.busy)
         }
@@ -578,6 +593,7 @@ private struct BulletList: View {
 private struct UninstallConfirmationView: View {
     @ObservedObject var model: PanelModel
     var onCancel: () -> Void
+    var onUninstalled: () -> Void = { NSApplication.shared.terminate(nil) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -599,7 +615,7 @@ private struct UninstallConfirmationView: View {
                     .disabled(model.busy)
                 Spacer()
                 if model.busy { ProgressView().controlSize(.small) }
-                Button("Uninstall Paceman", role: .destructive) { model.uninstall() }
+                Button("Uninstall Paceman", role: .destructive) { model.uninstall(onSuccess: onUninstalled) }
                     .disabled(model.busy)
             }
         }
@@ -640,7 +656,7 @@ private struct ManagementView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if confirmingUninstall {
-                    UninstallConfirmationView(model: model) { confirmingUninstall = false }
+                    UninstallConfirmationView(model: model, onCancel: { confirmingUninstall = false })
                 } else {
                     HStack {
                         Button("Done") { model.showingManagement = false }.keyboardShortcut(.defaultAction)
