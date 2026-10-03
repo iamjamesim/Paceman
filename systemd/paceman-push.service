@@ -2,12 +2,12 @@
 Description=Paceman push sender
 PartOf=paceman-source.service
 After=paceman-source.service
-ConditionPathExists="@STATE@/private/apns.json"
+ConditionPathExists=@STATE@/private/apns.json
 
 [Service]
 Type=simple
 ExecCondition=/usr/bin/test ! -e "@STATE@/sharing-paused"
-WorkingDirectory="@APP@"
+WorkingDirectory=@APP@
 ExecStart="@STATE@/push-venv/bin/python3" -m service.push --config "@STATE@/private/apns.json" --data-dir "@STATE@"
 Restart=on-failure
 RestartSec=3
