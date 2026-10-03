@@ -18,7 +18,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
-REPOSITORY = "iamjamesim/paceman"
+REPOSITORY = "iamjamesim/Paceman"
 VERSION = re.compile(r"\d+\.\d+\.\d+(?:-alpha\.\d+|-beta\.\d+)?")
 QA_CHECKS = {
     "mac-fresh": "Fresh standard-user install; Gatekeeper, login item, and menu",
@@ -94,7 +94,7 @@ def verify(directory, *, platform_checks=True):
         path = directory / item["name"]
         if item["sha256"] != entries[path.name] or item["bytes"] != path.stat().st_size:
             raise ValueError(f"Artifact differs from manifest: {path.name}")
-    tag = f"refs/tags/v{version}"
+    tag = f"refs/tags/desktop-v{version}"
     if (output("git", "cat-file", "-t", tag) != "tag"
             or output("git", "rev-parse", f"{tag}^{{commit}}") != revision
             or output("git", "rev-parse", "HEAD") != revision):
@@ -112,16 +112,17 @@ def verify(directory, *, platform_checks=True):
 def github_preflight():
     run("gh", "auth", "status")
     repository = gh("repo", "view", "--json", "nameWithOwner")["nameWithOwner"]
-    if repository != REPOSITORY:
+    if repository.casefold() != REPOSITORY.casefold():
         raise ValueError(f"Expected GitHub repository {REPOSITORY}, found {repository}")
     remote = output("git", "remote", "get-url", "origin")
-    if remote not in (f"https://github.com/{REPOSITORY}", f"https://github.com/{REPOSITORY}.git",
-                      f"git@github.com:{REPOSITORY}.git", f"git@github.com:{REPOSITORY}"):
+    slug = REPOSITORY.casefold()
+    if remote.casefold() not in (f"https://github.com/{slug}", f"https://github.com/{slug}.git",
+                                f"git@github.com:{slug}.git", f"git@github.com:{slug}"):
         raise ValueError("origin must point to the release repository on GitHub")
 
 
 def remote_tag(version, revision, *, push=False):
-    tag = f"refs/tags/v{version}"
+    tag = f"refs/tags/desktop-v{version}"
     remote = output("git", "ls-remote", "origin", tag, tag + "^{}")
     refs = dict(line.split()[::-1] for line in remote.splitlines())
     if not refs and push:
@@ -157,7 +158,7 @@ def prepare(args):
         identity = identities[0]
     run("xcrun", "notarytool", "history", "--keychain-profile", args.notary_profile,
         "--output-format", "json", stdout=subprocess.DEVNULL)
-    tag = f"v{args.version}"
+    tag = f"desktop-v{args.version}"
     existing = output("git", "tag", "--list", tag)
     if existing:
         if (output("git", "cat-file", "-t", tag) != "tag"
@@ -183,7 +184,7 @@ def releases():
 
 
 def release_view(version):
-    return gh("release", "view", f"v{version}", "--repo", REPOSITORY,
+    return gh("release", "view", f"desktop-v{version}", "--repo", REPOSITORY,
               "--json", "tagName,isDraft,isPrerelease,url,assets")
 
 
@@ -192,7 +193,7 @@ def download_check(directory, manifest, names):
     if {asset["name"] for asset in release["assets"]} != set(names):
         raise ValueError("Remote assets do not match the complete expected release set")
     destination = Path(tempfile.mkdtemp(prefix="downloaded-", dir=directory))
-    run("gh", "release", "download", f"v{manifest['version']}", "--repo", REPOSITORY,
+    run("gh", "release", "download", f"desktop-v{manifest['version']}", "--repo", REPOSITORY,
         "--dir", destination)
     for name in names:
         if sha256(destination / name) != sha256(directory / name):
@@ -209,7 +210,7 @@ def stage(directory):
     manifest, names = verify(directory)
     github_preflight()
     version = manifest["version"]
-    tag = f"v{version}"
+    tag = f"desktop-v{version}"
     existing = next((item for item in releases() if item["tagName"] == tag), None)
     if existing and not existing["isDraft"]:
         raise ValueError("Release is already public; it cannot be replaced by staging")
@@ -230,8 +231,9 @@ def stage(directory):
             run("gh", "release", "upload", tag, "--repo", REPOSITORY,
                 *(directory / name for name in sorted(missing)))
     else:
-        run("gh", "release", "create", tag, "--repo", REPOSITORY, "--draft", "--prerelease",
-            "--verify-tag", "--title", f"Paceman desktop v{version}",
+        run("gh", "release", "create", tag, "--repo", REPOSITORY, "--draft",
+            *(["--prerelease"] if "-" in version else []),
+            "--verify-tag", "--title", f"Paceman Desktop {version}",
             "--notes-file", directory / "RELEASE-NOTES.md", *(directory / name for name in names))
     download_check(directory, manifest, names)
 
@@ -277,16 +279,17 @@ def publish(directory):
     github_preflight()
     version = manifest["version"]
     remote_tag(version, manifest["sourceRevision"])
-    previous = [item for item in releases() if not item["isDraft"] and item["tagName"] != f"v{version}"]
+    previous = [item for item in releases() if not item["isDraft"]
+                and item["tagName"].startswith("desktop-v")
+                and item["tagName"] != f"desktop-v{version}"]
     require_qa(qa_record(directory), previous_releases=previous)
     download_check(directory, manifest, names)
     release = release_view(version)
     if release["isDraft"]:
-        # Stable releases need a separate updater/readiness decision, per the runbook.
-        run("gh", "release", "edit", f"v{version}", "--repo", REPOSITORY,
-            "--draft=false", "--prerelease", "--latest=false")
-    elif not release["isPrerelease"]:
-        raise ValueError("Expected an alpha/beta prerelease; refusing to alter a stable release")
+        run("gh", "release", "edit", f"desktop-v{version}", "--repo", REPOSITORY,
+            "--draft=false", f"--prerelease={str('-' in version).lower()}")
+    elif release["isPrerelease"] != ("-" in version):
+        raise ValueError("Published release classification differs from its version")
     download_check(directory, manifest, names)
     print(release_view(version)["url"])
 

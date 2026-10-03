@@ -95,7 +95,7 @@ class ReleaseTests(unittest.TestCase):
             run.assert_not_called()
 
     def test_conflicting_remote_tag_is_never_overwritten(self):
-        tag = f"refs/tags/v{self.version}"
+        tag = f"refs/tags/desktop-v{self.version}"
         def output(*args):
             if args[1] == "ls-remote":
                 return f"{'b'*40}\t{tag}\n{'c'*40}\t{tag}^{{}}"
@@ -115,7 +115,7 @@ class ReleaseTests(unittest.TestCase):
                 destination.write_bytes((self.directory / existing_name).read_bytes())
         with patch.object(release, "verify", return_value=(self.manifest, self.names)), \
              patch.object(release, "github_preflight"), patch.object(release, "remote_tag"), \
-             patch.object(release, "releases", return_value=[{"tagName": f"v{self.version}", "isDraft": True}]), \
+             patch.object(release, "releases", return_value=[{"tagName": f"desktop-v{self.version}", "isDraft": True}]), \
              patch.object(release, "release_view", return_value={"assets": [{"name": existing_name}]}), \
              patch.object(release, "run", side_effect=run), patch.object(release, "download_check"):
             release.stage(self.directory)
@@ -164,6 +164,46 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "remote changed"):
                 release.publish(self.directory)
             run.assert_not_called()
+
+    def test_release_tag_and_classification_follow_version(self):
+        for version in ("0.1.0", "0.2.0-beta.1"):
+            with self.subTest(version=version):
+                manifest = {**self.manifest, "version": version}
+                tag = f"desktop-v{version}"
+                with patch.object(release, "verify", return_value=(manifest, self.names)), \
+                     patch.object(release, "github_preflight"), patch.object(release, "remote_tag"), \
+                     patch.object(release, "releases", return_value=[]), \
+                     patch.object(release, "download_check"), patch.object(release, "run") as run:
+                    release.stage(self.directory)
+                    command = run.call_args.args
+                    self.assertEqual(command[:4], ("gh", "release", "create", tag))
+                    self.assertEqual("--prerelease" in command, "-" in version)
+                    self.assertIn(f"Paceman Desktop {version}", command)
+                record = {"checks": {name: {"result": "passed", "notes": "Observed"}
+                                     for name in release.QA_CHECKS}}
+                for name in release.UPGRADE_CHECKS:
+                    record["checks"][name]["result"] = "not-applicable"
+                with patch.object(release, "verify", return_value=(manifest, self.names)), \
+                     patch.object(release, "github_preflight"), patch.object(release, "remote_tag"), \
+                     patch.object(release, "releases", return_value=[{"tagName": "ios-v1.0.0", "isDraft": False}]), \
+                     patch.object(release, "qa_record", return_value=record), \
+                     patch.object(release, "download_check"), \
+                     patch.object(release, "release_view", return_value={"isDraft": True, "url": "draft"}), \
+                     patch.object(release, "run") as run:
+                    release.publish(self.directory)
+                    command = run.call_args.args
+                    self.assertEqual(command[:4], ("gh", "release", "edit", tag))
+                    self.assertIn(f"--prerelease={str('-' in version).lower()}", command)
+
+    def test_repository_case_change_is_allowed_but_other_repo_is_rejected(self):
+        with patch.object(release, "run"), \
+             patch.object(release, "gh", return_value={"nameWithOwner": "iamjamesim/Paceman"}), \
+             patch.object(release, "output", return_value="https://github.com/iamjamesim/paceman.git"):
+            release.github_preflight()
+        with patch.object(release, "run"), \
+             patch.object(release, "gh", return_value={"nameWithOwner": "other/Paceman"}):
+            with self.assertRaisesRegex(ValueError, "Expected GitHub repository"):
+                release.github_preflight()
 
     def test_qa_requires_current_download_verification(self):
         release.write_json(self.directory / "download-verification.json", {"checksumsSHA256": "outdated"})
