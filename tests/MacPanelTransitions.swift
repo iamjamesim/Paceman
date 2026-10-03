@@ -37,37 +37,52 @@ private struct MacPanelTransitions {
         PanelModel(command: { commands.execute($0) }, needsSetup: { false }, progressURL: nil)
     }
     @MainActor static func exerciseSetupWindow() {
-        // Run actual AppKit layout: model-only tests cannot catch constraint-pass crashes.
+        // Use AppKit's real display loop: model-only tests miss constraint-pass crashes.
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         let m = PanelModel(command: { _ in (true, paused) }, needsSetup: { false }, progressURL: nil)
         m.needsInstallation = true
         let delegate = PacemanAppDelegate(model: m)
-        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
-        let window = app.windows.first { $0.title == "Paceman Setup" }!
-        func settle() {
-            let end = Date().addingTimeInterval(0.25)
-            while Date() < end {
-                window.contentView?.layoutSubtreeIfNeeded()
-                _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        app.delegate = delegate
+        var welcome = NSSize.zero
+        var phase = 0
+        var completed = false
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { timer in
+            MainActor.assumeIsolated {
+                guard let window = app.windows.first(where: { $0.title == "Paceman Setup" }) else {
+                    fatalError("Setup window did not open")
+                }
+                let size = window.contentView!.frame.size
+                switch phase {
+                case 0:
+                    welcome = size
+                    assert(abs(size.width - 380) < 1 && size.height > 300)
+                    m.message = String(repeating: "Installation could not finish. ", count: 12)
+                case 1:
+                    assert(size.height > welcome.height)
+                    m.message = nil
+                    m.needsInstallation = false
+                case 2:
+                    assert(abs(size.width - 560) < 1 && abs(size.height - 600) < 1)
+                    m.needsInstallation = true
+                default:
+                    assert(abs(size.height - welcome.height) < 1)
+                    window.close()
+                    completed = true
+                    timer.invalidate()
+                    app.stop(nil)
+                    // Wake run() so it can observe stop without waiting for user input.
+                    app.postEvent(NSEvent.otherEvent(with: .applicationDefined, location: .zero,
+                        modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                        subtype: 0, data1: 0, data2: 0)!, atStart: false)
+                }
+                phase += 1
             }
         }
-        settle()
-        let welcome = window.contentView!.frame.size
-        assert(abs(welcome.width - 380) < 1 && welcome.height > 300)
-        // Wrapping an error must grow the welcome window without recursive layout.
-        m.message = String(repeating: "Installation could not finish. ", count: 12)
-        settle()
-        assert(window.contentView!.frame.height > welcome.height)
-        m.message = nil
-        m.needsInstallation = false
-        settle()
-        assert(abs(window.contentView!.frame.width - 560) < 1)
-        assert(abs(window.contentView!.frame.height - 600) < 1)
-        m.needsInstallation = true
-        settle()
-        assert(abs(window.contentView!.frame.height - welcome.height) < 1)
-        window.close()
+        app.run()
+        timer.invalidate()
+        assert(completed)
+        app.delegate = nil
     }
 
     @MainActor static func main() async {
