@@ -43,7 +43,10 @@ The hooks send event names, opaque task and turn IDs, and an optional short proj
 
 ## Connect your iPhone
 
-1. **Install Paceman on your iPhone** using your TestFlight invitation. If you haven’t received one, ask the person who invited you to test Paceman.
+1. **[Get Paceman for iPhone](https://testflight.apple.com/join/wpMWQb7d)** through TestFlight. Open this link on your iPhone and follow the installation steps.
+
+   Beta full? [DM James for access](https://x.com/james_im).
+
 2. **Connect Tailscale** on your Mac and iPhone to the same Tailscale network. [Get Tailscale](https://tailscale.com/download) if needed.
 3. In Mac setup, choose **Connect iPhone**. You can also use the QR button in Paceman’s menu-bar panel.
 4. On your iPhone, open **Paceman → Connect computer → Scan QR code** and scan the code on your Mac.

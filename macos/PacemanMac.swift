@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 private enum SetupGuide {
     static let url = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md")!
     static let phoneSetupURL = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md#connect-your-iphone")!
+    static let testFlightURL = URL(string: "https://testflight.apple.com/join/wpMWQb7d")!
     static let codexSettings = URL(string: "codex://settings")!
     static var codexApp: URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") }
     static var tailscaleApp: URL? {
@@ -470,7 +471,7 @@ private struct PairingView: View {
             Text("On your iPhone, open Paceman → Connect computer → Scan QR code.")
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Link("iPhone setup guide", destination: SetupGuide.phoneSetupURL)
+            Link("Get Paceman for iPhone", destination: SetupGuide.testFlightURL)
                 .font(.subheadline)
             if let qr {
                 Image(nsImage: qr).resizable().interpolation(.none).scaledToFit()
