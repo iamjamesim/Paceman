@@ -52,6 +52,7 @@ class PairingTests(unittest.TestCase):
         original = self.pair(self.device)
         self.store.push_device(original['credential'], {'deviceToken': 'ab' * 32, 'environment': 'development'})
         self.store.watch_push_device(original['credential'], {'deviceToken': 'cd' * 32, 'environment': 'development'})
+        original_paired_at = self.store.clients()[0]['pairedAt']
         renamed = {**self.device, 'name': 'My phone'}
         again = self.pair(renamed, original['credential'])
         self.assertEqual(original['clientID'], again['clientID'])
@@ -62,6 +63,8 @@ class PairingTests(unittest.TestCase):
         self.assertEqual(self.store.watch_push_device(again['credential']), {'registered': False})
         self.assertEqual(len(self.store.clients()), 1)
         self.assertEqual(self.store.clients()[0]['name'], 'My phone')
+        self.assertGreater(self.store.clients()[0]['pairedAt'], original_paired_at)
+        self.assertEqual(self.store.clients()[0]['lastContactAt'], 0)
 
     def test_watch_push_registration_requires_pairing_and_is_idempotent(self):
         paired = self.pair(self.device)

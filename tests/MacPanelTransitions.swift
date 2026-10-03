@@ -62,6 +62,45 @@ private struct MacPanelTransitions {
             try! FileManager.default.removeItem(at: url)
             assert(reopen().shouldPresentSetup && !reopen().connectingPhone)
         }
+        // Existing phones and their regular fetches never complete a new pairing.
+        // Both a new phone and a credential rotation need pairing + authenticated contact.
+        for repair in [false, true] {
+            let c = ControlledCommands()
+            var clock = 100.0
+            let m = PanelModel(command: { c.execute($0) }, needsSetup: { false },
+                               progressURL: nil, now: { clock })
+            assert(!m.continueAfterHookReview())
+            m.status = try! JSONDecoder().decode(SourceStatus.self, from: Data(live.utf8))
+            m.beginPairing(); await until("completion code") { c.count == 1 }; c.reply(0, true, "QR")
+            await until("completion status") { c.count == 2 }
+            c.reply(1, true, live.replacingOccurrences(of: "\"lastContactAt\":2", with: "\"lastContactAt\":110"))
+            await until("existing phone read") { m.hasReadStatus }
+            assert(!m.pairingComplete && m.pairingCode != nil)
+            let paired = live.replacingOccurrences(of: "\"pairedAt\":1", with: "\"pairedAt\":101")
+                .replacingOccurrences(of: "\"id\":\"phone\"", with: "\"id\":\"\(repair ? "phone" : "new-phone")\"")
+            m.refresh(); await until("paired no contact") { c.count == 3 }; c.reply(2, true, paired)
+            await until("pairing timestamp") { m.status.clients?.first?.pairedAt == 101 }
+            assert(!m.pairingComplete) // Redeeming alone is not a working phone connection.
+            let connected = paired.replacingOccurrences(of: "\"lastContactAt\":2", with: "\"lastContactAt\":102")
+            m.confirmingSetupUninstall = true
+            m.refresh(); await until("contact during confirmation") { c.count == 4 }; c.reply(3, true, connected)
+            await until("confirmed contact read") { m.status.clients?.first?.lastContactAt == 102 }
+            assert(!m.pairingComplete) // Never navigate behind a destructive confirmation.
+            m.confirmingSetupUninstall = false
+            m.refresh(); await until("new connection read") { c.count == 5 }; c.reply(4, true, connected)
+            await until("connected confirmation") { m.pairingComplete }
+            assert(m.pairingCode == nil && m.pairingMessage == nil && !m.shouldPresentSetup)
+            m.refresh(); await until("later disconnect") { c.count == 6 }; c.reply(5, false, "offline")
+            await until("later unavailable") { !m.status.running }
+            assert(m.pairingComplete) // A completed pairing remains a completed milestone.
+            m.endPairing(); assert(!m.pairingComplete)
+            clock = 200
+            m.beginPairing(); await until("connect another phone") { c.count == 7 }; c.reply(6, true, "another QR")
+            await until("another phone read") { c.count == 8 }; c.reply(7, true, connected)
+            await until("another phone code") { !m.busy && m.status.running }
+            assert(!m.pairingComplete && m.pairingCode != nil)
+            m.endPairing()
+        }
         // Coalesce refreshes and reject a read begun before a Sharing change.
         do {
             let c = ControlledCommands(); let m = model(c)

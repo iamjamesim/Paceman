@@ -100,6 +100,7 @@ private final class PanelModel: ObservableObject {
     @Published var message: String?
     @Published var pairingCode: PairingCode?
     @Published var pairingMessage: String?
+    @Published private(set) var pairingComplete = false
     @Published var showingManagement = false
     @Published var hookReviewStartedAt: Double = 0
     @Published var connectingPhone: Bool
@@ -121,6 +122,8 @@ private final class PanelModel: ObservableObject {
     private var pairingGeneration = 0
     private var pairingPresented = false
     private var pairingRequested = false
+    private var pairingStartedAt: Double?
+    private let now: () -> Double
     private let command: @Sendable ([String]) -> (Bool, String)
     private let installer: @Sendable () -> (Int32, String)
     private let needsSetup: () -> Bool
@@ -128,7 +131,9 @@ private final class PanelModel: ObservableObject {
     init(command: @escaping @Sendable ([String]) -> (Bool, String) = { PanelModel.execute($0) },
          installer: @escaping @Sendable () -> (Int32, String) = { PanelModel.executeInstaller() },
          needsSetup: @escaping () -> Bool = { InstalledBuild.needsSetup },
-         progressURL: URL? = SetupStep.fileURL) {
+         progressURL: URL? = SetupStep.fileURL,
+         now: @escaping () -> Double = { Date().timeIntervalSince1970 }) {
+        self.now = now
         self.command = command
         self.installer = installer
         self.needsSetup = needsSetup
@@ -244,6 +249,7 @@ private final class PanelModel: ObservableObject {
                 if result.0, let data = result.1.data(using: .utf8),
                    let state = try? JSONDecoder().decode(SourceStatus.self, from: data) {
                     self.status = state
+                    self.checkPairingCompletion(state)
                     if let id = self.expanded, state.clients?.contains(where: { $0.id == id }) != true {
                         self.expanded = nil
                         self.confirming = nil
@@ -336,6 +342,19 @@ private final class PanelModel: ObservableObject {
         }
     }
 
+    private func checkPairingCompletion(_ state: SourceStatus) {
+        guard pairingPresented, !pairingComplete, !confirmingSetupUninstall,
+              pairingCode != nil, let startedAt = pairingStartedAt,
+              state.running, state.sharingEnabled,
+              state.clients?.contains(where: {
+                  $0.platform == "ios" && $0.pairedAt >= startedAt && $0.lastContactAt >= $0.pairedAt
+              }) == true else { return }
+        pairingComplete = true
+        pairingCode = nil
+        pairingMessage = nil
+        if setupStep == .phone { saveSetupStep(.finished) }
+    }
+
     func beginPairing() {
         pairingPresented = true
         showPairing()
@@ -343,6 +362,8 @@ private final class PanelModel: ObservableObject {
 
     func endPairing() {
         pairingPresented = false
+        pairingComplete = false
+        pairingStartedAt = nil
         pairingRequested = false
         pairingGeneration += 1
         pairingCode = nil
@@ -351,6 +372,8 @@ private final class PanelModel: ObservableObject {
 
     func showPairing() {
         guard pairingPresented, !uninstalled else { return }
+        pairingComplete = false
+        pairingStartedAt = now()
         pairingGeneration += 1
         pairingRequested = true
         pairingCode = nil
@@ -547,8 +570,8 @@ private struct InstallationView: View {
 
 private struct HookReviewView: View {
     @ObservedObject var model: PanelModel
-    var onContinue: (() -> Void)? = nil
-    @Environment(\.dismissWindow) private var dismissWindow
+    let onContinue: () -> Void
+    let onClose: () -> Void
 
     // Match the event order in Codex Settings → Hooks → User config.
     private let events: [(String, String)] = [
@@ -617,19 +640,15 @@ private struct HookReviewView: View {
                 HStack {
                     Link("Setup guide", destination: SetupGuide.url)
                     Spacer()
-                    if let onContinue {
-                        Button(model.status.clients?.contains(where: { $0.platform == "ios" }) == true ? "Done" : "Connect iPhone", action: onContinue)
-                            .keyboardShortcut(.defaultAction)
-                    } else {
-                        Button("Done") { dismissWindow(id: "setup") }.keyboardShortcut(.defaultAction)
-                    }
+                    Button(model.status.clients?.contains(where: { $0.platform == "ios" }) == true ? "Done" : "Connect iPhone", action: onContinue)
+                        .keyboardShortcut(.defaultAction)
                 }
             }
             .padding(24)
         }
         .frame(width: 560, height: 600)
         .onAppear { model.refresh() }
-        .onExitCommand { dismissWindow(id: "setup") }
+        .onExitCommand(perform: onClose)
     }
 }
 
@@ -639,7 +658,21 @@ private struct ConnectionSetupView: View {
 
     var body: some View {
         VStack {
-            if let code = model.pairingCode {
+            if model.pairingComplete {
+                VStack(spacing: 16) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 52, weight: .regular))
+                        .foregroundStyle(.green)
+                        .accessibilityHidden(true)
+                    Text("iPhone connected").font(.title2.weight(.semibold))
+                    Text("Find Paceman in your menu bar.")
+                        .font(.body).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button("Done", action: onDone).keyboardShortcut(.defaultAction)
+                        .padding(.top, 8)
+                }
+                .padding(28)
+            } else if let code = model.pairingCode {
                 PairingView(code: code, onDone: onDone, onRefresh: model.showPairing)
             } else {
                 VStack(alignment: .leading, spacing: 16) {
@@ -673,7 +706,8 @@ private struct ConnectionSetupView: View {
 
 private struct SetupFlowView: View {
     @ObservedObject var model: PanelModel
-    @Environment(\.dismissWindow) private var dismissWindow
+    let onClose: () -> Void
+    let onComplete: () -> Void
 
     var body: some View {
         VStack {
@@ -681,13 +715,14 @@ private struct SetupFlowView: View {
                 InstallationView(model: model)
             } else if model.connectingPhone {
                 ConnectionSetupView(model: model) {
+                    let completed = model.pairingComplete
                     model.finishPairingStep()
-                    dismissWindow(id: "setup")
+                    if completed { onComplete() } else { onClose() }
                 }
             } else {
-                HookReviewView(model: model) {
-                    if model.continueAfterHookReview() { dismissWindow(id: "setup") }
-                }
+                HookReviewView(model: model, onContinue: {
+                    if model.continueAfterHookReview() { onComplete() }
+                }, onClose: onClose)
             }
         }
         .toolbar {
@@ -827,8 +862,8 @@ private struct ManagementView: View {
 }
 
 private struct Panel: View {
-    @Environment(\.openWindow) private var openWindow
     @ObservedObject var model: PanelModel
+    var onOpenSetup: () -> Void = {}
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var activity: String {
@@ -917,7 +952,7 @@ private struct Panel: View {
                 Spacer()
                 Button {
                     model.connectingPhone = true
-                    openWindow(id: "setup")
+                    onOpenSetup()
                     NSApplication.shared.activate(ignoringOtherApps: true)
                 } label: { Image(systemName: "qrcode") }
                     .help("Connect a phone").disabled(!model.status.sharingEnabled || !model.status.running || model.busy)
@@ -967,7 +1002,7 @@ private struct Panel: View {
                             model.hookReviewStartedAt = Date().timeIntervalSince1970
                         }
                         model.connectingPhone = false
-                        openWindow(id: "setup")
+                        onOpenSetup()
                         NSApplication.shared.activate(ignoringOtherApps: true)
                     }
                         .font(.caption)
@@ -1067,39 +1102,114 @@ private struct MenuActivityRobot: View {
     }
 }
 
-private extension Notification.Name {
-    static let reopenPaceman = Notification.Name("ai.paceman.reopen")
-}
-
-private final class PacemanAppDelegate: NSObject, NSApplicationDelegate {
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        NotificationCenter.default.post(name: .reopenPaceman, object: nil)
-        return false
+// AppKit owns presentation so setup can hand off to the real menu-bar panel.
+// SwiftUI continues to own the panel, setup content, toolbar and confirmation sheet.
+@MainActor
+private final class SetupHostingController: NSHostingController<AnyView> {
+    override var preferredContentSize: NSSize {
+        didSet {
+            guard preferredContentSize.width > 0, preferredContentSize.height > 0,
+                  let window = view.window else { return }
+            window.setContentSize(preferredContentSize)
+        }
     }
 }
 
-private struct PacemanMenuLabel: View {
-    @Environment(\.openWindow) private var openWindow
-    @ObservedObject var model: PanelModel
-    let icon: NSImage
+@MainActor
+private final class PacemanAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate {
+    let model = PanelModel()
+    private var statusItem: NSStatusItem?
+    private let popover = NSPopover()
+    private var setupWindow: NSWindow?
 
-    var body: some View {
-        Image(nsImage: icon).accessibilityLabel("Paceman")
-            .onReceive(NotificationCenter.default.publisher(for: .reopenPaceman)) { _ in
-                if model.shouldPresentSetup {
-                    openWindow(id: "setup")
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                }
-            }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        #if !PACEMAN_PREVIEW_WINDOW
+        let renderer = ImageRenderer(content: PacemanMark().foregroundStyle(.black).frame(width: 18, height: 18))
+        renderer.scale = 2
+        let icon = renderer.nsImage ?? NSImage(size: NSSize(width: 18, height: 18))
+        icon.isTemplate = true
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        item.button?.image = icon
+        item.button?.setAccessibilityLabel("Paceman")
+        item.button?.target = self
+        item.button?.action = #selector(togglePanel)
+        statusItem = item
+        popover.behavior = .transient
+        popover.delegate = self
+        if model.shouldPresentSetup || CommandLine.arguments.contains("--show-setup") { showSetup() }
+        #endif
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if model.shouldPresentSetup { showSetup() } else { showPanel() }
+        return false
+    }
+
+    @objc private func togglePanel() {
+        if popover.isShown { popover.performClose(nil) }
+        else { showPanel() }
+    }
+
+    private func showPanel() {
+        guard let button = statusItem?.button, !model.uninstalled else { return }
+        let host = NSHostingController(rootView: Panel(model: model, onOpenSetup: { [weak self] in self?.showSetup() }))
+        host.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = host
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        // Release the view and its foreground status polling when the panel closes.
+        popover.contentViewController = nil
+        model.showingManagement = false
+    }
+
+    private func showSetup() {
+        guard !model.uninstalled else { return }
+        popover.performClose(nil)
+        if let setupWindow {
+            setupWindow.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            return
+        }
+        let content = SetupFlowView(model: model, onClose: { [weak self] in self?.setupWindow?.close() },
+                                    onComplete: { [weak self] in
+            self?.setupWindow?.close()
+            self?.showPanel()
+        })
+        .onAppear { [model] in
+            model.refresh()
+            if model.hookReviewStartedAt == 0 { model.hookReviewStartedAt = Date().timeIntervalSince1970 }
+        }
+        .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { [model] _ in model.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { [model] _ in model.refresh() }
+        let host = SetupHostingController(rootView: AnyView(content))
+        host.sizingOptions = [.preferredContentSize]
+        host.sceneBridgingOptions = [.toolbars]
+        let window = NSWindow(contentViewController: host)
+        window.title = "Paceman Setup"
+        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.setContentSize(host.sizeThatFits(in: NSSize(width: 560, height: 900)))
+        window.center()
+        setupWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === setupWindow else { return }
+        model.endPairing()
+        setupWindow = nil
     }
 }
 
 @main
 struct PacemanMacApp: App {
     @NSApplicationDelegateAdaptor(PacemanAppDelegate.self) private var delegate
-    @StateObject private var model = PanelModel()
-    @State private var presentsSetupAtLaunch = InstalledBuild.needsSetup ||
-        SetupStep.load(from: SetupStep.fileURL) != .finished || CommandLine.arguments.contains("--show-setup")
 
     init() {
         let arguments = Array(CommandLine.arguments.dropFirst())
@@ -1134,47 +1244,16 @@ struct PacemanMacApp: App {
         }
     }
 
-    private var menuBarIcon: NSImage {
-        let renderer = ImageRenderer(content: PacemanMark()
-            .foregroundStyle(.black)
-            .frame(width: 18, height: 18))
-        renderer.scale = 2
-        let icon = renderer.nsImage ?? NSImage(size: NSSize(width: 18, height: 18))
-        icon.isTemplate = true
-        return icon
-    }
-
     var body: some Scene {
         #if PACEMAN_PREVIEW_WINDOW
         WindowGroup {
-            Panel(model: model)
+            Panel(model: delegate.model)
                 .environment(\.dynamicTypeSize,
                              ProcessInfo.processInfo.environment["PACEMAN_PREVIEW_LARGE_TEXT"] == "1"
                              ? .accessibility1 : .large)
         }
         #else
-        MenuBarExtra {
-            Panel(model: model)
-        } label: {
-            PacemanMenuLabel(model: model, icon: menuBarIcon)
-        }.menuBarExtraStyle(.window)
-        Window("Paceman Setup", id: "setup") {
-            SetupFlowView(model: model)
-            .onAppear {
-                presentsSetupAtLaunch = false
-                model.refresh()
-                if model.hookReviewStartedAt == 0 {
-                    model.hookReviewStartedAt = Date().timeIntervalSince1970
-                }
-                NSApplication.shared.activate(ignoringOtherApps: true)
-            }
-            .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in model.refresh() }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in model.refresh() }
-        }
-        .windowResizability(.contentSize)
-        .defaultPosition(.center)
-        .defaultLaunchBehavior(presentsSetupAtLaunch ? .presented : .suppressed)
-        .restorationBehavior(.disabled)
+        Settings { EmptyView() }
         #endif
     }
 }

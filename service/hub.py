@@ -190,7 +190,9 @@ class Store:
                 client_id = previous[0]
                 old_hash = db.execute("SELECT hash FROM clients WHERE id=?", (client_id,)).fetchone()[0]
                 db.execute("INSERT OR IGNORE INTO relay_revocations VALUES (?,?)", (client_id, old_hash))
-                db.execute("UPDATE clients SET hash=?,last_seen=0 WHERE id=?", (digest(credential), client_id))
+                # pairedAt describes the current credential's pairing, including a re-pair.
+                db.execute("UPDATE clients SET hash=?,created=?,last_seen=0 WHERE id=?",
+                           (digest(credential), now, client_id))
                 db.execute("DELETE FROM push_devices WHERE client_id=?", (client_id,))
                 db.execute("DELETE FROM watch_push_devices WHERE client_id=?", (client_id,))
                 db.execute("DELETE FROM live_activities WHERE client_id=?", (client_id,))
