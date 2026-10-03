@@ -69,7 +69,6 @@ private enum InstalledBuild {
         return !isInApplications || installedApp != appPath ||
             !FileManager.default.fileExists(atPath: controlPath) ||
             FileManager.default.fileExists(atPath: notificationMarker) ||
-            FileManager.default.fileExists(atPath: loginAttentionMarker) ||
             bundleBuild == nil || installedBuild != bundleBuild
     }
 }
@@ -336,25 +335,31 @@ private struct InstallationView: View {
                 .foregroundStyle(Color(nsColor: .labelColor))
             Text(!InstalledBuild.isInApplications ? "Move Paceman to Applications" : "Set up Paceman")
                 .font(.title2.weight(.semibold))
-            Text(!InstalledBuild.isInApplications
-                 ? "Drag Paceman onto Applications in the disk image, then open it from Applications."
-                 : model.needsLoginRepair
-                 ? "Paceman was installed, but Open at Login needs another try."
-                 : model.needsNotificationRepair
-                 ? "Paceman was installed, but iPhone notification setup needs another try."
-                 : "Start Paceman’s background item and prepare its Codex hooks. You’ll review the hooks in Codex before activity appears.")
-                .fixedSize(horizontal: false, vertical: true)
+            if InstalledBuild.isInApplications && !model.needsNotificationRepair {
+                Text("Keep up with Codex from your iPhone.")
+                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("To get started:")
+                    BulletList(items: [
+                        "**Enable background activity** so Paceman keeps working when you close its window.",
+                        "**Review Codex hooks** that report your tasks’ status to Paceman.",
+                        "**Connect your iPhone** to see activity and receive notifications.",
+                    ])
+                }
+            } else {
+                Text(!InstalledBuild.isInApplications
+                     ? "Drag Paceman onto Applications in the disk image, then open it from Applications."
+                     : "Paceman was installed, but iPhone notification setup needs another try.")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let message = model.message {
                 Text(message).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if model.needsLoginRepair && model.loginStatus == .requiresApproval {
-                Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
-            }
             HStack {
                 Link("Setup guide", destination: SetupGuide.url)
                 Spacer()
-                Button(!InstalledBuild.isInApplications ? "Open Applications" : model.busy ? "Setting up…" : model.needsNotificationRepair || model.needsLoginRepair ? "Retry setup" : "Set up Paceman") {
+                Button(!InstalledBuild.isInApplications ? "Open Applications" : model.busy ? "Setting up…" : model.needsNotificationRepair ? "Retry setup" : "Set up Paceman") {
                     if InstalledBuild.isInApplications {
                         model.installBundled()
                     } else {
@@ -522,7 +527,7 @@ private struct BulletList: View {
             ForEach(items, id: \.self) { item in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("•").accessibilityHidden(true)
-                    Text(item).fixedSize(horizontal: false, vertical: true)
+                    Text(LocalizedStringKey(item)).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -544,8 +549,10 @@ private struct ManagementView: View {
                         .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     Toggle("Open menu app at login", isOn: Binding(
                         get: { model.opensAtLogin }, set: { model.setOpenAtLogin($0) }))
-                    if model.loginStatus == .requiresApproval {
-                        Text("Allow Paceman in System Settings → General → Login Items & Extensions.")
+                    if model.loginStatus == .requiresApproval || model.needsLoginRepair {
+                        Text(model.loginStatus == .requiresApproval
+                             ? "Allow Paceman in System Settings → General → Login Items & Extensions."
+                             : "Open at Login isn’t enabled. Turn it on here or add Paceman in Login Items.")
                             .font(.caption).foregroundStyle(.secondary)
                         Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
                     }
@@ -846,7 +853,9 @@ struct PacemanMacApp: App {
             let service = SMAppService.mainApp
             do {
                 if arguments[0] == "--register-login" {
-                    if service.status == .notRegistered { try service.register() }
+                    if service.status == .notRegistered || service.status == .notFound {
+                        try service.register()
+                    }
                 } else if service.status == .enabled || service.status == .requiresApproval {
                     try service.unregister()
                 }
@@ -855,7 +864,11 @@ struct PacemanMacApp: App {
                         print("Paceman menu app opens at login.")
                         exit(0)
                     }
-                    fputs("Allow Paceman in System Settings → General → Login Items & Extensions.\n", stderr)
+                    if service.status == .requiresApproval {
+                        fputs("Allow Paceman in System Settings → General → Login Items & Extensions.\n", stderr)
+                    } else {
+                        fputs("macOS could not register Paceman for Open at Login (status \(service.status.rawValue)). Add Paceman in Login Items.\n", stderr)
+                    }
                     exit(1)
                 }
                 print("Paceman menu app removed from Open at Login.")
