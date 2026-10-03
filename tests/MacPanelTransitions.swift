@@ -36,7 +36,42 @@ private struct MacPanelTransitions {
     @MainActor static func model(_ commands: ControlledCommands) -> PanelModel {
         PanelModel(command: { commands.execute($0) }, needsSetup: { false }, progressURL: nil)
     }
+    @MainActor static func exerciseSetupWindow() {
+        // Run actual AppKit layout: model-only tests cannot catch constraint-pass crashes.
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        let m = PanelModel(command: { _ in (true, paused) }, needsSetup: { false }, progressURL: nil)
+        m.needsInstallation = true
+        let delegate = PacemanAppDelegate(model: m)
+        delegate.applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        let window = app.windows.first { $0.title == "Paceman Setup" }!
+        func settle() {
+            let end = Date().addingTimeInterval(0.25)
+            while Date() < end {
+                window.contentView?.layoutSubtreeIfNeeded()
+                _ = RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            }
+        }
+        settle()
+        let welcome = window.contentView!.frame.size
+        assert(abs(welcome.width - 380) < 1 && welcome.height > 300)
+        // Wrapping an error must grow the welcome window without recursive layout.
+        m.message = String(repeating: "Installation could not finish. ", count: 12)
+        settle()
+        assert(window.contentView!.frame.height > welcome.height)
+        m.message = nil
+        m.needsInstallation = false
+        settle()
+        assert(abs(window.contentView!.frame.width - 560) < 1)
+        assert(abs(window.contentView!.frame.height - 600) < 1)
+        m.needsInstallation = true
+        settle()
+        assert(abs(window.contentView!.frame.height - welcome.height) < 1)
+        window.close()
+    }
+
     @MainActor static func main() async {
+        exerciseSetupWindow()
         // Quitting/closing never marks setup finished. Progress survives a new model/process.
         do {
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

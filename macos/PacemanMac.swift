@@ -1105,19 +1105,19 @@ private struct MenuActivityRobot: View {
 // AppKit owns presentation so setup can hand off to the real menu-bar panel.
 // SwiftUI continues to own the panel, setup content, toolbar and confirmation sheet.
 @MainActor
-private final class SetupHostingController: NSHostingController<AnyView> {
-    override var preferredContentSize: NSSize {
-        didSet {
-            guard preferredContentSize.width > 0, preferredContentSize.height > 0,
-                  let window = view.window else { return }
-            window.setContentSize(preferredContentSize)
-        }
-    }
-}
-
-@MainActor
 private final class PacemanAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate {
-    let model = PanelModel()
+    let model: PanelModel
+
+    override init() {
+        model = PanelModel()
+        super.init()
+    }
+
+    init(model: PanelModel) {
+        self.model = model
+        super.init()
+    }
+
     private var statusItem: NSStatusItem?
     private let popover = NSPopover()
     private var setupWindow: NSWindow?
@@ -1185,8 +1185,14 @@ private final class PacemanAppDelegate: NSObject, NSApplicationDelegate, NSWindo
         }
         .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { [model] _ in model.refresh() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { [model] _ in model.refresh() }
-        let host = SetupHostingController(rootView: AnyView(content))
-        host.sizingOptions = [.preferredContentSize]
+        .fixedSize()
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { [weak self] size in
+            self?.resizeSetupWindow(to: size)
+        }
+        let host = NSHostingController(rootView: content)
+        // Auto Layout must not query SwiftUI's preferred size while it is laying out
+        // this variable-height screen. Resize from the completed layout instead.
+        host.sizingOptions = []
         host.sceneBridgingOptions = [.toolbars]
         let window = NSWindow(contentViewController: host)
         window.title = "Paceman Setup"
@@ -1198,6 +1204,20 @@ private final class PacemanAppDelegate: NSObject, NSApplicationDelegate, NSWindo
         setupWindow = window
         window.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func resizeSetupWindow(to size: CGSize) {
+        guard let window = setupWindow, size.width.isFinite, size.height.isFinite,
+              size.width > 0, size.height > 0 else { return }
+        // Leave the current constraint pass before changing the window's proposal.
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.setupWindow === window,
+                  let current = window.contentView?.frame.size else { return }
+            let target = NSSize(width: ceil(size.width), height: ceil(size.height))
+            if abs(current.width - target.width) > 0.5 || abs(current.height - target.height) > 0.5 {
+                window.setContentSize(target)
+            }
+        }
     }
 
     func windowWillClose(_ notification: Notification) {

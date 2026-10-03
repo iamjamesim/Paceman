@@ -16,6 +16,9 @@ class MacPanelTransitionTests(unittest.TestCase):
         # types stay private in the app; replace only its executable entry point.
         source, app = source.split("\n@main\nstruct PacemanMacApp: App", 1)
         self.assertTrue(app)
+        # Exercise the welcome screen even though the test binary is outside Applications.
+        source = source.replace("static var isInApplications: Bool { appLocations.contains(Bundle.main.bundlePath) }",
+                                "static var isInApplications: Bool { true }")
         source += (root / "tests/MacPanelTransitions.swift").read_text()
         with tempfile.TemporaryDirectory(prefix="paceman-panel-tests-") as directory:
             directory = Path(directory)
