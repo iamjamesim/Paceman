@@ -154,10 +154,13 @@ def main():
     push_unit = config / "systemd/user" / PUSH_SERVICE
     plugin = config / "omarchy/plugins" / PLUGIN
     hooks_path = home / ".codex/hooks.json"
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
     try:
         for path in (app, ctl.parent, unit.parent, state):
             directory(path)
         if args.action == "uninstall":
+            from service.network import remove_owned_route
             hooks_document, changed_hooks = hook_document(hooks_path, app, remove=True)
             run("/usr/bin/systemctl", "--user", "disable", "--now", SERVICE, check=False)
             run("/usr/bin/systemctl", "--user", "disable", "--now", PUSH_SERVICE, check=False)
@@ -172,17 +175,21 @@ def main():
             unit.unlink(missing_ok=True)
             push_unit.unlink(missing_ok=True)
             run("/usr/bin/systemctl", "--user", "daemon-reload")
+            route_removed = remove_owned_route(state)
             if Path("/usr/bin/omarchy").exists():
                 run("/usr/bin/omarchy", "shell", "shell", "rescanPlugins", check=False)
-            print("Paceman Omarchy source and its Codex hooks removed. Pairings, data, Tailscale routes and unrelated hooks preserved.")
+            print("Paceman Omarchy source and its Codex hooks removed. Pairings, data, and unrelated hooks preserved.")
+            if route_removed:
+                print("Paceman's private Tailscale route removed.")
+            elif (state / "tailscale-route.json").exists():
+                print("Paceman's private Tailscale route could not be removed; check Tailscale Serve settings.")
             return
         if sys.version_info < (3, 11):
             raise ValueError("Python 3.11 or later is required")
         # The install script is launched with -I, which omits the checkout root.
-        if str(ROOT) not in sys.path:
-            sys.path.insert(0, str(ROOT))
         from service.hub import Store, endpoint
         from service.push import Config, DEFAULT_RELAY_URL, RelayConfig
+        from service.network import RouteSetupError, ensure_private_route
         relay_url = endpoint(args.relay_url or DEFAULT_RELAY_URL)
         directory(hooks_path.parent)
         hooks_document, changed_hooks = hook_document(hooks_path, app)
@@ -271,6 +278,13 @@ def main():
         legacy = app / "desktop"
         if legacy.is_dir() and not legacy.is_symlink():
             shutil.rmtree(legacy)
+        route_error = None
+        if not paused:
+            try:
+                ensure_private_route(state)
+                print("Private phone connection ready through Tailscale.")
+            except RouteSetupError as error:
+                route_error = str(error)
         print("Paceman updated; sharing remains off." if paused else
               "Paceman is running and starts at login. Open its bar panel or run pacemanctl status.")
         print("Review Paceman's Codex hooks with /hooks; Codex calls each entry Hook 1.")
@@ -278,6 +292,9 @@ def main():
         for event, purpose in HOOK_PURPOSES:
             print(f"  {event}: {purpose}")
         print("After review, run a fresh local task and check lastAgentEventAt in pacemanctl status.")
+        if route_error:
+            print(f"Phone connection setup is incomplete: {route_error}", file=sys.stderr)
+            print("Complete the Tailscale step, then use the panel's pairing button to retry.", file=sys.stderr)
         if notification_error:
             print(f"Paceman source is installed, but notification setup is incomplete: {notification_error}",
                   file=sys.stderr)
@@ -286,9 +303,10 @@ def main():
                       f"--relay-url {shlex.quote(relay_url)}", file=sys.stderr)
             else:
                 print(f"Inspect the preserved configuration at {push_config}.", file=sys.stderr)
-            raise SystemExit(2)
         if push_config.is_file():
             print("iPhone notification sender configured. Pair with a fresh QR code if this phone was paired before relay setup.")
+        if route_error or notification_error:
+            raise SystemExit(2)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         detail = getattr(error, "stderr", "") or str(error)
         print(f"Paceman installation: {detail.strip()}", file=sys.stderr)

@@ -107,11 +107,14 @@ Panel {
     stdout: StdioCollector { id: output; waitForEnd: true }
     onExited: function(code) {
       if (code !== 0) {
+        var detail = String(errors.text || "").trim()
         root.actionError = root.action === "pair"
-          ? "Couldn't create a pairing code. Check Tailscale is connected and try again."
+          ? (detail.indexOf("Paceman route: ") === 0
+              ? detail.slice("Paceman route: ".length)
+              : "Couldn't create a pairing code. Run pacemanctl pair for details.")
           : root.action === "remove-access" ? "Couldn't remove access. Try again or check pacemanctl logs."
           : "Couldn't change sharing. Try again or check pacemanctl logs."
-        console.warn("Paceman action failed:", String(errors.text || "Unknown error").trim())
+        console.warn("Paceman action failed:", detail || "Unknown error")
       } else if (root.action === "pair") {
         try { if (root.pairingOpen) root.pairing = JSON.parse(output.text) }
         catch (error) { root.actionError = "Couldn't read the pairing code. Try again." }

@@ -19,6 +19,7 @@ import tempfile
 from macos.codex_hook import QUESTION_MATCHER
 from macos.paths import installed_app
 from service.hub import endpoint
+from service.network import RouteSetupError, ensure_private_route
 from service.push import DEFAULT_RELAY_URL
 
 REPO = Path(__file__).resolve().parent.parent
@@ -496,13 +497,22 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
         except sqlite3.Error:
             # The source may not have initialized the database if sharing is off.
             pass
+    route_ready = False
+    if not (ROOT / "sharing-paused").exists():
+        try:
+            ensure_private_route(ROOT)
+            route_ready = True
+            print("Private phone connection ready through Tailscale.")
+        except RouteSetupError as error:
+            print(f"Phone connection setup is incomplete: {error}", file=sys.stderr)
+            print("Complete the Tailscale step, then use the menu-bar pairing button to retry.", file=sys.stderr)
     if paired:
         print(f"Phone pairing preserved: {paired} connected installation{'s' if paired != 1 else ''}.")
         if relay_configured_now:
             print("Re-pair an existing phone if it was paired before relay setup.")
     else:
-        print("NEXT: Configure private Tailscale Serve HTTPS to 127.0.0.1:8765.")
-        print("Then click Paceman's QR button and scan it in the iPhone app's Connect computer flow.")
+        if route_ready:
+            print("NEXT: Click Paceman's QR button and scan it in the iPhone app's Connect computer flow.")
     (ROOT / "installed-app").write_text(str(APP) + "\n")
     installed_build = ROOT / "installed-build"
     if PYTHON == str(APP / "Contents/Resources/python/bin/python3"):
@@ -524,7 +534,7 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
     else:
         notification_marker.write_text("Retry Paceman notification setup.\n")
         notification_marker.chmod(0o600)
-    return notifications_ready
+    return notifications_ready and (route_ready or (ROOT / "sharing-paused").exists())
 
 
 def print_hook_review_steps(wrapper: Path):

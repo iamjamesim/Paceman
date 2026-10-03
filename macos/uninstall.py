@@ -13,6 +13,7 @@ import tempfile
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 from service.push import RelayConfig
+from service.network import remove_owned_route
 
 from macos.install import APP, LABEL, PLIST, PUSH_LABEL, PUSH_PLIST, ROOT
 
@@ -122,6 +123,8 @@ def uninstall():
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
             path.unlink()
     relay_revocation_pending = revoke_relay_source(ROOT / "private/apns.json")
+    route_recorded = (ROOT / "tailscale-route.json").exists()
+    route_removed = remove_owned_route(ROOT)
     if hooks is not None:
         descriptor, name = tempfile.mkstemp(prefix=".paceman-hooks-", dir=HOOKS.parent)
         temporary = Path(name)
@@ -141,4 +144,6 @@ def uninstall():
     if relay_revocation_pending:
         result += (" Relay revocation could not be confirmed for source " + relay_revocation_pending
                    + "; ask the project owner to revoke it in the relay database.")
+    if route_recorded and not route_removed:
+        result += " Check Tailscale Serve settings; Paceman's route could not be removed."
     return result

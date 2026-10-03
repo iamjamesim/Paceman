@@ -14,7 +14,8 @@ from unittest.mock import patch
 
 from omarchy import install
 from omarchy import install_push
-from omarchy.control import private_endpoint, read_status, set_sharing, pair_phone, remove_access
+from omarchy.control import read_status, set_sharing, pair_phone, remove_access
+from service.network import RouteSetupError, private_endpoint
 from tests.identity import device
 from service.hub import Server, Store
 from service.status import DesktopStatus
@@ -147,18 +148,11 @@ class DesktopStatusTests(unittest.TestCase):
 
     @unittest.skipUnless(Path("/usr/bin/qrencode").exists(), "qrencode is optional")
     def test_panel_pairing_returns_only_image_location_and_expiry(self):
-        config = {"TCP": {"8443": {"HTTPS": True}}, "Web": {
-            "test.ts.net:8443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8765"}}}}}
-        original_run = subprocess.run
-        def command(args, **kwargs):
-            if args[0] == "/usr/bin/tailscale":
-                return subprocess.CompletedProcess(args, 0, json.dumps(config), "")
-            return original_run(args, **kwargs)
         output = io.StringIO()
         with patch("omarchy.control.state_directory", return_value=self.root), \
              patch("omarchy.control.read_status", return_value={"running": True}), \
-             patch("omarchy.control.subprocess.run", side_effect=command), \
-             patch("omarchy.control.urllib.request.urlopen"), redirect_stdout(output):
+             patch("omarchy.control.ensure_private_route", return_value="https://test.ts.net:8443"), \
+             redirect_stdout(output):
             pair_phone(json_output=True)
         value = json.loads(output.getvalue())
         self.assertEqual(set(value), {"qrPath", "expiresAt"})
@@ -212,6 +206,7 @@ class DesktopInstallTests(unittest.TestCase):
         with patch.object(install, "ROOT", source), patch.object(install.Path, "home", return_value=home), \
              patch.object(install, "run", side_effect=fake_run), \
              patch.object(install_push.subprocess, "run", side_effect=fake_push_run), \
+             patch("service.network.ensure_private_route", return_value="https://test.ts.net:8443"), \
              patch.dict(os.environ, {"XDG_STATE_HOME": str(home / ".local/state"), "XDG_CONFIG_HOME": str(home / ".config")}), \
              patch.object(install.socket, "socket"):
             with patch("sys.argv", ["install.py", "install"]):
@@ -248,6 +243,11 @@ class DesktopInstallTests(unittest.TestCase):
             self.assertIn("push-venv/bin/python3", push_unit)
             self.assertNotIn("@STATE@", push_unit)
             self.assertTrue((home / ".local/bin/pacemanctl").exists())
+            with patch("service.network.ensure_private_route", side_effect=RouteSetupError("Enable Tailscale HTTPS")), \
+                 patch("sys.argv", ["install.py", "install"]):
+                with self.assertRaises(SystemExit) as incomplete:
+                    install.main()
+            self.assertEqual(incomplete.exception.code, 2)
             (home / ".local/state/paceman/sharing-paused").write_text('{"paused":true}')
             calls.clear()
             with patch("sys.argv", ["install.py", "install"]):

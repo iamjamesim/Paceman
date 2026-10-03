@@ -54,9 +54,9 @@ The hooks send event names, opaque task and turn IDs, and an optional short proj
 Codes expire after five minutes; choose **New code** if needed. Keep the pairing code private.
 
 <details>
-<summary>Paceman asks for a Tailscale Serve route</summary>
+<summary>Private Tailscale connection</summary>
 
-The Mac needs a private [Tailscale Serve HTTPS route](https://tailscale.com/docs/reference/tailscale-cli/serve) to `http://127.0.0.1:8765`. Leave Funnel off. Paceman’s installer does not change Tailscale routes. After configuring the route or reconnecting Tailscale, choose **Try again** in Paceman.
+Paceman prepares a private [Tailscale Serve HTTPS route](https://tailscale.com/docs/reference/tailscale-cli/serve) to its local source. It reuses a matching route, or creates one on a free port without replacing other routes or enabling Funnel. If Tailscale asks you to enable HTTPS for your network, complete that one-time step and choose **Try again** in Paceman.
 
 </details>
 
@@ -71,7 +71,7 @@ Seeing activity on the Mac confirms hook delivery. Receiving it on your locked i
 - **Sharing off** pauses activity tracking and iPhone updates while keeping your pairings.
 - **Manage Paceman… → Open menu app at login** controls whether the menu app opens at login. It is separate from Sharing.
 - **Remove access…** disconnects one phone.
-- **Manage Paceman… → Uninstall Paceman…** removes the Mac app, background item, Paceman hooks, local pairings, and notification credentials. During setup, Uninstall is in the **…** menu. The iPhone app and Tailscale stay installed.
+- **Manage Paceman… → Uninstall Paceman…** removes the Mac app, background item, Paceman hooks, local pairings, notification credentials, and any unchanged Tailscale route Paceman created. During setup, Uninstall is in the **…** menu. The iPhone app and Tailscale stay installed.
 
 To update, quit Paceman, replace it with the newer app, and reopen it. Pairings and your Sharing choice are kept.
 
@@ -118,21 +118,22 @@ From the repository root, use Python 3.11+ installed outside the checkout, Xcode
 python3 -m macos.install
 ```
 
-The installer builds the menu app and helper, copies the source to `~/Library/Application Support/Paceman`, prepares notifications through `https://relay.paceman.ai`, installs a per-user background item, and adds eight Paceman commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; the Mac stores only a source credential. Re-running preserves an existing relay or direct APNs configuration, pairings, Sharing choice, and unrelated hooks. If notification setup fails, the installer reports that the source is installed but notifications are incomplete. If the selected `python3` is too old, invoke a newer interpreter explicitly. A different Mac architecture needs a matching build target in the installer.
+The installer builds the menu app and helper, copies the source to `~/Library/Application Support/Paceman`, prepares notifications through `https://relay.paceman.ai`, installs a per-user background item, prepares a private Tailscale Serve route, and adds eight Paceman commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; the Mac stores only a source credential. Re-running preserves an existing relay or direct APNs configuration, pairings, Sharing choice, and unrelated hooks. If notification or private route setup fails, the installer reports a partial installation and the pairing button can retry route setup. If the selected `python3` is too old, invoke a newer interpreter explicitly. A different Mac architecture needs a matching build target in the installer.
 
 For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the installer. Developers managing a direct APNs sender can use `--no-push-setup` and follow [development-only direct APNs](../docs/push-delivery.md#development-only-direct-apns). Neither option is needed for the normal install.
 
-Open `~/Applications/Paceman.app` and confirm **Paceman** appears in **System Settings → General → Login Items & Extensions**. Continue with hook review and phone connection below.
+Open `~/Applications/Paceman.app` and confirm **Paceman** appears in **System Settings → General → Login Items & Extensions**. Continue with hook review and phone connection below. Paceman prepares a private Tailscale Serve route during setup or pairing; it reuses a matching route and leaves unrelated routes alone.
 
 
 Developers can [build the iPhone app with Xcode](../docs/development.md#iphone-and-live-activities-mac). The public Mac bundle ID is `ai.paceman.macos`. Ad hoc and Apple Development signatures are for testing; public Mac distribution requires Developer ID signing and notarization.
 
-If removing Paceman, remove its dedicated Tailscale Serve route separately.
+Uninstall removes an unchanged Serve route that Paceman created. Routes created or modified by someone else remain.
 
 </details>
 
 <details>
 <summary>Coverage limits</summary>
+
 
 An unrelated user message can clear async-question attention early; a completed turn clears it. Without `SessionEnd`, a Finished row can remain for up to ten minutes. Mac hooks cannot verify process ownership. The source reads Codex allowance through a short-lived local App Server every five minutes and sends only the percentage, window, observation time, and reset time.
 

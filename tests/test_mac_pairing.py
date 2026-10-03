@@ -1,7 +1,6 @@
 import io
 import json
 from pathlib import Path
-import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -9,6 +8,7 @@ from unittest.mock import patch
 
 from macos import control
 from macos.paths import installed_app
+from service.network import RouteSetupError
 
 
 class MacPairingTests(unittest.TestCase):
@@ -36,52 +36,21 @@ class MacPairingTests(unittest.TestCase):
                 marker.write_text("/Applications/Another.app\n")
                 self.assertEqual(installed_app(), home / "Applications/Paceman.app")
 
-    def test_finder_path_finds_installed_tailscale(self):
-        with patch.object(control.shutil, "which", return_value=None), \
-             patch.object(Path, "is_file", lambda path: str(path) == "/usr/local/bin/tailscale"), \
-             patch.object(control.os, "access", return_value=True):
-            self.assertEqual(control.tailscale_binary(), "/usr/local/bin/tailscale")
-
-    def test_app_install_without_cli_symlink_is_discovered(self):
-        binary = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
-        with patch.object(control.shutil, "which", return_value=None), \
-             patch.object(Path, "is_file", lambda path: str(path) == binary), \
-             patch.object(control.os, "access", return_value=True):
-            self.assertEqual(control.tailscale_binary(), binary)
-
-    def test_invalid_private_route_does_not_create_an_invitation(self):
-        public_route = {"TCP": {"443": {"HTTPS": True}}, "Web": {
-            "computer.example.ts.net:443": {"Handlers": {
-                "/": {"Proxy": "http://127.0.0.1:8765"}}}},
-            "AllowFunnel": {"computer.example.ts.net:443": True}}
-        for config in ({}, public_route):
-            with self.subTest(config=config), \
-                 patch.object(control, "status", return_value={"running": True, "sharingEnabled": True}), \
-                 patch.object(control, "tailscale_binary", return_value="/usr/local/bin/tailscale"), \
-                 patch.object(control.subprocess, "run", return_value=subprocess.CompletedProcess(
-                     "tailscale", 0, json.dumps(config))), \
-                 patch.object(control, "Store") as store:
-                with self.assertRaisesRegex(ValueError, "Tailscale setup guide"):
-                    control.pairing()
-                store.assert_not_called()
-
-    def test_pairing_retries_after_tailscale_reconnects(self):
-        route = {"TCP": {"8443": {"HTTPS": True}}, "Web": {
-            "computer.example.ts.net:8443": {"Handlers": {
-                "/": {"Proxy": "http://127.0.0.1:8765"}}}}}
-        disconnected = subprocess.CalledProcessError(1, "tailscale")
-        connected = subprocess.CompletedProcess("tailscale", 0, json.dumps(route))
+    def test_failed_route_does_not_create_an_invitation(self):
         with patch.object(control, "status", return_value={"running": True, "sharingEnabled": True}), \
-             patch.object(control, "tailscale_binary", return_value="/usr/local/bin/tailscale"), \
-             patch.object(control.subprocess, "run", side_effect=[disconnected, connected]), \
-             patch.object(control.urllib.request, "urlopen") as request, \
+             patch.object(control, "ensure_private_route", side_effect=RouteSetupError("Connect Tailscale")), \
              patch.object(control, "Store") as store:
-            with self.assertRaisesRegex(ValueError, "Open Tailscale, reconnect"):
+            with self.assertRaisesRegex(ValueError, "Connect Tailscale"):
                 control.pairing()
             store.assert_not_called()
-            request.side_effect = control.urllib.error.HTTPError("https://computer.example.ts.net:8443/v1/snapshot", 401, "Unauthorized", {}, io.BytesIO())
+
+    def test_pairing_prepares_route_before_inviting(self):
+        with patch.object(control, "status", return_value={"running": True, "sharingEnabled": True}), \
+             patch.object(control, "ensure_private_route", return_value="https://computer.example.ts.net:8443") as route, \
+             patch.object(control, "Store") as store:
             store.return_value.invite.return_value = {"schema": 1}
             with redirect_stdout(io.StringIO()) as output:
                 control.pairing()
             self.assertEqual(json.loads(output.getvalue()), {"schema": 1})
+            route.assert_called_once_with(control.ROOT)
             store.return_value.invite.assert_called_once_with("https://computer.example.ts.net:8443")

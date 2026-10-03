@@ -39,7 +39,7 @@ unverified.
 
 1. [Build the iPhone app](docs/development.md#iphone-and-live-activities-mac) with Xcode for iOS 18 or later.
 2. Install a source on an [Apple Silicon Mac](macos/README.md) or [Omarchy 4.0+ desktop](omarchy/README.md).
-3. Install [Tailscale](https://tailscale.com/download) on phone and computer, configure a private Serve route on the computer, then scan its pairing code in Paceman. The platform guides cover hook review and the first real activity event.
+3. Connect [Tailscale](https://tailscale.com/download) on phone and computer, then scan the pairing code in Paceman. The installers prepare a private Serve route when Tailscale permits it; the platform guides cover hook review and the first real activity event.
 
 The Mac and Omarchy installers configure the [APNs relay](service/RELAY.md) for
 locked-phone notifications by default; the iPhone must still allow notifications.
