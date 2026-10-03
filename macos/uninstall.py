@@ -81,16 +81,15 @@ def stop_menu_app(executable: Path) -> None:
     """Close only this user's installed Paceman menu process."""
     if not executable.is_file():
         return
-    result = subprocess.run(["/usr/bin/pgrep", "-U", str(os.getuid()),
-                             "-f", "-x", str(executable)],
+    # Match the executable, not the full command line: setup adds --show-setup.
+    result = subprocess.run(["/bin/ps", "-axo", "pid=,uid=,comm="], check=True,
                             capture_output=True, text=True, timeout=5)
-    if result.returncode == 1:  # The menu app was not open.
-        return
-    if result.returncode != 0:
-        raise OSError("Could not close the Paceman menu app")
-    for value in result.stdout.splitlines():
-        pid = int(value)
-        if pid == os.getppid():
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(None, 2)
+        if len(fields) != 3 or fields[2] != str(executable):
+            continue
+        pid, uid = map(int, fields[:2])
+        if uid != os.getuid() or pid == os.getppid():
             # A menu-initiated uninstall closes its parent after reporting success.
             continue
         try:

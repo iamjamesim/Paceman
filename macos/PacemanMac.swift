@@ -108,8 +108,24 @@ private final class PanelModel: ObservableObject {
         }
         #endif
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: commandPath)
-        process.arguments = args
+        let resources = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources")
+        let python = resources.appendingPathComponent("python/bin/python3")
+        let library = resources.appendingPathComponent("lib")
+        if args == ["uninstall", "--yes"],
+           FileManager.default.isExecutableFile(atPath: python.path),
+           FileManager.default.fileExists(atPath: library.appendingPathComponent("macos/uninstall.py").path) {
+            // The installed control command may not exist until setup finishes.
+            process.executableURL = python
+            process.arguments = ["-B", "-c", "from macos.uninstall import uninstall; print(uninstall())"]
+            process.currentDirectoryURL = library
+            var environment = ProcessInfo.processInfo.environment
+            environment["PYTHONPATH"] = library.path
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            process.environment = environment
+        } else {
+            process.executableURL = URL(fileURLWithPath: commandPath)
+            process.arguments = args
+        }
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
@@ -501,6 +517,7 @@ private struct ConnectionSetupView: View {
 private struct SetupFlowView: View {
     @ObservedObject var model: PanelModel
     @Environment(\.dismissWindow) private var dismissWindow
+    @State private var confirmingUninstall = false
 
     var body: some View {
         VStack {
@@ -515,6 +532,31 @@ private struct SetupFlowView: View {
                 }
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("Quit Paceman") { NSApplication.shared.terminate(nil) }
+                        .disabled(model.busy)
+                    Divider()
+                    Button("Uninstall Paceman…", role: .destructive) {
+                        model.message = nil
+                        confirmingUninstall = true
+                    }
+                    .disabled(model.busy || (!InstalledBuild.isInApplications &&
+                        !FileManager.default.fileExists(atPath: InstalledBuild.controlPath)))
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .menuIndicator(.hidden)
+                .help("Setup options")
+                .accessibilityLabel("Setup options")
+            }
+        }
+        .sheet(isPresented: $confirmingUninstall) {
+            UninstallConfirmationView(model: model) { confirmingUninstall = false }
+                .padding(24).frame(width: 390)
+                .interactiveDismissDisabled(model.busy)
+        }
     }
 }
 
@@ -528,6 +570,37 @@ private struct BulletList: View {
                     Text("•").accessibilityHidden(true)
                     Text(LocalizedStringKey(item)).fixedSize(horizontal: false, vertical: true)
                 }
+            }
+        }
+    }
+}
+
+private struct UninstallConfirmationView: View {
+    @ObservedObject var model: PanelModel
+    var onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Remove Paceman from this Mac?").font(.title2.weight(.semibold))
+            Text("Uninstall removes:")
+            BulletList(items: ["Paceman app", "Background item", "Paceman’s Codex hooks",
+                               "Local pairings", "Notification credentials"])
+            Text("The iPhone app and Tailscale stay installed.")
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Your iPhone will keep this computer in its list until you remove it there.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let message = model.message {
+                Text(message).font(.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
+                    .disabled(model.busy)
+                Spacer()
+                if model.busy { ProgressView().controlSize(.small) }
+                Button("Uninstall Paceman", role: .destructive) { model.uninstall() }
+                    .disabled(model.busy)
             }
         }
     }
@@ -562,28 +635,12 @@ private struct ManagementView: View {
                         "Excludes prompts, credentials, and computer names.",
                     ]).font(.caption).foregroundStyle(.secondary)
                 }
-                if let message = model.message {
+                if !confirmingUninstall, let message = model.message {
                     Text(message).font(.caption).foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if confirmingUninstall {
-                    Text("Remove Paceman from this Mac?").font(.title2.weight(.semibold))
-                    Text("Uninstall removes:")
-                    BulletList(items: ["Paceman app", "Background item", "Paceman’s Codex hooks",
-                                       "Local pairings", "Notification credentials"])
-                    Text("The iPhone app and Tailscale stay installed.")
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Your iPhone will keep this computer in its list until you remove it there.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack {
-                        Button("Cancel") { confirmingUninstall = false }
-                            .disabled(model.busy)
-                        Spacer()
-                        if model.busy { ProgressView().controlSize(.small) }
-                        Button("Uninstall Paceman", role: .destructive) { model.uninstall() }
-                            .disabled(model.busy)
-                    }
+                    UninstallConfirmationView(model: model) { confirmingUninstall = false }
                 } else {
                     HStack {
                         Button("Done") { model.showingManagement = false }.keyboardShortcut(.defaultAction)

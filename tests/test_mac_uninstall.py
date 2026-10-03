@@ -31,6 +31,30 @@ class HookRemovalTests(unittest.TestCase):
             self.assertEqual(result["hooks"]["SessionEnd"], [])
             self.assertEqual(json.loads(path.read_text()), original)
 
+    def test_uninstall_before_setup_finishes(self):
+        for started in (False, True):
+            with self.subTest(started=started), tempfile.TemporaryDirectory() as temporary:
+                base = Path(temporary)
+                root = base / "Paceman data"
+                app = base / "Paceman.app"
+                (app / "Contents").mkdir(parents=True)
+                (app / "Contents/Info.plist").write_bytes(plistlib.dumps(
+                    {"CFBundleIdentifier": "ai.paceman.macos"}))
+                if started:
+                    (root / "lib").mkdir(parents=True)
+                hooks = base / "hooks.json"
+                original = '{"hooks": {}, "custom": "preserve"}'
+                hooks.write_text(original)
+                with patch.object(mac_uninstall, "ROOT", root), \
+                     patch.object(mac_uninstall, "APP", app), \
+                     patch.object(mac_uninstall, "PLIST", base / "source.plist"), \
+                     patch.object(mac_uninstall, "PUSH_PLIST", base / "push.plist"), \
+                     patch.object(mac_uninstall, "HOOKS", hooks):
+                    mac_uninstall.uninstall()
+                self.assertFalse(app.exists())
+                self.assertFalse(root.exists())
+                self.assertEqual(hooks.read_text(), original)
+
     def test_uninstall_removes_only_paceman_installation(self):
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
@@ -51,8 +75,12 @@ class HookRemovalTests(unittest.TestCase):
                 {"type": "command", "command": f"python3 '{root / 'lib/macos/codex_hook.py'}'"},
                 {"type": "command", "command": "/bin/echo keep"}]}]}}))
             def command(args, **_):
-                if args[0] == "/usr/bin/pgrep":
-                    return subprocess.CompletedProcess(args, 0, "123\n456\n", "")
+                if args[0] == "/bin/ps":
+                    uid = os.getuid()
+                    rows = (f"123 {uid} {login_command}\n456 {uid} {login_command}\n"
+                            f"789 {uid + 1} {login_command}\n"
+                            f"999 {uid} {login_command}Other\n")
+                    return subprocess.CompletedProcess(args, 0, rows, "")
                 return subprocess.CompletedProcess(args, 0, "", "")
 
             with patch.object(mac_uninstall, "ROOT", root), patch.object(mac_uninstall, "APP", app), \
@@ -71,7 +99,7 @@ class HookRemovalTests(unittest.TestCase):
             self.assertEqual(calls.call_args_list[0].args[0],
                              [str(login_command), "--unregister-login"])
             self.assertEqual(calls.call_args_list[1].args[0],
-                             ["/usr/bin/pgrep", "-U", str(os.getuid()), "-f", "-x", str(login_command)])
+                             ["/bin/ps", "-axo", "pid=,uid=,comm="])
             kill.assert_called_once_with(456, signal.SIGTERM)
             self.assertEqual(len(calls.call_args_list), 3)
 
