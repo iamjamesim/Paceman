@@ -341,9 +341,9 @@ private struct InstallationView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("To get started:")
                     BulletList(items: [
-                        "**Enable background activity** so Paceman keeps working when you close its window.",
-                        "**Review Codex hooks** that report your tasks’ status to Paceman.",
-                        "**Connect your iPhone** to see activity and receive notifications.",
+                        "**Enable Paceman’s background item** to record and share Codex activity.",
+                        "**Review the Codex hooks** Paceman uses to track task activity.",
+                        "**Connect the iPhone** you’ll use to receive activity updates.",
                     ])
                 }
             } else {
