@@ -193,9 +193,12 @@ class DesktopInstallTests(unittest.TestCase):
         legacy.mkdir(parents=True)
         (legacy / "old.py").write_text("# old installation\n")
         calls = []
+        push_running = {"value": True}
         def fake_run(*args, **kwargs):
             calls.append(args)
-            output = json.dumps({"running": True, "startedAt": time.time()}) if args[-1] == "status" else "ok"
+            output = (json.dumps({"running": True, "startedAt": time.time()}) if args[-1] == "status"
+                      else "active" if args[-2:] == ("is-active", "paceman-push.service") and push_running["value"]
+                      else "inactive" if args[-2:] == ("is-active", "paceman-push.service") else "ok")
             return subprocess.CompletedProcess(args, 0, output, "")
         def fake_push_run(args, **kwargs):
             if args[1:3] == ["-m", "venv"]:
@@ -248,6 +251,12 @@ class DesktopInstallTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as incomplete:
                     install.main()
             self.assertEqual(incomplete.exception.code, 2)
+            push_running["value"] = False
+            with patch.object(install.time, "sleep"), patch("sys.argv", ["install.py", "install"]):
+                with self.assertRaises(SystemExit) as incomplete:
+                    install.main()
+            self.assertEqual(incomplete.exception.code, 2)
+            push_running["value"] = True
             (home / ".local/state/paceman/sharing-paused").write_text('{"paused":true}')
             calls.clear()
             with patch("sys.argv", ["install.py", "install"]):

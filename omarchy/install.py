@@ -263,6 +263,14 @@ def main():
                 time.sleep(.25)
             else:
                 raise ValueError("Paceman did not become ready. Run pacemanctl logs.")
+            if push_config.is_file() and not notification_error:
+                for attempt in range(20):
+                    if run("/usr/bin/systemctl", "--user", "is-active", PUSH_SERVICE,
+                           check=False).stdout.strip() == "active":
+                        break
+                    time.sleep(.25)
+                else:
+                    notification_error = "Paceman push sender did not start. Run pacemanctl logs."
         if not args.no_bar:
             shell_config = config / "omarchy/shell.json"
             if shell_config.exists():
@@ -303,7 +311,7 @@ def main():
                       f"--relay-url {shlex.quote(relay_url)}", file=sys.stderr)
             else:
                 print(f"Inspect the preserved configuration at {push_config}.", file=sys.stderr)
-        if push_config.is_file():
+        if push_config.is_file() and not notification_error:
             print("iPhone notification sender configured. Pair with a fresh QR code if this phone was paired before relay setup.")
         if route_error or notification_error:
             raise SystemExit(2)
