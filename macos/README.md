@@ -34,18 +34,18 @@ Installing and pairing do not enable session monitoring. Codex requires the user
 
 The Mac menu app also shows **Review Codex hooks…** under Activity during setup. It displays the installed command, the eight event purposes, and whether a new event reached Paceman after you opened the guide. App users can finish this check without running `pacemanctl`.
 
-In the Codex app, open **Settings → Hooks → User config (All projects)**. In the CLI, enter `/hooks` or select **Review hooks** at startup. Codex calls each command **Hook 1**; expand the event row to verify **User config — ~/.codex/hooks.json** and the installed command. The user decides whether to trust each Paceman row individually.
+In the Codex app, open **Settings → Hooks → User config (All projects)**. In the CLI, enter `/hooks` or select **Review hooks** at startup. Codex calls each command **Hook 1**; expand the event row to verify **User config — ~/.codex/hooks.json** and the installed command. Review each Paceman row individually. Click **Trust** only if its command matches the one shown by Paceman.
 
 | Event row | Purpose |
 | --- | --- |
-| `SessionStart` | Show a new task as idle. |
-| `UserPromptSubmit` | Show work after a prompt. |
-| `PermissionRequest` | Show pending approval after five seconds. |
 | `PreToolUse` | Show a pending blocking or async question after five seconds. |
+| `PermissionRequest` | Show pending approval after five seconds. |
 | `PostToolUse` | Resume work after a tool finishes. |
+| `SessionStart` | Show a new task as idle. |
+| `SessionEnd` | Remove a closed session. |
+| `UserPromptSubmit` | Show work after a prompt. |
 | `Stop` | Show a finished turn. |
 | `Interrupt` | Show an interrupted turn as idle. |
-| `SessionEnd` | Remove a closed session. |
 
 The hook sends the event name, opaque session and turn IDs, and possibly a short project label to Paceman's private local socket. It sends no prompts, replies, transcripts, tool arguments, or full paths. A project label may appear on the iPhone Lock Screen. Do not trust hooks on the user's behalf or bypass their review.
 

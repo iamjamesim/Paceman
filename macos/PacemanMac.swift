@@ -547,15 +547,16 @@ private struct HookReviewView: View {
     var onContinue: (() -> Void)? = nil
     @Environment(\.dismissWindow) private var dismissWindow
 
+    // Match the event order in Codex Settings → Hooks → User config.
     private let events: [(String, String)] = [
-        ("SessionStart", "Shows a new task as idle."),
-        ("UserPromptSubmit", "Shows work after you send a prompt."),
-        ("PermissionRequest", "Shows approval pending after five seconds."),
         ("PreToolUse", "Shows a question pending after five seconds."),
+        ("PermissionRequest", "Shows approval pending after five seconds."),
         ("PostToolUse", "Shows work resuming after a tool finishes."),
+        ("SessionStart", "Shows a new task as idle."),
+        ("SessionEnd", "Removes a closed task."),
+        ("UserPromptSubmit", "Shows work after you send a prompt."),
         ("Stop", "Shows a finished turn."),
         ("Interrupt", "Shows an interrupted turn as idle."),
-        ("SessionEnd", "Removes a closed task."),
     ]
 
     var body: some View {
@@ -563,51 +564,48 @@ private struct HookReviewView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Review Codex hooks").font(.title2.weight(.semibold))
                 Text("1. Open Codex Settings").font(.headline)
-                Text("Hooks → User config (All projects)").font(.subheadline)
+                Text("Hooks → User config (All projects)").font(.body)
                     .fixedSize(horizontal: false, vertical: true)
                 if SetupGuide.codexApp != nil {
                     Button("Open Codex Settings") { NSWorkspace.shared.open(SetupGuide.codexSettings) }
                 }
-                Text("2. Review all 8 hooks").font(.headline)
-                Text("Expand “Hook 1” in each Paceman row and check that its command matches:")
+                Text("2. Review and trust the 8 hooks").font(.headline)
+                Text("In Codex, expand “Hook 1” under each event below. Click Trust only if its command matches:")
                     .fixedSize(horizontal: false, vertical: true)
                 if let command = model.status.hookCommand {
-                    Text(command).font(.system(.caption, design: .monospaced))
+                    Text(command).font(.system(.body, design: .monospaced))
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-                    Button("Copy command") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(command, forType: .string)
-                    }
                 } else {
                     Text(model.hasReadStatus ? "The installed command is unavailable. Run Paceman setup again."
                          : "Loading Codex hook details…")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.body).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(events, id: \.0) { event in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(event.0).font(.subheadline.weight(.medium))
-                            Text(event.1).font(.caption).foregroundStyle(.secondary)
+                            Text(event.0).font(.body.weight(.medium))
+                            Text(event.1).font(.body).foregroundStyle(.secondary)
                         }
                     }
                 }
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-                Text("What hooks send").font(.subheadline.weight(.medium))
+                Text("What hooks send").font(.headline)
                 BulletList(items: [
-                    "Sent to Paceman on this Mac: event names, opaque task and turn IDs, and an optional short project label.",
-                    "Project labels may appear on your iPhone Lock Screen.",
-                    "Not sent: prompts, replies, transcripts, tool arguments, or full paths.",
-                ]).font(.caption).foregroundStyle(.secondary)
+                    "**Sent to Paceman on this Mac:** event names, task and turn IDs, and a short project label when available.",
+                    "**Not sent:** prompts, replies, transcripts, tool arguments, or full paths.",
+                    "**Project labels** may appear on your iPhone Lock Screen.",
+                ]).font(.body)
                 Text("3. Check activity").font(.headline)
-                Text("Start a fresh local Codex task and send a prompt.")
-                    .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                Text("Start a new local Codex task on this Mac and send a prompt.")
+                    .font(.body).fixedSize(horizontal: false, vertical: true)
                 Text(model.status.missingHooks?.isEmpty == false ? "Some hooks are missing. Run Paceman setup again, then review them in Codex."
                      : (model.status.lastAgentEventAt ?? 0) > model.hookReviewStartedAt ? "A new Codex event reached Paceman."
                      : "Waiting for a new Codex event.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.body).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Link("Setup guide", destination: SetupGuide.url)
                     Spacer()
