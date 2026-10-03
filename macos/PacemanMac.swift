@@ -498,7 +498,7 @@ private struct InstallationView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("During setup, you’ll:")
                     BulletList(items: [
-                        "**Start Paceman at login** to track agent activity and send updates automatically.",
+                        "**Start Paceman at login** to track agent activity in the background and send updates automatically.",
                         "**Review Codex hooks** that send agent events to Paceman.",
                         "**Connect your iPhone** to receive Live Activity updates.",
                     ])
