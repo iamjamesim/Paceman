@@ -77,6 +77,11 @@ older development builds;
 pair its phone and watch again, and register new push tokens with the matching
 APNs topic.
 
+For notifications from an iPhone app signed by your own team, use your own
+[relay and matching APNs credentials](../service/RELAY.md). Paceman's hosted relay
+serves the official app; a locally built desktop client can still use it with
+the [TestFlight iPhone app](https://testflight.apple.com/join/wpMWQb7d).
+
 Add new Swift files in Xcode. Regenerate the icon with
 `swift scripts/make-app-icon.swift ios/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png`
 only when its design changes.
