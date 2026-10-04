@@ -18,6 +18,11 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements-relay.txt
       - run: bash scripts/check.sh
+      - name: Package Omarchy archive and verify checksum
+        run: |
+          bash scripts/package-omarchy-release.sh HEAD 0.1.0-alpha.1 "$RUNNER_TEMP/PacemanOmarchyRelease"
+          cd "$RUNNER_TEMP/PacemanOmarchyRelease"
+          shasum -a 256 -c Paceman-Omarchy-0.1.0-alpha.1.tar.gz.sha256
 
   mac-and-ios:
     runs-on: xcode-27
@@ -40,6 +45,11 @@ jobs:
           with TemporaryDirectory() as directory:
               install.build_app(Path(directory) / "Paceman.app")
           PY
+      - name: Package Omarchy archive and verify checksum
+        run: |
+          bash scripts/package-omarchy-release.sh HEAD 0.1.0-alpha.1 "$RUNNER_TEMP/PacemanOmarchyRelease"
+          cd "$RUNNER_TEMP/PacemanOmarchyRelease"
+          shasum -a 256 -c Paceman-Omarchy-0.1.0-alpha.1.tar.gz.sha256
       - name: Dry-run Mac release package
         run: |
           python scripts/package-macos-release.py \

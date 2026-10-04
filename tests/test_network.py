@@ -1,3 +1,4 @@
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -73,10 +74,12 @@ class PrivateRouteTests(unittest.TestCase):
             self.assertEqual(network._config("tailscale"), {})
 
     def test_private_route_must_reach_the_authenticated_source(self):
+        response = io.BytesIO(b"Unauthorized")
         unauthorized = urllib.error.HTTPError("https://test.ts.net:8443/v1/snapshot", 401,
-                                               "Unauthorized", None, None)
+                                               "Unauthorized", None, response)
         with patch.object(network.urllib.request, "urlopen", side_effect=unauthorized):
             network._verify("https://test.ts.net:8443")
+        self.assertTrue(response.closed)
         with patch.object(network.urllib.request, "urlopen"):
             with self.assertRaises(network.RouteSetupError):
                 network._verify("https://test.ts.net:8443")

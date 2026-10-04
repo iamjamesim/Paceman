@@ -242,6 +242,48 @@ private struct MacPanelTransitions {
             m.refresh(); await until("after cancel read") { c.count == 3 }; c.reply(2, true, live)
             await until("missing installation detected") { m.needsInstallation }
         }
+        // A route-only installer warning must reach hooks, then recover in phone setup.
+        do {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let url = folder.appendingPathComponent("setup-step")
+            let c = ControlledCommands()
+            let install = ControlledCommands()
+            let unpaired = #"{"running":true,"sharingEnabled":true,"clients":[],"missingHooks":[],"lastAgentEventAt":1}"#
+            let hooks = PanelModel(command: { c.execute($0) }, installer: {
+                _ = install.execute(["install"])
+                return (0, "Phone connection setup is incomplete: Connect Tailscale, then try again.")
+            }, needsSetup: { install.count == 0 }, progressURL: url)
+            hooks.installBundled()
+            await until("route warning installer") { install.count == 1 }; install.reply(0)
+            await until("route warning status") { c.count == 1 }; c.reply(0, true, unpaired)
+            await until("route warning hooks") { hooks.hasReadStatus }
+            assert(!hooks.needsInstallation && hooks.setupStep == .hooks && hooks.message == nil)
+            let resumedHooks = PanelModel(command: { c.execute($0) }, needsSetup: { false }, progressURL: url)
+            assert(resumedHooks.shouldPresentSetup && !resumedHooks.connectingPhone)
+            assert(!resumedHooks.continueAfterHookReview())
+            let phone = PanelModel(command: { c.execute($0) }, needsSetup: { false },
+                                   progressURL: url, now: { 100 })
+            assert(phone.connectingPhone && !phone.needsInstallation)
+            phone.beginPairing(); await until("route warning pairing") { c.count == 2 }
+            c.reply(1, false, "Connect Tailscale on this computer, then try again.")
+            await until("route warning visible") { phone.pairingMessage != nil }
+            assert(phone.pairingCode == nil && phone.setupStep == .phone)
+            await until("route warning phone status") { c.count == 3 }; c.reply(2, true, unpaired)
+            await until("route warning phone read") { phone.hasReadStatus }
+            phone.showPairing(); await until("route recovery retry") { c.count == 4 }
+            c.reply(3, true, "fresh QR")
+            await until("route recovered QR") { phone.pairingCode?.text == "fresh QR" }
+            await until("route recovered contact") { c.count == 5 }
+            let connected = #"{"running":true,"sharingEnabled":true,"clients":[{"id":"new-phone","name":"Test phone","platform":"ios","pairedAt":101,"lastContactAt":102}]}"#
+            c.reply(4, true, connected)
+            await until("route recovered setup") { phone.pairingComplete }
+            assert(!phone.shouldPresentSetup)
+            let finished = PanelModel(command: { c.execute($0) }, needsSetup: { false }, progressURL: url)
+            assert(!finished.shouldPresentSetup)
+            phone.endPairing()
+        }
         // Setup completion stays in the same model; partial failure remains retryable.
         for code: Int32 in [0, 1, 2] {
             let c = ControlledCommands()

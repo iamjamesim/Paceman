@@ -151,6 +151,11 @@ python3 scripts/prepare-desktop-release.py \
   --output-dir "dist/$VERSION-candidate" --adhoc
 ```
 
+Omarchy archive creation also runs on the Mac release host. Linux CI requires
+`systemd-analyze verify` on the unit templates extracted from the archive; Mac CI
+checks archive creation without that Linux-only validation. Both jobs verify the
+archive checksum.
+
 These `UNSIGNED` candidates are not eligible for distribution. Keep this runbook
 updated with changes to the scripts or supported platforms; keep per-release QA
 and measurements with that release's evidence.

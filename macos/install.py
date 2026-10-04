@@ -534,7 +534,9 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
     else:
         notification_marker.write_text("Retry Paceman notification setup.\n")
         notification_marker.chmod(0o600)
-    return notifications_ready and (route_ready or (ROOT / "sharing-paused").exists())
+    # Route recovery belongs to phone pairing, which displays the prerequisite and
+    # retries it. Exit 2 is reserved for notification setup and its repair marker.
+    return notifications_ready
 
 
 def print_hook_review_steps(wrapper: Path):

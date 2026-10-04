@@ -35,11 +35,12 @@ git -C "$repo" archive --format=tar \
   requirements-client.txt requirements-push.txt scripts/install-omarchy.sh scripts/uninstall-omarchy.sh \
   | gzip -n > "$temporary"
 
-if ! command -v systemd-analyze >/dev/null; then
-  echo "systemd-analyze is required to validate Omarchy release units" >&2
-  exit 1
-fi
-python3 - "$temporary" "$version" "$verification" <<'PY'
+if [[ $(uname -s) == Linux ]]; then
+  if ! command -v systemd-analyze >/dev/null; then
+    echo "systemd-analyze is required to validate Omarchy release units on Linux" >&2
+    exit 1
+  fi
+  python3 - "$temporary" "$version" "$verification" <<'PY'
 from pathlib import Path
 import sys
 import tarfile
@@ -59,7 +60,10 @@ with tarfile.open(archive, "r:gz") as source:
         (destination / name).write_text(template.replace("@APP@", str(app))
                                         .replace("@STATE@", str(state)))
 PY
-systemd-analyze verify "$verification/paceman-source.service" "$verification/paceman-push.service"
+  systemd-analyze verify "$verification/paceman-source.service" "$verification/paceman-push.service"
+else
+  echo "Skipping systemd validation on this platform; Linux CI validates the packaged units."
+fi
 mv "$temporary" "$archive"
 
 (

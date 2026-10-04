@@ -181,8 +181,11 @@ class MacInstallTests(unittest.TestCase):
     def test_failed_background_setup_leaves_dragged_app_in_place(self):
         self._exercise_replacement(replace_app=False, fail_start=True)
 
-    def test_failed_private_route_reports_partial_install(self):
-        self._exercise_replacement(fail_route=True)
+    def test_failed_private_route_defers_recovery_to_pairing(self):
+        self._exercise_replacement(relay_url="https://relay.paceman.ai", fail_route=True)
+
+    def test_route_failure_does_not_hide_notification_repair(self):
+        self._exercise_replacement(relay_url="https://relay.paceman.ai", fail_route=True, fail_push=True)
 
     def _exercise_replacement(self, fail_start: bool = False, fail_hooks: bool = False,
                               relay_url: str | None = None, existing_push: bool = False,
@@ -266,7 +269,7 @@ class MacInstallTests(unittest.TestCase):
                      RouteSetupError("Tailscale needs HTTPS") if fail_route else None),
                      return_value="https://test.ts.net:8443"), \
                  patch("macos.install_push.install", side_effect=configure_push), \
-                 patch("builtins.print"):
+                 patch("builtins.print") as output:
                 if fail_start:
                     with self.assertRaises(subprocess.CalledProcessError):
                         installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app)
@@ -275,7 +278,10 @@ class MacInstallTests(unittest.TestCase):
                         installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app)
                 else:
                     ready = installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app)
-                    self.assertEqual(ready, not (fail_push or fail_route))
+                    self.assertEqual(ready, not fail_push)
+                    if fail_route:
+                        self.assertTrue(any("Phone connection setup is incomplete" in str(call)
+                                            for call in output.call_args_list))
 
             failed = fail_start or fail_hooks
             expected = "old" if failed else "new"

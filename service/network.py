@@ -84,8 +84,9 @@ def _verify(origin):
         with urllib.request.urlopen(origin + "/v1/snapshot", timeout=10):
             pass
     except urllib.error.HTTPError as error:
-        if error.code == 401:
-            return
+        with error:
+            if error.code == 401:
+                return
     except (OSError, ValueError) as error:
         raise RouteSetupError("Paceman's private Tailscale route is unreachable. Check Tailscale and try again.") from error
     raise RouteSetupError("Paceman's private Tailscale route is not reaching its source. Try again.")
