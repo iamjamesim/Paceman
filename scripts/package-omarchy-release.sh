@@ -26,13 +26,44 @@ if [[ -e $archive || -e $checksum ]]; then
   exit 1
 fi
 temporary=$(mktemp "$output_dir/.Paceman-Omarchy-$version.XXXXXX")
-trap 'rm -f "$temporary"' EXIT
+verification=$(mktemp -d "$output_dir/.Paceman-verify-$version.XXXXXX")
+trap 'rm -f "$temporary"; rm -rf "$verification"' EXIT
 
 git -C "$repo" archive --format=tar \
   --prefix="Paceman-Omarchy-$version/" "$ref" -- \
   README.md LICENSE THIRD_PARTY_NOTICES.md docs omarchy service systemd \
   requirements-client.txt requirements-push.txt scripts/install-omarchy.sh scripts/uninstall-omarchy.sh \
   | gzip -n > "$temporary"
+
+if [[ $(uname -s) == Linux ]]; then
+  if ! command -v systemd-analyze >/dev/null; then
+    echo "systemd-analyze is required to validate Omarchy release units on Linux" >&2
+    exit 1
+  fi
+  python3 - "$temporary" "$version" "$verification" <<'PY'
+from pathlib import Path
+import sys
+import tarfile
+
+archive, version, destination = sys.argv[1:]
+destination = Path(destination)
+app = destination / "app"
+state = destination / "state"
+app.mkdir()
+python = state / "push-venv/bin/python3"
+python.parent.mkdir(parents=True)
+python.symlink_to(sys.executable)
+with tarfile.open(archive, "r:gz") as source:
+    for name in ("paceman-source.service", "paceman-push.service"):
+        member = f"Paceman-Omarchy-{version}/systemd/{name}"
+        template = source.extractfile(member).read().decode()
+        (destination / name).write_text(template.replace("@APP@", str(app))
+                                        .replace("@STATE@", str(state)))
+PY
+  systemd-analyze verify "$verification/paceman-source.service" "$verification/paceman-push.service"
+else
+  echo "Skipping systemd validation on this platform; Linux CI validates the packaged units."
+fi
 mv "$temporary" "$archive"
 
 (

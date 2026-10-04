@@ -12,7 +12,7 @@ Requires Python 3.11+, a user systemd session, Omarchy 4.0+, and Tailscale on co
 bash scripts/install-omarchy.sh
 ```
 
-The installer copies Paceman to `~/.local/lib/paceman`, prepares notifications through `https://relay.paceman.ai`, installs `pacemanctl`, enables its user service, reloads the bar, and adds seven commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; Omarchy stores only a source credential. Re-run to update; `--no-bar` omits the panel. Updates preserve an existing relay or direct APNs configuration, pairing data, Sharing choice, and unrelated hooks. If notification setup fails, the installer reports that the source is installed but notifications are incomplete. A fresh install ignores checkout `.runtime` data. The installer disables the old `omarchy-watch.service` but leaves its data and Codex plugin.
+The installer copies Paceman to `~/.local/lib/paceman`, prepares notifications through `https://relay.paceman.ai`, installs `pacemanctl`, enables its user service, prepares a private Tailscale Serve route, reloads the bar, and adds seven commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; Omarchy stores only a source credential. Re-run to update; `--no-bar` omits the panel. Updates preserve an existing relay or direct APNs configuration, pairing data, Sharing choice, and unrelated hooks. If notification or private route setup fails, the installer reports a partial installation and the pairing button can retry route setup. A fresh install ignores checkout `.runtime` data. The installer disables the old `omarchy-watch.service` but leaves its data and Codex plugin.
 
 For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the install script. Developers managing a direct APNs sender can use `--no-push-setup` and follow [development-only direct APNs](../docs/push-delivery.md#development-only-direct-apns). Neither option is needed for the normal install.
 
@@ -32,19 +32,7 @@ If `omarchy-watch-codex` is already installed, Paceman still accepts its events 
 
 ## Private phone connection
 
-Inspect existing Tailscale Serve routes before adding one:
-
-```sh
-tailscale serve status
-```
-
-If port 8443 is free, route private HTTPS to the local source:
-
-```sh
-tailscale serve --bg --https=8443 http://127.0.0.1:8765
-```
-
-Leave Funnel off and do not replace unrelated routes. The installer does not manage them. Once notification setup has succeeded, use the bar panel's QR button or `pacemanctl pair --open`, then scan from **Connect computer** on iPhone. This first pairing includes the relay address. Invitations expire after five minutes and contain a pairing secret. The phone pairs with the ESP32 watch separately.
+The installer reuses a matching private Tailscale Serve route or creates one on a free HTTPS port. It does not replace unrelated routes or enable Funnel. If Tailscale asks you to enable HTTPS for this tailnet, complete that one-time step and press the pairing button again. Paceman removes only a route it created and that has not been changed. Once notification setup has succeeded, use the bar panel's QR button or `pacemanctl pair --open`, then scan from **Connect computer** on iPhone. This first pairing includes the relay address. Invitations expire after five minutes and contain a pairing secret. The phone pairs with the ESP32 watch separately.
 
 The iPhone must allow notifications and register its Apple-issued device token. If relay setup was added after the phone paired, pair again with a fresh QR code. After hook review, check `~/.local/state/paceman/push-delivery.jsonl` for `apns_accepted` (status 200) after a fresh Codex event, then confirm a **new notification on the physical iPhone**. APNs acceptance does not prove display. See [relay setup](../service/RELAY.md) for repair and operator details.
 
@@ -70,4 +58,4 @@ Sharing off persists across login and updates. `pacemanctl stop` stops only the 
 bash scripts/uninstall-omarchy.sh
 ```
 
-This removes the installed app, command, services, panel, and Paceman's Codex hooks. It retains source data, phone pairings, unrelated Codex hooks, the separate Omarchy Watch Codex plugin if installed, and Tailscale routes for deliberate cleanup or reinstallation.
+This removes the installed app, command, services, panel, Paceman's Codex hooks, and any unchanged Tailscale Serve route that Paceman created. It retains source data, phone pairings, unrelated Codex hooks, the separate Omarchy Watch Codex plugin if installed, and routes created by someone else.

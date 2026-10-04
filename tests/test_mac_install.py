@@ -14,6 +14,7 @@ from macos.codex_hook import EVENTS, QUESTION_MATCHER
 from macos.control import missing_hooks
 import macos.control as control
 from service.hub import Store
+from service.network import RouteSetupError
 
 
 class MacInstallTests(unittest.TestCase):
@@ -180,9 +181,16 @@ class MacInstallTests(unittest.TestCase):
     def test_failed_background_setup_leaves_dragged_app_in_place(self):
         self._exercise_replacement(replace_app=False, fail_start=True)
 
+    def test_failed_private_route_defers_recovery_to_pairing(self):
+        self._exercise_replacement(relay_url="https://relay.paceman.ai", fail_route=True)
+
+    def test_route_failure_does_not_hide_notification_repair(self):
+        self._exercise_replacement(relay_url="https://relay.paceman.ai", fail_route=True, fail_push=True)
+
     def _exercise_replacement(self, fail_start: bool = False, fail_hooks: bool = False,
                               relay_url: str | None = None, existing_push: bool = False,
-                              fail_push: bool = False, replace_app: bool = True):
+                              fail_push: bool = False, fail_route: bool = False,
+                              replace_app: bool = True):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "home"
             root = home / "Library/Application Support/Paceman"
@@ -257,8 +265,11 @@ class MacInstallTests(unittest.TestCase):
                  patch.object(Path, "home", return_value=home), \
                  patch.object(Path, "replace", replace_path), \
                  patch.object(installer.subprocess, "run", side_effect=command), \
+                 patch.object(installer, "ensure_private_route", side_effect=(
+                     RouteSetupError("Tailscale needs HTTPS") if fail_route else None),
+                     return_value="https://test.ts.net:8443"), \
                  patch("macos.install_push.install", side_effect=configure_push), \
-                 patch("builtins.print"):
+                 patch("builtins.print") as output:
                 if fail_start:
                     with self.assertRaises(subprocess.CalledProcessError):
                         installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app)
@@ -268,6 +279,9 @@ class MacInstallTests(unittest.TestCase):
                 else:
                     ready = installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app)
                     self.assertEqual(ready, not fail_push)
+                    if fail_route:
+                        self.assertTrue(any("Phone connection setup is incomplete" in str(call)
+                                            for call in output.call_args_list))
 
             failed = fail_start or fail_hooks
             expected = "old" if failed else "new"

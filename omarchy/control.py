@@ -9,12 +9,10 @@ import sqlite3
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 import uuid
 
 from service.hub import Store
-from service.network import private_endpoint
+from service.network import RouteSetupError, ensure_private_route
 
 SERVICE = "paceman-source.service"
 
@@ -89,19 +87,12 @@ def remove_access(client_id):
 def pair_phone(open_image=False, json_output=False):
     if not read_status().get("running"):
         raise ValueError("Start Paceman before connecting a phone.")
-    route = subprocess.run(["/usr/bin/tailscale", "serve", "status", "--json"],
-                           check=True, capture_output=True, text=True, timeout=10)
-    origin = private_endpoint(json.loads(route.stdout))
-    try:
-        urllib.request.urlopen(origin + "/v1/snapshot", timeout=10).close()
-    except urllib.error.HTTPError as error:
-        if error.code != 401:
-            raise ValueError("The private source route is not ready.") from error
     root = state_directory()
     if not (root / "hub.sqlite3").is_file():
         raise ValueError("Paceman's installed source database is missing.")
     if json_output and not Path("/usr/bin/qrencode").exists():
         raise ValueError("Install qrencode to show a pairing code in the panel.")
+    origin = ensure_private_route(root)
     invitation = Store(root / "hub.sqlite3").invite(origin)
     path = root / "invitation.json"
     path.write_text(json.dumps(invitation, separators=(",", ":")))
@@ -149,6 +140,9 @@ def main():
                             "-u", "paceman-push.service", "-n", "60", "--no-pager"], check=True)
         else:
             subprocess.run(["/usr/bin/systemctl", "--user", args.command, SERVICE], check=True, timeout=20)
+    except RouteSetupError as error:
+        print(f"Paceman route: {error}", file=sys.stderr)
+        raise SystemExit(1)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"Paceman: {error}", file=sys.stderr)
         raise SystemExit(1)

@@ -8,17 +8,14 @@ import os
 from pathlib import Path
 import plistlib
 import shlex
-import shutil
 import socket
 import sqlite3
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 import uuid
 
-from service.network import private_endpoint
+from service.network import ensure_private_route
 from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint
 from macos.paths import installed_app
@@ -120,43 +117,13 @@ def sharing(enabled):
         raise
 
 
-def tailscale_binary():
-    # Finder and login items do not inherit the user's shell PATH.
-    candidates = (shutil.which("tailscale"), "/usr/local/bin/tailscale",
-                  "/opt/homebrew/bin/tailscale",
-                  "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-                  str(Path.home() / "Applications/Tailscale.app/Contents/MacOS/Tailscale"))
-    for candidate in candidates:
-        if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
-            return candidate
-    raise ValueError("Install Tailscale on this Mac, then follow Paceman’s Tailscale setup guide.")
-
-
 def pairing():
     current = status()
     if not current["sharingEnabled"]:
         raise ValueError("Turn on Sharing before connecting your iPhone")
     if not current["running"]:
         raise ValueError("Start Paceman before connecting a phone")
-    binary = tailscale_binary()
-    try:
-        route = subprocess.run([binary, "serve", "status", "--json"], check=True,
-                               capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError) as error:
-        raise ValueError("Tailscale is unavailable. Open Tailscale, reconnect, then try again.") from error
-    config = json.loads(route.stdout)
-    try:
-        origin = private_endpoint(config)
-    except ValueError as error:
-        raise ValueError("Tailscale isn’t set up for Paceman yet. Follow the Tailscale setup guide, then try again.") from error
-    try:
-        urllib.request.urlopen(origin + "/v1/snapshot", timeout=10).close()
-    except urllib.error.HTTPError as error:
-        error.close()
-        if error.code != 401:
-            raise ValueError("Tailscale can’t reach Paceman yet. Check the Tailscale setup guide, then try again.") from error
-    except urllib.error.URLError as error:
-        raise ValueError("Couldn’t connect to Paceman over Tailscale. Check that Tailscale is connected, then try again.") from error
+    origin = ensure_private_route(ROOT)
     invitation = Store(ROOT / "data/hub.sqlite3").invite(endpoint(origin))
     print(json.dumps(invitation, separators=(",", ":")))
 
