@@ -2,19 +2,33 @@
 
 The Omarchy package installs a per-user source service and a bar panel. The service survives panel and shell restarts. The phone fetches snapshots through private HTTPS and owns the watch's Bluetooth link.
 
-Run the install and uninstall scripts from the repository root.
-
-## Install
+## Install the release
 
 Requires Python 3.11+, a user systemd session, Omarchy 4.0+, and Tailscale on computer and phone. `qrencode` enables QR pairing; without it, the CLI emits invitation JSON.
+
+Download the **[Omarchy archive](https://github.com/iamjamesim/Paceman/releases/download/desktop-v0.1.0/Paceman-Omarchy-0.1.0.tar.gz)** from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/releases/tag/desktop-v0.1.0). This package contains source and an installer. Extract it, open a terminal in the extracted `Paceman-Omarchy-0.1.0` folder, and run:
 
 ```sh
 bash scripts/install-omarchy.sh
 ```
 
+Prefer a Git checkout? Use [source setup](#install-from-a-git-checkout). Both installation paths continue with hook review and phone pairing below.
+
 The installer copies Paceman to `~/.local/lib/paceman`, prepares notifications through `https://relay.paceman.ai`, installs `pacemanctl`, enables its user service, prepares a private Tailscale Serve route, reloads the bar, and adds seven commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; Omarchy stores only a source credential. Re-run to update; `--no-bar` omits the panel. Updates preserve an existing relay or direct APNs configuration, pairing data, Sharing choice, and unrelated hooks. If notification or private route setup fails, the installer reports a partial installation and the pairing button can retry route setup. A fresh install ignores checkout `.runtime` data. The installer disables the old `omarchy-watch.service` but leaves its data and Codex plugin.
 
 For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the install script. Developers managing a direct APNs sender can use `--no-push-setup` and follow [development-only direct APNs](../docs/push-delivery.md#development-only-direct-apns). Neither option is needed for the normal install.
+
+## Install from a Git checkout
+
+Clone the release tag, then run the same installer from the repository root:
+
+```sh
+git clone --branch desktop-v0.1.0 https://github.com/iamjamesim/Paceman.git paceman
+cd paceman
+bash scripts/install-omarchy.sh
+```
+
+To follow current development instead, omit `--branch desktop-v0.1.0`. Continue with hook review and phone pairing below.
 
 ## Review Codex hooks
 
@@ -31,6 +45,8 @@ After review, start a fresh local Codex task and submit a prompt. Check that `la
 If `omarchy-watch-codex` is already installed, Paceman still accepts its events during migration. Paceman's own hooks take precedence for nonterminal events when both run. After verifying Paceman's hooks, remove the old Codex plugin with `codex plugin remove omarchy-watch-codex@omarchy-watch-codex` if it was used only for Paceman; the installer does not remove it for you.
 
 ## Private phone connection
+
+**[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**. Open the link on your iPhone and follow the installation steps; iOS 18 or later is required.
 
 The installer reuses a matching private Tailscale Serve route or creates one on a free HTTPS port. It does not replace unrelated routes or enable Funnel. If Tailscale asks you to enable HTTPS for this tailnet, complete that one-time step and press the pairing button again. Paceman removes only a route it created and that has not been changed. Once notification setup has succeeded, use the bar panel's QR button or `pacemanctl pair --open`, then scan from **Connect computer** on iPhone. This first pairing includes the relay address. Invitations expire after five minutes and contain a pairing secret. The phone pairs with the ESP32 watch separately.
 
@@ -53,6 +69,8 @@ pacemanctl restart
 Sharing off persists across login and updates. `pacemanctl stop` stops only the current process. Remove a phone from its panel row or from the iPhone app; revocation deletes that client's credential and push destination. An unreachable computer must be reached before phone-initiated removal completes.
 
 ## Remove
+
+From the extracted release folder or repository root, run:
 
 ```sh
 bash scripts/uninstall-omarchy.sh

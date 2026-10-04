@@ -2,13 +2,15 @@
 
 For Apple Silicon Macs running macOS 15 or later.
 
-## Install Paceman
+## Install the released app
 
-1. Download the signed Mac DMG from [Releases](https://github.com/iamjamesim/paceman/releases) when available, or use the test build you received.
+1. Download the **[Mac DMG](https://github.com/iamjamesim/Paceman/releases/download/desktop-v0.1.0/Paceman-macos-arm64-0.1.0.dmg)** from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/releases/tag/desktop-v0.1.0). The release is signed and notarized.
 2. Open the DMG, drag **Paceman** onto **Applications**, then open it from Applications.
 3. Choose **Set up Paceman**. This starts Paceman at login, enables its background item, and prepares the Codex hooks.
 
 macOS may show notifications about login and background items. You can manage them in **System Settings → General → Login Items & Extensions**. The Mac release includes Python; no separate runtime installation is needed.
+
+Prefer to build locally? Use [source setup](#build-and-install-from-source). Both installation paths continue with hook review and iPhone pairing below.
 
 ## Review Codex hooks
 
@@ -43,7 +45,7 @@ The hooks send event names, opaque task and turn IDs, and an optional short proj
 
 ## Connect your iPhone
 
-1. **[Get Paceman for iPhone](https://testflight.apple.com/join/wpMWQb7d)** through TestFlight. Open this link on your iPhone and follow the installation steps.
+1. **[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**. Open the link on your iPhone and follow the installation steps; iOS 18 or later is required.
 
    Beta full? [DM James for access](https://x.com/james_im).
 
@@ -73,7 +75,23 @@ Seeing activity on the Mac confirms hook delivery. Receiving it on your locked i
 - **Remove access…** disconnects one phone.
 - **Manage Paceman… → Uninstall Paceman…** removes the Mac app, background item, Paceman hooks, local pairings, notification credentials, and any unchanged Tailscale route Paceman created. During setup, Uninstall is in the **…** menu. The iPhone app and Tailscale stay installed.
 
-To update, quit Paceman, replace it with the newer app, and reopen it. Pairings and your Sharing choice are kept.
+To update a release install, quit Paceman, replace it with the newer app from [Releases](https://github.com/iamjamesim/Paceman/releases), and reopen it. For a source install, rerun the installer from the newer source. Pairings and your Sharing choice are kept.
+
+## Build and install from source
+
+Download the source from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/releases/tag/desktop-v0.1.0) or clone this repository. Use Python 3.11+ installed outside the checkout, Xcode, and an Apple Silicon Mac. From the repository root, run:
+
+```sh
+python3 -m macos.install
+```
+
+The installer builds the menu app and background helper, installs to `~/Applications/Paceman.app`, and prepares notifications, the private Tailscale route, and Codex hooks. It preserves existing pairings, Sharing choice, notification configuration, and unrelated hooks. If setup is incomplete, Paceman explains what needs attention. If your `python3` is too old, invoke a newer interpreter explicitly.
+
+The installer uses a matching Paceman signing identity if one is installed, otherwise an ad hoc signature. You do not need Paceman's signing credentials to build locally. Ad hoc and Apple Development signatures are for local builds; public Mac distribution requires Developer ID signing and notarization.
+
+Open `~/Applications/Paceman.app`, confirm **Paceman** appears in **System Settings → General → Login Items & Extensions**, then continue with [hook review](#review-codex-hooks) and [iPhone pairing](#connect-your-iphone). You can use the TestFlight iPhone app with your locally built desktop client.
+
+For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the installer. Developers managing a direct APNs sender can use `--no-push-setup` and follow [development-only direct APNs](../docs/push-delivery.md#development-only-direct-apns).
 
 ## Troubleshooting and developer details
 
@@ -106,28 +124,6 @@ python3 -m macos.install_push --relay-url https://relay.paceman.ai
 ```
 
 Use the Python 3.11+ interpreter printed by the source installer if needed. If relay setup was added after pairing, pair the iPhone again. See [push delivery](../docs/push-delivery.md) for more detail.
-
-</details>
-
-<details>
-<summary>Install from source</summary>
-
-From the repository root, use Python 3.11+ installed outside the checkout, Xcode, and an Apple Silicon Mac:
-
-```sh
-python3 -m macos.install
-```
-
-The installer builds the menu app and helper, copies the source to `~/Library/Application Support/Paceman`, prepares notifications through `https://relay.paceman.ai`, installs a per-user background item, prepares a private Tailscale Serve route, and adds eight Paceman commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; the Mac stores only a source credential. Re-running preserves an existing relay or direct APNs configuration, pairings, Sharing choice, and unrelated hooks. If notification setup fails, the installer reports a partial installation. If the private route is not ready, setup continues to hook review; the iPhone connection step explains the Tailscale prerequisite and offers **Try again**. If the selected `python3` is too old, invoke a newer interpreter explicitly. A different Mac architecture needs a matching build target in the installer.
-
-For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the installer. Developers managing a direct APNs sender can use `--no-push-setup` and follow [development-only direct APNs](../docs/push-delivery.md#development-only-direct-apns). Neither option is needed for the normal install.
-
-Open `~/Applications/Paceman.app` and confirm **Paceman** appears in **System Settings → General → Login Items & Extensions**. Continue with hook review and phone connection below. Paceman prepares a private Tailscale Serve route during setup or pairing; it reuses a matching route and leaves unrelated routes alone.
-
-
-Developers can [build the iPhone app with Xcode](../docs/development.md#iphone-and-live-activities-mac). The public Mac bundle ID is `ai.paceman.macos`. Ad hoc and Apple Development signatures are for testing; public Mac distribution requires Developer ID signing and notarization.
-
-Uninstall removes an unchanged Serve route that Paceman created. Routes created or modified by someone else remain.
 
 </details>
 
