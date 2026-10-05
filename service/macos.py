@@ -1,4 +1,4 @@
-"""Local Codex hook receiver for the macOS Paceman source.
+"""Local agent hook receiver for the macOS Paceman source.
 
 The private Unix socket is reachable only through a user-owned directory. Hook
 payloads are reduced to session/turn IDs and lifecycle states before storage.
@@ -19,6 +19,8 @@ import threading
 import time
 import unicodedata
 
+from service.claude import ClaudeSession
+from macos.claude_hook import EVENTS as CLAUDE_EVENTS
 from service.codex_limits import read_codex_allowance
 from service.codex_turns import read_codex_turn_statuses
 
@@ -76,6 +78,8 @@ class MacSource:
         self.closed = False
         self.monotonic = monotonic
         self.pending_attention = {}
+        self.claude_sessions = {}
+        self.last_event_by_provider = {}
         # Async questions outlive the tool call, but end with their turn.
         # A later user message can clear one while the turn is still running.
         self.pending_questions = {}
@@ -133,6 +137,15 @@ class MacSource:
                 if self.last_event_at:
                     db.execute("INSERT OR REPLACE INTO metadata VALUES ('mac_last_agent_event_at',?)",
                                (str(self.last_event_at),))
+                for row in db.execute("SELECT key,value FROM metadata WHERE key LIKE 'mac_last_event_%'"):
+                    provider = row["key"].removeprefix("mac_last_event_")
+                    if provider in ("codex", "claude"):
+                        try:
+                            observed = float(row["value"])
+                            if math.isfinite(observed) and observed > 0:
+                                self.last_event_by_provider[provider] = observed
+                        except (TypeError, ValueError):
+                            pass
                 db.execute("DELETE FROM schedule WHERE fired=0")
                 # Hook IDs prove that a session emitted an event, not that it is
                 # still open after this receiver was stopped. Start clean.
@@ -166,10 +179,15 @@ class MacSource:
     def receive(self, command: dict) -> bool:
         if not isinstance(command, dict) or command.get("command") != "agent-event":
             raise ValueError("Unsupported command")
+        provider = command.get("provider", "codex")
+        if provider not in ("codex", "claude"):
+            raise ValueError("Unsupported provider")
         session, turn, event = (command.get(key) for key in ("session", "turn", "event"))
         if (not isinstance(session, str) or not IDENTIFIER.fullmatch(session)
                 or not isinstance(turn, str) or (turn and not IDENTIFIER.fullmatch(turn))
-                or event not in EVENT_STATES):
+                or not isinstance(event, str)
+                or event not in (EVENT_STATES if provider == "codex" else
+                                 {*CLAUDE_EVENTS.values(), "question-opened", "interrupted"})):
             raise ValueError("Invalid event")
         workspace_label = command.get("workspaceLabel")
         if workspace_label is not None:
@@ -178,6 +196,8 @@ class MacSource:
                     or "/" in workspace_label or "\\" in workspace_label
                     or any(unicodedata.category(char).startswith("C") for char in workspace_label)):
                 workspace_label = None
+        if provider == "claude":
+            return self._receive_claude({**command, "workspaceLabel": workspace_label})
         key = hashlib.sha256(("codex:" + session).encode()).hexdigest()
         with self.lock, self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -219,9 +239,7 @@ class MacSource:
                     if previous is None:
                         db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
                                    (key, turn, "working", time.time(), workspace_label))
-                    self.last_event_at = time.time()
-                    db.execute("INSERT OR REPLACE INTO metadata VALUES ('mac_last_agent_event_at',?)",
-                               (str(self.last_event_at),))
+                    self._record_event(db, "codex")
                     return False
                 if event == "needs-input":
                     pending = self.pending_attention.get(key)
@@ -230,9 +248,7 @@ class MacSource:
                         return False
                     self.pending_attention[key] = (turn, self.monotonic() + ATTENTION_DELAY,
                                                    workspace_label)
-                    self.last_event_at = time.time()
-                    db.execute("INSERT OR REPLACE INTO metadata VALUES ('mac_last_agent_event_at',?)",
-                               (str(self.last_event_at),))
+                    self._record_event(db, "codex")
                     return False
                 self.pending_attention.pop(key, None)
                 question_cleared = False
@@ -244,9 +260,47 @@ class MacSource:
                     return False
                 db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
                            (key, turn, EVENT_STATES[event], time.time(), workspace_label))
-            self.last_event_at = time.time()
-            db.execute("INSERT OR REPLACE INTO metadata VALUES ('mac_last_agent_event_at',?)",
-                       (str(self.last_event_at),))
+            self._record_event(db, "codex")
+            return self._publish(db)
+
+    def _record_event(self, db, provider):
+        self.last_event_at = time.time()
+        self.last_event_by_provider[provider] = self.last_event_at
+        db.execute("INSERT OR REPLACE INTO metadata VALUES ('mac_last_agent_event_at',?)",
+                   (str(self.last_event_at),))
+        db.execute("INSERT OR REPLACE INTO metadata VALUES (?,?)",
+                   ("mac_last_event_" + provider, str(self.last_event_at)))
+
+    def _receive_claude(self, command):
+        hook, event, turn = (command.get(k) for k in ("hook", "event", "turn"))
+        if (not isinstance(hook, str) or hook not in CLAUDE_EVENTS
+                or (not turn and hook not in ("SessionStart", "SessionEnd"))
+                or (event != CLAUDE_EVENTS[hook] and (hook, event) not in
+                    (("PreToolUse", "question-opened"), ("PostToolUseFailure", "interrupted")))):
+            raise ValueError("Invalid Claude lifecycle")
+        for field in ("tool", "toolUse", "inputID"):
+            value = command.get(field)
+            if value is not None and (not isinstance(value, str) or not IDENTIFIER.fullmatch(value)):
+                raise ValueError("Invalid Claude scope")
+        if hook in ("PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure") and not command.get("tool"):
+            raise ValueError("Missing tool scope")
+        if hook in ("Elicitation", "ElicitationResult") and not command.get("inputID"):
+            raise ValueError("Missing input scope")
+        key = hashlib.sha256(("claude:" + command["session"]).encode()).hexdigest()
+        with self.lock, self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            previous = self.claude_sessions.get(key)
+            if event == "ended":
+                self.claude_sessions.pop(key, None)
+            elif event == "started":
+                if previous is None:
+                    self.claude_sessions[key] = ClaudeSession(workspace_label=command.get("workspaceLabel"))
+            else:
+                current = previous or ClaudeSession()
+                if not current.receive(command, self.monotonic(), ATTENTION_DELAY):
+                    return False
+                self.claude_sessions[key] = current
+            self._record_event(db, "claude")
             return self._publish(db)
 
     def tick(self):
@@ -256,6 +310,16 @@ class MacSource:
             if self.closed:
                 return
             now = self.monotonic()
+            if self.claude_sessions:
+                retired_claude = [key for key, session in self.claude_sessions.items()
+                                  if session.base_state in ("finished", "failed")
+                                  and session.updated <= time.time() - FINISHED_RETENTION]
+                for key in retired_claude:
+                    del self.claude_sessions[key]
+                # Publish only if a debounced attention state actually changed.
+                with self.store.connect() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    self._publish(db, lifecycle_only=bool(retired_claude))
             due = [(key, pending) for key, pending in self.pending_attention.items()
                    if pending[1] <= now]
             if due:
@@ -362,8 +426,13 @@ class MacSource:
             self._publish(db)
 
     def _publish(self, db, *, lifecycle_only=False) -> bool:
-        records = db.execute("SELECT * FROM mac_sessions ORDER BY id").fetchall()
         now_monotonic = self.monotonic()
+        records = [{**dict(row), "provider": "codex"} for row in
+                   db.execute("SELECT * FROM mac_sessions ORDER BY id")]
+        records.extend({"id": key, "turn": item.turn, "state": item.state(now_monotonic),
+                        "workspace_label": item.workspace_label, "provider": "claude"}
+                       for key, item in self.claude_sessions.items())
+        records.sort(key=lambda row: row["id"])
         sessions = []
         for row in records:
             question = self.pending_questions.get(row["id"])
@@ -372,7 +441,7 @@ class MacSource:
             state = ("needs_input" if row["state"] not in ("finished", "failed")
                      and question and question[0] == row["turn"] and question[1] <= now_monotonic
                      else row["state"])
-            session = {"id": row["id"], "provider": "codex", "state": state}
+            session = {"id": row["id"], "provider": row["provider"], "state": state}
             if row["workspace_label"]:
                 session["workspaceLabel"] = row["workspace_label"]
             sessions.append(session)
