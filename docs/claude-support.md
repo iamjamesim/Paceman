@@ -56,7 +56,15 @@ identity is unavailable, keep readings scoped to their reporting computer;
 never infer that two computers share an account or add their percentages.
 An unavailable or stale Claude reading must not clear Codex, and vice versa.
 
-Proposed presentation, pending product review:
+Agreed activity model:
+
+- One Live Activity per computer and one top-level robot for that computer.
+- Aggregate all its Codex and Claude sessions using the existing priority:
+  needs input, failed, working, finished, idle.
+- Supporting text identifies which provider needs attention and shows mixed
+  activity. Selecting a usage provider does not filter activity or alerts.
+
+Usage presentation direction:
 
 - Show both providers in the phone/watch app wherever space permits. Display
   the provider, window, remaining percentage and reset time distinctly.
@@ -67,14 +75,17 @@ Proposed presentation, pending product review:
 - Hide the picker when there is only one available provider. Do not silently
   substitute the other provider when the selected reading becomes unavailable.
 
-The acquisition route is still open. Claude's documented CLI status-line input
-contains five-hour and seven-day limits, but that alone does not establish a
-reader for the VS Code extension. CodexBar has OAuth, web and CLI readers and
-machine-readable output; reusing it is an option, not yet a dependency decision.
+Implementation default: Paceman works independently of CodexBar. Use the
+currently signed-in account for each provider in the first version; additional
+account switching is outside that initial scope. Claude's documented CLI
+status-line input contains five-hour and seven-day limits, but that alone does
+not establish a reader for VS Code-only users. Validate an independent reader
+before claiming usage support across interfaces. CodexBar's readers are a
+reference, not a required installation.
 
 ## Remaining implementation and verification
 
-1. Choose the usage reader and add provider/window-scoped readings, including
+1. Validate an independent usage reader and add provider/window-scoped readings, including
    freshness, account changes and backward compatibility.
 2. Add provider-aware installer, upgrade, removal and hook review. Preserve
    existing Claude settings and unrelated hooks. Claude-only users must not be
