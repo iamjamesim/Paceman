@@ -23,7 +23,6 @@ struct WatchAllowanceSnapshot: Codable, Equatable {
     }
 
     var providerName: String { provider == "claude" ? "Claude" : "Codex" }
-    var providerAbbreviation: String { provider == "claude" ? "CLD" : "CDX" }
     var usageID: String { "\(provider)/\(window)/\(windowDurationMins ?? 0)" }
 
     var limitTitle: String {
@@ -73,10 +72,6 @@ struct WatchAllowanceSnapshot: Codable, Equatable {
             return "\(hours) hour\(hours == 1 ? "" : "s")\(rest == 0 ? "" : ", \(rest) minute\(rest == 1 ? "" : "s")")"
         }
         return "\(minutes) minute\(minutes == 1 ? "" : "s")"
-    }
-
-    static func load() -> Self? {
-        WatchUsageState.load().selected(at: Date())
     }
 
     static func save(_ value: Self?, defaults: UserDefaults? = UserDefaults(suiteName: appGroup)) {

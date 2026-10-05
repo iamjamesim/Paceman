@@ -119,7 +119,6 @@ final class WatchPushDelegate: NSObject, WKApplicationDelegate {
 final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
     static let shared = WatchAllowanceStore()
     @Published private(set) var usage = WatchUsageState.load()
-    var allowance: WatchAllowanceSnapshot? { usage.selected(at: Date()) }
     private var pushTokenMessage: [String: Any]?
 
     override init() {

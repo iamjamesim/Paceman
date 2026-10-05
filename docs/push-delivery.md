@@ -9,9 +9,12 @@ By default, the source worker sends activity notifications and Live Activity upd
 
 The worker coalesces activity to the newest snapshot, waits at least ten seconds between attempts, discards events over five minutes old, and retries transient failures with backoff. A process crash can duplicate a send. Appearance-only changes do not send activity alerts. The iPhone always fetches from its stored paired endpoint, not a URL supplied by the push.
 
-Apple Watch usage changes are sent as one bounded bundle (up to four provider/window readings), spaced at least 20 minutes per destination, with periodic recovery sends while readings remain fresh. Older destinations retain single-provider payloads. Provider sign-out is represented by removal from the complete bundle. APNs acceptance does not prove watchOS processed the push.
+Apple Watch usage changes are bundled and spaced at least 20 minutes per destination, with periodic recovery sends while readings remain fresh. APNs acceptance does not prove watchOS processed the push.
 
 ## Authenticated relay
+
+Deploy relay updates before sources or clients that emit new payload fields. The
+relay accepts legacy payloads alongside the current formats.
 
 The phone approves its pairing with App Attest and registers each APNs token hash using its pairing credential before sending the raw token to the Mac. The Mac's first push presents its source credential and locally stored client hash; the relay checks both against the phone's approved token, environment, and mode before calling APNs. Removing a client clears its local destination and queues relay revocation until acknowledged. See [relay setup](../service/RELAY.md) for deployment and revocation, and [protocol](protocol.md#phone-notifications-and-live-activities) for the request contract.
 

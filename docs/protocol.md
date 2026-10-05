@@ -231,40 +231,30 @@ ESP32 watch. An update for snapshot revision 12 looks like:
 
 The `content-state` matches the iPhone's `MonitoringActivity.ContentState`:
 generation and revision identify the display update; state, counts and
-optional provider/workspace labels render it; optional `providerStates` maps each provider to its working/needs_input/finished/failed counts and must sum to the aggregate counts; `freshUntil` and `stale-date`
-bound freshness. A start push also carries `attributes` with the source ID
+optional provider/workspace labels render it. Optional `providerStates` maps each
+provider to its working/needs_input/finished/failed counts, which sum to the aggregate
+counts. `freshUntil` and `stale-date` bound freshness. A start push also carries `attributes` with the source ID
 and display name. An end push sets `event` to `end`.
 
-The separate watchOS app (watchOS 26+) receives usage-only background pushes
-(`apns-push-type: background`, `aps.content-available: 1`) at its own app token
-from the first paired source. Its notification handler stores all provider/window
-readings and calls `WidgetCenter.reloadTimelines` for the complications. WidgetKit's
-[own push path](https://developer.apple.com/documentation/widgetkit/updating-widgets-with-widgetkit-push-notifications)
-uses a different token, `apns-push-type: widgets`, and `aps.content-changed`. Paceman
-continues to use the app background path because a timeline reload alone would not
-supply new readings to the shared cache.
+The watchOS app receives usage-only background pushes
+(`apns-push-type: background`, `aps.content-available: 1`) at its app token from the
+first paired source, stores the readings and reloads its complications. WatchConnectivity also
+supplies full usage snapshots. Accounts from separate computers are not combined.
+Each Limit or Reset complication chooses Codex or Claude independently and shows
+that provider's most constrained unexpired window. Apple Watch requires watchOS 26+.
 
-Each Limit or Reset complication uses `AppIntentConfiguration` with a Codex/Claude
-provider parameter. Returning no preconfigured recommendations enables watchOS 26's
-native configuration editor. Two complications can select different providers.
-Each chooses its provider's most constrained unexpired window; at reset the timeline
-can switch to another unexpired window for that same provider. Unavailable usage
-never substitutes another provider or computer. The phone's ESP32 usage setting
-does not control Apple Watch complications.
+The watch app advertises `usageSchema: 2` with its token; the phone forwards this
+capability in source registration. Schema 2 pushes carry all available windows
+(at most four), including an empty array when no readings remain. Older destinations
+receive schema 1's single `allowance` reading for their registered provider.
 
-WatchConnectivity supplies `allowances`, `selectedProvider` (for legacy watch apps),
-`selectionRevision`, `sourceID` and `observedAt`, keeping the selected reading's flat
-fields for older watch apps. The watch app advertises `usageSchema: 2` with its push
-token; the phone forwards that capability during source registration. Older watch
-destinations continue receiving schema 1 single-provider payloads.
-
-Schema 2 pushes contain a complete array of up to four provider/window readings,
-including an empty array when no readings remain. Original per-window observation
-times stay unchanged for cached data. The whole-snapshot `observedAt` orders full
-phone and push snapshots, so delayed data cannot restore a signed-out provider.
-Pushes must match the phone's source and revision; only phone messages can change
-them. Source registration ignores older revisions, and delivery bookkeeping guards
-against registration changes during a send. Example:
+WatchConnectivity uses schema 1 with `allowances`, `observedAt`, `sourceID`,
+`selectedProvider` and `selectionRevision`, retaining flat selected-reading fields
+for older watch apps. Schema 2 pushes require the source and revision to match the
+phone's current settings. Only the phone changes that identity. `observedAt` orders
+complete snapshots, including sign-out removals; each reading keeps its original
+`updatedAt` and reset time. Older registrations cannot undo a newer phone revision.
+Example background push:
 
 ```json
 {
@@ -366,7 +356,3 @@ Implementations: [source API](../service/hub.py),
 [iPhone source decoder](../ios/AgentCompanion/SourceClient.swift),
 [iPhone watch link](../ios/AgentCompanion/WatchLink.swift), and
 [watch ANCS client](../firmware/esp32-watch/firmware/main/watch_ancs.c).
-
-The hosted relay must be updated to accept schema 2 watch usage bundles, the optional `providerStates` and watch
-selection/source fields before enabling this branch’s sender. Legacy payloads remain
-accepted. See [Claude acceptance testing](claude-support.md).

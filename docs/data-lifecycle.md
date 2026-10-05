@@ -17,7 +17,7 @@ cache. See the [source protocol](protocol.md) for freshness fields.
 | iPhone protected Application Support | One last-known snapshot per source, weather cache and bounded transport diagnostics | Source removal, relevant setting change or replacement data |
 | iPhone preferences | Phone theme, source names, per-watch settings, ESP32 usage provider/source revision and delivery bookkeeping | User change or corresponding device removal |
 | ESP32 watch NVS | Owner/bond, accepted profile, clock and preferences | Deliberate factory reset or owner transfer |
-| Apple Watch shared preferences | Provider/window usage cache, snapshot observation time, legacy provider selection, phone revision and reporting source; WidgetKit owns each complication’s provider choice | Authoritative phone clear/source change or newer accepted data; expired readings remain unavailable |
+| Apple Watch shared preferences | Provider/window usage cache, snapshot observation time, phone revision and reporting source; WidgetKit owns each complication’s provider choice | Authoritative phone clear/source change or newer accepted data; expired readings remain unavailable |
 | Live Activity | Expiring ActivityKit display copy | New event, stale date or lifecycle end |
 
 The watch keeps activity in RAM, so reboot clears old alerts. The phone keeps
@@ -33,8 +33,8 @@ source restart; Mac clears hook-only sessions until another hook arrives.
   after three hours, and daily high/low at the forecast location's midnight.
   Failure does not refresh their timestamps. Each complication's configured provider
   stays fixed when another reading arrives; an unavailable provider cannot borrow
-  another provider or computer. Full watch snapshots carry all windows and removals;
-  older snapshot times, phone revisions and wrong-source pushes are rejected. Usage changes do not create activity alerts.
+  another provider or computer. Older snapshot times, phone revisions and wrong-source
+  pushes are rejected; newer full snapshots remove signed-out providers.
 - Theme, identity and preferences survive disconnection. Confirmed revocation
   clears the affected source cache; removing one source leaves others intact.
 - iOS owns suspended network and Bluetooth work. Core Bluetooth pending
@@ -44,11 +44,11 @@ source restart; Mac clears hook-only sessions until another hook arrives.
 - The phone and ESP32 watch may be reachable while a computer is not, or vice
   versa. Each surface reports its own link without inferring the other.
 
-On Mac, hook-observed sessions clear on source restart. Working does not time out;
-finished and failed rows retire after ten minutes. Claude token changes on a failed
-usage request and invalid sign-in clear only Claude readings. Transient Claude usage failures
-retain the original cached times. Credentials remain in Claude’s existing profile or
-Keychain; Paceman retains neither a copy nor refresh tokens.
+On Mac, Working does not time out; finished and failed rows retire after ten
+minutes. Invalid Claude sign-in or a token change followed by a failed request
+clears only Claude usage. Transient failures retain cached readings and their times.
+Claude credentials stay in its existing profile or Keychain; Paceman does not copy
+or refresh them.
 
 The source prunes old untracked sessions after 24 hours. Its events table keeps
 the latest 1,024 revisions and the most recent activity event. Revisions remain

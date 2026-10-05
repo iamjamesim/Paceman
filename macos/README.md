@@ -88,29 +88,23 @@ Claude approval decisions. Project labels may appear on your iPhone Lock Screen.
 
 Keep Paceman's review window open, start a **fresh local Claude session** in the
 interface you use, and submit a prompt. Verify `lastAgentEventByProvider.claude`
-advances in `pacemanctl status`; repeat separately for CLI, VS Code and desktop
-Code when using them. Hook presence alone does not prove delivery. A user interrupt
-without another observable event can leave the old state until a new prompt or
-SessionEnd. [Claude support](../docs/claude-support.md) describes other boundaries
-and the acceptance checklist.
+advances in `pacemanctl status`; repeat for each interface you use. Hook presence
+alone does not prove delivery. See coverage limits below for unobserved activity.
 
 ### Usage
 
-Paceman works independently of CodexBar. It retains both agents' usage windows and
-the iPhone computer screen shows each separately. On **watchOS 26+**, choose Codex
-or Claude for each complication in the watch-face editor; add two to show both.
+The iPhone computer screen shows both agents' usage windows separately. On
+**watchOS 26+**, choose Codex or Claude for each complication in the watch-face editor; add two to show both.
 **iPhone Settings → ESP32 usage** selects the ESP32 meter's provider when that watch
 is paired and both providers are available. Activity and notifications continue to
-include both. Usage stays with the first paired
-computer rather than mixing accounts across computers.
+include both. Usage stays with the first paired computer.
 
 Claude usage needs an existing Claude Code subscription sign-in. If Paceman needs
 access, choose **Manage Paceman… → Allow Claude usage access…**; this explicit check
 may prompt for Keychain permission. Background checks do not prompt. Sign in or
 refresh sign-in in Claude Code if needed. Paceman never copies or refreshes your
-credentials. The reader depends on Anthropic's OAuth usage endpoint and still
-requires a real signed-in acceptance check before release. API-key-only usage is
-not supported by this reader.
+credentials. Usage requires the current subscription account; API-key-only usage
+is unsupported. Anthropic's OAuth usage endpoint is undocumented and may change.
 
 ## Connect your iPhone
 
@@ -155,7 +149,7 @@ Download the source from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/r
 python3 -m macos.install
 ```
 
-The installer builds the menu app and background helper, installs to `~/Applications/Paceman.app`, and prepares notifications, the private Tailscale route, and hooks for selected agents. It preserves existing pairings, Sharing choice, agent selection, notification configuration, and unrelated hooks. Use current repository source for Claude support; released Desktop 0.1.0 source monitors Codex. Pass `--agents claude` or `--agents codex claude` to select explicitly. If setup is incomplete, Paceman explains what needs attention. If your `python3` is too old, invoke a newer interpreter explicitly.
+The installer builds the menu app and background helper, installs to `~/Applications/Paceman.app`, and prepares notifications, the private Tailscale route, and hooks for selected agents. It preserves existing pairings, Sharing choice, agent selection, notification configuration, and unrelated hooks. Pass `--agents claude` or `--agents codex claude` to select explicitly. If setup is incomplete, Paceman explains what needs attention. If your `python3` is too old, invoke a newer interpreter explicitly.
 
 The installer uses a matching Paceman signing identity if one is installed, otherwise an ad hoc signature. You do not need Paceman's signing credentials to build locally. Ad hoc and Apple Development signatures are for local builds; public Mac distribution requires Developer ID signing and notarization.
 
@@ -198,10 +192,21 @@ Use the Python 3.11+ interpreter printed by the source installer if needed. If r
 </details>
 
 <details>
-
 <summary>Coverage limits</summary>
 
+Mac hooks cannot verify process ownership. Codex async-question attention can clear
+on an unrelated user message. Completed turns clear attention; finished and failed
+rows retire after ten minutes.
 
-An unrelated user message can clear async-question attention early; a completed turn clears it. Without `SessionEnd`, a Finished row can remain for up to ten minutes. Mac hooks cannot verify process ownership. The source reads Codex windows through a short-lived local App Server and Claude windows through a read-only OAuth usage request every five minutes. It sends only provider, percentage, window/duration, observation time, and reset time. Both remain independent; a reset without a fresh reading shows unavailable. Claude’s main-turn, interruption and subagent limits are documented in [Claude support](../docs/claude-support.md).
+Claude tracks the local main turn, not independent subagents, background tasks or
+remote/cloud sessions. Questions and approvals appear after five seconds; an
+approved tool can retain attention until its observed calls return. An interrupt
+without another hook can retain the old state until a new prompt or `SessionEnd`.
+Another Stop hook can briefly show Finished before a tool resumes the same turn.
+
+The source reads Codex usage through its local App Server and Claude usage through
+a read-only OAuth request every five minutes. It sends only provider, percentage,
+window/duration, observation and reset times. A reset without a fresh reading shows
+unavailable.
 
 </details>
