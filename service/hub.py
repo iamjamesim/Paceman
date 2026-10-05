@@ -133,6 +133,13 @@ class Store:
                 db.execute("ALTER TABLE push_devices DROP COLUMN mode")
             if "recovery_sends" not in {row[1] for row in db.execute("PRAGMA table_info(watch_push_devices)")}:
                 db.execute("ALTER TABLE watch_push_devices ADD COLUMN recovery_sends INTEGER NOT NULL DEFAULT 0")
+            watch_columns = {row[1] for row in db.execute("PRAGMA table_info(watch_push_devices)")}
+            if "provider" not in watch_columns:
+                db.execute("ALTER TABLE watch_push_devices ADD COLUMN provider TEXT NOT NULL DEFAULT 'codex'")
+            if "selection_revision" not in watch_columns:
+                db.execute("ALTER TABLE watch_push_devices ADD COLUMN selection_revision INTEGER NOT NULL DEFAULT 0")
+            if "usage_schema" not in watch_columns:
+                db.execute("ALTER TABLE watch_push_devices ADD COLUMN usage_schema INTEGER NOT NULL DEFAULT 1")
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM clients c LEFT JOIN client_devices d ON d.client_id=c.id "
                           "WHERE d.client_id IS NULL LIMIT 1").fetchone():
@@ -293,7 +300,12 @@ class Store:
                 or not isinstance(payload.get("deviceToken"), str)
                 or not re.fullmatch(r"[0-9a-f]{32,512}", payload["deviceToken"])
                 or len(payload["deviceToken"]) % 2
-                or payload.get("environment") not in ("development", "production")):
+                or payload.get("environment") not in ("development", "production")
+                or payload.get("provider", "codex") not in ("codex", "claude")
+                or type(payload.get("usageSchema", 1)) is not int
+                or payload.get("usageSchema", 1) not in (1, 2)
+                or type(payload.get("selectionRevision", 0)) is not int
+                or not 0 <= payload.get("selectionRevision", 0) <= 9_007_199_254_740_991):
             raise ValueError("Invalid Watch push registration")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -302,11 +314,15 @@ class Store:
                 return None
             client_id = client[0]
             if payload is not None:
-                old = db.execute("SELECT token,environment FROM watch_push_devices WHERE client_id=?",
-                                 (client_id,)).fetchone()
-                if old is None or (old["token"], old["environment"]) != (payload["deviceToken"], payload["environment"]):
-                    db.execute("INSERT OR REPLACE INTO watch_push_devices(client_id,token,environment) VALUES (?,?,?)",
-                               (client_id, payload["deviceToken"], payload["environment"]))
+                provider, revision = payload.get("provider", "codex"), payload.get("selectionRevision", 0)
+                usage_schema = payload.get("usageSchema", 1)
+                old = db.execute("SELECT * FROM watch_push_devices WHERE client_id=?", (client_id,)).fetchone()
+                if old is not None and revision < old["selection_revision"]:
+                    return {"registered": False}
+                if old is None or (old["token"], old["environment"], old["provider"], old["selection_revision"], old["usage_schema"]) != (
+                        payload["deviceToken"], payload["environment"], provider, revision, usage_schema):
+                    db.execute("INSERT OR REPLACE INTO watch_push_devices(client_id,token,environment,provider,selection_revision,usage_schema) "
+                               "VALUES (?,?,?,?,?,?)", (client_id, payload["deviceToken"], payload["environment"], provider, revision, usage_schema))
             row = db.execute("SELECT * FROM watch_push_devices WHERE client_id=?", (client_id,)).fetchone()
         return {"registered": row is not None}
 
@@ -614,9 +630,15 @@ def main():
                     parser.error(str(error))
             elif args.source == "macos":
                 from service.macos import MacSource
+                from service.claude_limits import ClaudeUsageReader
+                from macos.agents import configured_providers, claude_config_dir
+                directory = claude_config_dir(args.data_dir.parent)
+                os.environ["CLAUDE_CONFIG_DIR"] = str(directory)
                 hook_socket = args.agent_socket or args.data_dir / "hook.sock"
                 try:
-                    server.adapter = stack.enter_context(MacSource(store, socket_path=hook_socket))
+                    server.adapter = stack.enter_context(MacSource(store, socket_path=hook_socket,
+                        claude_allowance_reader=ClaudeUsageReader(),
+                        providers=configured_providers(args.data_dir.parent)))
                 except (OSError, ValueError) as error:
                     parser.error(str(error))
             else:

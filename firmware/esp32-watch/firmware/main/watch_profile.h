@@ -6,7 +6,7 @@
 
 enum {
     OMARCHY_PROTOCOL_VERSION_MIN = 1,
-    OMARCHY_PROTOCOL_VERSION = 5,
+    OMARCHY_PROTOCOL_VERSION = 6,
     OMARCHY_PROFILE_KIND = 1,
     OMARCHY_FIRMWARE_VERSION_MAJOR = 0,
     OMARCHY_FIRMWARE_VERSION_MINOR = 6,
@@ -102,6 +102,15 @@ typedef struct __attribute__((packed)) {
     int64_t weather_daily_expires_at;
 } omarchy_profile_v5_t;
 
+/* v6 preserves the v5 prefix. Provider: 1 Codex, 2 Claude.
+ * Window duration belongs to the observed reading, never a guessed reset. */
+typedef struct __attribute__((packed)) {
+    omarchy_profile_v4_t base;
+    int64_t weather_daily_expires_at;
+    uint8_t allowance_provider;
+    uint16_t allowance_duration_minutes;
+} omarchy_profile_v6_t;
+
 enum { OMARCHY_DATA_FRESH_SECONDS = 1800, OMARCHY_WEATHER_CURRENT_SECONDS = 10800 };
 
 static inline bool omarchy_data_stale(int64_t updated, int64_t now)
@@ -166,6 +175,7 @@ _Static_assert(sizeof(omarchy_profile_v2_t) == 81, "v2 profile wire size changed
 _Static_assert(sizeof(omarchy_profile_v3_t) == 85, "v3 profile wire size changed");
 _Static_assert(sizeof(omarchy_profile_v4_t) == 103, "v4 profile wire size changed");
 _Static_assert(sizeof(omarchy_profile_v5_t) == 111, "v5 profile wire size changed");
+_Static_assert(sizeof(omarchy_profile_v6_t) == 114, "v6 profile wire size changed");
 _Static_assert(sizeof(omarchy_identity_v1_t) == 32, "identity wire size changed");
 _Static_assert(sizeof(omarchy_activity_v1_t) == 14, "activity wire size changed");
 
@@ -306,4 +316,16 @@ static inline bool omarchy_profile_v5_is_valid(const omarchy_profile_v5_t *profi
         (end == 0 || (end >= INT64_C(1704067200) && end <= INT64_C(3155759999))) &&
         (!(p->base.flags & OMARCHY_PROFILE_WEATHER_VALID) ||
          p->base.weather_updated_at <= p->base.unix_time);
+}
+
+static inline bool omarchy_profile_v6_is_valid(const omarchy_profile_v6_t *profile)
+{
+    if (!profile || profile->base.base.version != 6) return false;
+    omarchy_profile_v5_t base;
+    memcpy(&base, profile, sizeof(base));
+    base.base.base.version = 5;
+    return omarchy_profile_v5_is_valid(&base) &&
+        (profile->allowance_provider == 1 || profile->allowance_provider == 2) &&
+        (profile->base.allowance_remaining == 255 ? profile->allowance_duration_minutes == 0 :
+         profile->allowance_duration_minutes >= 1 && profile->allowance_duration_minutes <= 10080);
 }

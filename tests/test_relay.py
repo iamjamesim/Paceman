@@ -2,7 +2,10 @@ import json
 from pathlib import Path
 import plistlib
 import secrets
+import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import uuid
@@ -16,6 +19,23 @@ from service.push import RelayConfig
 
 
 class RelaySetupTests(unittest.TestCase):
+    def test_relay_image_can_import_its_entry_point(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory)
+            for line in (root / "Dockerfile.relay").read_text().splitlines():
+                if not line.startswith("COPY "):
+                    continue
+                *sources, destination = shlex.split(line)[1:]
+                target = image / destination
+                target.mkdir(parents=True, exist_ok=True)
+                for source in sources:
+                    shutil.copy2(root / source, target / Path(source).name)
+            result = subprocess.run([sys.executable, "-I", "-c",
+                "import sys; sys.path.insert(0, '.'); import service.relay"],
+                cwd=image, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def setUp(self):
         self.source = str(uuid.uuid4())
         self.source_key = secrets.token_urlsafe(32)

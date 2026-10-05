@@ -39,6 +39,13 @@ class DesktopStatus:
             "computerName": socket.gethostname(),
             "activity": snapshot["state"], "sessions": len(snapshot["sessions"]),
             "sessionCounts": session_counts,
+            "allowances": snapshot.get("allowances", []),
+            "usageStatus": snapshot.get("usageStatus", {}),
+            "providerCounts": {p: {state: sum(s["provider"] == p and s["state"] == state
+                for s in snapshot["sessions"]) for state in session_counts}
+                for p in sorted({s["provider"] for s in snapshot["sessions"]})},
+            "providers": sorted({s["provider"] for s in snapshot["sessions"]}),
+            "lastAgentEventByProvider": getattr(adapter, "last_event_by_provider", {}),
             "sessionLiveness": local_liveness,
             "lastAgentEventAt": getattr(adapter, "last_event_at", 0),
             "clients": clients,

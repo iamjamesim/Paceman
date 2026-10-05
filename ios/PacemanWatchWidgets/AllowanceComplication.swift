@@ -1,5 +1,6 @@
 import SwiftUI
 import WidgetKit
+import AppIntents
 
 @main
 struct PacemanWatchWidgets: WidgetBundle {
@@ -15,73 +16,88 @@ private enum AllowanceMetric {
     var kind: String { self == .limit ? "PacemanAllowance" : "PacemanReset" }
 }
 
+enum UsageProvider: String, AppEnum {
+    case codex, claude
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Provider"
+    static let caseDisplayRepresentations: [Self: DisplayRepresentation] = [
+        .codex: "Codex", .claude: "Claude"
+    ]
+    var name: String { self == .claude ? "Claude" : "Codex" }
+    var abbreviation: String { self == .claude ? "CLD" : "CDX" }
+}
+
+struct UsageConfigurationIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "Usage provider"
+    static let description = IntentDescription("Choose the agent shown by this complication.")
+    @Parameter(title: "Provider", default: .codex)
+    var provider: UsageProvider
+}
+
 private struct AllowanceEntry: TimelineEntry {
     let date: Date
+    let provider: UsageProvider
     let allowance: WatchAllowanceSnapshot?
 }
 
-private struct AllowanceProvider: TimelineProvider {
+private struct AllowanceProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> AllowanceEntry {
         let now = Date()
-        return AllowanceEntry(date: now, allowance: .sample(at: now))
+        return AllowanceEntry(date: now, provider: .codex, allowance: .sample(at: now, provider: .codex))
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (AllowanceEntry) -> Void) {
+    func snapshot(for configuration: UsageConfigurationIntent, in context: Context) async -> AllowanceEntry {
         let now = Date()
-        completion(AllowanceEntry(date: now, allowance: .sample(at: now)))
+        let value = context.isPreview ? WatchAllowanceSnapshot.sample(at: now, provider: configuration.provider)
+            : WatchUsageState.load().reading(for: configuration.provider.rawValue, at: now)
+        return AllowanceEntry(date: now, provider: configuration.provider, allowance: value)
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<AllowanceEntry>) -> Void) {
+    // watchOS 26 supplies the per-instance configuration editor.
+    func recommendations() -> [AppIntentRecommendation<UsageConfigurationIntent>] { [] }
+
+    func timeline(for configuration: UsageConfigurationIntent, in context: Context) async -> Timeline<AllowanceEntry> {
         let now = Date()
-        let value = WatchAllowanceSnapshot.load()
-        var dates = [now]
-        if let value, value.available(at: now) {
+        let state = WatchUsageState.load()
+        var dates = Set([now])
+        var reload: Date?
+        for value in state.readings where value.provider == configuration.provider.rawValue && value.available(at: now) {
             let reset = Date(timeIntervalSince1970: value.resetsAt)
-            let shortStep: TimeInterval = 300
-            // Entries update the ring and static text; native date text updates on its own.
+            var last = now
+            // Keep the existing ring/countdown cadence for each quota window.
             for _ in 0..<70 {
-                let remaining = reset.timeIntervalSince(dates.last!)
+                let remaining = reset.timeIntervalSince(last)
                 let next: Date
                 if remaining >= 86_400 {
-                    // Compact day/hour text changes on reset-relative hour boundaries.
-                    let wholeHours = Int(remaining / 3_600)
-                    next = reset.addingTimeInterval(-Double(wholeHours) * 3_600 + 1)
-                } else if remaining > 3_600 {
-                    next = dates.last!.addingTimeInterval(900)
+                    next = reset.addingTimeInterval(-Double(Int(remaining / 3_600)) * 3_600 + 1)
                 } else {
-                    next = dates.last!.addingTimeInterval(shortStep)
+                    next = last.addingTimeInterval(remaining > 3_600 ? 900 : 300)
                 }
                 if next >= reset { break }
-                dates.append(next)
+                dates.insert(next)
+                last = next
             }
-            let lastRingUpdate = dates.last!
-            let cached = Date(timeIntervalSince1970: value.updatedAt + 1_801)
-            if cached > now && cached < reset { dates.append(cached) }
-            let oneDayBeforeReset = reset.addingTimeInterval(-86_400)
-            if oneDayBeforeReset > now && !dates.contains(oneDayBeforeReset) {
-                dates.append(oneDayBeforeReset)
+            if last < reset.addingTimeInterval(-300) {
+                let nextReload = last.addingTimeInterval(300)
+                reload = min(reload ?? nextReload, nextReload)
             }
-            let afterOneDayBoundary = oneDayBeforeReset.addingTimeInterval(1)
-            if afterOneDayBoundary > now && !dates.contains(afterOneDayBoundary) {
-                dates.append(afterOneDayBoundary)
+            for boundary in [Date(timeIntervalSince1970: value.updatedAt + 1_801),
+                             reset.addingTimeInterval(-86_400), reset.addingTimeInterval(-86_400 + 1), reset] {
+                if boundary > now && boundary <= reset { dates.insert(boundary) }
             }
-            // The reset state must be present even when the ring's 70-entry batch ends early.
-            dates.append(reset)
-            dates.sort()
-            let policy: TimelineReloadPolicy = lastRingUpdate < reset.addingTimeInterval(-shortStep)
-                ? .after(lastRingUpdate.addingTimeInterval(shortStep)) : .never
-            completion(Timeline(entries: dates.map { AllowanceEntry(date: $0, allowance: value) },
-                                policy: policy))
-            return
         }
-        completion(Timeline(entries: dates.map { AllowanceEntry(date: $0, allowance: value) },
-                            policy: .never))
+        // Select again at every entry: when a five-hour quota resets, an
+        // unexpired weekly quota remains available for the same provider.
+        let entries = dates.sorted().map { date in
+            AllowanceEntry(date: date, provider: configuration.provider,
+                           allowance: state.reading(for: configuration.provider.rawValue, at: date))
+        }
+        return Timeline(entries: entries, policy: reload.map { .after($0) } ?? .never)
     }
 }
 
 private struct LimitComplication: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: AllowanceMetric.limit.kind, provider: AllowanceProvider()) { entry in
+        AppIntentConfiguration(kind: AllowanceMetric.limit.kind, intent: UsageConfigurationIntent.self, provider: AllowanceProvider()) { entry in
             AllowanceView(entry: entry, metric: .limit)
                 .containerBackground(.clear, for: .widget)
         }
@@ -93,7 +109,7 @@ private struct LimitComplication: Widget {
 
 private struct ResetComplication: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: AllowanceMetric.reset.kind, provider: AllowanceProvider()) { entry in
+        AppIntentConfiguration(kind: AllowanceMetric.reset.kind, intent: UsageConfigurationIntent.self, provider: AllowanceProvider()) { entry in
             AllowanceView(entry: entry, metric: .reset)
                 .containerBackground(.clear, for: .widget)
         }
@@ -129,7 +145,7 @@ private struct AllowanceView: View {
     }
 
     private var limitTitle: String {
-        entry.allowance?.limitTitle ?? "Weekly limit"
+        entry.allowance?.limitTitle.replacingOccurrences(of: " limit", with: "") ?? "Limit"
     }
 
     private func positiveNarrowStyle(_ fields: Set<Date.ComponentsFormatStyle.Field>) -> Date.ComponentsFormatStyle {
@@ -194,7 +210,7 @@ private struct AllowanceView: View {
         Group {
             if metric == .limit {
                 Gauge(value: fraction, in: 0...1) {
-                    Text("LEFT")
+                    Text(entry.provider.abbreviation)
                         .foregroundStyle(fullColorAccent ?? Color.primary)
                         .widgetAccentable()
                 } currentValueLabel: {
@@ -204,7 +220,7 @@ private struct AllowanceView: View {
                 .tint(fullColorAccent)
             } else {
                 Gauge(value: fraction, in: 0...1) {
-                    Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                    Text(entry.provider.abbreviation)
                         .foregroundStyle(fullColorAccent ?? Color.primary)
                         .widgetAccentable()
                 } currentValueLabel: {
@@ -262,13 +278,13 @@ private struct AllowanceView: View {
         .widgetLabel {
             if metric == .limit {
                 ProgressView(value: fraction, total: 1) {
-                    Text("LIMIT")
+                    Text(entry.provider.abbreviation)
                 }
                 .tint(fullColorAccent)
                 .widgetAccentable()
             } else if value == nil {
                 ProgressView(value: 0, total: 1) {
-                    Text("RESET")
+                    Text(entry.provider.abbreviation)
                 }
                 .tint(fullColorAccent)
                 .widgetAccentable()
@@ -278,7 +294,7 @@ private struct AllowanceView: View {
                 } currentValueLabel: {
                     EmptyView()
                 } minimumValueLabel: {
-                    Text("RESET")
+                    Text(entry.provider.abbreviation)
                 } maximumValueLabel: {
                     Text("")
                 }
@@ -291,9 +307,10 @@ private struct AllowanceView: View {
 
     private var rectangular: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("\(Image(systemName: "gauge.with.needle"))  \(limitTitle)")
+            Text("\(Image(systemName: "gauge.with.needle"))  \(entry.provider.name) · \(limitTitle)")
                 .font(.headline)
                 .fontWeight(.semibold)
+                .minimumScaleFactor(0.55)
                 .foregroundStyle(fullColorAccent ?? Color.primary)
                 .widgetAccentable()
                 .lineLimit(1)
@@ -331,29 +348,29 @@ private struct AllowanceView: View {
     private var inline: some View {
         Group {
             if let value {
-                Text("\(value.remaining)% left")
+                Text("\(entry.provider.name) \(value.remaining)% left")
                     .foregroundStyle(fullColorAccent ?? Color.primary)
                     .widgetAccentable()
             } else {
-                Text("—")
+                Text("\(entry.provider.name) —")
                     .foregroundStyle(.secondary)
             }
         }
     }
 
     private var accessibilityText: String {
-        guard let value else { return "Codex \(metric == .limit ? "limit" : "reset") unavailable" }
+        guard let value else { return "\(entry.provider.name) \(metric == .limit ? "limit" : "reset") unavailable" }
         let freshness = value.cached(at: entry.date) ? "last known" : "current"
         if metric == .limit {
-            return "Codex limit, \(value.remaining) percent remaining, \(freshness), resets \(Date(timeIntervalSince1970: value.resetsAt).formatted())"
+            return "\(value.providerName) \(value.limitTitle), \(value.remaining) percent remaining, \(freshness), resets \(Date(timeIntervalSince1970: value.resetsAt).formatted())"
         }
-        return "Codex reset at \(Date(timeIntervalSince1970: value.resetsAt).formatted()), \(freshness)"
+        return "\(value.providerName) reset at \(Date(timeIntervalSince1970: value.resetsAt).formatted()), \(freshness)"
     }
 }
 
 private extension WatchAllowanceSnapshot {
-    static func sample(at date: Date) -> Self {
-        Self(provider: "codex", remaining: 64, window: 1,
+    static func sample(at date: Date, provider: UsageProvider) -> Self {
+        Self(provider: provider.rawValue, remaining: 64, window: 1,
              updatedAt: date.timeIntervalSince1970,
              resetsAt: date.addingTimeInterval(2.4 * 86_400).timeIntervalSince1970,
              windowDurationMins: 10_080)

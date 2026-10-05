@@ -28,6 +28,7 @@ struct MonitoringWatchCard: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
     private var compactSessionSummary: String {
+        if state.providerStates?.count ?? 0 > 1 { return state.sessionSummary }
         let parts = [(state.needsInput, "input"), (state.failedCount, "failed"),
                      (state.working, "working"), (state.finished, "finished")]
             .filter { $0.0 > 0 }

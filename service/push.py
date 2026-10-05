@@ -14,6 +14,7 @@ import uuid
 from urllib.parse import urlsplit
 
 from service.hub import Store
+from service.usage import PROVIDERS, readings, selected_reading
 
 DEFAULT_RELAY_URL = "https://relay.paceman.ai"
 
@@ -230,16 +231,23 @@ def notification(source_id: str, generation: str, event: dict, now: float,
     return payload, headers
 
 
-def watch_allowance_notification(source_id: str, allowance: dict, now: float) -> tuple[dict, dict]:
+def watch_allowance_notification(source_id: str, allowance: dict, now: float, selection_revision=0) -> tuple[dict, dict]:
     """Quiet, bounded Watch data; the source snapshot is the same one the phone pulls."""
     fields = ("provider", "remaining", "window", "windowDurationMins", "updatedAt", "resetsAt")
     reading = {key: allowance[key] for key in fields if key in allowance}
     return ({"aps": {"content-available": 1}, "schema": 1,
-             "allowance": reading},
+             "allowance": reading, "sourceID": source_id, **({"selectionRevision": selection_revision} if selection_revision else {})},
             {"apns-push-type": "background", "apns-priority": "5",
              "apns-expiration": str(int(now + 3600)),
              "apns-collapse-id": hashlib.sha256((source_id + "/allowance").encode()).hexdigest(),
              "apns-id": str(uuid.uuid4())})
+
+
+def watch_usage_notification(source_id: str, values: list[dict], now: float, selection_revision=0, observed_at=None) -> tuple[dict, dict]:
+    """A complete provider/window snapshot, including removals, for capable Watches."""
+    _, headers = watch_allowance_notification(source_id, {}, now, selection_revision)
+    return ({"aps": {"content-available": 1}, "schema": 2, "sourceID": source_id,
+             "selectionRevision": selection_revision, "observedAt": now if observed_at is None else observed_at, "allowances": values}, headers)
 
 
 LIVE_ALERT_SOUNDS = {"working": "PacemanWorking.wav", "needs_input": "PacemanInput.wav", "finished": "PacemanFinished.wav",
@@ -272,6 +280,10 @@ def live_notification(snapshot: dict, now: float, ending=False,
         content["providers"] = sorted({aliases.get(s.get("provider"), "other")
                                        if isinstance(s.get("provider"), str) else "other"
                                        for s in active_sessions})
+        content["providerStates"] = {p: {state: sum(
+            aliases.get(s.get("provider"), "other") == p and s.get("state") == state for s in active_sessions)
+            for state in ("working", "needs_input", "finished", "failed")}
+            for p in content["providers"]}
         workspaces = {s.get("workspaceLabel") for s in active_sessions if isinstance(s, dict)}
         if len(workspaces) == 1:
             label = next(iter(workspaces))
@@ -431,24 +443,36 @@ class Worker:
                       "status": result.status, "reason": result.reason, "apnsID": result.apns_id})
 
     def step_watch_allowance(self, now, snapshot):
-        allowance = snapshot.get("allowance")
-        if (not isinstance(allowance, dict) or allowance.get("provider") != "codex"
-                or type(allowance.get("remaining")) is not int or not 0 <= allowance["remaining"] <= 100
-                or allowance.get("window") not in (1, 2)
-                or type(allowance.get("updatedAt")) is not int
-                or not 0 <= now - allowance["updatedAt"] <= 1800
-                or type(allowance.get("resetsAt")) is not int or allowance["resetsAt"] <= now
-                or type(allowance.get("windowDurationMins")) is not int
-                or not 1 <= allowance["windowDurationMins"] <= 10080):
-            return
-        fingerprint = json.dumps([allowance[key] for key in
-                                  ("provider", "remaining", "window", "windowDurationMins", "resetsAt")],
-                                 separators=(",", ":"))
         with self.store.connect() as db:
             devices = [dict(row) for row in db.execute(
                 "SELECT w.* FROM watch_push_devices w JOIN clients c ON w.client_id=c.id")]
         for device in devices:
+            if device["usage_schema"] == 2:
+                # Cache age is carried unchanged; signed-out providers disappear
+                # from this complete snapshot. One push updates every complication.
+                observed_at = snapshot.get("observedAt", now)
+                values = [r for provider in PROVIDERS for r in readings(snapshot, provider)
+                          if r["updatedAt"] <= observed_at and type(r.get("windowDurationMins")) is int]
+                values.sort(key=lambda r: (r["provider"], r["window"]))
+                fields = ("provider", "remaining", "window", "windowDurationMins", "updatedAt", "resetsAt")
+                values = [{key: r[key] for key in fields} for r in values]
+                if len(values) > 4 or len({(r["provider"], r["window"]) for r in values}) != len(values):
+                    continue
+                fingerprint_values = [[r[key] for key in fields if key != "updatedAt"] for r in values]
+                payload, headers = watch_usage_notification(snapshot["sourceID"], values, now, device["selection_revision"], observed_at)
+            else:
+                allowance = selected_reading([r for r in readings(snapshot, device["provider"])
+                    if 0 <= now - r["updatedAt"] <= 1800 and type(r.get("windowDurationMins")) is int], now)
+                if allowance is None:
+                    continue
+                fingerprint_values = [allowance[key] for key in
+                    ("provider", "remaining", "window", "windowDurationMins", "resetsAt")]
+                payload, headers = watch_allowance_notification(snapshot["sourceID"], allowance, now, device["selection_revision"])
+            fingerprint = json.dumps([fingerprint_values, device["selection_revision"]], separators=(",", ":"))
             changed = fingerprint != device["last_fingerprint"]
+            if device["usage_schema"] == 2 and not changed and not any(
+                    0 <= now - r["updatedAt"] <= 1800 and now < r["resetsAt"] for r in values):
+                continue
             # Give a changed reading priority. APNs acceptance is not a delivery
             # receipt, so retry unchanged readings sparsely while they stay fresh.
             recovery_delay = (1800 if device["recovery_sends"] == 0 else
@@ -462,7 +486,6 @@ class Worker:
                 owner = db.execute("SELECT hash FROM clients WHERE id=?", (device["client_id"],)).fetchone()
             if current is None or dict(current) != device or owner is None:
                 continue
-            payload, headers = watch_allowance_notification(snapshot["sourceID"], allowance, now)
             result = self.sender.send({**device, "mode": "watch", "client_hash": owner["hash"]}, payload, headers, now)
             invalid = result.status == 410 or result.reason in ("BadDeviceToken", "DeviceTokenNotForTopic")
             accepted = result.status == 200
@@ -480,12 +503,12 @@ class Worker:
                 else:
                     db.execute("UPDATE watch_push_devices SET last_fingerprint=?,last_sent=?,next_attempt=?,"
                                "attempts=?,last_result=?,last_apns_id=?,recovery_sends=? "
-                               "WHERE client_id=? AND token=?",
+                               "WHERE client_id=? AND token=? AND provider=? AND selection_revision=? AND usage_schema=?",
                                (fingerprint if accepted else device["last_fingerprint"],
                                 now if accepted else device["last_sent"], now + delay,
                                 0 if accepted else device["attempts"] + 1, result.reason, result.apns_id,
                                 recovery_sends,
-                                device["client_id"], device["token"]))
+                                device["client_id"], device["token"], device["provider"], device["selection_revision"], device["usage_schema"]))
             self.log({"at": now, "stage": "watch_allowance_accepted" if accepted else "watch_allowance_failed",
                       "clientID": device["client_id"], "status": result.status, "reason": result.reason,
                       "apnsID": result.apns_id})

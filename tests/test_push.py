@@ -8,7 +8,7 @@ import unittest
 from tests.identity import device
 from service.hub import Store
 from service.push import APNs, Config, Result, Worker, notification, watch_allowance_notification
-from service.relay import APNsRouter
+from service.relay import APNsRouter, valid_payload
 
 
 class FakeSender:
@@ -35,6 +35,101 @@ class PushWorkerTests(unittest.TestCase):
 
     def pair(self):
         return self.store.redeem(self.store.invite("https://source.example")["invitation"], device=device())
+
+    def test_watch_provider_selection_survives_newer_other_provider_readings(self):
+        now=1800000000
+        def reading(provider,left):
+            return dict(provider=provider,remaining=left,window=1,windowDurationMins=10080,
+                        updatedAt=now,resetsAt=now+86400)
+        source=dict(sourceID=self.store.metadata("source_id"),allowance=reading("codex",3),
+                    allowances=[reading("codex",3),reading("claude",80)])
+        payload={"deviceToken":"ef"*32,"environment":"development","provider":"claude","selectionRevision":2}
+        self.store.watch_push_device(self.client["credential"],payload)
+        self.worker.step_watch_allowance(now,source)
+        self.assertEqual(self.sender.calls[-1][1]["allowance"]["provider"],"claude")
+        self.assertEqual(self.sender.calls[-1][1]["selectionRevision"],2)
+        self.assertEqual(self.sender.calls[-1][1]["sourceID"],source["sourceID"])
+        # A late registration cannot undo the user's newer choice.
+        self.assertEqual(self.store.watch_push_device(self.client["credential"],{**payload,"provider":"codex","selectionRevision":1}),{"registered":False})
+        source["allowances"]=[reading("codex",1)]
+        self.worker.step_watch_allowance(now+2000,source)
+        self.assertEqual(len(self.sender.calls),1)
+        self.store.watch_push_device(self.client["credential"],{**payload,"provider":"codex","selectionRevision":3})
+        self.worker.step_watch_allowance(now,source)
+        self.assertEqual(self.sender.calls[-1][1]["allowance"]["provider"],"codex")
+
+    def test_complete_watch_usage_preserves_legacy_delivery_and_clears_signed_out_provider(self):
+        now = 1800000000
+        def reading(provider, window, left):
+            return dict(provider=provider, remaining=left, window=window,
+                        windowDurationMins=10080 if window == 1 else 300,
+                        updatedAt=now, resetsAt=now+86400)
+        values = [reading(p, w, left) for p, left in (("codex", 70), ("claude", 20)) for w in (1, 2)]
+        source = dict(sourceID=self.store.metadata("source_id"), observedAt=now+0.5, allowances=values)
+        modern = {"deviceToken": "ef"*32, "environment": "development", "provider": "claude",
+                  "selectionRevision": 2, "usageSchema": 2}
+        self.store.watch_push_device(self.client["credential"], modern)
+        other = self.pair()
+        self.store.watch_push_device(other["credential"], {"deviceToken": "cd"*32, "environment": "development"})
+        self.worker.step_watch_allowance(now, source)
+        by_token = {call[0]["token"]: call[1] for call in self.sender.calls}
+        self.assertEqual(by_token[modern["deviceToken"]]["schema"], 2)
+        self.assertEqual(by_token[modern["deviceToken"]]["observedAt"], now+0.5)
+        self.assertCountEqual(by_token[modern["deviceToken"]]["allowances"], values)
+        self.assertEqual(by_token["cd"*32]["schema"], 1)
+        self.assertEqual(by_token["cd"*32]["allowance"]["provider"], "codex")
+        for payload in by_token.values():
+            self.assertTrue(valid_payload("watch", source["sourceID"], payload))
+        self.worker.step_watch_allowance(now+1199, source)
+        self.assertEqual(len(self.sender.calls), 2)
+        source["allowances"] = [v for v in values if v["provider"] == "codex"]
+        self.worker.step_watch_allowance(now+1200, source)
+        self.assertEqual(self.sender.calls[-1][1]["allowances"], source["allowances"])
+        source["allowances"] = []
+        self.worker.step_watch_allowance(now+2400, source)
+        self.assertEqual(self.sender.calls[-1][1]["allowances"], [])
+        count = len(self.sender.calls)
+        self.worker.step_watch_allowance(now+10000, source)
+        self.assertEqual(len(self.sender.calls), count)  # No recovery churn for empty/stale data.
+
+    def test_complete_watch_payload_rejects_unbounded_duplicate_and_future_data(self):
+        now = 1800000000
+        source = self.store.metadata("source_id")
+        reading = dict(provider="claude", remaining=20, window=2, windowDurationMins=300,
+                       updatedAt=now, resetsAt=now+3600)
+        payload = {"aps": {"content-available": 1}, "schema": 2, "sourceID": source,
+                   "selectionRevision": 2, "observedAt": now, "allowances": [reading]}
+        self.assertTrue(valid_payload("watch", source, payload))
+        self.assertTrue(valid_payload("watch", source, {**payload, "allowances": []}))
+        for bad in ({**payload, "allowances": [reading]*5},
+                    {**payload, "allowances": [reading, {**reading, "windowDurationMins": 60}]},
+                    {**payload, "allowances": [{**reading, "updatedAt": now+1}]},
+                    {**payload, "allowances": [{**reading, "prompt": "private"}]},
+                    {**payload, "sourceID": "bbbbbbbb-2222-4333-8444-555555555555"},
+                    {**payload, "observedAt": True}, {**payload, "observedAt": float("nan")},
+                    {**payload, "allowance": reading}):
+            with self.subTest(payload=bad):
+                self.assertFalse(valid_payload("watch", source, bad))
+
+    def test_watch_capability_upgrade_resets_delivery_without_losing_registration(self):
+        payload = {"deviceToken": "ef"*32, "environment": "development", "selectionRevision": 2}
+        self.store.watch_push_device(self.client["credential"], payload)
+        with self.store.connect() as db:
+            db.execute("UPDATE watch_push_devices SET last_fingerprint='legacy',next_attempt=1800000000")
+        self.store.watch_push_device(self.client["credential"], {**payload, "usageSchema": 2})
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM watch_push_devices").fetchone()
+        self.assertEqual(row["usage_schema"], 2)
+        self.assertEqual(row["next_attempt"], 0)
+        self.assertIsNone(row["last_fingerprint"])
+        with self.assertRaises(ValueError):
+            self.store.watch_push_device(self.client["credential"], {**payload, "usageSchema": True})
+        with self.store.connect() as db:
+            db.execute("ALTER TABLE watch_push_devices DROP COLUMN usage_schema")
+        reopened = Store(self.store.path)
+        with reopened.connect() as db:
+            row = db.execute("SELECT usage_schema,token FROM watch_push_devices").fetchone()
+        self.assertEqual((row["usage_schema"], row["token"]), (1, payload["deviceToken"]))
 
     def test_existing_source_database_adds_per_phone_name(self):
         old = Path(self.tmp.name) / "old.sqlite3"

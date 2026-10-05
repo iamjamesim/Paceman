@@ -15,6 +15,24 @@ final class CompanionModel: ObservableObject {
     @Published var revokedSources: Set<String> = []
     @Published var status = "Connect a work source"
     @Published var busy = false
+    @Published private(set) var selectedUsageProvider = UserDefaults.standard.string(forKey: "usage-provider") ?? "codex"
+    private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
+    var availableUsageProviders: [String] {
+        let values = pairedSources.filter { !isRevoked($0.sourceID) }.compactMap { snapshots[$0.sourceID] }
+        let providers = Set(values.flatMap { ($0.configuredProviders ?? []) + $0.usageReadings.map(\.provider) })
+        return ["codex", "claude"].filter { providers.contains($0) }
+    }
+    func selectUsageProvider(_ provider: String) {
+        guard ["codex", "claude"].contains(provider) else { return }
+        selectedUsageProvider = provider
+        usageSelectionRevision = max(usageSelectionRevision + 1, Int(Date().timeIntervalSince1970 * 1000))
+        if !designPreview {
+            UserDefaults.standard.set(provider, forKey: "usage-provider")
+            UserDefaults.standard.set(usageSelectionRevision, forKey: "usage-selection-revision")
+        }
+        forwardWatchAggregate()
+        if !designPreview { Task { await syncWatchPush() } }
+    }
     private let client = SourceClient()
     private let pairedStore = PairedSourcesStore()
     private var polling: Task<Void, Never>?
@@ -43,6 +61,30 @@ final class CompanionModel: ObservableObject {
                 let id = "aaaaaaaa-2222-4333-8444-555555555555"
                 pairedSources = [PairedSource(endpoint: URL(string: "https://omarchy.example.ts.net")!,
                     sourceID: id, clientID: id, credential: "preview")]
+            }
+            if screen.contains("usage"), let id = pairedSources.first?.sourceID {
+                let now = Date().timeIntervalSince1970
+                let stale = screen.contains("stale")
+                let expired = screen.contains("expired")
+                let empty = screen.contains("empty")
+                let claudeOnly = screen.contains("claude-only")
+                let observed = Int64(now) - (stale ? 7200 : expired ? 4000 : 0)
+                let reset = Int64(now) + (expired ? -60 : 3600)
+                let providers = claudeOnly ? ["claude"] : ["codex", "claude"]
+                let values = empty ? [] : providers.flatMap { provider in
+                    [CodexAllowance(provider: provider, remaining: provider == "claude" ? 20 : 70,
+                        window: 2, updatedAt: observed, resetsAt: reset, windowDurationMins: 300),
+                     CodexAllowance(provider: provider, remaining: provider == "claude" ? 80 : 5,
+                        window: 1, updatedAt: observed, resetsAt: Int64(now) + 86400, windowDurationMins: 10080)]
+                }
+                snapshots[id] = Snapshot(schema: 1, sourceID: id, generation: id, revision: 1,
+                    sourceName: "Jamess-MacBook-Pro", observedAt: Double(observed), changedAt: Double(observed),
+                    freshFor: 30, state: .needsInput, eventID: "1", allowance: nil,
+                    sessions: providers.map { AgentSession(id: $0, provider: $0, state: $0 == "claude" ? .needsInput : .working) },
+                    allowances: values, configuredProviders: providers)
+                lastContacts[id] = Date(timeIntervalSince1970: Double(observed))
+                fetchedUptimes[id] = ProcessInfo.processInfo.systemUptime - (stale ? 7200 : 0)
+                selectedUsageProvider = claudeOnly ? "claude" : "codex"
             }
             if screen.hasPrefix("--screen=multi-") {
                 let id = "11111111-2222-4333-8444-555555555555"
@@ -89,11 +131,12 @@ final class CompanionModel: ObservableObject {
             Task { @MainActor in await self?.refreshAll(fromWatch: true) }
         }
         if !preview {
-            AppleWatchAllowanceBridge.shared.onWatchPushToken = { [weak self] token, environment in
+            AppleWatchAllowanceBridge.shared.onWatchPushToken = { [weak self] token, environment, usageSchema in
                 guard let self,
                       Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String == environment else { return }
                 do {
                     try Vault.save(token, key: "watch-apns-device-token")
+                    try Vault.save(usageSchema, key: "watch-usage-schema")
                     Task { await self.syncWatchPush() }
                 } catch { Diagnostics.shared.record("watch_push_token_store_failed") }
             }
@@ -139,11 +182,15 @@ final class CompanionModel: ObservableObject {
         let current = pairedSources.compactMap { paired -> Snapshot? in
             isFresh(paired.sourceID) ? snapshots[paired.sourceID] : nil
         }
-        let profiles = pairedSources.compactMap { snapshots[$0.sourceID] }
-        let allowance = WatchAggregate.selectAllowance(current: current, profiles: profiles,
-                                                       now: Date().timeIntervalSince1970)
-        return WatchAggregate.make(current: current, allowance: allowance,
-                                   now: Date().timeIntervalSince1970)
+        // Usage stays with the first paired computer, including its cached readings.
+        // Activity still aggregates every connected computer.
+        let profiles = pairedSources.prefix(1).compactMap { isRevoked($0.sourceID) ? nil : snapshots[$0.sourceID] }
+        let allowance = WatchAggregate.selectAllowance(current: current.filter { $0.sourceID == pairedSources.first?.sourceID }, profiles: profiles,
+                                                       now: Date().timeIntervalSince1970, provider: selectedUsageProvider)
+        var aggregate = WatchAggregate.make(current: current, allowance: allowance,
+                                            now: Date().timeIntervalSince1970)
+        aggregate.configuredProviders = [selectedUsageProvider]
+        return aggregate
     }
 
     func setTheme(_ family: ThemeFamily) {
@@ -152,11 +199,28 @@ final class CompanionModel: ObservableObject {
     }
 
     private func forwardWatchAggregate() {
+        if UserDefaults.standard.string(forKey: "usage-provider") == nil, let first = availableUsageProviders.first {
+            selectedUsageProvider = first
+            if !designPreview {
+                usageSelectionRevision = max(usageSelectionRevision + 1, Int(Date().timeIntervalSince1970 * 1000))
+                UserDefaults.standard.set(first, forKey: "usage-provider")
+                UserDefaults.standard.set(usageSelectionRevision, forKey: "usage-selection-revision")
+                Task { await syncWatchPush() }
+            }
+        }
+        let sourceID = pairedSources.first?.sourceID
+        if !designPreview, UserDefaults.standard.string(forKey: "usage-source") != sourceID {
+            usageSelectionRevision = max(usageSelectionRevision + 1, Int(Date().timeIntervalSince1970 * 1000))
+            UserDefaults.standard.set(sourceID, forKey: "usage-source")
+            UserDefaults.standard.set(usageSelectionRevision, forKey: "usage-selection-revision")
+        }
         let value = watchAggregate
         if let value { watch.forward(value) }
         else { watch.clearSourceProfile() }
         if !designPreview {
             AppleWatchAllowanceBridge.shared.update(value?.allowance,
+                readings: pairedSources.prefix(1).compactMap { isRevoked($0.sourceID) ? nil : snapshots[$0.sourceID] }.flatMap(\.usageReadings),
+                provider: selectedUsageProvider, selectionRevision: usageSelectionRevision, sourceID: sourceID, observedAt: sourceID.flatMap { snapshots[$0]?.observedAt },
                 clear: pairedSources.allSatisfy { isRevoked($0.sourceID) })
         }
     }
@@ -290,7 +354,9 @@ final class CompanionModel: ObservableObject {
         }
         do {
             // Pairing order is the allowance preference; only its first source pushes.
-            try await client.registerWatchPush(source, token: token, environment: environment)
+            try await client.registerWatchPush(source, token: token, environment: environment,
+                provider: selectedUsageProvider, selectionRevision: usageSelectionRevision,
+                usageSchema: Vault.load(Int.self, key: "watch-usage-schema") ?? 1)
             Diagnostics.shared.record("watch_push_destination_registered")
         } catch { Diagnostics.shared.record("watch_push_registration_failed") }
     }

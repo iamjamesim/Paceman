@@ -166,6 +166,9 @@ class MacInstallTests(unittest.TestCase):
     def test_successful_service_start_replaces_install(self):
         self._exercise_replacement()
 
+    def test_dual_agent_selection_is_available_before_source_start(self):
+        self._exercise_replacement(agents=["codex", "claude"])
+
     def test_normal_install_prepares_relay_before_first_pairing(self):
         self._exercise_replacement(relay_url="https://relay.paceman.ai")
 
@@ -190,7 +193,7 @@ class MacInstallTests(unittest.TestCase):
     def _exercise_replacement(self, fail_start: bool = False, fail_hooks: bool = False,
                               relay_url: str | None = None, existing_push: bool = False,
                               fail_push: bool = False, fail_route: bool = False,
-                              replace_app: bool = True):
+                              replace_app: bool = True, agents=None):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "home"
             root = home / "Library/Application Support/Paceman"
@@ -245,6 +248,8 @@ class MacInstallTests(unittest.TestCase):
 
             def command(args, **kwargs):
                 if args[:2] == ["/bin/launchctl", "bootstrap"]:
+                    if not bootstraps:
+                        self.assertEqual(json.loads((root / "agents.json").read_text())["providers"], agents or ["codex"])
                     bootstraps.append(args)
                     if fail_start and len(bootstraps) == 1:
                         raise subprocess.CalledProcessError(5, args, "new service failed")
@@ -272,12 +277,12 @@ class MacInstallTests(unittest.TestCase):
                  patch("builtins.print") as output:
                 if fail_start:
                     with self.assertRaises(subprocess.CalledProcessError):
-                        installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app)
+                        installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app, agents=agents)
                 elif fail_hooks:
                     with self.assertRaises(OSError):
-                        installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app)
+                        installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app, agents=agents)
                 else:
-                    ready = installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app)
+                    ready = installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app, agents=agents)
                     self.assertEqual(ready, not fail_push)
                     if fail_route:
                         self.assertTrue(any("Phone connection setup is incomplete" in str(call)
@@ -294,6 +299,7 @@ class MacInstallTests(unittest.TestCase):
             if failed:
                 self.assertEqual(plist.read_bytes(), old_plist)
                 self.assertEqual(hooks.read_bytes(), old_hooks)
+                self.assertFalse((root / "agents.json").exists())
             else:
                 self.assertEqual(plistlib.loads(plist.read_bytes())["ProgramArguments"][0],
                                  str(app / "Contents/MacOS/PacemanBackground"))

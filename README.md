@@ -48,7 +48,7 @@ or [Omarchy source setup](omarchy/README.md#install-from-a-git-checkout).
 
 The Mac and Omarchy installers configure the [APNs relay](service/RELAY.md) for
 locked-phone notifications by default; the iPhone must still allow notifications.
-The Apple Watch app requires watchOS 11 or later.
+The Apple Watch app requires watchOS 26 or later.
 
 Developers can [build the iPhone app with Xcode](docs/development.md#iphone-and-live-activities-mac).
 

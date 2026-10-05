@@ -79,7 +79,8 @@ def bounded_text(value, limit=160):
 
 
 def valid_payload(mode: str, identity: str, payload: object) -> bool:
-    if not exact(payload, ("aps",), ("companion", "schema", "allowance")):
+    if not exact(payload, ("aps",), ("companion", "schema", "allowance") +
+                 (("selectionRevision", "sourceID", "allowances", "observedAt") if mode == "watch" else ())):
         return False
     aps = payload["aps"]
     if mode == "alert":
@@ -96,13 +97,28 @@ def valid_payload(mode: str, identity: str, payload: object) -> bool:
                 and bounded_text(hint["generation"], 64) and bounded_text(hint["eventID"], 128)
                 and type(hint["revision"]) is int and hint["revision"] >= 0)
     if mode == "watch":
-        if not exact(payload, ("aps", "schema", "allowance")) or aps != {"content-available": 1} or payload["schema"] != 1:
+        def valid_watch_reading(reading):
+            return (exact(reading, ("provider", "remaining", "window", "windowDurationMins", "updatedAt", "resetsAt"))
+                    and reading["provider"] in ("codex", "claude") and all(type(reading[k]) is int for k in
+                    ("remaining", "window", "windowDurationMins", "updatedAt", "resetsAt"))
+                    and 0 <= reading["remaining"] <= 100 and reading["window"] in (1, 2)
+                    and 1 <= reading["windowDurationMins"] <= 10080
+                    and 0 <= reading["updatedAt"] < reading["resetsAt"] <= 3155759999)
+        if (aps != {"content-available": 1}
+                or ("sourceID" in payload and (payload["sourceID"] != identity or not valid_uuid(payload["sourceID"])))
+                or ("selectionRevision" in payload and (type(payload["selectionRevision"]) is not int
+                    or not 0 <= payload["selectionRevision"] <= 9_007_199_254_740_991))):
             return False
-        reading = payload["allowance"]
-        return (exact(reading, ("provider", "remaining", "window", "windowDurationMins", "updatedAt", "resetsAt"))
-                and reading["provider"] == "codex" and all(type(reading[k]) is int for k in
-                ("remaining", "window", "windowDurationMins", "updatedAt", "resetsAt"))
-                and 0 <= reading["remaining"] <= 100 and reading["window"] in (1, 2))
+        if payload.get("schema") == 2:
+            values = payload.get("allowances")
+            return (exact(payload, ("aps", "schema", "sourceID", "selectionRevision", "observedAt", "allowances"))
+                    and type(payload["schema"]) is int and type(payload["observedAt"]) in (int, float)
+                    and 1704067200 <= payload["observedAt"] <= 3155759999
+                    and isinstance(values, list) and len(values) <= 4
+                    and all(valid_watch_reading(r) and r["updatedAt"] <= payload["observedAt"] for r in values)
+                    and len({(r["provider"], r["window"]) for r in values}) == len(values))
+        return (exact(payload, ("aps", "schema", "allowance"), ("selectionRevision", "sourceID"))
+                and type(payload["schema"]) is int and payload["schema"] == 1 and valid_watch_reading(payload["allowance"]))
     if mode == "liveactivity":
         if not exact(payload, ("aps",)) or not exact(aps,
                 ("timestamp", "event", "content-state", "stale-date", "relevance-score"),
@@ -111,7 +127,7 @@ def valid_payload(mode: str, identity: str, payload: object) -> bool:
         state = aps["content-state"]
         if not exact(state, ("schema", "generation", "revision", "state", "working", "needsInput",
                 "finished", "failed", "observedAt", "freshUntil", "changedAt"),
-                ("providers", "workspaceLabel")):
+                ("providers", "workspaceLabel", "providerStates")):
             return False
         if (state["schema"] != 1 or not bounded_text(state["generation"], 64)
                 or state["state"] not in ("idle", "working", "needs_input", "finished", "failed")
@@ -121,6 +137,17 @@ def valid_payload(mode: str, identity: str, payload: object) -> bool:
                     or len(state["providers"]) > 4 or any(p not in ("codex", "claude", "other") for p in state["providers"])))
                 or ("workspaceLabel" in state and not bounded_text(state["workspaceLabel"], 160))):
             return False
+        if "providerStates" in state:
+            groups = state["providerStates"]
+            if (not isinstance(groups, dict) or len(groups) > 3
+                    or any(p not in ("codex", "claude", "other") or not exact(counts,
+                        ("working", "needs_input", "finished", "failed"))
+                        or any(type(n) is not int or not 0 <= n <= 1000 for n in counts.values())
+                        for p, counts in groups.items())):
+                return False
+            for raw, field in (("working", "working"), ("needs_input", "needsInput"), ("finished", "finished"), ("failed", "failed")):
+                if sum(c[raw] for c in groups.values()) != state[field]:
+                    return False
         if (aps["event"] not in ("start", "update", "end") or type(aps["timestamp"]) is not int
                 or type(aps["stale-date"]) is not int
                 or type(aps["relevance-score"]) not in (int, float)

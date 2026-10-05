@@ -81,6 +81,22 @@ int main(int argc, char **argv)
     v5.base.base.version = 5;
     v5.base.allowance_resets_at = v5.base.allowance_updated_at;
     assert(!omarchy_profile_v5_is_valid(&v5));
+    omarchy_profile_v6_t v6 = {0};
+    memcpy(&v6, &v5, sizeof(v5));
+    v6.base.base.version = 6;
+    v6.base.allowance_resets_at = 1800086400;
+    v6.allowance_provider = 2;
+    v6.allowance_duration_minutes = 10080;
+    assert(omarchy_profile_v6_is_valid(&v6));
+    v6.allowance_provider = 3;
+    assert(!omarchy_profile_v6_is_valid(&v6));
+    v6.allowance_provider = 1;
+    v6.allowance_duration_minutes = 0;
+    assert(!omarchy_profile_v6_is_valid(&v6));
+    v6.base.allowance_remaining = 255;
+    v6.base.allowance_window = 0;
+    v6.base.allowance_updated_at = v6.base.allowance_resets_at = 0;
+    assert(omarchy_profile_v6_is_valid(&v6));
     puts("Profile compatibility and allowance expiry checks passed");
     return 0;
 }

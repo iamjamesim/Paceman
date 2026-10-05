@@ -6,13 +6,19 @@ For Apple Silicon Macs running macOS 15 or later.
 
 1. Download the **[Mac DMG](https://github.com/iamjamesim/Paceman/releases/download/desktop-v0.1.0/Paceman-macos-arm64-0.1.0.dmg)** from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/releases/tag/desktop-v0.1.0). The release is signed and notarized.
 2. Open the DMG, drag **Paceman** onto **Applications**, then open it from Applications.
-3. Choose **Set up Paceman**. This starts Paceman at login, enables its background item, and prepares the Codex hooks.
+3. Choose **Set up Paceman**. This starts Paceman at login, enables its background item, and prepares hooks for the selected agents. Existing installations keep their agent selection; choose Codex, Claude, or both under **Manage Paceman… → Agents**.
 
 macOS may show notifications about login and background items. You can manage them in **System Settings → General → Login Items & Extensions**. The Mac release includes Python; no separate runtime installation is needed.
 
 Prefer to build locally? Use [source setup](#build-and-install-from-source). Both installation paths continue with hook review and iPhone pairing below.
 
-## Review Codex hooks
+Desktop 0.1.0 monitors Codex. Claude support below requires a build from the current source until a newer desktop release includes it.
+
+## Review agent hooks
+
+Review each selected agent before checking phone delivery. Paceman shows the exact command for this installation in its setup window.
+
+### Codex
 
 Hooks let Codex send activity events to Paceman. Review them yourself before trusting them:
 
@@ -43,6 +49,63 @@ The hooks send event names, opaque task and turn IDs, and an optional short proj
 
 </details>
 
+### Claude Code
+
+Use Claude Code **2.1.196 or later**. Paceman adds twelve observer commands to
+`~/.claude/settings.json` (or the saved `CLAUDE_CONFIG_DIR`) and preserves unrelated
+hooks and settings. In Claude Code, use `/hooks` to inspect those commands; for
+VS Code or desktop Code, inspect the same local user settings. Complete any hook
+review requested by Claude. If `disableAllHooks` is enabled, decide whether to
+change it yourself; Paceman does not override it.
+
+Expand a Paceman entry and compare its complete command against Paceman's setup
+window. A typical command has this shape, with the actual runtime and user path
+shown by your installation:
+
+```text
+/PATH/TO/python3 -B '/Users/YOU/Library/Application Support/Paceman/lib/macos/claude_hook.py'
+```
+
+| Event row | Purpose |
+| --- | --- |
+| `SessionStart` | Show a new or resumed session as idle. |
+| `UserPromptSubmit` | Show work after a prompt. |
+| `PreToolUse` | Observe work, questions and plan approval. |
+| `PermissionRequest` | Show pending approval after five seconds. |
+| `PostToolUse` | Clear attention when the corresponding tool returns. |
+| `PostToolUseFailure` | Clear tool attention; observe an interrupt when supplied. |
+| `PostToolBatch` | Clear attention when the tool batch returns. |
+| `Elicitation` | Show an MCP input request after five seconds. |
+| `ElicitationResult` | Clear the corresponding MCP request. |
+| `Stop` | Show a finished main turn. |
+| `StopFailure` | Show a failed main turn. |
+| `SessionEnd` | Remove a closed session. |
+
+The commands forward lifecycle names, opaque IDs, hashed tool/server names and an
+optional short project label to Paceman's private local socket. They do not send
+prompts, replies, transcripts, tool arguments/results or full paths. They make no
+Claude approval decisions. Project labels may appear on your iPhone Lock Screen.
+
+Keep Paceman's review window open, start a **fresh local Claude session** in the
+interface you use, and submit a prompt. Verify `lastAgentEventByProvider.claude`
+advances in `pacemanctl status`; repeat for each interface you use. Hook presence
+alone does not prove delivery. See coverage limits below for unobserved activity.
+
+### Usage
+
+The iPhone computer screen shows both agents' usage windows separately. On
+**watchOS 26+**, choose Codex or Claude for each complication in the watch-face editor; add two to show both.
+**iPhone Settings → ESP32 usage** selects the ESP32 meter's provider when that watch
+is paired and both providers are available. Activity and notifications continue to
+include both. Usage stays with the first paired computer.
+
+Claude usage needs an existing Claude Code subscription sign-in. If Paceman needs
+access, choose **Manage Paceman… → Allow Claude usage access…**; this explicit check
+may prompt for Keychain permission. Background checks do not prompt. Sign in or
+refresh sign-in in Claude Code if needed. Paceman never copies or refreshes your
+credentials. Usage requires the current subscription account; API-key-only usage
+is unsupported. Anthropic's OAuth usage endpoint is undocumented and may change.
+
 ## Connect your iPhone
 
 1. **[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**. Open the link on your iPhone and follow the installation steps; iOS 18 or later is required.
@@ -64,13 +127,14 @@ Paceman prepares a private [Tailscale Serve HTTPS route](https://tailscale.com/d
 
 ## Check iPhone notifications
 
-Allow notifications when Paceman asks on your iPhone. Then lock the phone and start a new local Codex task on your Mac. Confirm that you receive a **new notification on the phone** when the turn finishes.
+Allow notifications when Paceman asks on your iPhone. Then lock the phone and start a new local task with each selected agent on your Mac. Confirm that you receive a **new notification on the phone** when the turn finishes.
 
 Seeing activity on the Mac confirms hook delivery. Receiving it on your locked iPhone checks notification delivery too.
 
 ## Control and removal
 
-- **Sharing off** pauses activity tracking and iPhone updates while keeping your pairings.
+- **Sharing off** pauses activity tracking and notification sending for both agents while keeping your pairings.
+- **Manage Paceman… → Agents** selects which local agents Paceman observes; review newly added hooks before using them.
 - **Manage Paceman… → Open menu app at login** controls whether the menu app opens at login. It is separate from Sharing.
 - **Remove access…** disconnects one phone.
 - **Manage Paceman… → Uninstall Paceman…** removes the Mac app, background item, Paceman hooks, local pairings, notification credentials, and any unchanged Tailscale route Paceman created. During setup, Uninstall is in the **…** menu. The iPhone app and Tailscale stay installed.
@@ -85,20 +149,20 @@ Download the source from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/r
 python3 -m macos.install
 ```
 
-The installer builds the menu app and background helper, installs to `~/Applications/Paceman.app`, and prepares notifications, the private Tailscale route, and Codex hooks. It preserves existing pairings, Sharing choice, notification configuration, and unrelated hooks. If setup is incomplete, Paceman explains what needs attention. If your `python3` is too old, invoke a newer interpreter explicitly.
+The installer builds the menu app and background helper, installs to `~/Applications/Paceman.app`, and prepares notifications, the private Tailscale route, and hooks for selected agents. It preserves existing pairings, Sharing choice, agent selection, notification configuration, and unrelated hooks. Pass `--agents claude` or `--agents codex claude` to select explicitly. If setup is incomplete, Paceman explains what needs attention. If your `python3` is too old, invoke a newer interpreter explicitly.
 
 The installer uses a matching Paceman signing identity if one is installed, otherwise an ad hoc signature. You do not need Paceman's signing credentials to build locally. Ad hoc and Apple Development signatures are for local builds; public Mac distribution requires Developer ID signing and notarization.
 
-Open `~/Applications/Paceman.app`, confirm **Paceman** appears in **System Settings → General → Login Items & Extensions**, then continue with [hook review](#review-codex-hooks) and [iPhone pairing](#connect-your-iphone). You can use the TestFlight iPhone app with your locally built desktop client.
+Open `~/Applications/Paceman.app`, confirm **Paceman** appears in **System Settings → General → Login Items & Extensions**, then continue with [hook review](#review-agent-hooks) and [iPhone pairing](#connect-your-iphone). You can use the TestFlight iPhone app with your locally built desktop client.
 
 For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the installer. Developers managing a direct APNs sender can use `--no-push-setup` and follow [development-only direct APNs](../docs/push-delivery.md#development-only-direct-apns).
 
 ## Troubleshooting and developer details
 
 <details>
-<summary>No Codex activity</summary>
+<summary>No agent activity</summary>
 
-Open **Review Codex hooks…** under Activity in Paceman and recheck each row. **Setup needed** means commands are missing; **No activity yet** means no event has arrived; **No active work** means an observed session is idle.
+Open **Review agent hooks…** in Manage Paceman (or **Review Codex hooks…** under Activity on a Codex-only install) and recheck each selected agent’s rows. **Setup needed** means commands are missing; **No activity yet** means no event has arrived; **No active work** means an observed session is idle.
 
 For a terminal check, start a fresh local task and verify that `lastAgentEventAt` advances:
 
@@ -130,7 +194,19 @@ Use the Python 3.11+ interpreter printed by the source installer if needed. If r
 <details>
 <summary>Coverage limits</summary>
 
+Mac hooks cannot verify process ownership. Codex async-question attention can clear
+on an unrelated user message. Completed turns clear attention; finished and failed
+rows retire after ten minutes.
 
-An unrelated user message can clear async-question attention early; a completed turn clears it. Without `SessionEnd`, a Finished row can remain for up to ten minutes. Mac hooks cannot verify process ownership. The source reads Codex allowance through a short-lived local App Server every five minutes and sends only the percentage, window, observation time, and reset time.
+Claude tracks the local main turn, not independent subagents, background tasks or
+remote/cloud sessions. Questions and approvals appear after five seconds; an
+approved tool can retain attention until its observed calls return. An interrupt
+without another hook can retain the old state until a new prompt or `SessionEnd`.
+Another Stop hook can briefly show Finished before a tool resumes the same turn.
+
+The source reads Codex usage through its local App Server and Claude usage through
+a read-only OAuth request every five minutes. It sends only provider, percentage,
+window/duration, observation and reset times. A reset without a fresh reading shows
+unavailable.
 
 </details>

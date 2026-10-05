@@ -24,6 +24,35 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(WatchAggregate.selectAllowance(current: [], profiles: [older], now: now)?.remaining, 5)
     }
 
+    func testQuotaSelectionStaysWithinChosenProviderAndPreservesObservation() {
+        let now = 1800000000.0
+        var source = Snapshot(schema: 1, sourceID: "source", generation: "g", revision: 1,
+            sourceName: "source", observedAt: now, changedAt: now, freshFor: 30, state: .working,
+            eventID: "1", allowance: nil, sessions: nil)
+        source.allowances = [
+            CodexAllowance(provider: "codex", remaining: 5, window: 1, updatedAt: Int64(now), resetsAt: Int64(now)+86400),
+            CodexAllowance(provider: "claude", remaining: 80, window: 1, updatedAt: Int64(now)-4000, resetsAt: Int64(now)+86400),
+            CodexAllowance(provider: "claude", remaining: 20, window: 2, updatedAt: Int64(now)-4000, resetsAt: Int64(now)+3600)]
+        let pinned = WatchAggregate.selectAllowance(current:[source],profiles:[source],now:now,provider:"claude")
+        XCTAssertEqual(pinned?.provider,"claude")
+        XCTAssertEqual(pinned?.remaining,20)
+        XCTAssertEqual(pinned?.updatedAt,Int64(now)-4000)
+        source.allowances = source.allowances?.filter { $0.provider == "codex" }
+        XCTAssertNil(WatchAggregate.selectAllowance(current:[source],profiles:[source],now:now,provider:"claude"))
+    }
+
+    func testClaudeFirmwareProfilesRequireProviderAwareVersion() {
+        let now=Date(timeIntervalSince1970:1800000000)
+        let claude=CodexAllowance(provider:"claude",remaining:20,window:2,updatedAt:1800000000,resetsAt:1800003600,windowDurationMins:300)
+        let older=Array(WatchWire.profile(owner:UUID(),revision:1,now:now,offset:0,version:5,allowance:claude))
+        XCTAssertEqual(older[85],255)
+        let newer=Array(WatchWire.profile(owner:UUID(),revision:1,now:now,offset:0,version:6,allowance:claude))
+        XCTAssertEqual(newer.count,114)
+        XCTAssertEqual(newer[85],20)
+        XCTAssertEqual(newer[111],2)
+        XCTAssertEqual(Array(newer[112...113]),[44,1])
+    }
+
     func testWatchAggregateChoosesFreshAttentionAcrossComputers() {
         func source(_ id: String, _ state: ActivityState, _ changed: Double) -> Snapshot {
             Snapshot(schema: 1, sourceID: id, generation: "generation", revision: 1,
@@ -121,7 +150,8 @@ final class ProtocolTests: XCTestCase {
             AgentSession(id: "l2", provider: "claude", state: .working)]))
         XCTAssertEqual(mac.working, 1)
         XCTAssertEqual(mac.needsInput, 0)
-        XCTAssertEqual(linux.sessionSummary, "1 needs input · 1 working")
+        XCTAssertEqual(linux.sessionSummary, "Claude working · Codex needs input")
+        XCTAssertEqual(linux.headline, "Codex needs input")
         XCTAssertEqual(linux.working, 1)
         XCTAssertEqual(linux.needsInput, 1)
         XCTAssertEqual(mac.agentSummary, "Codex")
@@ -773,10 +803,13 @@ final class ProtocolTests: XCTestCase {
             XCTAssertEqual(body["deviceToken"] as? String, String(repeating: "ab", count: 32))
             XCTAssertEqual(body["environment"] as? String, "development")
             XCTAssertNil(body["mode"])
+            XCTAssertEqual(body["usageSchema"] as? Int, 2)
+            XCTAssertEqual(body["provider"] as? String, "claude")
+            XCTAssertEqual(body["selectionRevision"] as? Int, 9)
             return (200, Data(#"{"registered":true}"#.utf8))
         }
         try await client.registerWatchPush(source, token: String(repeating: "ab", count: 32),
-                                           environment: "development")
+                                           environment: "development", provider: "claude", selectionRevision: 9, usageSchema: 2)
     }
 
     func testRemovalIsSelfScopedAndAlreadyRevokedIsSuccess() async throws {
