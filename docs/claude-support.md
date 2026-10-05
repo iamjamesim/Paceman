@@ -111,8 +111,9 @@ unverified.
 
 ## Acceptance checklist
 
-1. **Prepare matching builds.** Deploy this branch's relay changes to a test relay
-   before enabling its new Live Activity/provider and watch-selection fields.
+1. **Merge and deploy the relay first.** After review and automated checks, merge
+   this branch and deploy the project relay. Legacy clients remain supported; verify
+   its health and an existing Codex client before testing the new push fields.
    Build/install the Mac and iPhone versions from this branch; use matching watchOS
    targets. Keep existing private relay configuration and APNs keys private. Existing
    published apps/relay do not constitute a test of this branch.

@@ -11,6 +11,9 @@ Today, Paceman shows Codex status in Live Activities on the iPhone Lock Screen,
 Apple Watch Smart Stack, and Mac menu bar. Apple Watch complications show how
 much Codex usage remains and when it resets.
 
+Paceman is in **alpha**. Desktop installers are available, and the iPhone app
+is available through TestFlight.
+
 <p align="center">
   <a href="docs/images/iphone-live-activity.png"><img src="docs/images/iphone-live-activity.png" alt="Paceman Live Activity on an iPhone Lock Screen" width="320"></a>
   <a href="docs/images/apple-watch-smart-stack.jpg"><img src="docs/images/apple-watch-smart-stack.jpg" alt="Paceman in the Apple Watch Smart Stack" width="320"></a>
@@ -30,20 +33,24 @@ still need custom firmware and iPhone pairing support today.
   <a href="docs/images/esp32-watch.jpg"><img src="docs/images/esp32-watch.jpg" alt="Paceman on an experimental ESP32-S3 watch" width="300"></a>
 </p>
 
-Paceman is in **alpha** and currently installed from source. Mac Codex desktop and
-Mac CLI hooks and the Omarchy Codex CLI companion have been exercised on development
-devices. Omarchy Codex desktop and broader background delivery remain
-unverified.
+Mac Codex desktop and CLI hooks and the Omarchy Codex CLI companion have been
+exercised on development devices. Omarchy Codex desktop and broader background
+delivery remain unverified.
 
 ## Get started
 
-1. [Build the iPhone app](docs/development.md#iphone-and-live-activities-mac) with Xcode for iOS 18 or later.
-2. Install a source on an [Apple Silicon Mac](macos/README.md) or [Omarchy 4.0+ desktop](omarchy/README.md).
-3. Connect [Tailscale](https://tailscale.com/download) on phone and computer, then scan the pairing code in Paceman. The installers prepare a private Serve route when Tailscale permits it; the platform guides cover hook review and the first real activity event.
+1. **[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**. Open the link on your iPhone; iOS 18 or later is required.
+2. **[Download the desktop client](https://github.com/iamjamesim/Paceman/releases/tag/desktop-v0.1.0)** and follow the [Mac setup](macos/README.md) or [Omarchy setup](omarchy/README.md) guide.
+3. Review the Codex hooks, connect [Tailscale](https://tailscale.com/download) on your computer and iPhone, and scan the pairing code. The setup guides walk through these checks; Paceman prepares the private connection when Tailscale permits it.
+
+Prefer source installation? See [Mac source setup](macos/README.md#build-and-install-from-source)
+or [Omarchy source setup](omarchy/README.md#install-from-a-git-checkout).
 
 The Mac and Omarchy installers configure the [APNs relay](service/RELAY.md) for
 locked-phone notifications by default; the iPhone must still allow notifications.
 The Apple Watch app requires watchOS 11 or later.
+
+Developers can [build the iPhone app with Xcode](docs/development.md#iphone-and-live-activities-mac).
 
 ## Understand the system
 
