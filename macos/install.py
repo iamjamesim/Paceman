@@ -17,6 +17,7 @@ import sys
 import tempfile
 
 from macos.codex_hook import QUESTION_MATCHER
+from macos.agents import CLAUDE_PURPOSES, claude_config_dir, provider_config, PROVIDERS, configured_providers, detected_providers, hook_path
 from macos.paths import installed_app
 from service.hub import endpoint
 from service.network import RouteSetupError, ensure_private_route
@@ -95,8 +96,10 @@ HOOK_PURPOSES = (
 HOOK_EVENTS = tuple(event for event, _ in HOOK_PURPOSES)
 
 
-def install_hooks(path: Path | None = None):
-    path = path or Path.home() / ".codex/hooks.json"
+def install_hooks(path: Path | None = None, *, provider="codex"):
+    if provider not in PROVIDERS:
+        raise ValueError("Unsupported agent provider")
+    path = path or hook_path(provider, root=ROOT)
     path.parent.mkdir(parents=True, exist_ok=True)
     document = json.loads(path.read_text()) if path.exists() else {}
     if not isinstance(document, dict):
@@ -104,10 +107,10 @@ def install_hooks(path: Path | None = None):
     hooks = document.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         raise ValueError("Existing hooks configuration is not an object")
-    script = str(ROOT / "lib/macos/codex_hook.py")
+    script = str(ROOT / f"lib/macos/{provider}_hook.py")
     command = shlex.quote(PYTHON) + " -B " + shlex.quote(script)
     changed = []
-    for event in HOOK_EVENTS:
+    for event in (HOOK_EVENTS if provider == "codex" else tuple(e for e, _ in CLAUDE_PURPOSES)):
         groups = hooks.setdefault(event, [])
         if not isinstance(groups, list):
             raise ValueError(f"Existing {event} hooks are not a list")
@@ -124,7 +127,7 @@ def install_hooks(path: Path | None = None):
                     continue
                 if len(arguments) in (2, 3) and arguments[-1] == script:
                     installed = True
-                    if event == "PreToolUse" and group.get("matcher") != QUESTION_MATCHER:
+                    if provider == "codex" and event == "PreToolUse" and group.get("matcher") != QUESTION_MATCHER:
                         # Matcher belongs to the group. Keep unrelated handlers
                         # in a shared group on their original match pattern.
                         if len(group["hooks"]) == 1:
@@ -133,6 +136,20 @@ def install_hooks(path: Path | None = None):
                             group["hooks"].remove(item)
                             groups.append({"matcher": QUESTION_MATCHER, "hooks": [item]})
                         changed.append(event)
+                    if provider == "claude" and group.get("matcher") not in (None, "", "*", ".*"):
+                        if len(group["hooks"]) == 1:
+                            group.pop("matcher", None)
+                        else:
+                            group["hooks"].remove(item)
+                            groups.append({"hooks": [item]})
+                        if event not in changed:
+                            changed.append(event)
+                    # Paceman is observational on every selected event.
+                    for field in ("if", "async", "asyncRewake"):
+                        if field in item:
+                            item.pop(field)
+                            if event not in changed:
+                                changed.append(event)
                     if item.get("type") != "command" or item.get("command") != command or item.get("timeout") != 3:
                         item.update(type="command", command=command, timeout=3)
                         if event not in changed:
@@ -142,7 +159,7 @@ def install_hooks(path: Path | None = None):
                 break
         if not installed:
             group = {"hooks": [{"type": "command", "command": command, "timeout": 3}]}
-            if event == "PreToolUse":
+            if provider == "codex" and event == "PreToolUse":
                 group["matcher"] = QUESTION_MATCHER
             groups.append(group)
             changed.append(event)
@@ -204,7 +221,7 @@ def build_app(destination: Path | None = None, *, version: str = "0.1",
 
 
 def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: bool = False,
-            prebuilt_app: Path | None = None):
+            prebuilt_app: Path | None = None, agents: list[str] | None = None):
     global PYTHON
     if sys.version_info < (3, 11):
         raise ValueError("Install Python 3.11 or newer and run this installer with it")
@@ -220,6 +237,11 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
         PYTHON = str(APP / "Contents/Resources/python/bin/python3")
     if relay_url is not None:
         relay_url = endpoint(relay_url)
+    if agents is None:
+        agents = configured_providers(ROOT) if (ROOT / "agents.json").exists() or (ROOT / "bin/pacemanctl").exists() else detected_providers()
+    if not agents or any(p not in PROVIDERS for p in agents):
+        raise ValueError("Choose at least one supported agent")
+    agents = list(dict.fromkeys(agents))
     os.umask(0o077)
     ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
     ROOT.chmod(0o700)
@@ -241,7 +263,7 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
                                               open_menu=prebuilt_app is None,
                                               stop_installed_menu=(prebuilt_app is None or
                                                                    prebuilt_app != APP.resolve()),
-                                              replace_app=prebuilt_app != APP.resolve())
+                                              replace_app=prebuilt_app != APP.resolve(), agents=agents)
     finally:
         if not (staging / "ROLLBACK_INCOMPLETE").exists():
             shutil.rmtree(staging, ignore_errors=True)
@@ -250,7 +272,9 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
 
 def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                     replace_push_config: bool = False, open_menu: bool = True,
-                    stop_installed_menu: bool = True, replace_app: bool = True):
+                    stop_installed_menu: bool = True, replace_app: bool = True,
+                    agents: list[str] | None = None):
+    agents = agents or configured_providers(ROOT)
     try:
         previous_status = json.loads((ROOT / "status.json").read_text())
         had_activity = previous_status.get("mode") == "macos" and float(previous_status.get("lastAgentEventAt", 0)) > 0
@@ -295,21 +319,36 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                 "WorkingDirectory": str(lib), "RunAtLoad": True, "KeepAlive": True,
                 "StandardOutPath": str(ROOT / "background.log"),
                 "StandardErrorPath": str(ROOT / "background-error.log")}
+    if "claude" in agents:
+        document["EnvironmentVariables"] = {"CLAUDE_CONFIG_DIR": str(claude_config_dir(ROOT))}
     staged_plist.write_bytes(plistlib.dumps(document))
     staged_plist.chmod(0o600)
 
-    hooks_path = Path.home() / ".codex/hooks.json"
-    staged_hooks = staging / "hooks.json"
-    if hooks_path.exists():
-        shutil.copy2(hooks_path, staged_hooks)
-    changed_hooks = install_hooks(staged_hooks)
-
+    staged_hooks_by_provider = {}
+    changed_by_provider = {}
+    for provider in dict.fromkeys([*configured_providers(ROOT), *agents]):
+        hooks_path = hook_path(provider, root=ROOT)
+        staged_hooks = staging / ("hooks.json" if provider == "codex" else "claude-settings.json")
+        if hooks_path.exists():
+            shutil.copy2(hooks_path, staged_hooks)
+        if provider in agents:
+            changed_by_provider[provider] = install_hooks(staged_hooks, provider=provider)
+        else:
+            from macos.uninstall import cleaned_hooks
+            cleaned = cleaned_hooks(staged_hooks, provider=provider)
+            changed_by_provider[provider] = ["removed"] if cleaned is not None else []
+            if cleaned is not None:
+                staged_hooks.write_text(json.dumps(cleaned, indent=2) + "\n")
+        staged_hooks_by_provider[provider] = (staged_hooks, hooks_path)
+        if changed_by_provider[provider]:
+            hooks_path.parent.mkdir(parents=True, exist_ok=True)
+    changed_hooks = changed_by_provider.get("codex", [])
+    staged_agents = staging / "agents.json"
+    staged_agents.write_text(json.dumps(provider_config(agents, ROOT)) + "\n")
     lib.mkdir(exist_ok=True)
     bin_dir.mkdir(exist_ok=True)
     APP.parent.mkdir(parents=True, exist_ok=True)
     PLIST.parent.mkdir(parents=True, exist_ok=True)
-    if changed_hooks:
-        hooks_path.parent.mkdir(parents=True, exist_ok=True)
 
     backups = staging / "backup"
     backups.mkdir()
@@ -353,13 +392,17 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
         if replace_app:
             replace(staged_app, APP, "Paceman.app")
         replace(staged_plist, PLIST, "source.plist")
+        # The source reads its selected providers during startup. Commit this
+        # before bootstrap so a fresh Claude install cannot start Codex-only.
+        replace(staged_agents, ROOT / "agents.json", "agents.json")
         if not (ROOT / "sharing-paused").exists():
             subprocess.run(["/bin/launchctl", "enable", label], check=True)
             subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(PLIST)], check=True)
         if PUSH_PLIST.is_file():
             replace(None, PUSH_PLIST, "push.plist")
-        if changed_hooks:
-            replace(staged_hooks, hooks_path, "hooks.json")
+        for provider, (staged_hooks, hooks_path) in staged_hooks_by_provider.items():
+            if changed_by_provider[provider]:
+                replace(staged_hooks, hooks_path, "hooks.json" if provider == "codex" else "claude-settings.json")
     except Exception as error:
         rollback_errors = []
         try:
@@ -479,13 +522,15 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
     print("Its Sharing switch pauses the background item;")
     print("Manage Paceman in the panel explains removal and offers Uninstall Paceman.")
     print(f"Control: {wrapper}")
-    if not changed_hooks and had_activity:
+    if "codex" in agents and not changed_hooks and had_activity:
         print("Codex hooks are installed and have delivered activity before.")
         print("If a new local Codex task does not appear, review Paceman in Codex")
         print("Settings > Hooks (CLI: /hooks) and check pacemanctl status.")
-    else:
+    elif "codex" in agents:
         print("NEXT: Guide the user through Paceman hook review before testing activity.")
         print_hook_review_steps(wrapper)
+    if "claude" in agents:
+        print_claude_review_steps(wrapper)
     if notifications_ready and push_config.is_file():
         print("The Mac background item also runs the configured iPhone notification worker.")
     paired = 0
@@ -539,6 +584,22 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
     return notifications_ready
 
 
+def print_claude_review_steps(wrapper: Path):
+    print("NEXT: Review Paceman's Claude hooks before checking activity.")
+    print("  Claude CLI: /hooks. VS Code/desktop Code: inspect the local user settings.")
+    print(f"  Claude settings: {hook_path('claude', root=ROOT)}")
+    print("  Check the user-settings entries and this exact command:")
+    print(f"     {shlex.quote(PYTHON)} -B {shlex.quote(str(ROOT / 'lib/macos/claude_hook.py'))}")
+    for event, purpose in CLAUDE_PURPOSES:
+        print(f"     {event}: {purpose}")
+    print("  Only event names, opaque IDs and an optional short project label leave the hook.")
+    print("  No prompts, replies, transcript contents or tool arguments are sent.")
+    print("  Requires Claude Code 2.1.196 or later; restart existing sessions after setup.")
+    print("  Send a prompt in a fresh local Claude session and verify lastAgentEventByProvider.claude.")
+    print("  If Claude usage needs Keychain access, use Manage Paceman > Allow Claude usage access.")
+    print(f"  Status: {shlex.quote(str(wrapper))} status")
+
+
 def print_hook_review_steps(wrapper: Path):
     print("  Codex app: Settings > Hooks > User config (All projects).")
     print("  Codex CLI: enter /hooks, or choose Review hooks at startup.")
@@ -567,12 +628,13 @@ if __name__ == "__main__":
                            help="Skip automatic relay setup for a developer-managed sender")
     parser.add_argument("--prebuilt-app", type=Path,
                         help="Install the signed app bundle without Xcode or an external Python")
+    parser.add_argument("--agents", nargs="+", choices=PROVIDERS, help="Agents to monitor; updates preserve the existing selection")
     arguments = parser.parse_args()
     try:
         ready = install(relay_url=None if arguments.no_push_setup else
                         arguments.relay_url or DEFAULT_RELAY_URL,
                         replace_push_config=arguments.relay_url is not None,
-                        prebuilt_app=arguments.prebuilt_app)
+                        prebuilt_app=arguments.prebuilt_app, agents=arguments.agents)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"Paceman install failed: {error}", file=sys.stderr)
         raise SystemExit(1)

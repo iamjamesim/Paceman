@@ -194,7 +194,7 @@ private struct AllowanceView: View {
         Group {
             if metric == .limit {
                 Gauge(value: fraction, in: 0...1) {
-                    Text("LEFT")
+                    Text(value?.providerAbbreviation ?? "LEFT")
                         .foregroundStyle(fullColorAccent ?? Color.primary)
                         .widgetAccentable()
                 } currentValueLabel: {
@@ -291,7 +291,7 @@ private struct AllowanceView: View {
 
     private var rectangular: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("\(Image(systemName: "gauge.with.needle"))  \(limitTitle)")
+            Text("\(Image(systemName: "gauge.with.needle"))  \(value?.providerName ?? "Usage") · \(limitTitle)")
                 .font(.headline)
                 .fontWeight(.semibold)
                 .foregroundStyle(fullColorAccent ?? Color.primary)
@@ -342,12 +342,12 @@ private struct AllowanceView: View {
     }
 
     private var accessibilityText: String {
-        guard let value else { return "Codex \(metric == .limit ? "limit" : "reset") unavailable" }
+        guard let value else { return "\(entry.allowance?.providerName ?? "Usage") \(metric == .limit ? "limit" : "reset") unavailable" }
         let freshness = value.cached(at: entry.date) ? "last known" : "current"
         if metric == .limit {
-            return "Codex limit, \(value.remaining) percent remaining, \(freshness), resets \(Date(timeIntervalSince1970: value.resetsAt).formatted())"
+            return "\(value.providerName) limit, \(value.remaining) percent remaining, \(freshness), resets \(Date(timeIntervalSince1970: value.resetsAt).formatted())"
         }
-        return "Codex reset at \(Date(timeIntervalSince1970: value.resetsAt).formatted()), \(freshness)"
+        return "\(value.providerName) reset at \(Date(timeIntervalSince1970: value.resetsAt).formatted()), \(freshness)"
     }
 }
 

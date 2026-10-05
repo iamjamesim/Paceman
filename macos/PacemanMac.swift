@@ -36,6 +36,19 @@ private struct SourceStatus: Decodable {
     let lastAgentEventAt: Double?
     let missingHooks: [String]?
     let hookCommand: String?
+    var configuredProviders: [String]? = nil
+    var providers: [String]? = nil
+    var providerCounts: [String: [String: Int]]? = nil
+    var missingHooksByProvider: [String: [String]]? = nil
+    var hookCommands: [String: String]? = nil
+    var lastAgentEventByProvider: [String: Double]? = nil
+    var usageStatus: [String: String]? = nil
+    var selectedProviders: [String] { configuredProviders ?? ["codex"] }
+    var agentName: String {
+        let active = providers?.isEmpty == false ? providers! : selectedProviders
+        let names = ["codex", "claude"].filter { active.contains($0) }.map { $0 == "claude" ? "Claude" : "Codex" }
+        return names.isEmpty ? "Agent" : names.joined(separator: " + ")
+    }
     func unavailable() -> SourceStatus {
         var state = self
         state.running = false
@@ -423,6 +436,31 @@ private final class PanelModel: ObservableObject {
         })
     }
 
+    func setAgent(_ provider: String, enabled: Bool) {
+        var selected = status.selectedProviders
+        if enabled { selected.append(provider) } else { selected.removeAll { $0 == provider } }
+        selected = ["codex", "claude"].filter { selected.contains($0) }
+        guard !selected.isEmpty else { return }
+        run(["agents", "--providers"] + selected, onSuccess: { _ in
+            self.hookReviewStartedAt = Date().timeIntervalSince1970
+            self.saveSetupStep(.hooks)
+            self.connectingPhone = false
+        })
+    }
+
+    func allowClaudeUsage() {
+        run(["allow-claude-usage"], onSuccess: { result in
+            guard let data = result.data(using: .utf8),
+                  let value = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
+            switch value["claudeUsageStatus"] {
+            case "ready": self.run(["restart"])
+            case "sign_in_needed": self.message = "Sign in to Claude Code, then check usage again."
+            case "access_needed": self.message = "Claude usage access wasn’t granted. You can try again when ready."
+            default: self.message = "Claude usage is temporarily unavailable. Try again later."
+            }
+        })
+    }
+
     func saveSupportReport() {
         run(["support"], onSuccess: { contents in
             guard let data = contents.data(using: .utf8) else {
@@ -525,7 +563,7 @@ private struct InstallationView: View {
                     Text("During setup, you’ll:")
                     BulletList(items: [
                         "**Start Paceman at login** to track agent activity in the background and send updates automatically.",
-                        "**Review Codex hooks** that send agent events to Paceman.",
+                        "**Review agent hooks** that send activity events to Paceman.",
                         "**Connect your iPhone** to receive Live Activity updates.",
                     ])
                 }
@@ -573,6 +611,21 @@ private struct HookReviewView: View {
     let onContinue: () -> Void
     let onClose: () -> Void
 
+    private let claudeEvents: [(String, String)] = [
+        ("SessionStart", "Shows a new or resumed session as idle."),
+        ("UserPromptSubmit", "Shows work after a new prompt."),
+        ("PreToolUse", "Observes tools, questions, and plan approval."),
+        ("PermissionRequest", "Shows approval pending after five seconds."),
+        ("PostToolUse", "Clears attention after a tool returns."),
+        ("PostToolUseFailure", "Clears tool attention and observes reported interrupts."),
+        ("PostToolBatch", "Clears attention after a tool batch returns."),
+        ("Elicitation", "Shows an MCP input request after five seconds."),
+        ("ElicitationResult", "Clears the corresponding MCP input request."),
+        ("Stop", "Shows a finished main turn."),
+        ("StopFailure", "Shows a failed main turn."),
+        ("SessionEnd", "Removes a closed session."),
+    ]
+
     // Match the event order in Codex Settings → Hooks → User config.
     private let events: [(String, String)] = [
         ("PreToolUse", "Shows a question pending after five seconds."),
@@ -588,7 +641,8 @@ private struct HookReviewView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Review Codex hooks").font(.title2.weight(.semibold))
+                Text(model.status.selectedProviders == ["codex"] ? "Review Codex hooks" : "Review agent hooks").font(.title2.weight(.semibold))
+                if model.status.selectedProviders.contains("codex") {
                 Text("1. Open Codex Settings").font(.headline)
                 Text("Hooks → User config (All projects)").font(.body)
                     .fixedSize(horizontal: false, vertical: true)
@@ -598,7 +652,7 @@ private struct HookReviewView: View {
                 Text("2. Review and trust the 8 hooks").font(.headline)
                 Text("In Codex, expand “Hook 1” under each event below. Click Trust only if its command matches:")
                     .fixedSize(horizontal: false, vertical: true)
-                if let command = model.status.hookCommand {
+                if let command = model.status.hookCommands?["codex"] ?? model.status.hookCommand {
                     Text(command).font(.system(.body, design: .monospaced))
                         .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -618,6 +672,30 @@ private struct HookReviewView: View {
                 }
                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                }
+                if model.status.selectedProviders.contains("claude") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Claude Code hooks").font(.headline)
+                        Text("In a local Claude Code session, open /hooks and review the Paceman entries in your user settings. In VS Code, inspect your Claude user settings file. Start a new session after changes.")
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("These hooks observe activity. They never approve or block a tool.")
+                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if let command = model.status.hookCommands?["claude"] {
+                            Text(command).font(.system(.body, design: .monospaced))
+                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        ForEach(claudeEvents, id: \.0) { event in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(event.0).font(.body.weight(.medium))
+                                Text(event.1).font(.body).foregroundStyle(.secondary)
+                            }
+                        }
+                        Text("Requires Claude Code 2.1.196 or newer. Local terminal, VS Code, and desktop Code sessions share these hooks.")
+                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 Text("What hooks send to Paceman").font(.headline)
                 BulletList(items: [
                     "Event names",
@@ -630,13 +708,18 @@ private struct HookReviewView: View {
                     .font(.body).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("3. Check activity").font(.headline)
-                Text("Start a new local Codex task on this Mac and send a prompt.")
-                    .font(.body).fixedSize(horizontal: false, vertical: true)
-                Text(model.status.missingHooks?.isEmpty == false ? "Some hooks are missing. Run Paceman setup again, then review them in Codex."
-                     : (model.status.lastAgentEventAt ?? 0) > model.hookReviewStartedAt ? "A new Codex event reached Paceman."
-                     : "Waiting for a new Codex event.")
-                    .font(.body).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(model.status.selectedProviders, id: \.self) { provider in
+                    let name = provider == "claude" ? "Claude" : "Codex"
+                    let observed = model.status.lastAgentEventByProvider?[provider]
+                        ?? (provider == "codex" ? model.status.lastAgentEventAt ?? 0 : 0)
+                    Text("Start a new local \(name) task on this Mac and send a prompt.")
+                        .font(.body).fixedSize(horizontal: false, vertical: true)
+                    Text(model.status.missingHooksByProvider?[provider]?.isEmpty == false
+                         ? "Some \(name) hooks are missing or disabled. Review your settings, then run Paceman setup again."
+                         : observed > model.hookReviewStartedAt ? "A new \(name) event reached Paceman."
+                         : "Waiting for a new \(name) event.")
+                        .font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 HStack {
                     Link("Setup guide", destination: SetupGuide.url)
                     Spacer()
@@ -782,7 +865,7 @@ private struct UninstallConfirmationView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Remove Paceman from this Mac?").font(.title2.weight(.semibold))
             Text("Uninstall removes:")
-            BulletList(items: ["Paceman app", "Background item", "Paceman’s Codex hooks",
+            BulletList(items: ["Paceman app", "Background item", "Paceman’s agent hooks",
                                "Local pairings", "Notification credentials"])
             Text("The iPhone app and Tailscale stay installed.")
                 .fixedSize(horizontal: false, vertical: true)
@@ -807,6 +890,7 @@ private struct UninstallConfirmationView: View {
 
 private struct ManagementView: View {
     @ObservedObject var model: PanelModel
+    var onReview: () -> Void = {}
     @State private var confirmingUninstall = false
 
     var body: some View {
@@ -827,6 +911,34 @@ private struct ManagementView: View {
                             .font(.caption).foregroundStyle(.secondary)
                         Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
                     }
+                    Divider()
+                    Text("Agents").font(.headline)
+                    ForEach(["codex", "claude"], id: \.self) { provider in
+                        let enabled = model.status.selectedProviders.contains(provider)
+                        Toggle(provider == "claude" ? "Claude Code" : "Codex", isOn: Binding(
+                            get: { model.status.selectedProviders.contains(provider) },
+                            set: { model.setAgent(provider, enabled: $0) }))
+                            .disabled(model.busy || (enabled && model.status.selectedProviders.count == 1))
+                    }
+                    Text("Review each agent’s Paceman hooks after enabling it. At least one agent must stay selected.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Button("Review agent hooks…") {
+                        model.showingManagement = false
+                        onReview()
+                        NSApplication.shared.activate(ignoringOtherApps: true)
+                    }.disabled(model.busy)
+                    if model.status.selectedProviders.contains("claude") {
+                        if model.status.usageStatus?["claude"] == "access_needed" {
+                            Text("Allow access to your existing Claude Code sign-in to read subscription usage. Paceman doesn’t copy or refresh your credentials.")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Button("Allow Claude usage…") { model.allowClaudeUsage() }.disabled(model.busy)
+                        } else if model.status.usageStatus?["claude"] == "sign_in_needed" {
+                            Text("Sign in to Claude Code for subscription usage. API-key accounts don’t provide these limits.")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Button("Check Claude usage") { model.allowClaudeUsage() }.disabled(model.busy)
+                        }
+                    }
+                    Divider()
                     Button("Save support report…") { model.saveSupportReport() }
                         .disabled(model.busy)
                     BulletList(items: [
@@ -880,12 +992,12 @@ private struct Panel: View {
         guard model.status.running && model.status.sharingEnabled else { return nil }
         if let missing = model.status.missingHooks, !missing.isEmpty {
             let label = (model.status.sessions ?? 0) > 0 ? activity : "Setup needed"
-            return (label, "Paceman’s Codex hooks are missing. In Codex, ask your agent to run the Paceman Mac installer again.")
+            return (label, "Paceman’s agent hooks are missing or disabled. Review the selected agents in Manage Paceman and their hook settings.")
         }
         if model.status.missingHooks?.isEmpty == true,
            (model.status.lastAgentEventAt ?? 0) <= 0,
            (model.status.sessions ?? 0) == 0 {
-            return ("No activity yet", "Review Paceman’s hooks in Codex Settings → Hooks → User config (All projects), then start a local task.")
+            return ("No activity yet", model.status.selectedProviders == ["codex"] ? "Review Paceman’s hooks in Codex Settings → Hooks → User config (All projects), then start a local task." : "Review Paceman’s agent hooks, then start a fresh local task.")
         }
         return nil
     }
@@ -893,6 +1005,15 @@ private struct Panel: View {
     private var breakdown: String? {
         guard model.status.running, model.status.sharingEnabled, (model.status.sessions ?? 0) > 1,
               let counts = model.status.sessionCounts else { return nil }
+        if let providers = model.status.providerCounts, providers.count > 1 {
+            let priority = ["needs_input", "failed", "working", "finished", "idle"]
+            return ["codex", "claude"].compactMap { provider -> String? in
+                guard let counts = providers[provider], let state = priority.first(where: { (counts[$0] ?? 0) > 0 }) else { return nil }
+                let name = provider == "claude" ? "Claude" : "Codex"
+                let label = state == "needs_input" ? "needs input" : state
+                return "\(name) \(label)"
+            }.joined(separator: " · ")
+        }
         let labels = [("needs_input", "need input"), ("failed", "failed"), ("working", "working"),
                       ("finished", "finished"), ("idle", "idle")]
         let parts = labels.compactMap { key, label -> String? in
@@ -924,7 +1045,7 @@ private struct Panel: View {
             if model.needsInstallation {
                 InstallationView(model: model)
             } else if model.showingManagement {
-                ManagementView(model: model)
+                ManagementView(model: model, onReview: onOpenSetup)
             } else {
                 summary
             }
@@ -981,7 +1102,7 @@ private struct Panel: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("ACTIVITY").font(.system(size: 10, weight: .semibold)).tracking(1.6).foregroundStyle(.secondary)
                 HStack {
-                    Text((model.status.sessions ?? 0) > 1 ? "Codex · \(model.status.sessions ?? 0) sessions" : "Codex")
+                    Text((model.status.sessions ?? 0) > 1 ? "\(model.status.agentName) · \(model.status.sessions ?? 0) sessions" : model.status.agentName)
                     Spacer()
                     Text(!model.status.sharingEnabled ? "Paused"
                          : model.status.running ? (activitySetup?.label ?? activity) : "Unavailable")
@@ -997,7 +1118,7 @@ private struct Panel: View {
                 if let activitySetup {
                     Text(activitySetup.instruction).font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Review Codex hooks…") {
+                    Button(model.status.selectedProviders == ["codex"] ? "Review Codex hooks…" : "Review agent hooks…") {
                         if model.hookReviewStartedAt == 0 {
                             model.hookReviewStartedAt = Date().timeIntervalSince1970
                         }

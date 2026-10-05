@@ -68,7 +68,7 @@ static omarchy_activity_v1_t activity = {
 
 /* Keep I2C, flash, and display work out of NimBLE callbacks. */
 typedef struct {
-    omarchy_profile_v5_t packet;
+    omarchy_profile_v6_t packet;
     uint16_t packet_length;
 } pending_profile_t;
 
@@ -152,13 +152,13 @@ static esp_err_t persist_profile(const void *profile,
     if (err == ESP_OK) {
         err = nvs_set_blob(nvs, "owner_id", profile_owner_id, 16);
     }
-    const char *profile_key = version == 5 ? "profile_v5" : version == 4 ? "profile_v4" : version == 3 ? "profile_v3" :
+    const char *profile_key = version == 6 ? "profile_v6" : version == 5 ? "profile_v5" : version == 4 ? "profile_v4" : version == 3 ? "profile_v3" :
                               version == 2 ? "profile_v2" : "profile_v1";
     if (err == ESP_OK) {
         err = nvs_set_blob(nvs, profile_key, profile, profile_size);
     }
     /* Remove newer layouts when a legacy desktop becomes authoritative. */
-    for (unsigned newer = version + 1; err == ESP_OK && newer <= 5; ++newer) {
+    for (unsigned newer = version + 1; err == ESP_OK && newer <= 6; ++newer) {
         char key[16];
         snprintf(key, sizeof(key), "profile_v%u", newer);
         esp_err_t erase_err = nvs_erase_key(nvs, key);
@@ -206,8 +206,10 @@ static void apply_profile_task(void *argument)
             continue;
         }
 
-        if (base->version == 5) {
-            watch_ui_apply_profile_v5(&pending.packet);
+        if (base->version == 6) {
+            watch_ui_apply_profile_v6(&pending.packet);
+        } else if (base->version == 5) {
+            watch_ui_apply_profile_v5((const omarchy_profile_v5_t *)&pending.packet);
         } else if (base->version == 4) {
             watch_ui_apply_profile_v4(&pending.packet.base);
         } else if (base->version == 3) {
@@ -438,11 +440,12 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
             packet_length != sizeof(omarchy_profile_v2_t) &&
             packet_length != sizeof(omarchy_profile_v3_t) &&
             packet_length != sizeof(omarchy_profile_v4_t) &&
-            packet_length != sizeof(omarchy_profile_v5_t)) {
+            packet_length != sizeof(omarchy_profile_v5_t) &&
+            packet_length != sizeof(omarchy_profile_v6_t)) {
             return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
         }
 
-        omarchy_profile_v5_t packet = {0};
+        omarchy_profile_v6_t packet = {0};
         uint16_t copied = 0;
         if (ble_hs_mbuf_to_flat(ctxt->om, &packet, packet_length, &copied) != 0 ||
             copied != packet_length) {
@@ -457,8 +460,10 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
         const bool is_v4 = packet_length == sizeof(omarchy_profile_v4_t) &&
                            omarchy_profile_v4_is_valid(&packet.base);
         const bool is_v5 = packet_length == sizeof(omarchy_profile_v5_t) &&
-                           omarchy_profile_v5_is_valid(&packet);
-        if (!is_v1 && !is_v2 && !is_v3 && !is_v4 && !is_v5) {
+                           omarchy_profile_v5_is_valid((const omarchy_profile_v5_t *)&packet);
+        const bool is_v6 = packet_length == sizeof(omarchy_profile_v6_t) &&
+                           omarchy_profile_v6_is_valid(&packet);
+        if (!is_v1 && !is_v2 && !is_v3 && !is_v4 && !is_v5 && !is_v6) {
             return BLE_ATT_ERR_UNLIKELY;
         }
         const omarchy_profile_v1_t *base = (const omarchy_profile_v1_t *)&packet;

@@ -221,14 +221,16 @@ final class SourceClient {
         try await relayCall(source, path: "v2/destinations", method: "DELETE", fields: ["mode": "alert"])
     }
 
-    func registerWatchPush(_ source: PairedSource, token: String, environment: String) async throws {
+    func registerWatchPush(_ source: PairedSource, token: String, environment: String,
+                           provider: String = "codex", selectionRevision: Int = 0) async throws {
         try await registerRelayDestination(source, mode: "watch", token: token, environment: environment)
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/watch-push"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token,
-                                                                      "environment": environment])
+                                                                      "environment": environment, "provider": provider,
+                                                                      "selectionRevision": selectionRevision])
         let data = try await response(request)
         struct Registration: Decodable { let registered: Bool }
         guard try JSONDecoder().decode(Registration.self, from: data).registered else {

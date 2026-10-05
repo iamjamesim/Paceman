@@ -21,7 +21,8 @@ import unicodedata
 
 from service.claude import ClaudeSession
 from macos.claude_hook import EVENTS as CLAUDE_EVENTS
-from service.codex_limits import read_codex_allowance
+from service.codex_limits import read_codex_allowances
+from service.usage import selected_reading, valid_reading
 from service.codex_turns import read_codex_turn_statuses
 
 
@@ -55,9 +56,11 @@ class HookHandler(socketserver.StreamRequestHandler):
 
 class MacSource:
     def __init__(self, store, *, socket_path: Path, computer_name: str | None = None,
-                 allowance_reader=read_codex_allowance,
-                 turn_status_reader=read_codex_turn_statuses, monotonic=time.monotonic):
+                 allowance_reader=read_codex_allowances, claude_allowance_reader=None,
+                 turn_status_reader=read_codex_turn_statuses, monotonic=time.monotonic,
+                 providers=("codex", "claude")):
         self.store = store
+        self.providers = tuple(p for p in providers if p in ("codex", "claude"))
         self.socket_path = socket_path
         self.computer_name = (computer_name or socket.gethostname()).split(".")[0][:80]
         self.lock = threading.RLock()
@@ -67,6 +70,10 @@ class MacSource:
         self.last_event_at = 0
         self.allowance_reader = allowance_reader
         self.allowance = None
+        self.allowances = {"codex": [], "claude": []}
+        self.usage_status = {}
+        self.claude_allowance_reader = claude_allowance_reader
+        self.claude_allowance_thread = None
         self.allowance_thread = None
         self.next_allowance_at = 0.0
         self.turn_status_reader = turn_status_reader
@@ -166,6 +173,8 @@ class MacSource:
             self.thread.join(timeout=2)
         if self.allowance_thread is not None:
             self.allowance_thread.join(timeout=2)
+        if self.claude_allowance_thread is not None:
+            self.claude_allowance_thread.join(timeout=2)
         if self.turn_status_thread is not None:
             self.turn_status_thread.join(timeout=2)
         if self.server is not None:
@@ -182,6 +191,8 @@ class MacSource:
         provider = command.get("provider", "codex")
         if provider not in ("codex", "claude"):
             raise ValueError("Unsupported provider")
+        if provider not in self.providers:
+            return False
         session, turn, event = (command.get(key) for key in ("session", "turn", "event"))
         if (not isinstance(session, str) or not IDENTIFIER.fullmatch(session)
                 or not isinstance(turn, str) or (turn and not IDENTIFIER.fullmatch(turn))
@@ -373,8 +384,13 @@ class MacSource:
             if now < self.next_allowance_at:
                 return
             self.next_allowance_at = now + 300
-            self.allowance_thread = threading.Thread(target=self._refresh_allowance, daemon=True)
-            self.allowance_thread.start()
+            if "codex" in self.providers and (self.allowance_thread is None or not self.allowance_thread.is_alive()):
+                self.allowance_thread = threading.Thread(target=self._refresh_allowance, daemon=True)
+                self.allowance_thread.start()
+            if "claude" in self.providers and self.claude_allowance_reader is not None and (self.claude_allowance_thread is None
+                    or not self.claude_allowance_thread.is_alive()):
+                self.claude_allowance_thread = threading.Thread(target=self._refresh_claude_allowance, daemon=True)
+                self.claude_allowance_thread.start()
 
     def _refresh_allowance(self):
         try:
@@ -384,7 +400,22 @@ class MacSource:
         with self.lock:
             if self.closed:
                 return
-            self.allowance = allowance
+            values = [allowance] if isinstance(allowance, dict) else allowance or []
+            self.allowances["codex"] = [v for v in values if valid_reading(v) and v["provider"] == "codex"]
+            self.allowance = selected_reading(self.allowances["codex"])
+            self.publish_current()
+
+    def _refresh_claude_allowance(self):
+        try:
+            values, status = self.claude_allowance_reader()
+        except Exception:
+            values, status = None, "unavailable"
+        with self.lock:
+            if self.closed:
+                return
+            if values is not None:
+                self.allowances["claude"] = [v for v in values if valid_reading(v) and v["provider"] == "claude"]
+            self.usage_status["claude"] = status
             self.publish_current()
 
     def _refresh_turn_statuses(self, tracked):
@@ -453,7 +484,9 @@ class MacSource:
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         old = json.loads(last["payload"]) if last["payload"] else {}
         payload = {"sourceName": self.computer_name, "state": state,
-                   "sessions": sessions, "allowance": self.allowance}
+                   "sessions": sessions, "allowance": self.allowance,
+                   "allowances": [r for provider in ("codex", "claude") for r in self.allowances[provider]],
+                   "usageStatus": self.usage_status, "configuredProviders": list(self.providers)}
         if old_key and old_key[0] == activity_key and all(old.get(k) == v for k, v in payload.items()):
             return False
         changed = not old_key or old_key[0] != activity_key

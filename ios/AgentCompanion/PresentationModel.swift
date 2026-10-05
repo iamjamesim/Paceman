@@ -59,7 +59,7 @@ final class PresentationModel: ObservableObject {
         default: return .idle
         }
     }
-    var previewOffline: Bool { ["offline", "computer-offline", "single-offline", "offline-empty"].contains(previewScreen) }
+    var previewOffline: Bool { ["offline", "computer-offline", "computer-usage-stale", "single-offline", "offline-empty"].contains(previewScreen) }
     var previewSessions: [AgentSession] {
         if previewScreen == "grouped" {
             return [AgentSession(id: "1", provider: "codex", state: .needsInput),

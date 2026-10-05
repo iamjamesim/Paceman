@@ -25,6 +25,13 @@ struct MonitoringActivity: ActivityAttributes {
         var providers: [String]? = nil
         // One shared, path-free workspace label when it describes every active session.
         var workspaceLabel: String? = nil
+        var providerStates: [String: [String: Int]]? = nil
+        var attentionProvider: String? {
+            guard let groups = providerStates, groups.count > 1 else { return nil }
+            let names = groups.keys.sorted().filter { (groups[$0]?[dominantState] ?? 0) > 0 }
+            guard names.count == 1 else { return nil }
+            return Self.agentSummary(for: names)
+        }
         var failedCount: Int { failed ?? 0 }
         var sessionCount: Int { working + needsInput + finished + failedCount }
         // Keep fresh input prominent, but a newer working activity can overtake
@@ -48,7 +55,16 @@ struct MonitoringActivity: ActivityAttributes {
             return "No active sessions"
         }
         var headline: String {
-            switch dominantState {
+            if let provider = attentionProvider {
+                switch dominantState {
+                case "needs_input": return "\(provider) needs input"
+                case "failed": return "\(provider) failed"
+                case "working": return "\(provider) working"
+                case "finished": return "\(provider) finished"
+                default: break
+                }
+            }
+            return switch dominantState {
             case "needs_input": "Needs input"
             case "failed": "Failed"
             case "working": "Working"
@@ -89,7 +105,16 @@ struct MonitoringActivity: ActivityAttributes {
             return label
         }
         var sessionSummary: String {
-            [(needsInput, needsInput == 1 ? "needs input" : "need input"),
+            if let groups = providerStates, groups.count > 1 {
+                return groups.keys.sorted().compactMap { provider -> String? in
+                    guard let name = Self.agentSummary(for: [provider]), let counts = groups[provider] else { return nil }
+                    let parts = [("needs_input", "needs input"), ("failed", "failed"), ("working", "working"), ("finished", "finished")]
+                        .filter { (counts[$0.0] ?? 0) > 0 }
+                        .map { (counts[$0.0] ?? 0) > 1 ? "\(counts[$0.0]!) \($0.1)" : $0.1 }
+                    return parts.isEmpty ? nil : "\(name) \(parts.joined(separator: ", "))"
+                }.joined(separator: " · ")
+            }
+            return [(needsInput, needsInput == 1 ? "needs input" : "need input"),
              (failedCount, "failed"),
              (working, "working"), (finished, "finished")]
                 .filter { $0.0 > 0 }

@@ -1039,6 +1039,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         let packet = WatchWire.profile(owner: owner, revision: 1, now: now,
             offset: TimeZone.current.secondsFromGMT() / 60, version: profileVersion,
             theme: selectedTheme, allowance: desiredSnapshot?.allowance,
+            usageProvider: desiredSnapshot?.configuredProviders?.first ?? "codex",
             brightness: brightness, hours: timeFormat.hours(), weather: weather, fahrenheit: weatherFahrenheit)
         // Clock passage does not trigger writes on every poll. Reconnection always
         // resyncs time, and changes in timezone/data/appearance update the profile.
@@ -1050,6 +1051,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         let payload = WatchWire.profile(owner: owner, revision: revision, now: now,
             offset: TimeZone.current.secondsFromGMT() / 60, version: profileVersion,
             theme: selectedTheme, allowance: desiredSnapshot?.allowance,
+            usageProvider: desiredSnapshot?.configuredProviders?.first ?? "codex",
             brightness: brightness, hours: timeFormat.hours(), weather: weather, fahrenheit: weatherFahrenheit)
         sentProfileFingerprint = fingerprint
         profileWritePending = true

@@ -1,4 +1,4 @@
-"""Remove this Mac's Paceman installation without touching other Codex hooks."""
+"""Remove this Mac's Paceman installation without touching other agent hooks or settings."""
 from __future__ import annotations
 
 import json
@@ -15,6 +15,7 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 from service.push import RelayConfig
 from service.network import remove_owned_route
 
+from macos.agents import hook_path
 from macos.install import APP, LABEL, PLIST, PUSH_LABEL, PUSH_PLIST, ROOT
 
 HOOKS = Path.home() / ".codex/hooks.json"
@@ -45,18 +46,18 @@ def revoke_relay_source(config_path: Path) -> str | None:
         return value.get("sourceID", "unknown") if isinstance(value, dict) else "unknown"
 
 
-def cleaned_hooks(path: Path | None = None):
-    path = path or HOOKS
+def cleaned_hooks(path: Path | None = None, *, provider="codex"):
+    path = path or (HOOKS if provider == "codex" else hook_path(provider))
     if not path.exists():
         return None
     document = json.loads(path.read_text())
     if not isinstance(document, dict) or not isinstance(document.get("hooks", {}), dict):
-        raise ValueError("Codex hooks configuration is invalid; leave it for manual review")
+        raise ValueError("Agent hooks configuration is invalid; leave it for manual review")
     changed = False
-    script = str(ROOT / "lib/macos/codex_hook.py")
+    script = str(ROOT / f"lib/macos/{provider}_hook.py")
     for event, groups in document.get("hooks", {}).items():
         if not isinstance(groups, list):
-            raise ValueError(f"Codex {event} hooks are invalid; leave them for manual review")
+            raise ValueError(f"Agent {event} hooks are invalid; leave them for manual review")
         remaining = []
         for group in groups:
             if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
@@ -110,6 +111,8 @@ def uninstall():
         if path.exists() and plistlib.loads(path.read_bytes()).get("Label") != label:
             raise ValueError(f"Background item at {path} does not belong to Paceman")
     hooks = cleaned_hooks()
+    claude_path = hook_path("claude", root=ROOT)
+    claude_hooks = cleaned_hooks(claude_path, provider="claude")
 
     login_command = APP / "Contents/MacOS/Paceman"
     if login_command.is_file():
@@ -125,21 +128,23 @@ def uninstall():
     relay_revocation_pending = revoke_relay_source(ROOT / "private/apns.json")
     route_recorded = (ROOT / "tailscale-route.json").exists()
     route_removed = remove_owned_route(ROOT)
-    if hooks is not None:
-        descriptor, name = tempfile.mkstemp(prefix=".paceman-hooks-", dir=HOOKS.parent)
+    for path, document in ((HOOKS, hooks), (claude_path, claude_hooks)):
+        if document is None:
+            continue
+        descriptor, name = tempfile.mkstemp(prefix=".paceman-hooks-", dir=path.parent)
         temporary = Path(name)
         try:
             with os.fdopen(descriptor, "w") as output:
-                json.dump(hooks, output, indent=2)
+                json.dump(document, output, indent=2)
                 output.write("\n")
-            temporary.replace(HOOKS)
+            temporary.replace(path)
         finally:
             temporary.unlink(missing_ok=True)
     if APP.exists():
         shutil.rmtree(APP)
     if ROOT.exists():
         shutil.rmtree(ROOT)
-    result = ("Removed Paceman's Mac app, background item, Codex hooks, local pairings, "
+    result = ("Removed Paceman's Mac app, background item, Paceman hooks, local pairings, "
               "and APNs key. The iPhone app, other Python installations, and Tailscale remain installed.")
     if relay_revocation_pending:
         result += (" Relay revocation could not be confirmed for source " + relay_revocation_pending

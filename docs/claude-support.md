@@ -1,107 +1,159 @@
-# Claude support: branch implementation and remaining work
+# Claude support: implementation and acceptance testing
 
-This is development work on `codex/claude-monitoring`, not an installed or
-release-ready integration. The existing installer still configures Codex only.
+Development branch: `codex/claude-monitoring`. This work has not been installed on
+this Mac, deployed to the relay, or validated with signed-in Claude sessions or
+physical devices. CodexBar is optional and is not a dependency.
 
-## Implemented activity foundation
+## Implemented behavior
 
-The Mac receiver accepts provider-scoped Claude events alongside Codex events.
-Session identities include the provider, so identical session IDs cannot collide.
-Claude hooks use `prompt_id` to reject callbacks from an older turn; this requires
-Claude Code 2.1.196 or later. Claude sessions never enter the Codex App Server
-status reader.
+Local Claude Code sessions use the same computer, robot states and Live Activity
+as Codex. Sessions remain separate by provider, even when their raw IDs match.
+The aggregate priority is needs input, failed, working, finished, idle. Supporting
+text identifies the provider needing attention. Selecting usage never filters
+activity or alerts. CLI, VS Code and desktop Code share Claude's local hook
+contract; each interface still needs a real-event acceptance test.
 
-`macos/claude_hook.py` observes the main session, forwards only lifecycle metadata,
-opaque IDs and an optional short workspace label, and emits no decisions or text
-to Claude. Tool names are hashed before forwarding; tool arguments, results,
-prompts, replies and transcript paths are not forwarded or read from disk.
+The installer and **Manage Paceman → Agents** configure Codex, Claude, or both.
+Existing Codex-only installations retain their selection on upgrade. New installs
+detect local agents. Settings changes preserve unrelated hooks and Claude settings,
+including an existing status line. Disabling an agent removes only Paceman's hooks
+for that agent. A saved `CLAUDE_CONFIG_DIR` stays tied to its original profile.
+`disableAllHooks` is reported as needing attention rather than changed for the user.
 
-Questions, plan approval, tool approval and MCP elicitation are debounced for
-five seconds. Unrelated parallel tools do not clear a pending question.
-PermissionRequest lacks a tool-use ID, so approval attention is conservatively
-retained until all observed calls of that tool have returned, or the tool batch
-or turn ends. This may retain attention while an approved tool is executing.
-Stop marks the main turn finished; StopFailure marks it failed. A fresh tool
-start can resume a turn continued by another Stop hook. Subagent events are
-ignored in this first implementation, including their independent approvals.
+Usage is retained by computer, provider and window, with independent observation
+and reset times. The iPhone computer screen shows both session and weekly windows
+for both providers when available. The Apple Watch app shows each provider's most
+constrained available window. **iPhone Settings → Watch usage** pins Codex or Claude
+for compact watch surfaces; the picker appears only when both are available. Both
+the Apple Watch complications and ESP32 meter use that selection. The watch usage
+computer remains the first paired computer, matching its background push sender;
+accounts from different computers are never combined or substituted.
 
-Hook-observed sessions clear on source restart. The last event time is retained
-per provider for subsequent setup verification. Working sessions do not expire
-merely because time has elapsed. Finished and failed display rows retire after
-ten minutes, matching Codex's existing display retention.
+Usage selection persists across restarts. Foreground watch messages and background
+pushes carry a selection revision and source identity; older selections and wrong
+sources cannot overwrite the current meter. Readings retain their original times
+when disconnected. After reset, a reading is unavailable until refreshed. Older
+ESP32 firmware continues to receive Codex-compatible profiles and shows unavailable
+when Claude is selected; profile v6 firmware is required to display Claude correctly.
 
-## Known event limitations
+## Activity contract and limitations
 
-- Claude has no general interrupt event. Stop does not fire on a user interrupt.
-  Without another observable event, a session can retain its previous state
-  until a new prompt or SessionEnd. PostToolUseFailure's is_interrupt flag is
-  handled when supplied, but is not a universal cancellation signal.
-- Another Stop hook can continue model reasoning without immediately emitting
-  a tool event. Paceman may temporarily display Finished during that interval.
-- Finished refers to the main turn, not all background tasks or scheduled work.
-- Remote SSH/cloud execution and subagent-specific monitoring are not included.
-- CLI, VS Code and desktop Code local sessions need separate real-event tests;
-  the shared hook contract alone does not establish support.
+Claude Code **2.1.196 or later** is required for native `prompt_id`. The adapter
+observes the main session only. It forwards lifecycle names, opaque identifiers,
+hashed tool/server names, and an optional short project label to a private local
+socket. It never reads transcripts or forwards prompts, replies, tool arguments,
+results or full paths. Hooks emit no Claude decisions or text and fail without
+blocking the user's work.
 
-## Usage direction
+Questions, plan approval, tool approval and MCP elicitation are debounced for five
+seconds. Unrelated parallel tools do not clear a pending question. PermissionRequest
+has no tool-use ID, so approval attention is retained until all observed calls of
+that tool return, or the batch/turn ends. An approved long-running tool can therefore
+retain attention. Old prompt callbacks cannot overwrite a newer turn.
 
-Claude usage is part of the intended feature. Do not route it into the existing
-single Codex `allowance` slot: that would overwrite another provider's reading.
-The current phone, relay, watch app and watch firmware still assume that slot
-means Codex. None of those assumptions have been changed on this branch yet.
+`Stop` finishes the main turn; `StopFailure` marks it failed. A fresh tool start
+can resume a turn continued by another Stop hook. Source restart clears hook-observed
+sessions, retaining per-provider event times for setup verification. Working does
+not expire just because time elapsed. Finished/failed rows retire after ten minutes.
 
-Retain readings separately by computer, provider, account scope (where known),
-and usage window. Each window needs its own observation and reset time. When
-identity is unavailable, keep readings scoped to their reporting computer;
-never infer that two computers share an account or add their percentages.
-An unavailable or stale Claude reading must not clear Codex, and vice versa.
+Known boundaries:
 
-Agreed activity model:
+- Claude has no general interrupt hook. A user interrupt without another observed
+  event can retain the old state until a new prompt or SessionEnd. The supplied
+  PostToolUseFailure `is_interrupt` flag is handled, but is not universal.
+- Another Stop hook can continue reasoning before emitting a tool event; Paceman
+  can temporarily show Finished in that interval.
+- Finished means the main turn, not background tasks or scheduled work. Independent
+  subagent events and approvals, remote SSH and cloud execution are outside scope.
 
-- One Live Activity per computer and one top-level robot for that computer.
-- Aggregate all its Codex and Claude sessions using the existing priority:
-  needs input, failed, working, finished, idle.
-- Supporting text identifies which provider needs attention and shows mixed
-  activity. Selecting a usage provider does not filter activity or alerts.
+## Usage reader and sign-in
 
-Usage presentation direction:
+Codex windows come from its local App Server. Claude windows come from a read-only
+request to Anthropic's OAuth usage endpoint using the existing local Claude Code
+sign-in. This endpoint is used by CodexBar but is not a documented stable public API.
+It is a compatibility dependency that needs live validation before release.
 
-- Show both providers in the phone/watch app wherever space permits. Display
-  the provider, window, remaining percentage and reset time distinctly.
-- Pin a provider/account for a compact watch surface. Prefer a per-complication
-  choice where supported. A new reading must not change the user's selection.
-- Keep activity monitoring and notifications enabled for both providers,
-  independent of the selected usage meter. No automatic provider rotation.
-- Hide the picker when there is only one available provider. Do not silently
-  substitute the other provider when the selected reading becomes unavailable.
+Paceman reads a profile's `.credentials.json` or the default macOS Claude Code
+Keychain item. It never copies credentials into Paceman's database, refreshes tokens,
+scrapes a browser, modifies a status line, or sends a model request. Normal background
+reads do not prompt. **Manage Paceman → Allow Claude usage access…** performs an
+explicit user-initiated access check, which may ask for Keychain permission. Claude
+owns refreshing its own sign-in. API-key-only setups and model-specific/spend limits
+are not covered. Only the current account for each provider is supported.
 
-Implementation default: Paceman works independently of CodexBar. Use the
-currently signed-in account for each provider in the first version; additional
-account switching is outside that initial scope. Claude's documented CLI
-status-line input contains five-hour and seven-day limits, but that alone does
-not establish a reader for VS Code-only users. Validate an independent reader
-before claiming usage support across interfaces. CodexBar's readers are a
-reference, not a required installation.
+Transient Claude usage failures retain Claude’s cached times; sign-out, invalid
+credentials or a changed token on a failed request clear its old reading. Neither
+provider clears the other's quota. This Mac's no-prompt check returned
+`sign_in_needed`; authenticated usage has not been proven here.
 
-## Remaining implementation and verification
+## Checks completed
 
-1. Validate an independent usage reader and add provider/window-scoped readings, including
-   freshness, account changes and backward compatibility.
-2. Add provider-aware installer, upgrade, removal and hook review. Preserve
-   existing Claude settings and unrelated hooks. Claude-only users must not be
-   required to configure Codex.
-3. Update the existing Mac activity label and usage surfaces. Review the whole
-   connected, empty, stale/disconnected and mixed-provider screens before
-   calling the design finished.
-4. Update watch transport and push selection together, so foreground updates and
-   background pushes cannot overwrite a pinned provider.
-5. Exercise real CLI, VS Code and desktop sessions, then independently verify
-   APNs acceptance and a newly displayed notification on a locked physical phone.
+The final Python/Mac/watch suite ran 283 tests: 266 passed and 17 skipped for
+platform/environment requirements. All 74 iPhone tests passed. The host renderer
+passed 10 checks.
 
-Tests cover adapter-to-Unix-socket delivery, mixed-provider identity, main-turn
-transitions, parallel attention, old-prompt rejection, no elapsed-time completion,
-privacy and non-blocking hook failures. These are synthetic tests, not evidence
-of real Claude UI or hardware delivery. No installed hooks or apps were changed.
+Automated checks cover source aggregation, lifecycle transitions, parallel attention,
+old-prompt rejection, socket delivery, privacy, bounded/nonblocking failures, usage
+parsing and account changes, installer preservation/rollback, relay validation,
+watch push registration races, persistent selection and backward compatibility.
+The iPhone tests also cover mixed-provider presentation and BLE v6/legacy encoding.
+Mac Swift views compile; iPhone and watchOS builds and the ESP32 firmware build pass.
+The host renderer's profile and freshness checks pass. Hardware has not been flashed.
+
+Rendered screen review used synthetic data. Checked Mac connected/mixed,
+Claude-only, empty, unavailable, paused, missing-hook and long-name states; iPhone
+mixed, Claude-only, no usage, cached/offline and post-reset screens, settings, and
+largest accessibility text. Also checked watchOS mixed, Claude-only, empty, cached
+and post-reset states, plus the host-rendered ESP32 Claude label. The acceptance
+steps below cover what simulator and rendering checks cannot establish. Hook trust, actual agent delivery, authenticated
+quota, relay deployment, APNs delivery and physical phone/watch presentation remain
+unverified.
+
+## Acceptance checklist
+
+1. **Prepare matching builds.** Deploy this branch's relay changes to a test relay
+   before enabling its new Live Activity/provider and watch-selection fields.
+   Build/install the Mac and iPhone versions from this branch; use matching watchOS
+   targets. Keep existing private relay configuration and APNs keys private. Existing
+   published apps/relay do not constitute a test of this branch.
+2. **Select and review agents.** Install with `python3 -m macos.install --agents codex claude`
+   (or `--agents claude` for the friend's setup). Confirm Paceman appears under
+   System Settings → General → Login Items & Extensions. Follow [Mac hook review](../macos/README.md):
+   review Codex's eight Hook 1 entries yourself and inspect Claude's twelve Paceman
+   commands in its local settings. Do not trust unrelated entries. Confirm status
+   has no missing hooks, then use a fresh local session for each provider and verify
+   `lastAgentEventByProvider` advances. Presence alone is insufficient.
+3. **Exercise real interfaces.** In CLI, VS Code and desktop Code separately, submit
+   work, finish, ask a question/approve a plan, trigger a tool approval and a failed
+   tool, and close the session. Check the five-second attention delay and resumption.
+   Send a new prompt while an older callback is pending. Run Codex and Claude together:
+   one robot/Live Activity per computer, correct priority, distinct provider text.
+   Test user interrupt and Stop-hook continuation against the limitations above.
+4. **Check real quota and persistence.** Sign into Claude Code and compare both
+   windows against Claude's own usage view. If needed, use the explicit access check.
+   Confirm Codex remains correct. Switch Watch usage, restart apps/source, and deliver
+   late old-selection messages. Disconnect and reconnect: cached readings retain
+   their timestamps and reset makes usage unavailable until refreshed. Test sign-out
+   and sign-in/account change; one provider must not overwrite the other. Also test
+   Claude-only setup without Codex or CodexBar.
+5. **Check suspended delivery on hardware.** Pair a physical iPhone, allow notifications,
+   then lock it. Trigger new Claude and Codex attention/finish events. Verify the
+   per-user sender uses the source database and records `apns_accepted` (200), then
+   separately confirm a new notification and Live Activity on the phone. Test
+   reconnection separately from delivery while already connected. For Apple Watch,
+   verify both app rows, the pinned complication, delayed push rejection, reset and
+   reconnect on a physical watch. For ESP32, flash v6 only when deliberately testing
+   hardware; verify the Claude label, selected quota, restart cache and Bluetooth
+   reconnection. A compiled image or simulator screenshot does not prove delivery.
+6. **Check upgrade/removal.** On a disposable profile, upgrade a Codex-only install,
+   enable/disable Claude, pause Sharing, and uninstall. Preserve unrelated Claude
+   settings/hooks and confirm Sharing pauses both local tracking and push sending.
+   Open at Login remains independent. Repeat with a custom Claude config directory.
+
+Installation is partial until hook review and a real event pass. Notification setup
+is partial until both APNs acceptance and physical phone display pass. Mac ad hoc or
+Apple Development signing is for testing; public distribution still needs Developer
+ID signing and notarization.
 
 ## References
 
@@ -109,4 +161,3 @@ of real Claude UI or hardware delivery. No installed hooks or apps were changed.
 - [Claude desktop shared configuration](https://code.claude.com/docs/en/desktop#shared-configuration)
 - [Claude status-line fields](https://code.claude.com/docs/en/statusline)
 - [CodexBar Claude readers](https://github.com/steipete/CodexBar/blob/main/docs/claude.md)
-- [CodexBar CLI](https://github.com/steipete/CodexBar/blob/main/docs/cli.md)

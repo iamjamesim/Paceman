@@ -36,6 +36,28 @@ class PushWorkerTests(unittest.TestCase):
     def pair(self):
         return self.store.redeem(self.store.invite("https://source.example")["invitation"], device=device())
 
+    def test_watch_provider_selection_survives_newer_other_provider_readings(self):
+        now=1800000000
+        def reading(provider,left):
+            return dict(provider=provider,remaining=left,window=1,windowDurationMins=10080,
+                        updatedAt=now,resetsAt=now+86400)
+        source=dict(sourceID=self.store.metadata("source_id"),allowance=reading("codex",3),
+                    allowances=[reading("codex",3),reading("claude",80)])
+        payload={"deviceToken":"ef"*32,"environment":"development","provider":"claude","selectionRevision":2}
+        self.store.watch_push_device(self.client["credential"],payload)
+        self.worker.step_watch_allowance(now,source)
+        self.assertEqual(self.sender.calls[-1][1]["allowance"]["provider"],"claude")
+        self.assertEqual(self.sender.calls[-1][1]["selectionRevision"],2)
+        self.assertEqual(self.sender.calls[-1][1]["sourceID"],source["sourceID"])
+        # A late registration cannot undo the user's newer choice.
+        self.assertEqual(self.store.watch_push_device(self.client["credential"],{**payload,"provider":"codex","selectionRevision":1}),{"registered":False})
+        source["allowances"]=[reading("codex",1)]
+        self.worker.step_watch_allowance(now+2000,source)
+        self.assertEqual(len(self.sender.calls),1)
+        self.store.watch_push_device(self.client["credential"],{**payload,"provider":"codex","selectionRevision":3})
+        self.worker.step_watch_allowance(now,source)
+        self.assertEqual(self.sender.calls[-1][1]["allowance"]["provider"],"codex")
+
     def test_existing_source_database_adds_per_phone_name(self):
         old = Path(self.tmp.name) / "old.sqlite3"
         with closing(sqlite3.connect(old)) as db, db:

@@ -26,6 +26,13 @@ extension MonitoringActivity.ContentState {
         themeID = ThemePreference.current.rawValue
         providers = Self.providerCodes((snapshot.sessions ?? [])
             .filter { $0.state != .idle }.map(\.provider))
+        providerStates = Dictionary(grouping: sessions.filter { $0.state != .idle }, by: {
+            Self.providerCodes([$0.provider]).first ?? "other"
+        }).mapValues { group in
+            Dictionary(uniqueKeysWithValues: [ActivityState.working, .needsInput, .finished, .failed].map { state in
+                (state.rawValue, group.filter { $0.state == state }.count)
+            })
+        }
         workspaceLabel = Self.sharedWorkspaceLabel(sessions.filter { $0.state != .idle }.map(\.workspaceLabel))
     }
 }

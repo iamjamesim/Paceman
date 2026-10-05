@@ -14,27 +14,25 @@ struct PacemanWatchApp: App {
         WindowGroup {
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 ScrollView {
-                    Group {
-                        if let allowance = store.allowance, allowance.available(at: context.date) {
-                            allowanceSummary(allowance, at: context.date)
-                        } else if let allowance = store.allowance {
-                            expiredSummary(allowance, at: context.date)
-                        } else {
-                            setupSummary
+                    VStack(alignment: .leading, spacing: 20) {
+                        let summaries = store.usage.summaries(at: context.date)
+                        if summaries.isEmpty { setupSummary }
+                        ForEach(summaries, id: \.provider) { allowance in
+                            if allowance.available(at: context.date) { allowanceSummary(allowance, at: context.date) }
+                            else { expiredSummary(allowance, at: context.date) }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
                 }
-                .id(store.allowance.map { $0.available(at: context.date) ? "reading" : "expired" } ?? "setup")
             }
         }
     }
 
     private func allowanceSummary(_ allowance: WatchAllowanceSnapshot, at date: Date) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("\(Image(systemName: "gauge.with.needle"))  \(allowance.limitTitle)")
+            Text("\(Image(systemName: "gauge.with.needle"))  \(allowance.providerName) · \(allowance.limitTitle)")
                 .font(.headline)
                 .fontWeight(.semibold)
                 .foregroundStyle(accent)
@@ -66,7 +64,7 @@ struct PacemanWatchApp: App {
                 .padding(.top, 8)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(allowance.limitTitle), \(allowance.remaining) percent remaining, resets in \(allowance.resetCountdownDetailedSpoken(at: date)), updated \(Date(timeIntervalSince1970: allowance.updatedAt).formatted())")
+        .accessibilityLabel("\(allowance.providerName) \(allowance.limitTitle), \(allowance.remaining) percent remaining, resets in \(allowance.resetCountdownDetailedSpoken(at: date)), updated \(Date(timeIntervalSince1970: allowance.updatedAt).formatted())")
     }
 
     private func updatedLabel(since timestamp: TimeInterval, at date: Date) -> String {
@@ -79,6 +77,8 @@ struct PacemanWatchApp: App {
 
     private func expiredSummary(_ allowance: WatchAllowanceSnapshot, at date: Date) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+            Text(allowance.providerName)
+                .font(.caption).foregroundStyle(.secondary)
             Text("Waiting for new limit")
                 .font(.headline)
             if date.timeIntervalSince1970 - allowance.resetsAt > 1_800 {
@@ -110,22 +110,39 @@ final class WatchPushDelegate: NSObject, WKApplicationDelegate {
     func didReceiveRemoteNotification(_ userInfo: [AnyHashable: Any],
                                       fetchCompletionHandler completionHandler: @escaping (WKBackgroundFetchResult) -> Void) {
         guard userInfo["schema"] as? Int == 1,
-              let message = userInfo["allowance"] as? [String: Any] else {
+              userInfo["allowance"] is [String: Any] else {
             completionHandler(.noData)
             return
         }
-        let accepted = WatchAllowanceStore.shared.receive(["schema": 1].merging(message) { _, new in new })
+        let accepted = WatchAllowanceStore.shared.receive(userInfo.reduce(into: [String: Any]()) { result, entry in
+            if let key = entry.key as? String { result[key] = entry.value }
+        }, authoritative: false)
         completionHandler(accepted ? .newData : .noData)
     }
 }
 
 final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
     static let shared = WatchAllowanceStore()
-    @Published private(set) var allowance = WatchAllowanceSnapshot.load()
+    @Published private(set) var usage = WatchUsageState.load()
+    var allowance: WatchAllowanceSnapshot? { usage.selected(at: Date()) }
     private var pushTokenMessage: [String: Any]?
 
     override init() {
         super.init()
+        #if DEBUG
+        if let preview = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--usage-preview=") }) {
+            let now = Date().timeIntervalSince1970
+            let scenario = String(preview.dropFirst(16))
+            let stale = scenario == "stale"
+            let expired = scenario == "expired"
+            let providers = scenario == "claude-only" ? ["claude"] : ["codex", "claude"]
+            usage = WatchUsageState(selectedProvider: providers.first!, readings: scenario == "empty" ? [] : providers.map { provider in
+                WatchAllowanceSnapshot(provider: provider, remaining: provider == "claude" ? 20 : 70, window: 2,
+                    updatedAt: now - (stale ? 7200 : expired ? 4000 : 0), resetsAt: now + (expired ? -60 : 3600), windowDurationMins: 300)
+            })
+            return
+        }
+        #endif
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
         WCSession.default.activate()
@@ -150,41 +167,18 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     @discardableResult
-    func receive(_ message: [String: Any]) -> Bool {
-        guard message["schema"] as? Int == 1 else { return false }
-        if message["clear"] as? Bool == true {
-            guard WatchAllowanceSnapshot.load() != nil else { return false }
-            WatchAllowanceSnapshot.save(nil)
-            WidgetCenter.shared.reloadTimelines(ofKind: "PacemanAllowance")
-            WidgetCenter.shared.reloadTimelines(ofKind: "PacemanReset")
-            DispatchQueue.main.async { self.allowance = nil }
-            return true
+    func receive(_ message: [String: Any], authoritative: Bool = true) -> Bool {
+        // WCSession and APNs callbacks may arrive on different queues. Serialize
+        // their cache transactions so neither can erase a concurrent reading.
+        if !Thread.isMainThread {
+            return DispatchQueue.main.sync { self.receive(message, authoritative: authoritative) }
         }
-        let value: WatchAllowanceSnapshot?
-        if let provider = message["provider"] as? String,
-           let remaining = message["remaining"] as? Int,
-           let window = message["window"] as? Int,
-           let updatedAt = message["updatedAt"] as? Double,
-           let resetsAt = message["resetsAt"] as? Double {
-            value = WatchAllowanceSnapshot(provider: provider, remaining: remaining, window: window,
-                                           updatedAt: updatedAt, resetsAt: resetsAt,
-                                           windowDurationMins: message["windowDurationMins"] as? Int)
-        } else {
-            value = nil
-        }
-        if value == nil { return false }
-        let accepted = value?.valid == true ? value : nil
-        if value != nil && accepted == nil { return false }
-        if let accepted, accepted.updatedAt > Date().timeIntervalSince1970 + 60 { return false }
-        if let accepted, let previous = WatchAllowanceSnapshot.load(),
-           accepted.updatedAt < previous.updatedAt { return false }
-        if accepted == WatchAllowanceSnapshot.load() { return false }
-        WatchAllowanceSnapshot.save(accepted)
+        var next = usage
+        guard next.receive(message, authoritative: authoritative) else { return false }
+        next.save()
+        usage = next
         WidgetCenter.shared.reloadTimelines(ofKind: "PacemanAllowance")
         WidgetCenter.shared.reloadTimelines(ofKind: "PacemanReset")
-        DispatchQueue.main.async {
-            self.allowance = accepted
-        }
         return true
     }
 

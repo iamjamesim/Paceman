@@ -100,7 +100,7 @@ struct CompanionRoot: View {
                 model.weather.showPreview("weather-denied")
                 #endif
                 path = [.watch]
-            case "settings": path = [.settings]
+            case "settings", "settings-usage": path = [.settings]
             case "appearance": path = [.settings, .appearance]
             case "live-activities", "multi-live-activities", "live-activities-setup", "live-activities-off": path = [.liveActivities]
             case "pairing", "reconnect": path = [.pairing]
@@ -116,7 +116,7 @@ struct CompanionRoot: View {
             case "watch-pairing": path = [.watch, .watchPairing]
             case "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error": path = [.watchPairing]
             case "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off", "watch-paired", "watch-complete": path = [.watch]
-            case "computer", "computer-offline", "computer-revoked", "computer-stale", "computer-waiting", "computer-long": path = [.computer]
+            case "computer-usage", "computer-usage-stale", "computer-usage-empty", "computer-usage-expired", "computer-usage-claude-only", "computer", "computer-offline", "computer-revoked", "computer-stale", "computer-waiting", "computer-long": path = [.computer]
             default: break
             }
         }

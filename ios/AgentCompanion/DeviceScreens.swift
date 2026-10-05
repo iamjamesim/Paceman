@@ -55,6 +55,29 @@ struct ComputerDetail: View {
                     Text("It will reconnect when this computer is awake and online.")
                         .font(.footnote).foregroundStyle(theme.secondaryInk)
                 }
+                if connection != .revoked, let snapshot = paired.flatMap({ model.snapshots[$0.sourceID] }),
+                   !snapshot.usageReadings.isEmpty {
+                    CompanionRule(theme: theme)
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("Usage").font(.headline)
+                        ForEach(snapshot.usageReadings, id: \.usageID) { reading in
+                            VStack(alignment: .leading, spacing: 5) {
+                                ViewThatFits(in: .horizontal) {
+                                    HStack { Text("\(reading.providerName) · \(reading.limitTitle)"); Spacer(); usageValue(reading) }
+                                    VStack(alignment: .leading, spacing: 5) { Text("\(reading.providerName) · \(reading.limitTitle)"); usageValue(reading) }
+                                }.font(.subheadline)
+                                Text(Date().timeIntervalSince1970 >= Double(reading.resetsAt)
+                                    ? "Waiting for usage after reset"
+                                    : "Resets \(Date(timeIntervalSince1970: Double(reading.resetsAt)).formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.caption).foregroundStyle(theme.secondaryInk)
+                                if Date().timeIntervalSince1970 - Double(reading.updatedAt) > 1800 {
+                                    Text("Last checked \(Date(timeIntervalSince1970: Double(reading.updatedAt)).formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption).foregroundStyle(theme.secondaryInk)
+                                }
+                            }
+                        }
+                    }
+                }
                 CompanionRule(theme: theme)
                 Button { name = presentation.displayName(source: paired, snapshot: paired.flatMap { model.snapshots[$0.sourceID] }); rename = true } label: {
                     ViewThatFits(in: .horizontal) {
@@ -99,6 +122,11 @@ struct ComputerDetail: View {
                     }
                 }
             } message: { Text("Stop receiving activity from this computer and remove this phone’s access. Your agents keep running.") }
+    }
+
+    private func usageValue(_ reading: CodexAllowance) -> some View {
+        Text(Date().timeIntervalSince1970 < Double(reading.resetsAt) ? "\(reading.remaining)% left" : "Unavailable")
+            .monospacedDigit().foregroundStyle(theme.secondaryInk)
     }
 
     private var nameValue: some View {

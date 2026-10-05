@@ -74,42 +74,46 @@ def _send(process: subprocess.Popen, message: dict):
     process.stdin.flush()
 
 
-def parse_codex_allowance(result: dict, observed_at: int) -> dict | None:
-    """Map the most depleted recognized Codex window to watch profile v5."""
+def parse_codex_allowances(result: dict, observed_at: int) -> list[dict]:
+    """Return every recognized Codex window with its own observation and reset time."""
     if not isinstance(result, dict):
-        return None
+        return []
     buckets = result.get("rateLimitsByLimitId")
     bucket = buckets.get("codex") if isinstance(buckets, dict) else None
     if bucket is None:
         bucket = result.get("rateLimits")
     if not isinstance(bucket, dict) or bucket.get("limitId") != "codex":
-        return None
+        return []
     windows = []
     for key in ("primary", "secondary"):
         item = bucket.get(key)
         if item is None:
             continue
         if not isinstance(item, dict):
-            return None
+            return []
         used, minutes, reset = (item.get(k) for k in ("usedPercent", "windowDurationMins", "resetsAt"))
         if (type(used) not in (int, float) or not math.isfinite(used) or not 0 <= used <= 100
                 or type(minutes) is not int or not 0 < minutes <= 10080
                 or type(reset) is not int or not observed_at < reset <= 3155759999):
-            return None
+            return []
         windows.append((used, 1 if minutes == 10080 else 2, reset, minutes))
     if not windows:
-        return None
-    # A tie does not make the shorter window more useful to show.
-    used, window, reset, minutes = max(windows, key=lambda item: (item[0], item[1] == 1))
-    return {"provider": "codex", "remaining": int(math.floor(100 - used + 0.5)),
-            "window": window, "windowDurationMins": minutes,
-            "updatedAt": observed_at, "resetsAt": reset}
+        return []
+    return [{"provider": "codex", "remaining": int(math.floor(100 - used + 0.5)),
+             "window": window, "windowDurationMins": minutes,
+             "updatedAt": observed_at, "resetsAt": reset}
+            for used, window, reset, minutes in windows]
 
 
-def read_codex_allowance() -> dict | None:
+def parse_codex_allowance(result: dict, observed_at: int) -> dict | None:
+    from service.usage import selected_reading
+    return selected_reading(parse_codex_allowances(result, observed_at))
+
+
+def read_codex_allowances() -> list[dict]:
     binary = codex_binary()
     if binary is None:
-        return None
+        return []
     process = None
     try:
         process = subprocess.Popen([binary, "app-server", "--stdio"], stdin=subprocess.PIPE,
@@ -118,16 +122,16 @@ def read_codex_allowance() -> dict | None:
         _send(process, {"method": "initialize", "id": 1, "params": {
             "clientInfo": {"name": "paceman", "title": "Paceman", "version": "0.1.0"}}})
         if not _response(process, 1, deadline):
-            return None
+            return []
         _send(process, {"method": "initialized", "params": {}})
         _send(process, {"method": "account/read", "id": 2, "params": {"refreshToken": False}})
         account = _response(process, 2, deadline).get("account")
         if not isinstance(account, dict) or account.get("type") != "chatgpt":
-            return None
+            return []
         _send(process, {"method": "account/rateLimits/read", "id": 3, "params": {}})
-        return parse_codex_allowance(_response(process, 3, deadline), int(time.time()))
+        return parse_codex_allowances(_response(process, 3, deadline), int(time.time()))
     except (OSError, ValueError, BrokenPipeError, OverflowError):
-        return None
+        return []
     finally:
         if process is not None:
             try:
@@ -141,3 +145,8 @@ def read_codex_allowance() -> dict | None:
                     pass
             process.stdin.close()
             process.stdout.close()
+
+
+def read_codex_allowance() -> dict | None:
+    from service.usage import selected_reading
+    return selected_reading(read_codex_allowances())
