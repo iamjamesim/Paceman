@@ -100,7 +100,7 @@ struct CompanionRoot: View {
                 model.weather.showPreview("weather-denied")
                 #endif
                 path = [.watch]
-            case "settings", "settings-usage": path = [.settings]
+            case "settings", "settings-usage", "settings-usage-esp32": path = [.settings]
             case "appearance": path = [.settings, .appearance]
             case "live-activities", "multi-live-activities", "live-activities-setup", "live-activities-off": path = [.liveActivities]
             case "pairing", "reconnect": path = [.pairing]

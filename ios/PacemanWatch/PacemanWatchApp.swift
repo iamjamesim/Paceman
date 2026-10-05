@@ -109,11 +109,6 @@ final class WatchPushDelegate: NSObject, WKApplicationDelegate {
 
     func didReceiveRemoteNotification(_ userInfo: [AnyHashable: Any],
                                       fetchCompletionHandler completionHandler: @escaping (WKBackgroundFetchResult) -> Void) {
-        guard userInfo["schema"] as? Int == 1,
-              userInfo["allowance"] is [String: Any] else {
-            completionHandler(.noData)
-            return
-        }
         let accepted = WatchAllowanceStore.shared.receive(userInfo.reduce(into: [String: Any]()) { result, entry in
             if let key = entry.key as? String { result[key] = entry.value }
         }, authoritative: false)
@@ -152,7 +147,7 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
         guard let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
               ["development", "production"].contains(environment) else { return }
         pushTokenMessage = ["schema": 1, "watchPushToken": data.map { String(format: "%02x", $0) }.joined(),
-                            "environment": environment]
+                            "environment": environment, "usageSchema": 2]
         sendPushToken()
     }
 

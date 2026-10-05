@@ -803,10 +803,13 @@ final class ProtocolTests: XCTestCase {
             XCTAssertEqual(body["deviceToken"] as? String, String(repeating: "ab", count: 32))
             XCTAssertEqual(body["environment"] as? String, "development")
             XCTAssertNil(body["mode"])
+            XCTAssertEqual(body["usageSchema"] as? Int, 2)
+            XCTAssertEqual(body["provider"] as? String, "claude")
+            XCTAssertEqual(body["selectionRevision"] as? Int, 9)
             return (200, Data(#"{"registered":true}"#.utf8))
         }
         try await client.registerWatchPush(source, token: String(repeating: "ab", count: 32),
-                                           environment: "development")
+                                           environment: "development", provider: "claude", selectionRevision: 9, usageSchema: 2)
     }
 
     func testRemovalIsSelfScopedAndAlreadyRevokedIsSuccess() async throws {

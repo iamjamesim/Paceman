@@ -5,7 +5,7 @@ import WatchConnectivity
 final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
     static let shared = AppleWatchAllowanceBridge()
     private var pending: [String: Any] = ["schema": 1]
-    var onWatchPushToken: ((String, String) -> Void)?
+    var onWatchPushToken: ((String, String, Int) -> Void)?
 
     private override init() {
         super.init()
@@ -15,7 +15,7 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
     }
 
     func update(_ allowance: CodexAllowance?, readings: [CodexAllowance] = [], provider: String = "codex",
-                selectionRevision: Int = 0, sourceID: String? = nil, clear: Bool = false) {
+                selectionRevision: Int = 0, sourceID: String? = nil, observedAt: TimeInterval? = nil, clear: Bool = false) {
         if let allowance, allowance.valid {
             pending = ["schema": 1, "provider": allowance.provider, "remaining": allowance.remaining,
                        "window": allowance.window, "updatedAt": Double(allowance.updatedAt),
@@ -25,6 +25,7 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
             pending = clear ? ["schema": 1, "clear": true] : ["schema": 1]
         }
         if let sourceID { pending["sourceID"] = sourceID }
+        if let observedAt { pending["observedAt"] = observedAt }
         pending["selectedProvider"] = provider
         pending["selectionRevision"] = selectionRevision
         if let data = try? JSONEncoder().encode(readings.filter { $0.valid }),
@@ -68,7 +69,9 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
               token.count.isMultiple(of: 2),
               let environment = message["environment"] as? String,
               ["development", "production"].contains(environment) else { return false }
-        DispatchQueue.main.async { self.onWatchPushToken?(token, environment) }
+        let usageSchema = message["usageSchema"] as? Int ?? 1
+        guard [1, 2].contains(usageSchema) else { return false }
+        DispatchQueue.main.async { self.onWatchPushToken?(token, environment, usageSchema) }
         return true
     }
 

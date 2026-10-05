@@ -10,7 +10,7 @@ Each paired computer reports its own agent activity. Mac supports Codex and Clau
                  │                                         ▲                 ▲
                  └── authenticated relay ── APNs ──► iOS Notification Center ── ANCS ─────┘
                                        ├── ActivityKit ──► iPhone Live Activity
-                                       └── selected usage ──► Apple Watch app
+                                       └── provider usage ──► Apple Watch app
 ```
 
 ## From agents to the phone
@@ -36,8 +36,8 @@ When configured, the source sends notifications through the relay, which holds t
 
 The iPhone owns the ESP32 watch's Bluetooth connection and chooses activity from fresh computers. The watch retains its bond, owner, and profile, but keeps current activity only in RAM. Reconnection sends current state rather than replaying missed events. See [Bluetooth lifecycle](../firmware/esp32-watch/CONNECTION.md) and [data lifecycle](data-lifecycle.md).
 
-The Mac retains usage windows independently for Codex and Claude. The phone shows both; its Watch usage setting pins the provider for compact watch displays without changing activity or alerts. Usage stays with the first paired computer; accounts from separate computers are never combined.
+The Mac retains usage windows independently for Codex and Claude. The phone shows both. Each Apple Watch complication chooses its provider in the watch-face editor; two slots can show Codex and Claude simultaneously. The watchOS app and complications require watchOS 26+. The phone's ESP32 usage setting selects the provider for the ESP32 meter without changing activity or alerts. Usage stays with the first paired computer; accounts from separate computers are never combined.
 
-When configured, the Apple Watch app receives the selected provider's usage through its own background push path and refreshes its complications. Foreground WatchConnectivity messages can supply both providers; a source identity and selection revision reject outdated pushes. ESP32 profile v6 also carries the selected provider. Older firmware displays unavailable when Claude is selected. Apple Watch does not use the ESP32 Bluetooth route. Exact fields and versions are in the [protocol](protocol.md).
+When configured, the Apple Watch app receives all available provider/window readings in one background push and refreshes its complications. Foreground WatchConnectivity also supplies all readings. Source identity, phone revision and whole-snapshot observation time reject outdated data, including removals after sign-out. Older watch destinations retain their single-provider push format. ESP32 profile v6 carries the phone-selected provider. Older firmware displays unavailable when Claude is selected. Apple Watch does not use the ESP32 Bluetooth route. Exact fields and versions are in the [protocol](protocol.md).
 
 See [Claude support and acceptance testing](claude-support.md) for event limitations, sign-in behavior and unverified hardware checks.

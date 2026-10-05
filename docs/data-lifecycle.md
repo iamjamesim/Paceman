@@ -15,9 +15,9 @@ cache. See the [source protocol](protocol.md) for freshness fields.
 | APNs relay | APNs key in host-managed secret files; hashed source and client credentials, hashed token bindings, App Attest public keys and counters, pairing approvals, and revocation tombstones in managed PostgreSQL | Phone/source revocation, token replacement, or key rotation; attested keys remain available for later approvals |
 | iPhone Keychain | Source endpoints and credentials, installation ID, ESP32 watch owner identity; device-only, available after first unlock | Explicit removal or confirmed revocation |
 | iPhone protected Application Support | One last-known snapshot per source, weather cache and bounded transport diagnostics | Source removal, relevant setting change or replacement data |
-| iPhone preferences | Phone theme, source names, per-watch settings, pinned usage provider/source revision and delivery bookkeeping | User change or corresponding device removal |
+| iPhone preferences | Phone theme, source names, per-watch settings, ESP32 usage provider/source revision and delivery bookkeeping | User change or corresponding device removal |
 | ESP32 watch NVS | Owner/bond, accepted profile, clock and preferences | Deliberate factory reset or owner transfer |
-| Apple Watch shared preferences | Provider/window usage cache, selected provider, selection revision and reporting source | Authoritative phone clear/source change or newer accepted data; expired readings remain unavailable |
+| Apple Watch shared preferences | Provider/window usage cache, snapshot observation time, legacy provider selection, phone revision and reporting source; WidgetKit owns each complication’s provider choice | Authoritative phone clear/source change or newer accepted data; expired readings remain unavailable |
 | Live Activity | Expiring ActivityKit display copy | New event, stale date or lifecycle end |
 
 The watch keeps activity in RAM, so reboot clears old alerts. The phone keeps
@@ -31,10 +31,10 @@ source restart; Mac clears hook-only sessions until another hook arrives.
 - Each provider/window allowance retains its original observation and reset times; after reset it
   becomes unavailable until a new reading. Weather current conditions expire
   after three hours, and daily high/low at the forecast location's midnight.
-  Failure does not refresh their timestamps. Provider selection never rotates when
-  another reading arrives; an unavailable selected provider cannot borrow another
-  provider or computer. Old watch selection revisions and wrong-source pushes are
-  rejected. Usage changes do not create activity alerts.
+  Failure does not refresh their timestamps. Each complication's configured provider
+  stays fixed when another reading arrives; an unavailable provider cannot borrow
+  another provider or computer. Full watch snapshots carry all windows and removals;
+  older snapshot times, phone revisions and wrong-source pushes are rejected. Usage changes do not create activity alerts.
 - Theme, identity and preferences survive disconnection. Confirmed revocation
   clears the affected source cache; removing one source leaves others intact.
 - iOS owns suspended network and Bluetooth work. Core Bluetooth pending

@@ -89,17 +89,21 @@ struct WatchAllowanceSnapshot: Codable, Equatable {
 }
 
 
-/// Provider/window caches are separate. Only the phone can change the selection;
-/// silent pushes must match its revision and source before they can update data.
+/// Provider/window caches are separate. Complications select a provider locally.
+/// Only the phone can change source identity; pushes must match its revision.
 struct WatchUsageState: Codable, Equatable {
     static let storageKey = "apple-watch-usage-v2"
     var selectedProvider = "codex"
     var selectionRevision = 0
     var sourceID: String? = nil
     var readings: [WatchAllowanceSnapshot] = []
+    var observedAt: TimeInterval? = nil
 
     func selected(at date: Date) -> WatchAllowanceSnapshot? {
-        Self.select(readings.filter { $0.provider == selectedProvider }, at: date)
+        reading(for: selectedProvider, at: date)
+    }
+    func reading(for provider: String, at date: Date) -> WatchAllowanceSnapshot? {
+        Self.select(readings.filter { $0.provider == provider }, at: date)
     }
     static func select(_ values: [WatchAllowanceSnapshot], at date: Date) -> WatchAllowanceSnapshot? {
         let available = values.filter { $0.available(at: date) }
@@ -108,13 +112,14 @@ struct WatchUsageState: Codable, Equatable {
         }
     }
     func summaries(at date: Date) -> [WatchAllowanceSnapshot] {
-        [selectedProvider, selectedProvider == "codex" ? "claude" : "codex"].compactMap { provider in
+        ["codex", "claude"].compactMap { provider in
             Self.select(readings.filter { $0.provider == provider }, at: date)
         }
     }
     @discardableResult
     mutating func receive(_ message: [String: Any], authoritative: Bool, now: Date = Date()) -> Bool {
-        guard message["schema"] as? Int == 1 else { return false }
+        guard let schema = message["schema"] as? Int, [1, 2].contains(schema),
+              !authoritative || schema == 1 else { return false }
         let revision = message["selectionRevision"] as? Int ?? 0
         guard revision >= 0 else { return false }
         var next = self
@@ -127,19 +132,25 @@ struct WatchUsageState: Codable, Equatable {
             }
             if let source = message["sourceID"] as? String {
                 guard UUID(uuidString: source) != nil else { return false }
-                if source != sourceID { next.readings = [] }
+                if source != sourceID { next.readings = []; next.observedAt = nil }
                 next.sourceID = source
             }
         } else {
             guard revision == selectionRevision,
                   (message["sourceID"] as? String) == sourceID else { return false }
+            if schema == 2 {
+                guard sourceID != nil, message["selectionRevision"] as? Int != nil else { return false }
+            }
         }
         if message["clear"] as? Bool == true {
             guard authoritative else { return false }
             next.readings = []
+            next.observedAt = nil
         } else {
             let raw: [[String: Any]]
-            if authoritative, let values = message["allowances"] as? [[String: Any]] {
+            let complete = message["allowances"] != nil && (authoritative || schema == 2)
+            if complete {
+                guard let values = message["allowances"] as? [[String: Any]] else { return false }
                 raw = values
             } else if let reading = message["allowance"] as? [String: Any] {
                 raw = [reading]
@@ -152,16 +163,27 @@ struct WatchUsageState: Codable, Equatable {
                   let data = try? JSONSerialization.data(withJSONObject: raw),
                   let incoming = try? JSONDecoder().decode([WatchAllowanceSnapshot].self, from: data),
                   incoming.allSatisfy({ $0.valid && $0.updatedAt <= now.timeIntervalSince1970 + 60 }),
-                  Set(incoming.map(\.usageID)).count == incoming.count,
-                  authoritative || incoming.allSatisfy({ $0.provider == selectedProvider }) else { return false }
-            if authoritative, message["allowances"] != nil {
-                // Full phone snapshots may remove a signed-out provider. Preserve
-                // a newer push only for windows still present in that snapshot.
-                next.readings = incoming.map { value in
-                    next.readings.first { $0.usageID == value.usageID && $0.updatedAt > value.updatedAt } ?? value
+                  Set(incoming.map { "\($0.provider)/\($0.window)" }).count == incoming.count,
+                  authoritative || schema == 2 || incoming.allSatisfy({ $0.provider == selectedProvider }) else { return false }
+            if complete {
+                if let observed = message["observedAt"] as? Double {
+                    guard observed.isFinite, observed >= 1_704_067_200,
+                          observed <= now.timeIntervalSince1970 + 60,
+                          incoming.allSatisfy({ $0.updatedAt <= observed }) else { return false }
+                    if observed >= (next.observedAt ?? 0) {
+                        next.readings = incoming
+                        next.observedAt = observed
+                    }
+                } else {
+                    guard schema == 1 else { return false }
+                    // Older phones supply no whole-snapshot clock. Use their
+                    // snapshots only until complete-snapshot ordering is established.
+                    if next.observedAt == nil { next.readings = incoming }
                 }
             } else {
+                guard schema == 1 else { return false }
                 for value in incoming {
+                    if let observed = next.observedAt, value.updatedAt <= observed { continue }
                     if let index = next.readings.firstIndex(where: { $0.usageID == value.usageID }) {
                         if value.updatedAt >= next.readings[index].updatedAt { next.readings[index] = value }
                     } else {
@@ -183,7 +205,8 @@ struct WatchUsageState: Codable, Equatable {
         if let data = defaults?.data(forKey: storageKey), let value = try? JSONDecoder().decode(Self.self, from: data),
            ["codex", "claude"].contains(value.selectedProvider), value.readings.count <= 4,
            value.readings.allSatisfy(\.valid), value.selectionRevision >= 0,
-           Set(value.readings.map(\.usageID)).count == value.readings.count { return value }
+           Set(value.readings.map { "\($0.provider)/\($0.window)" }).count == value.readings.count,
+           value.observedAt == nil || value.observedAt!.isFinite && value.observedAt! >= 1_704_067_200 { return value }
         if let data = defaults?.data(forKey: WatchAllowanceSnapshot.storageKey),
            let value = try? JSONDecoder().decode(WatchAllowanceSnapshot.self, from: data), value.valid {
             return Self(selectedProvider: value.provider, readings: [value])

@@ -131,11 +131,12 @@ final class CompanionModel: ObservableObject {
             Task { @MainActor in await self?.refreshAll(fromWatch: true) }
         }
         if !preview {
-            AppleWatchAllowanceBridge.shared.onWatchPushToken = { [weak self] token, environment in
+            AppleWatchAllowanceBridge.shared.onWatchPushToken = { [weak self] token, environment, usageSchema in
                 guard let self,
                       Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String == environment else { return }
                 do {
                     try Vault.save(token, key: "watch-apns-device-token")
+                    try Vault.save(usageSchema, key: "watch-usage-schema")
                     Task { await self.syncWatchPush() }
                 } catch { Diagnostics.shared.record("watch_push_token_store_failed") }
             }
@@ -219,7 +220,7 @@ final class CompanionModel: ObservableObject {
         if !designPreview {
             AppleWatchAllowanceBridge.shared.update(value?.allowance,
                 readings: pairedSources.prefix(1).compactMap { isRevoked($0.sourceID) ? nil : snapshots[$0.sourceID] }.flatMap(\.usageReadings),
-                provider: selectedUsageProvider, selectionRevision: usageSelectionRevision, sourceID: sourceID,
+                provider: selectedUsageProvider, selectionRevision: usageSelectionRevision, sourceID: sourceID, observedAt: sourceID.flatMap { snapshots[$0]?.observedAt },
                 clear: pairedSources.allSatisfy { isRevoked($0.sourceID) })
         }
     }
@@ -354,7 +355,8 @@ final class CompanionModel: ObservableObject {
         do {
             // Pairing order is the allowance preference; only its first source pushes.
             try await client.registerWatchPush(source, token: token, environment: environment,
-                provider: selectedUsageProvider, selectionRevision: usageSelectionRevision)
+                provider: selectedUsageProvider, selectionRevision: usageSelectionRevision,
+                usageSchema: Vault.load(Int.self, key: "watch-usage-schema") ?? 1)
             Diagnostics.shared.record("watch_push_destination_registered")
         } catch { Diagnostics.shared.record("watch_push_registration_failed") }
     }

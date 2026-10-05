@@ -92,7 +92,7 @@ Fixtures disable real networking/Bluetooth; release builds ignore these argument
 
 ## Apple Watch
 
-The Apple Watch app and complications require watchOS 11+.
+The Apple Watch app and complications require watchOS 26+.
 
 ## ESP32 watch
 

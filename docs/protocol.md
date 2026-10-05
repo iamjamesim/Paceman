@@ -12,7 +12,7 @@ private Tailscale HTTPS.
 | Source push worker → authenticated relay → iOS Notification Center | Ordinary APNs alert | Notification event and a hint for the phone app to fetch. |
 | iOS Notification Center → ESP32 watch | Apple ANCS over BLE | Identifies a Paceman notification so the watch can request a fetch; does not forward APNs JSON. |
 | Source push worker → authenticated relay → iPhone Live Activity | ActivityKit APNs | Expiring display copy for the Lock Screen and Dynamic Island. |
-| Source push worker → authenticated relay → Paceman watchOS app | Background APNs | Optional selected-provider allowance reading; the app then reloads its WidgetKit complications. |
+| Source push worker → authenticated relay → Paceman watchOS app | Background APNs | Optional provider/window usage bundle; the app then reloads its WidgetKit complications. |
 | Paceman iPhone app ↔ ESP32 watch | Encrypted BLE packets | Phone-selected profile and activity; watch acknowledgement and fetch requests. |
 
 ## Pairing and access
@@ -131,7 +131,7 @@ Push registration is authenticated and scoped to the paired client:
 | --- | --- |
 | `POST/GET/DELETE /v1/push` | One iPhone ordinary-alert token. Registration sends `deviceToken`, `environment` (`development` or `production`), and optional `displayName`; status omits the token. |
 | `POST /v1/live-activity` | iPhone Live Activity start/update token, or its removal. |
-| `POST /v1/watch-push` | Optional watchOS app background-push token for allowance only, with optional `provider` and monotonic `selectionRevision`. Older registrations default to Codex/revision 0. |
+| `POST /v1/watch-push` | Optional watchOS app background-push token for allowance only, with optional `provider`, monotonic `selectionRevision`, and `usageSchema`. Capable watches advertise schema 2; older registrations default to Codex/revision 0/schema 1. |
 
 The phone first approves a source/client pairing on the relay. Its five-minute
 `POST /v2/attest/challenge` binds the source ID and relay-credential hash,
@@ -235,43 +235,50 @@ optional provider/workspace labels render it; optional `providerStates` maps eac
 bound freshness. A start push also carries `attributes` with the source ID
 and display name. An end push sets `event` to `end`.
 
-The separate watchOS app may receive an allowance-only background push
-(`apns-push-type: background`, `aps.content-available: 1`) at its own app
-token from the first paired source. Its notification handler stores the
-reading and calls `WidgetCenter.reloadTimelines` for the complications.
-WidgetKit's [own push path](https://developer.apple.com/documentation/widgetkit/updating-widgets-with-widgetkit-push-notifications)
-uses a different token, `apns-push-type: widgets`, and
-`aps.content-changed`. It [starts on watchOS 26](https://developer.apple.com/videos/play/wwdc2025/334/), while Paceman targets
-watchOS 11. It requests a timeline reload; the current complication reads
-allowance data stored by the watch app, so a reload alone would not supply
-a new reading. The phone can also forward a selected reading through
-WatchConnectivity. Usage remains pinned to the first paired source for both foreground and background
-delivery, and to the provider selected on the phone. The compact meter chooses the
-most constrained unexpired window for that provider. It never substitutes another
-provider/computer when unavailable. Readings from separate accounts are not combined.
+The separate watchOS app (watchOS 26+) receives usage-only background pushes
+(`apns-push-type: background`, `aps.content-available: 1`) at its own app token
+from the first paired source. Its notification handler stores all provider/window
+readings and calls `WidgetCenter.reloadTimelines` for the complications. WidgetKit's
+[own push path](https://developer.apple.com/documentation/widgetkit/updating-widgets-with-widgetkit-push-notifications)
+uses a different token, `apns-push-type: widgets`, and `aps.content-changed`. Paceman
+continues to use the app background path because a timeline reload alone would not
+supply new readings to the shared cache.
 
-WatchConnectivity supplies `allowances`, `selectedProvider`, `selectionRevision`
-and `sourceID`, while keeping the selected reading’s flat fields for older watch apps. A background
-push carries only its registered provider plus source/selection identity. The watch
-rejects older selections, wrong sources/providers, future observations and older
-per-window observations. Only authoritative phone messages can change selection or
-clear the cache. Source registration ignores older revisions; delivery bookkeeping
-also guards against a provider change during a send. Example:
+Each Limit or Reset complication uses `AppIntentConfiguration` with a Codex/Claude
+provider parameter. Returning no preconfigured recommendations enables watchOS 26's
+native configuration editor. Two complications can select different providers.
+Each chooses its provider's most constrained unexpired window; at reset the timeline
+can switch to another unexpired window for that same provider. Unavailable usage
+never substitutes another provider or computer. The phone's ESP32 usage setting
+does not control Apple Watch complications.
+
+WatchConnectivity supplies `allowances`, `selectedProvider` (for legacy watch apps),
+`selectionRevision`, `sourceID` and `observedAt`, keeping the selected reading's flat
+fields for older watch apps. The watch app advertises `usageSchema: 2` with its push
+token; the phone forwards that capability during source registration. Older watch
+destinations continue receiving schema 1 single-provider payloads.
+
+Schema 2 pushes contain a complete array of up to four provider/window readings,
+including an empty array when no readings remain. Original per-window observation
+times stay unchanged for cached data. The whole-snapshot `observedAt` orders full
+phone and push snapshots, so delayed data cannot restore a signed-out provider.
+Pushes must match the phone's source and revision; only phone messages can change
+them. Source registration ignores older revisions, and delivery bookkeeping guards
+against registration changes during a send. Example:
 
 ```json
 {
   "aps": {"content-available": 1},
-  "schema": 1,
+  "schema": 2,
   "sourceID": "11111111-1111-4111-8111-111111111111",
   "selectionRevision": 1790000000000,
-  "allowance": {
-    "provider": "codex",
-    "remaining": 42,
-    "window": 2,
-    "windowDurationMins": 300,
-    "updatedAt": 1790000003,
-    "resetsAt": 1790003600
-  }
+  "observedAt": 1790000003,
+  "allowances": [
+    {"provider": "codex", "remaining": 42, "window": 2,
+     "windowDurationMins": 300, "updatedAt": 1790000003, "resetsAt": 1790003600},
+    {"provider": "claude", "remaining": 20, "window": 1,
+     "windowDurationMins": 10080, "updatedAt": 1790000003, "resetsAt": 1790604800}
+  ]
 }
 ```
 
@@ -360,6 +367,6 @@ Implementations: [source API](../service/hub.py),
 [iPhone watch link](../ios/AgentCompanion/WatchLink.swift), and
 [watch ANCS client](../firmware/esp32-watch/firmware/main/watch_ancs.c).
 
-The hosted relay must be updated to accept the optional `providerStates` and watch
+The hosted relay must be updated to accept schema 2 watch usage bundles, the optional `providerStates` and watch
 selection/source fields before enabling this branch’s sender. Legacy payloads remain
 accepted. See [Claude acceptance testing](claude-support.md).

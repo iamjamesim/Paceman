@@ -1,6 +1,6 @@
 # Push delivery
 
-By default, the source worker sends activity notifications and Live Activity updates through the authenticated relay, which holds the APNs key. It can also push Codex allowance to Apple Watch. An ordinary notification reaches the ESP32 watch through Apple's Notification Center Service (ANCS); the watch asks the iPhone to fetch the current snapshot and forward it over Bluetooth. Activity pushes carry an event hint or expiring display copy, never source credentials, prompts, or transcripts. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
+By default, the source worker sends activity notifications and Live Activity updates through the authenticated relay, which holds the APNs key. It can also push Codex and Claude usage to Apple Watch. An ordinary notification reaches the ESP32 watch through Apple's Notification Center Service (ANCS); the watch asks the iPhone to fetch the current snapshot and forward it over Bluetooth. Activity pushes carry an event hint or expiring display copy, never source credentials, prompts, or transcripts. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
 
 | State | Ordinary notification |
 | --- | --- |
@@ -9,7 +9,7 @@ By default, the source worker sends activity notifications and Live Activity upd
 
 The worker coalesces activity to the newest snapshot, waits at least ten seconds between attempts, discards events over five minutes old, and retries transient failures with backoff. A process crash can duplicate a send. Appearance-only changes do not send activity alerts. The iPhone always fetches from its stored paired endpoint, not a URL supplied by the push.
 
-Apple Watch allowance changes are spaced at least 20 minutes per destination, with periodic recovery sends while the reading remains fresh. APNs acceptance does not prove watchOS processed the push.
+Apple Watch usage changes are sent as one bounded bundle (up to four provider/window readings), spaced at least 20 minutes per destination, with periodic recovery sends while readings remain fresh. Older destinations retain single-provider payloads. Provider sign-out is represented by removal from the complete bundle. APNs acceptance does not prove watchOS processed the push.
 
 ## Authenticated relay
 

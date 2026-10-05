@@ -23,15 +23,19 @@ for that agent. A saved `CLAUDE_CONFIG_DIR` stays tied to its original profile.
 Usage is retained by computer, provider and window, with independent observation
 and reset times. The iPhone computer screen shows both session and weekly windows
 for both providers when available. The Apple Watch app shows each provider's most
-constrained available window. **iPhone Settings → Watch usage** pins Codex or Claude
-for compact watch surfaces; the picker appears only when both are available. Both
-the Apple Watch complications and ESP32 meter use that selection. The watch usage
-computer remains the first paired computer, matching its background push sender;
+constrained available window. Apple Watch requires **watchOS 26+**. Each Limit or
+Reset complication offers **Provider → Codex / Claude** in the watch-face editor,
+so two slots can show both at once. Background delivery sends all available readings
+in one bounded bundle; it does not track which complications the user installed.
+**iPhone Settings → ESP32 usage** selects the ESP32 meter's provider; this picker
+appears only with a paired ESP32 and both providers. The watch usage computer
+remains the first paired computer, matching its background push sender;
 accounts from different computers are never combined or substituted.
 
 Usage selection persists across restarts. Foreground watch messages and background
-pushes carry a selection revision and source identity; older selections and wrong
-sources cannot overwrite the current meter. Readings retain their original times
+pushes carry a phone revision, source identity and full-snapshot observation time;
+older snapshots and wrong sources cannot overwrite current usage or undo sign-out.
+Existing single-provider watch registrations and payloads remain supported by the source and relay. Readings retain their original times
 when disconnected. After reset, a reading is unavailable until refreshed. Older
 ESP32 firmware continues to receive Codex-compatible profiles and shows unavailable
 when Claude is selected; profile v6 firmware is required to display Claude correctly.
@@ -88,14 +92,14 @@ provider clears the other's quota. This Mac's no-prompt check returned
 
 ## Checks completed
 
-The final Python/Mac/watch suite ran 283 tests: 266 passed and 17 skipped for
+The latest Python/Mac/watch suite ran 286 tests: 269 passed and 17 skipped for
 platform/environment requirements. All 74 iPhone tests passed. The host renderer
 passed 10 checks.
 
 Automated checks cover source aggregation, lifecycle transitions, parallel attention,
 old-prompt rejection, socket delivery, privacy, bounded/nonblocking failures, usage
 parsing and account changes, installer preservation/rollback, relay validation,
-watch push registration races, persistent selection and backward compatibility.
+watch push registration races, independent complication providers, atomic full snapshots, sign-out/removal ordering, persistent caches and backward compatibility.
 The iPhone tests also cover mixed-provider presentation and BLE v6/legacy encoding.
 Mac Swift views compile; iPhone and watchOS builds and the ESP32 firmware build pass.
 The host renderer's profile and freshness checks pass. Hardware has not been flashed.
@@ -104,7 +108,15 @@ Rendered screen review used synthetic data. Checked Mac connected/mixed,
 Claude-only, empty, unavailable, paused, missing-hook and long-name states; iPhone
 mixed, Claude-only, no usage, cached/offline and post-reset screens, settings, and
 largest accessibility text. Also checked watchOS mixed, Claude-only, empty, cached
-and post-reset states, plus the host-rendered ESP32 Claude label. The acceptance
+and post-reset states, plus the host-rendered ESP32 Claude label. The watchOS 26
+follow-up reviewed the actual complication view bodies in a temporary simulator
+app: two providers, empty, expired, cached, Limit/Reset, rectangular and inline,
+and a long window label at larger accessibility text. Corner text was rendered,
+but its system-owned gauge/label needs an actual watch face. Reviewed the whole
+iPhone Settings screen with and without an ESP32 and at largest accessibility
+text. App Intent metadata contains the Provider parameter and Codex/Claude options;
+simulator and device builds pass. Native watch-face editing and existing static
+complication migration have not been exercised. The acceptance
 steps below cover what simulator and rendering checks cannot establish. Hook trust, actual agent delivery, authenticated
 quota, relay deployment, APNs delivery and physical phone/watch presentation remain
 unverified.
@@ -132,8 +144,10 @@ unverified.
    Test user interrupt and Stop-hook continuation against the limitations above.
 4. **Check real quota and persistence.** Sign into Claude Code and compare both
    windows against Claude's own usage view. If needed, use the explicit access check.
-   Confirm Codex remains correct. Switch Watch usage, restart apps/source, and deliver
-   late old-selection messages. Disconnect and reconnect: cached readings retain
+   Confirm Codex remains correct. Add two Limit complications on watchOS 26+, choose
+   Codex for one and Claude for the other, then repeat with Reset complications.
+   Change one slot and verify the other stays fixed across restarts. Switch ESP32
+   usage on the phone separately and deliver late old-source/revision snapshots. Disconnect and reconnect: cached readings retain
    their timestamps and reset makes usage unavailable until refreshed. Test sign-out
    and sign-in/account change; one provider must not overwrite the other. Also test
    Claude-only setup without Codex or CodexBar.
@@ -142,8 +156,11 @@ unverified.
    per-user sender uses the source database and records `apns_accepted` (200), then
    separately confirm a new notification and Live Activity on the phone. Test
    reconnection separately from delivery while already connected. For Apple Watch,
-   verify both app rows, the pinned complication, delayed push rejection, reset and
-   reconnect on a physical watch. For ESP32, flash v6 only when deliberately testing
+   verify both app rows and independently configured complications while the phone
+   is locked, delayed snapshot rejection, provider sign-out, reset and reconnect on
+   a physical watch. Confirm the watch-face editor and existing Codex complication
+   upgrade behavior on hardware; builds and extracted App Intent metadata alone
+   do not prove the system editor's behavior. For ESP32, flash v6 only when deliberately testing
    hardware; verify the Claude label, selected quota, restart cache and Bluetooth
    reconnection. A compiled image or simulator screenshot does not prove delivery.
 6. **Check upgrade/removal.** On a disposable profile, upgrade a Codex-only install,

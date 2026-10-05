@@ -97,9 +97,11 @@ and the acceptance checklist.
 ### Usage
 
 Paceman works independently of CodexBar. It retains both agents' usage windows and
-the iPhone computer screen shows each separately. **iPhone Settings → Watch usage**
-selects the provider for compact watch displays when both are available; activity
-and notifications continue to include both. Usage stays with the first paired
+the iPhone computer screen shows each separately. On **watchOS 26+**, choose Codex
+or Claude for each complication in the watch-face editor; add two to show both.
+**iPhone Settings → ESP32 usage** selects the ESP32 meter's provider when that watch
+is paired and both providers are available. Activity and notifications continue to
+include both. Usage stays with the first paired
 computer rather than mixing accounts across computers.
 
 Claude usage needs an existing Claude Code subscription sign-in. If Paceman needs

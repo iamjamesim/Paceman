@@ -138,6 +138,8 @@ class Store:
                 db.execute("ALTER TABLE watch_push_devices ADD COLUMN provider TEXT NOT NULL DEFAULT 'codex'")
             if "selection_revision" not in watch_columns:
                 db.execute("ALTER TABLE watch_push_devices ADD COLUMN selection_revision INTEGER NOT NULL DEFAULT 0")
+            if "usage_schema" not in watch_columns:
+                db.execute("ALTER TABLE watch_push_devices ADD COLUMN usage_schema INTEGER NOT NULL DEFAULT 1")
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM clients c LEFT JOIN client_devices d ON d.client_id=c.id "
                           "WHERE d.client_id IS NULL LIMIT 1").fetchone():
@@ -300,6 +302,8 @@ class Store:
                 or len(payload["deviceToken"]) % 2
                 or payload.get("environment") not in ("development", "production")
                 or payload.get("provider", "codex") not in ("codex", "claude")
+                or type(payload.get("usageSchema", 1)) is not int
+                or payload.get("usageSchema", 1) not in (1, 2)
                 or type(payload.get("selectionRevision", 0)) is not int
                 or not 0 <= payload.get("selectionRevision", 0) <= 9_007_199_254_740_991):
             raise ValueError("Invalid Watch push registration")
@@ -311,13 +315,14 @@ class Store:
             client_id = client[0]
             if payload is not None:
                 provider, revision = payload.get("provider", "codex"), payload.get("selectionRevision", 0)
+                usage_schema = payload.get("usageSchema", 1)
                 old = db.execute("SELECT * FROM watch_push_devices WHERE client_id=?", (client_id,)).fetchone()
                 if old is not None and revision < old["selection_revision"]:
                     return {"registered": False}
-                if old is None or (old["token"], old["environment"], old["provider"], old["selection_revision"]) != (
-                        payload["deviceToken"], payload["environment"], provider, revision):
-                    db.execute("INSERT OR REPLACE INTO watch_push_devices(client_id,token,environment,provider,selection_revision) "
-                               "VALUES (?,?,?,?,?)", (client_id, payload["deviceToken"], payload["environment"], provider, revision))
+                if old is None or (old["token"], old["environment"], old["provider"], old["selection_revision"], old["usage_schema"]) != (
+                        payload["deviceToken"], payload["environment"], provider, revision, usage_schema):
+                    db.execute("INSERT OR REPLACE INTO watch_push_devices(client_id,token,environment,provider,selection_revision,usage_schema) "
+                               "VALUES (?,?,?,?,?,?)", (client_id, payload["deviceToken"], payload["environment"], provider, revision, usage_schema))
             row = db.execute("SELECT * FROM watch_push_devices WHERE client_id=?", (client_id,)).fetchone()
         return {"registered": row is not None}
 

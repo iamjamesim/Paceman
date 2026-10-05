@@ -48,7 +48,7 @@ final class PresentationModel: ObservableObject {
         }
     }
     var previewHasComputer: Bool { !["setup", "pairing", "watch-only"].contains(previewScreen) }
-    var previewHasWatch: Bool { ["watch-weather-denied", "paired-watch", "watch-paired", "watch-only", "watch-complete", "watch-notifications", "watch-troubleshooting", "single-finished", "single-offline", "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(previewScreen) }
+    var previewHasWatch: Bool { ["settings-usage-esp32", "watch-weather-denied", "paired-watch", "watch-paired", "watch-only", "watch-complete", "watch-notifications", "watch-troubleshooting", "single-finished", "single-offline", "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(previewScreen) }
     var previewWatchPhase: WatchSetupPhase {
         switch previewScreen {
         case "watch-select": return .selecting

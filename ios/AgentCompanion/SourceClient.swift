@@ -222,7 +222,7 @@ final class SourceClient {
     }
 
     func registerWatchPush(_ source: PairedSource, token: String, environment: String,
-                           provider: String = "codex", selectionRevision: Int = 0) async throws {
+                           provider: String = "codex", selectionRevision: Int = 0, usageSchema: Int = 1) async throws {
         try await registerRelayDestination(source, mode: "watch", token: token, environment: environment)
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/watch-push"))
         request.httpMethod = "POST"
@@ -230,7 +230,7 @@ final class SourceClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token,
                                                                       "environment": environment, "provider": provider,
-                                                                      "selectionRevision": selectionRevision])
+                                                                      "selectionRevision": selectionRevision, "usageSchema": usageSchema])
         let data = try await response(request)
         struct Registration: Decodable { let registered: Bool }
         guard try JSONDecoder().decode(Registration.self, from: data).registered else {

@@ -80,7 +80,7 @@ def bounded_text(value, limit=160):
 
 def valid_payload(mode: str, identity: str, payload: object) -> bool:
     if not exact(payload, ("aps",), ("companion", "schema", "allowance") +
-                 (("selectionRevision", "sourceID") if mode == "watch" else ())):
+                 (("selectionRevision", "sourceID", "allowances", "observedAt") if mode == "watch" else ())):
         return False
     aps = payload["aps"]
     if mode == "alert":
@@ -97,18 +97,28 @@ def valid_payload(mode: str, identity: str, payload: object) -> bool:
                 and bounded_text(hint["generation"], 64) and bounded_text(hint["eventID"], 128)
                 and type(hint["revision"]) is int and hint["revision"] >= 0)
     if mode == "watch":
-        if not exact(payload, ("aps", "schema", "allowance"), ("selectionRevision", "sourceID")) or aps != {"content-available": 1} or payload["schema"] != 1:
+        def valid_watch_reading(reading):
+            return (exact(reading, ("provider", "remaining", "window", "windowDurationMins", "updatedAt", "resetsAt"))
+                    and reading["provider"] in ("codex", "claude") and all(type(reading[k]) is int for k in
+                    ("remaining", "window", "windowDurationMins", "updatedAt", "resetsAt"))
+                    and 0 <= reading["remaining"] <= 100 and reading["window"] in (1, 2)
+                    and 1 <= reading["windowDurationMins"] <= 10080
+                    and 0 <= reading["updatedAt"] < reading["resetsAt"] <= 3155759999)
+        if (aps != {"content-available": 1}
+                or ("sourceID" in payload and (payload["sourceID"] != identity or not valid_uuid(payload["sourceID"])))
+                or ("selectionRevision" in payload and (type(payload["selectionRevision"]) is not int
+                    or not 0 <= payload["selectionRevision"] <= 9_007_199_254_740_991))):
             return False
-        reading = payload["allowance"]
-        return (exact(reading, ("provider", "remaining", "window", "windowDurationMins", "updatedAt", "resetsAt"))
-                and reading["provider"] in ("codex", "claude") and all(type(reading[k]) is int for k in
-                ("remaining", "window", "windowDurationMins", "updatedAt", "resetsAt"))
-                and 0 <= reading["remaining"] <= 100 and reading["window"] in (1, 2)
-                and 1 <= reading["windowDurationMins"] <= 10080
-                and 0 <= reading["updatedAt"] < reading["resetsAt"] <= 3155759999
-                and ("sourceID" not in payload or payload["sourceID"] == identity and valid_uuid(payload["sourceID"]))
-                and ("selectionRevision" not in payload or type(payload["selectionRevision"]) is int
-                     and 0 <= payload["selectionRevision"] <= 9_007_199_254_740_991))
+        if payload.get("schema") == 2:
+            values = payload.get("allowances")
+            return (exact(payload, ("aps", "schema", "sourceID", "selectionRevision", "observedAt", "allowances"))
+                    and type(payload["schema"]) is int and type(payload["observedAt"]) in (int, float)
+                    and 1704067200 <= payload["observedAt"] <= 3155759999
+                    and isinstance(values, list) and len(values) <= 4
+                    and all(valid_watch_reading(r) and r["updatedAt"] <= payload["observedAt"] for r in values)
+                    and len({(r["provider"], r["window"]) for r in values}) == len(values))
+        return (exact(payload, ("aps", "schema", "allowance"), ("selectionRevision", "sourceID"))
+                and type(payload["schema"]) is int and payload["schema"] == 1 and valid_watch_reading(payload["allowance"]))
     if mode == "liveactivity":
         if not exact(payload, ("aps",)) or not exact(aps,
                 ("timestamp", "event", "content-state", "stale-date", "relevance-score"),
