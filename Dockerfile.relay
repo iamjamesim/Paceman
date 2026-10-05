@@ -2,7 +2,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY requirements-push.txt requirements-relay.txt ./
 RUN pip install --no-cache-dir -r requirements-relay.txt
-COPY service/__init__.py service/hub.py service/push.py service/relay.py service/relay_registry.py service/app_attest.py ./service/
+COPY service/__init__.py service/hub.py service/push.py service/usage.py service/relay.py service/relay_registry.py service/app_attest.py ./service/
 COPY service/certs/Apple_App_Attestation_Root_CA.pem ./service/certs/
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PACEMAN_APNS_CONFIG=/etc/secrets/apns.json
