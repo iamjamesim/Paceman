@@ -52,17 +52,22 @@ class ClaudeInstallTests(unittest.TestCase):
         install.install_hooks(path,provider="claude")
         self.assertTrue(json.loads(path.read_text())["disableAllHooks"])
         self.assertEqual(len(control.missing_hooks(provider="claude")),12)
-    def test_configure_and_deselect_roll_back_on_restart_failure(self):
+    def test_configure_and_deselect_roll_back_on_write_failure(self):
         codex=agents.hook_path("codex");codex.parent.mkdir(parents=True)
         codex.write_text('{"keep":true,"hooks":{}}')
         original=codex.read_bytes()
-        with patch.object(control,"launch",side_effect=OSError("start failed")):
+        with patch("macos.control.os.fdopen",side_effect=OSError("write failed")):
             with self.assertRaises(OSError):control.configure_agents(["claude"])
         self.assertEqual(codex.read_bytes(),original)
         self.assertFalse(agents.hook_path("claude").exists())
         self.assertFalse((self.root/"agents.json").exists())
         with patch.object(control,"launch"):
             control.configure_agents(["codex","claude"])
+            control.configure_agents(["claude"])
+        with patch.object(control,"launch") as launch:
+            control.configure_agents(["codex"])
+            launch.assert_not_called()
+        with patch.object(control,"launch"):
             control.configure_agents(["claude"])
         self.assertEqual(agents.configured_providers(self.root),["claude"])
         self.assertTrue(all(not v for v in json.loads(codex.read_text())["hooks"].values()))
@@ -75,14 +80,17 @@ class ClaudeInstallTests(unittest.TestCase):
         self.assertEqual(control.missing_hooks(provider="claude"),[])
         self.assertIsNotNone(uninstall.cleaned_hooks(agents.hook_path("claude",root=self.root),provider="claude"))
 
-    def test_usage_access_uses_saved_profile_instead_of_inherited_environment(self):
-        selected = self.home / ".claude"
-        (self.root / "agents.json").write_text(json.dumps({"providers":["claude"],"claudeConfigDir":str(selected)}))
-        def read(**kwargs):
-            self.assertEqual(os.environ["CLAUDE_CONFIG_DIR"], str(selected))
-            self.assertTrue(kwargs["allow_prompt"])
-            return [], "sign_in_needed"
-        with patch.dict(os.environ,{"CLAUDE_CONFIG_DIR":str(self.home / "another-profile")}), \
-             patch.object(sys,"argv",["pacemanctl","allow-claude-usage"]), \
-             patch("service.claude_limits.read_claude_allowances",side_effect=read), patch("builtins.print"):
-            control.main()
+
+    def test_repairing_existing_hooks_does_not_restart_source(self):
+        (self.root/'agents.json').write_text(json.dumps({'providers':['codex','claude']}))
+        with patch.object(control,'launch') as launch:
+            control.configure_agents(['codex','claude'])
+            launch.assert_not_called()
+
+    def test_only_claude_can_be_turned_off_without_enabling_codex(self):
+        with patch.object(control,'launch') as launch:
+            control.configure_agents(['claude'])
+            control.configure_agents([])
+            launch.assert_not_called()
+        self.assertEqual(agents.configured_providers(self.root),[])
+        self.assertTrue(all(not groups for groups in json.loads(agents.hook_path('claude',root=self.root).read_text())['hooks'].values()))

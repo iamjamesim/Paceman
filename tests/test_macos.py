@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -110,6 +111,74 @@ class MacSourceTests(unittest.TestCase):
             with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": str(cli)}):
                 binary.chmod(0o700)
                 self.assertEqual(codex_binary(application_dirs=(root,)), str(cli.resolve()))
+
+    def test_provider_changes_preserve_other_activity_and_codex_usage(self):
+        from macos.claude_hook import message_for
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            providers = [["codex"]]
+            quota = dict(provider="codex",remaining=68,window=1,updatedAt=1780000000,resetsAt=1780600000)
+            with MacSource(store, socket_path=root / "hook.sock", providers=["codex"],
+                           settings_reader=lambda: providers[0], allowance_reader=lambda: [quota],
+                           turn_status_reader=lambda _: {}) as source:
+                source.receive(dict(command="agent-event",session=str(uuid4()),turn=str(uuid4()),
+                                    event="working",hook="UserPromptSubmit"))
+                source.tick(); source.allowance_thread.join(timeout=2)
+                original = store.snapshot()
+                providers[0] = ["codex", "claude"]
+                source.tick()
+                self.assertEqual(store.snapshot()["sessions"], original["sessions"])
+                self.assertEqual(store.snapshot()["eventID"], original["eventID"])
+                event = message_for(dict(hook_event_name="UserPromptSubmit",session_id="claude",prompt_id="one"))
+                self.assertTrue(source.receive(event))
+                self.assertEqual(len(store.snapshot()["sessions"]), 2)
+                self.assertEqual(store.snapshot()["allowances"], [quota])
+                providers[0] = ["codex"]
+                source.tick()
+                self.assertEqual(store.snapshot()["sessions"], original["sessions"])
+                self.assertEqual(store.snapshot()["allowances"], [quota])
+                self.assertFalse(source.receive(event))
+                providers[0] = []
+                source.tick()
+                self.assertEqual(store.snapshot()["sessions"], [])
+                self.assertEqual(store.snapshot()["allowances"], [])
+                self.assertFalse(source.closed)
+
+    def test_claude_only_monitors_activity_without_reading_usage(self):
+        from macos.claude_hook import message_for
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            reader = Mock()
+            with MacSource(store, socket_path=root / "hook.sock", providers=("claude",),
+                           allowance_reader=reader) as source:
+                source.receive(message_for({"hook_event_name": "UserPromptSubmit", "session_id": "claude", "prompt_id": "one"}))
+                source.tick()
+                reader.assert_not_called()
+                self.assertEqual(store.snapshot()["state"], "working")
+                self.assertEqual(store.snapshot()["allowances"], [])
+
+    def test_disabled_codex_rejects_an_inflight_quota_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            providers = [["codex", "claude"]]
+            entered, release = threading.Event(), threading.Event()
+            def read():
+                entered.set(); release.wait(3)
+                return dict(provider="codex",remaining=68,window=1,updatedAt=1780000000,resetsAt=1780600000)
+            with MacSource(store,socket_path=root/'hook.sock',settings_reader=lambda: providers[0],
+                           allowance_reader=read,turn_status_reader=lambda _: {}) as source:
+                try:
+                    source.tick(); self.assertTrue(entered.wait(2))
+                    providers[0] = ["claude"]
+                    source.tick()
+                finally:
+                    release.set(); source.allowance_thread.join(timeout=2)
+                self.assertEqual(store.snapshot()["allowances"], [])
 
     def test_mac_allowance_is_presentation_only(self):
         with tempfile.TemporaryDirectory() as temporary:

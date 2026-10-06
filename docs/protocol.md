@@ -110,9 +110,9 @@ example, an allowance change raised `revision` to 12 without changing activity
 | `eventID` | Opaque activity identity, 1–128 UTF-8 bytes without control characters; stable across presentation-only revisions. |
 | `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded workspace labels; no prompts or transcripts. |
 | `allowance` | Legacy optional Codex-only reading; may advance `revision` without a new activity event. |
-| `allowances` | Optional array of up to four provider/window readings for Codex and Claude. Each has its own observation and reset time. |
+| `allowances` | Optional array of up to four provider/window readings. Current sources emit Codex only; legacy Claude readings remain wire-compatible but are ignored by clients. Each reading retains its observation and reset time. |
 | `configuredProviders` | Optional configured agent names (`codex`, `claude`), including agents without a received event/reading. |
-| `usageStatus` | Optional per-provider setup status; Claude reports `ready`, `sign_in_needed`, `access_needed` or `unavailable`. |
+| `usageStatus` | Legacy optional per-provider setup status; no longer emitted. |
 
 Omarchy has its own `sourceID`, `generation`, and revisions, using this same
 schema. Mac uses hook-observed session liveness and clears sessions on restart;
@@ -239,9 +239,9 @@ and display name. An end push sets `event` to `end`.
 The watchOS app receives usage-only background pushes
 (`apns-push-type: background`, `aps.content-available: 1`) at its app token from the
 first paired source, stores the readings and reloads its complications. WatchConnectivity also
-supplies full usage snapshots. Accounts from separate computers are not combined.
-Each Limit or Reset complication chooses Codex or Claude independently and shows
-that provider's most constrained unexpired window. Apple Watch requires watchOS 26+.
+supplies full usage snapshots using the phone's [source selection](architecture.md#watches).
+Complications display Codex only; saved Claude configurations show unavailable.
+Apple Watch requires watchOS 26+.
 
 The watch app advertises `usageSchema: 2` with its token; the phone forwards this
 capability in source registration. Schema 2 pushes carry all available windows
@@ -266,7 +266,7 @@ Example background push:
   "allowances": [
     {"provider": "codex", "remaining": 42, "window": 2,
      "windowDurationMins": 300, "updatedAt": 1790000003, "resetsAt": 1790003600},
-    {"provider": "claude", "remaining": 20, "window": 1,
+    {"provider": "codex", "remaining": 20, "window": 1,
      "windowDurationMins": 10080, "updatedAt": 1790000003, "resetsAt": 1790604800}
   ]
 }
@@ -322,10 +322,9 @@ All multibyte values are little-endian. The profile byte ranges are:
 | 103–110 | Signed forecast-day expiry time |
 | 111, 112–113 (v6) | Usage provider (`1` Codex, `2` Claude); unsigned window duration minutes (`0` when unavailable, otherwise `1`–`10080`) |
 
-Versions 4 and 5 retain their original Codex-only meaning. When Claude is selected
-on older firmware, the phone sends unavailable instead of relabeling Claude as
-Codex. Profile v6 is negotiated through the identity version range and persisted
-separately on the watch. Provider selection remains visible when quota is unavailable.
+Versions 4 and 5 retain their original Codex-only meaning. The current phone sends
+Codex usage only; provider `2` remains reserved for compatibility. Profile v6 is
+negotiated through the identity version range and persisted separately on the watch.
 
 Profile flags mark valid weather, Fahrenheit, night mode and a transient
 preview. The location is null-terminated UTF-8 (at most 23 data bytes).

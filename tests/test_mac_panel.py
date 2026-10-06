@@ -19,6 +19,10 @@ class MacPanelTransitionTests(unittest.TestCase):
         # Exercise the welcome screen even though the test binary is outside Applications.
         source = source.replace("static var isInApplications: Bool { appLocations.contains(Bundle.main.bundlePath) }",
                                 "static var isInApplications: Bool { true }")
+        # Keep notification-repair fixtures away from the user's installed state.
+        source = source.replace(
+            'static let notificationMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/notification-setup-incomplete"',
+            'static let notificationMarker = FileManager.default.temporaryDirectory.appendingPathComponent("paceman-panel-notification-" + UUID().uuidString).path')
         source += (root / "tests/MacPanelTransitions.swift").read_text()
         with tempfile.TemporaryDirectory(prefix="paceman-panel-tests-") as directory:
             directory = Path(directory)

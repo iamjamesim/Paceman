@@ -6,7 +6,7 @@ For Apple Silicon Macs running macOS 15 or later.
 
 1. Download the **[Mac DMG](https://github.com/iamjamesim/Paceman/releases/download/desktop-v0.1.0/Paceman-macos-arm64-0.1.0.dmg)** from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/releases/tag/desktop-v0.1.0). The release is signed and notarized.
 2. Open the DMG, drag **Paceman** onto **Applications**, then open it from Applications.
-3. Choose **Set up Paceman**. This starts Paceman at login, enables its background item, and prepares hooks for the selected agents. Existing installations keep their agent selection; choose Codex, Claude, or both under **Manage Paceman… → Agents**.
+3. Choose Codex, Claude Code, or both, then **Set up Paceman**. This starts Paceman at login, enables its background item, and prepares the selected hooks. Change agents later under **Manage Paceman… → Agents**; reinstalling preserves your selection and reviewed hook commands.
 
 macOS may show notifications about login and background items. You can manage them in **System Settings → General → Login Items & Extensions**. The Mac release includes Python; no separate runtime installation is needed.
 
@@ -93,18 +93,13 @@ alone does not prove delivery. See coverage limits below for unobserved activity
 
 ### Usage
 
-The iPhone computer screen shows both agents' usage windows separately. On
-**watchOS 26+**, choose Codex or Claude for each complication in the watch-face editor; add two to show both.
-**iPhone Settings → ESP32 usage** selects the ESP32 meter's provider when that watch
-is paired and both providers are available. Activity and notifications continue to
-include both. Usage stays with the first paired computer.
+Usage limits are **Codex-only**, including the Apple Watch **Codex Limit** and
+**Codex Reset** complications (watchOS 26+) and the ESP32 meter. Claude Code
+activity is supported; its usage limits are not. Paceman does not access Claude
+credentials.
 
-Claude usage needs an existing Claude Code subscription sign-in. If Paceman needs
-access, choose **Manage Paceman… → Allow Claude usage access…**; this explicit check
-may prompt for Keychain permission. Background checks do not prompt. Sign in or
-refresh sign-in in Claude Code if needed. Paceman never copies or refreshes your
-credentials. Usage requires the current subscription account; API-key-only usage
-is unsupported. Anthropic's OAuth usage endpoint is undocumented and may change.
+Usage assumes the same Codex account across computers. See [source selection and
+Apple Watch delivery](../docs/architecture.md#watches).
 
 ## Connect your iPhone
 
@@ -204,8 +199,7 @@ approved tool can retain attention until its observed calls return. An interrupt
 without another hook can retain the old state until a new prompt or `SessionEnd`.
 Another Stop hook can briefly show Finished before a tool resumes the same turn.
 
-The source reads Codex usage through its local App Server and Claude usage through
-a read-only OAuth request every five minutes. It sends only provider, percentage,
+The source reads Codex usage through its local App Server every five minutes. It sends only provider, percentage,
 window/duration, observation and reset times. A reset without a fresh reading shows
 unavailable.
 

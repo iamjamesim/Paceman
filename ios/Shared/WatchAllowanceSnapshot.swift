@@ -84,7 +84,7 @@ struct WatchAllowanceSnapshot: Codable, Equatable {
 }
 
 
-/// Provider/window caches are separate. Complications select a provider locally.
+/// Codex window cache; legacy Claude data is accepted on the wire but discarded.
 /// Only the phone can change source identity; pushes must match its revision.
 struct WatchUsageState: Codable, Equatable {
     static let storageKey = "apple-watch-usage-v2"
@@ -98,7 +98,8 @@ struct WatchUsageState: Codable, Equatable {
         reading(for: selectedProvider, at: date)
     }
     func reading(for provider: String, at date: Date) -> WatchAllowanceSnapshot? {
-        Self.select(readings.filter { $0.provider == provider }, at: date)
+        guard provider == "codex" else { return nil }
+        return Self.select(readings.filter { $0.provider == provider }, at: date)
     }
     static func select(_ values: [WatchAllowanceSnapshot], at date: Date) -> WatchAllowanceSnapshot? {
         let available = values.filter { $0.available(at: date) }
@@ -107,7 +108,7 @@ struct WatchUsageState: Codable, Equatable {
         }
     }
     func summaries(at date: Date) -> [WatchAllowanceSnapshot] {
-        ["codex", "claude"].compactMap { provider in
+        ["codex"].compactMap { provider in
             Self.select(readings.filter { $0.provider == provider }, at: date)
         }
     }
@@ -166,7 +167,9 @@ struct WatchUsageState: Codable, Equatable {
                           observed <= now.timeIntervalSince1970 + 60,
                           incoming.allSatisfy({ $0.updatedAt <= observed }) else { return false }
                     if observed >= (next.observedAt ?? 0) {
-                        next.readings = incoming
+                        next.readings = incoming.map { value in
+                            next.readings.first { $0.usageID == value.usageID && $0.updatedAt > value.updatedAt } ?? value
+                        }
                         next.observedAt = observed
                     }
                 } else {
@@ -192,18 +195,25 @@ struct WatchUsageState: Codable, Equatable {
                 }
             }
         }
+        next.readings.removeAll { $0.provider != "codex" }
         guard next.readings.count <= 4, next != self else { return false }
         self = next
         return true
     }
     static func load(defaults: UserDefaults? = UserDefaults(suiteName: WatchAllowanceSnapshot.appGroup)) -> Self {
-        if let data = defaults?.data(forKey: storageKey), let value = try? JSONDecoder().decode(Self.self, from: data),
+        if let data = defaults?.data(forKey: storageKey), var value = try? JSONDecoder().decode(Self.self, from: data),
            ["codex", "claude"].contains(value.selectedProvider), value.readings.count <= 4,
            value.readings.allSatisfy(\.valid), value.selectionRevision >= 0,
            Set(value.readings.map { "\($0.provider)/\($0.window)" }).count == value.readings.count,
-           value.observedAt == nil || value.observedAt!.isFinite && value.observedAt! >= 1_704_067_200 { return value }
+           value.observedAt == nil || value.observedAt!.isFinite && value.observedAt! >= 1_704_067_200 {
+            if value.readings.contains(where: { $0.provider != "codex" }) {
+                value.readings.removeAll { $0.provider != "codex" }
+                value.save(defaults: defaults)
+            }
+            return value
+        }
         if let data = defaults?.data(forKey: WatchAllowanceSnapshot.storageKey),
-           let value = try? JSONDecoder().decode(WatchAllowanceSnapshot.self, from: data), value.valid {
+           let value = try? JSONDecoder().decode(WatchAllowanceSnapshot.self, from: data), value.valid, value.provider == "codex" {
             return Self(selectedProvider: value.provider, readings: [value])
         }
         return Self()

@@ -630,15 +630,14 @@ def main():
                     parser.error(str(error))
             elif args.source == "macos":
                 from service.macos import MacSource
-                from service.claude_limits import ClaudeUsageReader
                 from macos.agents import configured_providers, claude_config_dir
                 directory = claude_config_dir(args.data_dir.parent)
                 os.environ["CLAUDE_CONFIG_DIR"] = str(directory)
                 hook_socket = args.agent_socket or args.data_dir / "hook.sock"
                 try:
                     server.adapter = stack.enter_context(MacSource(store, socket_path=hook_socket,
-                        claude_allowance_reader=ClaudeUsageReader(),
-                        providers=configured_providers(args.data_dir.parent)))
+                        providers=configured_providers(args.data_dir.parent),
+                        settings_reader=lambda: configured_providers(args.data_dir.parent)))
                 except (OSError, ValueError) as error:
                     parser.error(str(error))
             else:

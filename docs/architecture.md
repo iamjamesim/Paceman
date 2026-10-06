@@ -10,7 +10,7 @@ Each paired computer reports its own agent activity. Mac supports Codex and Clau
                  │                                         ▲                 ▲
                  └── authenticated relay ── APNs ──► iOS Notification Center ── ANCS ─────┘
                                        ├── ActivityKit ──► iPhone Live Activity
-                                       └── provider usage ──► Apple Watch app
+                                       └── Codex usage ────► Apple Watch app
 ```
 
 ## From agents to the phone
@@ -36,6 +36,13 @@ When configured, the source sends notifications through the relay, which holds t
 
 The iPhone owns the ESP32 watch's Bluetooth connection and chooses activity from fresh computers. The watch retains its owner bond and profile, accepts data only from the authenticated owner, and keeps current activity in RAM. Reconnection sends current state rather than replaying missed events. See [Bluetooth lifecycle](../firmware/esp32-watch/CONNECTION.md) and [data lifecycle](data-lifecycle.md).
 
-Usage stays with the first paired computer, with separate windows for Codex and Claude; accounts from different computers are never combined. The phone shows both providers. Each Apple Watch complication chooses its provider in the watch-face editor; the phone's ESP32 usage setting controls the ESP32 meter. Neither selection filters activity or alerts.
+Usage is Codex-only and assumes one Codex account across computers. The phone
+prefers a recent reading from a connected computer, then recent cached usage,
+then older cached usage, in pairing order. Windows come from one computer;
+accounts are not combined. Claude Code contributes activity only.
 
-Apple Watch receives all usage readings through WatchConnectivity or its own background push path, independently of ESP32 Bluetooth. Exact fields, compatibility and versions are in the [protocol](protocol.md); freshness and clearing rules are in [data lifecycle](data-lifecycle.md).
+Apple Watch's Codex Limit and Codex Reset complications show the most constrained
+unexpired window. The phone forwards its chosen computer's readings, but direct
+background pushes still come only from the first paired computer. Independent
+background failover is not supported.
+Apple Watch receives usage readings through WatchConnectivity or its own background push path, independently of ESP32 Bluetooth. Exact fields, compatibility and versions are in the [protocol](protocol.md); freshness and clearing rules are in [data lifecycle](data-lifecycle.md).

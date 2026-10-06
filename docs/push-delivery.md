@@ -1,6 +1,6 @@
 # Push delivery
 
-By default, the source worker sends activity notifications and Live Activity updates through the authenticated relay, which holds the APNs key. It can also push Codex and Claude usage to Apple Watch. An ordinary notification reaches the ESP32 watch through Apple's Notification Center Service (ANCS); the watch asks the iPhone to fetch the current snapshot and forward it over Bluetooth. Activity pushes carry an event hint or expiring display copy, never source credentials, prompts, or transcripts. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
+By default, the source worker sends activity notifications and Live Activity updates through the authenticated relay, which holds the APNs key. It can also push Codex usage to Apple Watch. An ordinary notification reaches the ESP32 watch through Apple's Notification Center Service (ANCS); the watch asks the iPhone to fetch the current snapshot and forward it over Bluetooth. Activity pushes carry an event hint or expiring display copy, never source credentials, prompts, or transcripts. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
 
 | State | Ordinary notification |
 | --- | --- |

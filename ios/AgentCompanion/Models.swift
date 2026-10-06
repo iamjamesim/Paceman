@@ -34,7 +34,7 @@ struct Snapshot: Codable {
     var usageStatus: [String: String]? = nil
     var usageReadings: [CodexAllowance] {
         var values: [CodexAllowance] = []
-        for value in (allowances ?? allowance.map { [$0] } ?? []).filter({ $0.valid }) {
+        for value in (allowances ?? allowance.map { [$0] } ?? []).filter({ $0.valid && $0.provider == "codex" }) {
             if let index = values.firstIndex(where: { $0.usageID == value.usageID }) {
                 if value.updatedAt > values[index].updatedAt { values[index] = value }
             } else { values.append(value) }
@@ -46,26 +46,24 @@ struct Snapshot: Codable {
 }
 
 enum WatchAggregate {
-    static func selectAllowance(current: [Snapshot], profiles: [Snapshot], now: Double, provider: String = "codex") -> CodexAllowance? {
-        func select(_ snapshot: Snapshot) -> CodexAllowance? {
-            let values = snapshot.usageReadings.filter { $0.provider == provider }
-            let unexpired = values.filter { Double($0.updatedAt) <= now && now < Double($0.resetsAt) }
-            return (unexpired.isEmpty ? values : unexpired).min {
-                $0.remaining == $1.remaining ? $0.window < $1.window : $0.remaining < $1.remaining
+    static func usageSource(current: [Snapshot], profiles: [Snapshot], now: Double) -> Snapshot? {
+        func recent(_ snapshot: Snapshot) -> Bool {
+            snapshot.usageReadings.contains {
+                Double($0.updatedAt) <= now && now - Double($0.updatedAt) <= 1800 && Double($0.resetsAt) > now
             }
         }
-        func recent(_ snapshot: Snapshot) -> CodexAllowance? {
-            guard let value = select(snapshot), value.valid,
-                  Double(value.updatedAt) <= now,
-                  now - Double(value.updatedAt) <= 1800,
-                  Double(value.resetsAt) > now else { return nil }
-            return value
+        return current.first(where: recent) ?? profiles.first(where: recent)
+            ?? profiles.first { !$0.usageReadings.isEmpty }
+            ?? profiles.max { $0.observedAt < $1.observedAt }
+    }
+
+    static func selectAllowance(current: [Snapshot], profiles: [Snapshot], now: Double, provider: String = "codex") -> CodexAllowance? {
+        guard provider == "codex", let snapshot = usageSource(current: current, profiles: profiles, now: now) else { return nil }
+        let values = snapshot.usageReadings
+        let available = values.filter { Double($0.updatedAt) <= now && now < Double($0.resetsAt) }
+        return (available.isEmpty ? values : available).min {
+            $0.remaining == $1.remaining ? $0.window < $1.window : $0.remaining < $1.remaining
         }
-        // Prefer a reading from a connected computer. Pairing order breaks ties,
-        // rather than whichever agent happened to change state most recently.
-        return current.compactMap(recent).first
-            ?? profiles.compactMap(recent).first
-            ?? profiles.compactMap(select).first { $0.valid }
     }
 
     static func make(current: [Snapshot], allowance: CodexAllowance?, now: Double) -> Snapshot {
@@ -339,9 +337,9 @@ extension Snapshot {
         // A richer session list cannot invalidate core activity.
         sessions = try? c.decode([AgentSession].self, forKey: .sessions)
         let limits = try? c.decode(CodexAllowance.self, forKey: .allowance)
-        allowance = limits?.valid == true ? limits : nil
+        allowance = limits?.valid == true && limits?.provider == "codex" ? limits : nil
         if let values = try? c.decode([CodexAllowance].self, forKey: .allowances), values.count <= 4 {
-            allowances = values.filter { $0.valid }
+            allowances = values.filter { $0.valid && $0.provider == "codex" }
         } else { allowances = nil }
         configuredProviders = (try? c.decode([String].self, forKey: .configuredProviders))?.filter { ["codex", "claude"].contains($0) }
         usageStatus = try? c.decode([String: String].self, forKey: .usageStatus)

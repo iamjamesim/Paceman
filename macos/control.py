@@ -15,7 +15,7 @@ import sys
 import time
 import uuid
 
-from macos.agents import CLAUDE_PURPOSES, PROVIDERS, configured_providers, claude_config_dir, provider_config, hook_path
+from macos.agents import CLAUDE_PURPOSES, PROVIDERS, configured_providers, detected_providers, claude_config_dir, provider_config, hook_path, installed_hook_command
 from service.network import ensure_private_route
 from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint
@@ -91,12 +91,13 @@ def status():
     value["computerName"] = socket.gethostname().split(".")[0]
     providers = configured_providers(ROOT)
     value["configuredProviders"] = providers
+    value["detectedProviders"] = detected_providers(root=ROOT)
     value["missingHooksByProvider"] = {p: missing_hooks(provider=p) for p in providers}
     value["missingHooks"] = [event for missing in value["missingHooksByProvider"].values() for event in missing]
     try:
         arguments = plistlib.loads(PLIST.read_bytes()).get("ProgramArguments", [])
         if len(arguments) >= 2 and isinstance(arguments[1], str):
-            value["hookCommands"] = {p: shlex.quote(arguments[1]) + " -B " +
+            value["hookCommands"] = {p: installed_hook_command(p, ROOT) or shlex.quote(arguments[1]) + " -B " +
                                     shlex.quote(str(ROOT / f"lib/macos/{p}_hook.py")) for p in providers}
             value["hookCommand"] = value["hookCommands"].get("codex")
     except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
@@ -148,8 +149,8 @@ def configure_agents(providers):
     from macos import install as installer
     from macos.uninstall import cleaned_hooks
     providers = list(dict.fromkeys(providers))
-    if not providers or any(p not in PROVIDERS for p in providers):
-        raise ValueError("Choose at least one supported agent")
+    if any(p not in PROVIDERS for p in providers):
+        raise ValueError("Choose supported agents")
     try:
         arguments = plistlib.loads(PLIST.read_bytes()).get("ProgramArguments", [])
         if len(arguments) >= 2 and Path(arguments[1]).is_file():
@@ -191,10 +192,9 @@ def configure_agents(providers):
                 Path(temporary).unlink(missing_ok=True)
         try:
             for target, original, data in targets:
-                write(target, data)
-                replaced.append((target, original))
-            if not (ROOT / 'sharing-paused').exists():
-                launch('kickstart', '-k', service_target())
+                if original != data:
+                    write(target, data)
+                    replaced.append((target, original))
         except Exception:
             for target, original in reversed(replaced):
                 write(target, original)
@@ -203,9 +203,9 @@ def configure_agents(providers):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "support", "pair", "share-on", "share-off", "restart", "remove-access", "uninstall", "allow-claude-usage", "agents"))
+    parser.add_argument("command", choices=("status", "support", "pair", "share-on", "share-off", "restart", "remove-access", "uninstall", "agents"))
     parser.add_argument("--client-id")
-    parser.add_argument("--providers", nargs="+", choices=PROVIDERS)
+    parser.add_argument("--providers", nargs="*", choices=PROVIDERS)
     parser.add_argument("--yes", action="store_true", help="Confirm complete Mac uninstall")
     args = parser.parse_args()
     try:
@@ -221,17 +221,10 @@ def main():
                                   "missingHooks": missing_hooks()}
             print(json.dumps(report(ROOT, current_status, app), separators=(",", ":")))
         elif args.command == "agents":
-            if not args.providers:
-                raise ValueError("Choose at least one agent with --providers")
+            if args.providers is None:
+                raise ValueError("Specify the agent selection with --providers")
             configure_agents(args.providers)
             print("Agent settings updated. Review the selected agents’ Paceman hook commands, then start a fresh local task.")
-        elif args.command == "allow-claude-usage":
-            from service.claude_limits import read_claude_allowances
-            directory = claude_config_dir(ROOT)
-            # The default Keychain is scoped to the default Claude profile.
-            os.environ["CLAUDE_CONFIG_DIR"] = str(directory)
-            _, result = read_claude_allowances(allow_prompt=True)
-            print(json.dumps({"claudeUsageStatus": result}))
         elif args.command == "pair":
             pairing()
         elif args.command in ("share-on", "share-off"):

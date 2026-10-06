@@ -7,6 +7,7 @@ import WidgetKit
 struct PacemanWatchApp: App {
     @WKApplicationDelegateAdaptor(WatchPushDelegate.self) private var pushDelegate
     @StateObject private var store = WatchAllowanceStore.shared
+    @State private var showUnsupportedUsage = false
     // Ayu dark is the iPhone app's default glance palette.
     private let accent = Color(red: 1, green: 0.8, blue: 0.4)
 
@@ -26,6 +27,12 @@ struct PacemanWatchApp: App {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
                 }
+            }
+            .onOpenURL { url in showUnsupportedUsage = url.host == "claude-usage-unsupported" }
+            .alert("Claude usage isn’t supported", isPresented: $showUnsupportedUsage) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Use a Codex Limit or Codex Reset complication. Claude Code activity remains supported.")
             }
         }
     }
@@ -90,9 +97,9 @@ struct PacemanWatchApp: App {
 
     private var setupSummary: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("No limit yet")
+            Text("No Codex limit yet")
                 .font(.headline)
-            Text("Open Paceman on iPhone to finish setup.")
+            Text("Open Paceman on iPhone to connect a computer using Codex. Claude usage limits are not supported.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
     }

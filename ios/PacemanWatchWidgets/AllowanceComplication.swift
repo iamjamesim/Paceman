@@ -23,12 +23,13 @@ enum UsageProvider: String, AppEnum {
         .codex: "Codex", .claude: "Claude"
     ]
     var name: String { self == .claude ? "Claude" : "Codex" }
-    var abbreviation: String { self == .claude ? "CLD" : "CDX" }
 }
 
 struct UsageConfigurationIntent: WidgetConfigurationIntent {
-    static let title: LocalizedStringResource = "Usage provider"
-    static let description = IntentDescription("Choose the agent shown by this complication.")
+    static let title: LocalizedStringResource = "Codex usage"
+    static let description = IntentDescription("Codex allowance and reset time.")
+    // Preserve the saved provider for upgrades; new complications need no picker.
+    static var parameterSummary: some ParameterSummary { Summary() }
     @Parameter(title: "Provider", default: .codex)
     var provider: UsageProvider
 }
@@ -52,7 +53,6 @@ private struct AllowanceProvider: AppIntentTimelineProvider {
         return AllowanceEntry(date: now, provider: configuration.provider, allowance: value)
     }
 
-    // watchOS 26 supplies the per-instance configuration editor.
     func recommendations() -> [AppIntentRecommendation<UsageConfigurationIntent>] { [] }
 
     func timeline(for configuration: UsageConfigurationIntent, in context: Context) async -> Timeline<AllowanceEntry> {
@@ -101,7 +101,7 @@ private struct LimitComplication: Widget {
             AllowanceView(entry: entry, metric: .limit)
                 .containerBackground(.clear, for: .widget)
         }
-        .configurationDisplayName("Limit")
+        .configurationDisplayName("Codex Limit")
         .description("Allowance remaining and reset")
         .supportedFamilies([.accessoryCircular, .accessoryCorner, .accessoryRectangular, .accessoryInline])
     }
@@ -113,7 +113,7 @@ private struct ResetComplication: Widget {
             AllowanceView(entry: entry, metric: .reset)
                 .containerBackground(.clear, for: .widget)
         }
-        .configurationDisplayName("Reset")
+        .configurationDisplayName("Codex Reset")
         .description("Time until the allowance resets")
         .supportedFamilies([.accessoryCircular, .accessoryCorner])
     }
@@ -130,7 +130,7 @@ private struct AllowanceView: View {
     }
 
     private var value: WatchAllowanceSnapshot? {
-        guard let allowance = entry.allowance, allowance.available(at: entry.date) else { return nil }
+        guard entry.provider == .codex, let allowance = entry.allowance, allowance.available(at: entry.date) else { return nil }
         return allowance
     }
 
@@ -194,14 +194,19 @@ private struct AllowanceView: View {
 
     var body: some View {
         Group {
-            switch family {
-            case .accessoryCircular: circular
-            case .accessoryCorner: corner
-            case .accessoryRectangular: rectangular
-            case .accessoryInline: inline
-            default: EmptyView()
+            if entry.provider == .claude {
+                Text("Claude —").font(.caption2)
+            } else {
+                switch family {
+                case .accessoryCircular: circular
+                case .accessoryCorner: corner
+                case .accessoryRectangular: rectangular
+                case .accessoryInline: inline
+                default: EmptyView()
+                }
             }
         }
+        .widgetURL(entry.provider == .claude ? URL(string: "paceman://claude-usage-unsupported") : nil)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
     }
@@ -210,7 +215,7 @@ private struct AllowanceView: View {
         Group {
             if metric == .limit {
                 Gauge(value: fraction, in: 0...1) {
-                    Text(entry.provider.abbreviation)
+                    Text("LEFT")
                         .foregroundStyle(fullColorAccent ?? Color.primary)
                         .widgetAccentable()
                 } currentValueLabel: {
@@ -220,7 +225,7 @@ private struct AllowanceView: View {
                 .tint(fullColorAccent)
             } else {
                 Gauge(value: fraction, in: 0...1) {
-                    Text(entry.provider.abbreviation)
+                    Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
                         .foregroundStyle(fullColorAccent ?? Color.primary)
                         .widgetAccentable()
                 } currentValueLabel: {
@@ -278,13 +283,13 @@ private struct AllowanceView: View {
         .widgetLabel {
             if metric == .limit {
                 ProgressView(value: fraction, total: 1) {
-                    Text(entry.provider.abbreviation)
+                    Text("LIMIT")
                 }
                 .tint(fullColorAccent)
                 .widgetAccentable()
             } else if value == nil {
                 ProgressView(value: 0, total: 1) {
-                    Text(entry.provider.abbreviation)
+                    Text("RESET")
                 }
                 .tint(fullColorAccent)
                 .widgetAccentable()
@@ -294,7 +299,7 @@ private struct AllowanceView: View {
                 } currentValueLabel: {
                     EmptyView()
                 } minimumValueLabel: {
-                    Text(entry.provider.abbreviation)
+                    Text("RESET")
                 } maximumValueLabel: {
                     Text("")
                 }
@@ -359,6 +364,7 @@ private struct AllowanceView: View {
     }
 
     private var accessibilityText: String {
+        if entry.provider == .claude { return "Claude usage is not supported. Open Paceman for details." }
         guard let value else { return "\(entry.provider.name) \(metric == .limit ? "limit" : "reset") unavailable" }
         let freshness = value.cached(at: entry.date) ? "last known" : "current"
         if metric == .limit {

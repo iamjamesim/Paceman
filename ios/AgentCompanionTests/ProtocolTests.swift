@@ -24,21 +24,46 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(WatchAggregate.selectAllowance(current: [], profiles: [older], now: now)?.remaining, 5)
     }
 
-    func testQuotaSelectionStaysWithinChosenProviderAndPreservesObservation() {
+    func testOldClaudeUsageDoesNotReplaceCodexOrHideActivity() throws {
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture([
+            "configuredProviders": ["claude"],
+            "sessions": [["id":"claude-task", "provider":"claude", "state":"working"]],
+            "allowances": [
+                ["provider":"codex", "remaining":70, "window":1, "updatedAt":1800000000, "resetsAt":1800086400],
+                ["provider":"claude", "remaining":10, "window":2, "updatedAt":1800000000, "resetsAt":1800003600]]]))
+        XCTAssertEqual(snapshot.sessions?.first?.provider, "claude")
+        XCTAssertEqual(snapshot.configuredProviders, ["claude"])
+        XCTAssertEqual(snapshot.usageReadings.map(\.provider), ["codex"])
+        XCTAssertEqual(snapshot.allowances?.count, 1)
+        XCTAssertNil(WatchAggregate.selectAllowance(current:[snapshot], profiles:[snapshot], now:1800000000, provider:"claude"))
+    }
+
+    func testWatchUsageFallsBackToConnectedSecondComputerWithoutMixingWindows() {
         let now = 1800000000.0
-        var source = Snapshot(schema: 1, sourceID: "source", generation: "g", revision: 1,
-            sourceName: "source", observedAt: now, changedAt: now, freshFor: 30, state: .working,
-            eventID: "1", allowance: nil, sessions: nil)
-        source.allowances = [
-            CodexAllowance(provider: "codex", remaining: 5, window: 1, updatedAt: Int64(now), resetsAt: Int64(now)+86400),
-            CodexAllowance(provider: "claude", remaining: 80, window: 1, updatedAt: Int64(now)-4000, resetsAt: Int64(now)+86400),
-            CodexAllowance(provider: "claude", remaining: 20, window: 2, updatedAt: Int64(now)-4000, resetsAt: Int64(now)+3600)]
-        let pinned = WatchAggregate.selectAllowance(current:[source],profiles:[source],now:now,provider:"claude")
-        XCTAssertEqual(pinned?.provider,"claude")
-        XCTAssertEqual(pinned?.remaining,20)
-        XCTAssertEqual(pinned?.updatedAt,Int64(now)-4000)
-        source.allowances = source.allowances?.filter { $0.provider == "codex" }
-        XCTAssertNil(WatchAggregate.selectAllowance(current:[source],profiles:[source],now:now,provider:"claude"))
+        func source(_ id: String, left: Int, updated: Int64) -> Snapshot {
+            Snapshot(schema: 1, sourceID: id, generation: "g", revision: 1, sourceName: id,
+                observedAt: Double(updated), changedAt: Double(updated), freshFor: 30, state: .working,
+                eventID: "1", allowance: nil, sessions: nil,
+                allowances: [CodexAllowance(provider:"codex", remaining:left, window:2,
+                    updatedAt:updated, resetsAt:Int64(now)+3600, windowDurationMins:300)])
+        }
+        let first = source("offline", left:5, updated:Int64(now)-4000)
+        let second = source("connected", left:80, updated:Int64(now))
+        let chosen = WatchAggregate.usageSource(current:[second], profiles:[first,second], now:now)
+        XCTAssertEqual(chosen?.sourceID, second.sourceID)
+        XCTAssertEqual(chosen?.usageReadings, second.usageReadings)
+        XCTAssertEqual(WatchAggregate.selectAllowance(current:[second], profiles:[first,second], now:now)?.remaining,80)
+        // Pairing order remains the preference when both computers are current.
+        let recovered = source("recovered", left:30, updated:Int64(now))
+        XCTAssertEqual(WatchAggregate.usageSource(current:[recovered,second], profiles:[recovered,second], now:now)?.sourceID,"recovered")
+    }
+
+    func testEmptyUsageCarriesObservationTimeToClearWatchCache() throws {
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(["allowances": []]))
+        let chosen = WatchAggregate.usageSource(current: [snapshot], profiles: [snapshot], now: snapshot.observedAt)
+        XCTAssertEqual(chosen?.observedAt, snapshot.observedAt)
+        XCTAssertEqual(chosen?.usageReadings, [])
+        XCTAssertNil(WatchAggregate.selectAllowance(current: [snapshot], profiles: [snapshot], now: snapshot.observedAt))
     }
 
     func testClaudeFirmwareProfilesRequireProviderAwareVersion() {
