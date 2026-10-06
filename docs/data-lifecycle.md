@@ -47,8 +47,8 @@ Phone-side Remove watch removes access; it does not reset watch ownership.
   versa. Each surface reports its own link without inferring the other.
 
 On Mac, Working does not time out; finished and failed rows retire after ten
-minutes. Changing enabled agents clears only disabled agents' sessions and usage;
-other agents continue without restarting the source.
+minutes. Disabling an agent clears its sessions; disabling Codex also clears usage.
+Other agents continue without restarting the source.
 
 The source prunes old untracked sessions after 24 hours. Its events table keeps
 the latest 1,024 revisions and the most recent activity event. Revisions remain

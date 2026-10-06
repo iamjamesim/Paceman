@@ -244,9 +244,7 @@ Apple Watch requires watchOS 26+.
 The watch app advertises `usageSchema: 2` with its token; the phone forwards this
 capability in source registration. `multipleSources: true` in the Watch token
 message lets the phone register every paired computer; older watches retain
-single-source registration. This capability does not change relay payloads.
-Schema 2 pushes carry all available windows
-(at most two), including an empty array when no readings remain. Older destinations
+single-source registration. Schema 2 pushes carry up to two Codex windows, including an empty array when no readings remain. Older destinations
 receive schema 1's single Codex `allowance` reading.
 
 WatchConnectivity uses schema 1 with `allowances`, `observedAt`, `sourceID`,
@@ -323,8 +321,7 @@ All multibyte values are little-endian. The profile byte ranges are:
 | 85, 86, 87–94, 95–102 | Remaining allowance (`255` = unavailable), window (`0` unavailable, `1` weekly, `2` session), observation and reset times |
 | 103–110 | Signed forecast-day expiry time |
 
-Allowance is Codex-only. The phone negotiates the profile version through the
-identity version range.
+Allowance is Codex-only.
 
 Profile flags mark valid weather, Fahrenheit, night mode and a transient
 preview. The location is null-terminated UTF-8 (at most 23 data bytes).

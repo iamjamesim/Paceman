@@ -6,7 +6,7 @@ For Apple Silicon Macs running macOS 15 or later.
 
 1. Download the **[Mac DMG](https://github.com/iamjamesim/Paceman/releases/download/desktop-v0.1.0/Paceman-macos-arm64-0.1.0.dmg)** from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/releases/tag/desktop-v0.1.0). The release is signed and notarized.
 2. Open the DMG, drag **Paceman** onto **Applications**, then open it from Applications.
-3. Choose Codex, Claude Code, or both, then **Set up Paceman**. This starts Paceman at login, enables its background item, and prepares the selected hooks. Change agents later under **Manage Paceman… → Agents**; reinstalling preserves your selection and reviewed hook commands.
+3. Choose **Set up Paceman**. This starts Paceman at login, enables its background item, and prepares Codex hooks.
 
 macOS may show notifications about login and background items. You can manage them in **System Settings → General → Login Items & Extensions**. The Mac release includes Python; no separate runtime installation is needed.
 
@@ -144,7 +144,9 @@ Download the source from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/r
 python3 -m macos.install
 ```
 
-The installer builds the menu app and background helper, installs to `~/Applications/Paceman.app`, and prepares notifications, the private Tailscale route, and hooks for selected agents. It preserves existing pairings, Sharing choice, agent selection, notification configuration, and unrelated hooks. Pass `--agents claude` or `--agents codex claude` to select explicitly. If setup is incomplete, Paceman explains what needs attention. If your `python3` is too old, invoke a newer interpreter explicitly.
+Current builds let you select Codex, Claude Code, or both during setup and later under **Manage Paceman… → Agents**.
+
+The source installer builds the menu app and background helper, installs to `~/Applications/Paceman.app`, and prepares notifications, the private Tailscale route, and hooks for selected agents. It preserves existing pairings, Sharing choice, agent selection, notification configuration, and unrelated hooks. Pass `--agents claude` or `--agents codex claude` to select explicitly. If setup is incomplete, Paceman explains what needs attention. If your `python3` is too old, invoke a newer interpreter explicitly.
 
 The installer uses a matching Paceman signing identity if one is installed, otherwise an ad hoc signature. You do not need Paceman's signing credentials to build locally. Ad hoc and Apple Development signatures are for local builds; public Mac distribution requires Developer ID signing and notarization.
 
@@ -199,8 +201,8 @@ approved tool can retain attention until its observed calls return. An interrupt
 without another hook can retain the old state until a new prompt or `SessionEnd`.
 Another Stop hook can briefly show Finished before a tool resumes the same turn.
 
-The source reads Codex usage through its local App Server every five minutes. It sends only provider, percentage,
-window/duration, observation and reset times. A reset without a fresh reading shows
+The source reads Codex usage through its local App Server every five minutes.
+It sends only provider, percentage, window/duration, observation and reset times. A reset without a fresh reading shows
 unavailable.
 
 </details>
