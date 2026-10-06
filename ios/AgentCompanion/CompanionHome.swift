@@ -302,11 +302,8 @@ struct CompanionHome: View {
     @ViewBuilder private func sessionPill(_ session: AgentSession) -> some View {
         if let url = session.appURL {
             Link(destination: url) {
-                HStack(spacing: 5) {
-                    Text(session.appLinkTitle).multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Image(systemName: "arrow.up.right").accessibilityHidden(true)
-                }
+                Text(session.appLinkTitle).multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(theme.canvas)
                 .padding(.horizontal, 9).padding(.vertical, 5)
