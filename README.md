@@ -45,7 +45,7 @@ delivery remain unverified.
 
 Prefer source installation? See [Mac source setup](macos/README.md#build-and-install-from-source)
 or [Omarchy source setup](omarchy/README.md#install-from-a-git-checkout).
-Current source builds support opt-in Claude Code activity on both platforms; Desktop 0.1.0 is Codex-only.
+Current source builds support Claude Code activity on both platforms; Desktop 0.1.0 is Codex-only.
 
 The Mac and Omarchy installers configure the [APNs relay](service/RELAY.md) for
 locked-phone notifications by default; the iPhone must still allow notifications.

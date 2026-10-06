@@ -14,7 +14,7 @@ if str(Path(__file__).resolve().parent.parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from omarchy.files import directory, write
 from omarchy.agents import (HOOK_PURPOSES, HOOK_EVENTS, CLAUDE_PURPOSES, hook_command,
-                            owns_hook, hook_document, configuration, prepare, apply)
+                            owns_hook, hook_document, setup_providers, prepare, apply)
 
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = "io.github.iamjamesim.paceman"
@@ -94,7 +94,9 @@ def main():
         from service.push import Config, DEFAULT_RELAY_URL, RelayConfig
         from service.network import RouteSetupError, ensure_private_route
         relay_url = endpoint(args.relay_url or DEFAULT_RELAY_URL)
-        providers = configuration(state)["providers"] if args.agents is None else args.agents
+        providers = setup_providers(state, home=home) if args.agents is None else args.agents
+        print("Monitor activity from: " + (", ".join("Codex" if p == "codex" else "Claude Code" for p in providers) or "none") +
+              ". Use --agents to choose explicitly; the panel can change this later.")
         documents = prepare(state, app, providers, home=home)
         run("/usr/bin/systemctl", "--user", "show-environment")
         if not args.no_bar:

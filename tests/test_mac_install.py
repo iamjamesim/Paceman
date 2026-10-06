@@ -11,7 +11,7 @@ from unittest.mock import patch
 import macos.install as installer
 from macos.install import PYTHON, install_hooks
 from macos.codex_hook import EVENTS, QUESTION_MATCHER
-from macos.agents import detected_providers
+from macos.agents import detected_providers, setup_providers
 from macos.control import missing_hooks
 import macos.control as control
 from service.hub import Store
@@ -42,14 +42,15 @@ class MacInstallTests(unittest.TestCase):
                 self.assertEqual(installer.PYTHON,
                                  str(installed / "Contents/Resources/python/bin/python3"))
                 self.assertFalse(kwargs["open_menu"])
-                self.assertEqual(kwargs["agents"], ["codex"])
+                self.assertEqual(kwargs["agents"], ["claude"])
                 return True
 
             with patch.multiple(installer, ROOT=root, APP=installed, REPO=library,
                                 LOGIN_ATTENTION=root / "login-setup-incomplete",
                                 PYTHON=sys.executable), \
                  patch.object(installer, "build_app", side_effect=AssertionError("Xcode used")), \
-                 patch.object(installer, "_finish_install", side_effect=finish):
+                 patch.object(installer, "_finish_install", side_effect=finish), \
+                 patch("macos.agents.detected_providers", return_value=["claude"]):
                 self.assertTrue(installer.install(prebuilt_app=source))
 
     def test_dragged_app_is_configured_without_replacing_the_running_bundle(self):
@@ -230,6 +231,9 @@ class MacInstallTests(unittest.TestCase):
     def test_successful_service_start_replaces_install(self):
         self._exercise_replacement()
 
+    def test_all_off_selection_survives_installation(self):
+        self._exercise_replacement(agents=[])
+
     def test_dual_agent_selection_is_available_before_source_start(self):
         self._exercise_replacement(agents=["codex", "claude"])
 
@@ -313,7 +317,7 @@ class MacInstallTests(unittest.TestCase):
             def command(args, **kwargs):
                 if args[:2] == ["/bin/launchctl", "bootstrap"]:
                     if not bootstraps:
-                        self.assertEqual(json.loads((root / "agents.json").read_text())["providers"], agents or ["codex"])
+                        self.assertEqual(json.loads((root / "agents.json").read_text())["providers"], ["codex"] if agents is None else agents)
                     bootstraps.append(args)
                     if fail_start and len(bootstraps) == 1:
                         raise subprocess.CalledProcessError(5, args, "new service failed")
@@ -367,7 +371,10 @@ class MacInstallTests(unittest.TestCase):
             else:
                 self.assertEqual(plistlib.loads(plist.read_bytes())["ProgramArguments"][0],
                                  str(app / "Contents/MacOS/PacemanBackground"))
-                self.assertEqual(len(json.loads(hooks.read_text())["hooks"]), 8)
+                self.assertEqual(len(json.loads(hooks.read_text())["hooks"]),
+                                 8 if agents is None or "codex" in agents else 0)
+                if agents is not None:
+                    self.assertEqual(json.loads((root / "agents.json").read_text())["providers"], agents)
             self.assertEqual(push_plist.exists(), failed)
             self.assertEqual((root / "notification-setup-incomplete").exists(),
                              fail_push and not failed)
@@ -405,7 +412,8 @@ class AgentDetectionTests(unittest.TestCase):
             self.assertEqual(self.detect(home), ['claude'])
 
     def test_editor_only_installations_and_desktop_are_detected(self):
-        for artifact in ('.vscode/extensions/anthropic.claude-code-2.1.196',
+        for artifact in ('.vscode/extensions/openai.chatgpt-0.4.0',
+                         '.vscode/extensions/anthropic.claude-code-2.1.196',
                          '.vscode-insiders/extensions/anthropic.claude-code-2.1.196',
                          '.cursor/extensions/anthropic.claude-code-2.1.196',
                          '.windsurf/extensions/anthropic.claude-code-2.1.196',
@@ -413,9 +421,9 @@ class AgentDetectionTests(unittest.TestCase):
             with self.subTest(artifact=artifact), tempfile.TemporaryDirectory() as temporary:
                 home = Path(temporary)
                 (home / artifact).mkdir(parents=True)
-                self.assertEqual(self.detect(home), ['claude'])
+                self.assertEqual(self.detect(home), ['codex'] if 'openai.chatgpt' in artifact else ['claude'])
 
-    def test_saved_custom_profile_is_detected_without_reading_credentials(self):
+    def test_settings_folder_alone_does_not_claim_an_installed_agent(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
             profile = home / 'custom'
@@ -423,8 +431,34 @@ class AgentDetectionTests(unittest.TestCase):
             root = home / 'paceman'
             root.mkdir()
             (root / 'agents.json').write_text(json.dumps({'claudeConfigDir': str(profile)}))
-            self.assertEqual(self.detect(home, root=root), ['claude'])
+            self.assertEqual(self.detect(home, root=root), [])
             self.assertEqual(list(profile.iterdir()), [])
+
+
+class AgentSetupTests(unittest.TestCase):
+    def test_fresh_detection_and_saved_choices_are_separate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for detected in ([], ['codex'], ['claude'], ['codex', 'claude']):
+                with self.subTest(detected=detected), patch('macos.agents.detected_providers', return_value=detected):
+                    self.assertEqual(setup_providers(root), detected)
+            for saved in ([], ['codex'], ['claude'], ['codex', 'claude']):
+                (root / 'agents.json').write_text(json.dumps({'providers': saved}))
+                with self.subTest(saved=saved), patch('macos.agents.detected_providers', side_effect=AssertionError('Upgrade selected newly detected agents')):
+                    self.assertEqual(setup_providers(root), saved)
+            (root / 'agents.json').unlink()
+            (root / 'lib/macos').mkdir(parents=True)
+            with patch('macos.agents.detected_providers', return_value=['claude']):
+                self.assertEqual(setup_providers(root), ['codex'])
+
+    def test_fresh_status_exposes_setup_selection_without_claiming_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.object(control, 'ROOT', root), patch('macos.agents.detected_providers', return_value=['claude']), \
+                    patch.object(control, 'detected_providers', return_value=['claude']):
+                status = control.status()
+            self.assertEqual(status['setupProviders'], ['claude'])
+            self.assertFalse((root / 'agents.json').exists())
 
 
 if __name__ == "__main__":

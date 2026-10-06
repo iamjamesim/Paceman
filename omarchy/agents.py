@@ -108,14 +108,26 @@ def hook_paths(root, *, home=None):
             "claude": Path(configuration(root)["claudeConfigDir"]) / "settings.json"}
 
 
+def setup_providers(root, *, home=None):
+    """Detect fresh installs; preserve choices, including pre-selection Codex installs."""
+    home = home or Path.home()
+    if ((root / "agents.json").exists() or (root / "agents.json").is_symlink()
+            or (root / "hub.sqlite3").is_file()
+            or (home / ".local/lib/paceman/service/launch.py").is_file()
+            or (home / ".local/lib/paceman/desktop").is_dir()):
+        return configured_providers(root)
+    return detected_providers(root, home=home)
+
+
 def detected_providers(root, *, home=None):
     home = home or Path.home()
     result = [p for p in PROVIDERS if shutil.which(p) or
               ((home / ".local/bin" / p).is_file() and os.access(home / ".local/bin" / p, os.X_OK))]
-    if "claude" not in result and any(any((home / editor / "extensions").glob("anthropic.claude-code-*"))
-            for editor in (".vscode", ".vscode-insiders", ".cursor", ".windsurf", ".vscode-server")):
-        result.append("claude")
-    return result
+    for provider, extension in (("codex", "openai.chatgpt-*"), ("claude", "anthropic.claude-code-*")):
+        if provider not in result and any(any((home / editor / "extensions").glob(extension))
+                for editor in (".vscode", ".vscode-insiders", ".cursor", ".windsurf", ".vscode-server")):
+            result.append(provider)
+    return [p for p in PROVIDERS if p in result]
 
 
 def prepare(root, app, providers, *, home=None):

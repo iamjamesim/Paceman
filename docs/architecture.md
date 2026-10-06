@@ -1,6 +1,6 @@
 # Architecture
 
-Each paired computer reports its own agent activity. Mac and Omarchy support Codex and opt-in Claude Code. The iPhone fetches that status over private HTTPS, presents each computer separately, and sends one current view to the ESP32 watch. Prompts, replies, and tool arguments stay on the computer.
+Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, presents each computer separately, and sends one current view to the ESP32 watch. Prompts, replies, and tool arguments stay on the computer.
 
 ```text
        Reviewed agent hooks

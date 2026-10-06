@@ -14,7 +14,7 @@ bash scripts/install-omarchy.sh
 
 Prefer a Git checkout? Use [source setup](#install-from-a-git-checkout). Both installation paths continue with hook review and phone pairing below.
 
-The installer copies Paceman to `~/.local/lib/paceman`, prepares notifications through `https://relay.paceman.ai`, installs `pacemanctl`, enables its user service, prepares a private Tailscale Serve route, reloads the bar, and adds seven commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; Omarchy stores only a source credential. Re-run to update; `--no-bar` omits the panel. Current source builds support opt-in Claude Code activity; Desktop 0.1.0 is Codex-only. Updates preserve an existing relay or direct APNs configuration, pairing data, Sharing and agent choices, and unrelated hooks. If notification or private route setup fails, the installer reports a partial installation and the pairing button can retry route setup. A fresh install ignores checkout `.runtime` data. The installer disables the old `omarchy-watch.service` but leaves its data and Codex plugin.
+The installer copies Paceman to `~/.local/lib/paceman`, prepares notifications through `https://relay.paceman.ai`, installs `pacemanctl`, enables its user service, prepares a private Tailscale Serve route, reloads the bar, and adds seven commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; Omarchy stores only a source credential. Re-run to update; `--no-bar` omits the panel. Current source builds support Claude Code activity; Desktop 0.1.0 is Codex-only. Updates preserve an existing relay or direct APNs configuration, pairing data, Sharing and agent choices, and unrelated hooks. If notification or private route setup fails, the installer reports a partial installation and the pairing button can retry route setup. A fresh install ignores checkout `.runtime` data. The installer disables the old `omarchy-watch.service` but leaves its data and Codex plugin.
 
 For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the install script. Developers managing a direct APNs sender can use `--no-push-setup` and follow [development-only direct APNs](../docs/push-delivery.md#development-only-direct-apns). Neither option is needed for the normal install.
 
@@ -32,13 +32,13 @@ To follow current development instead, omit `--branch desktop-v0.1.0`. Continue 
 
 ## Choose agents
 
-Current source builds default to Codex. To enable Claude Code during installation:
+To choose agents explicitly during installation:
 
 ```sh
 bash scripts/install-omarchy.sh --agents codex claude
 ```
 
-Choose either agent or both in the bar panel, or use `pacemanctl agents --enable claude` / `--disable claude` (also accepts `codex`). Changes apply without restarting the source and survive updates. An available installation is a hint, not automatic opt-in. Sharing pauses both agents.
+Fresh installs enable detected Codex and Claude Code installations. Pass `--agents codex`, `--agents claude`, or `--agents codex claude` to choose explicitly. Updates preserve your choices, including disabled agents. Choose either agent or both in the bar panel, or use `pacemanctl agents --enable claude` / `--disable claude` (also accepts `codex`). Changes apply without restarting the source and survive updates. An agent installed later is shown as Available until enabled. Sharing pauses both agents.
 
 Claude Code needs 2.1.196+ for prompt IDs. Paceman observes local CLI and VS Code sessions that run its hooks on this computer; remote IDE sessions need Paceman on the remote computer. It uses `~/.claude/settings.json`, or the `CLAUDE_CONFIG_DIR` selected during installation, and preserves unrelated settings. Claude activity requires no credentials. Claude usage remains unsupported; existing usage meters are Codex-only.
 

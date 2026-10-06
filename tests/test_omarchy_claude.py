@@ -129,6 +129,50 @@ class AgentConfigurationTests(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
+    def test_fresh_detection_preserves_saved_and_legacy_selections(self):
+        for detected in ([], ['codex'], ['claude'], ['codex', 'claude']):
+            with self.subTest(detected=detected), patch.object(agents, 'detected_providers', return_value=detected):
+                self.assertEqual(agents.setup_providers(self.root, home=self.home), detected)
+        self.root.mkdir()
+        for saved in ([], ['codex'], ['claude'], ['codex', 'claude']):
+            (self.root / 'agents.json').write_text(json.dumps({'providers': saved,
+                'claudeConfigDir': str(self.home / 'custom-claude')}))
+            with self.subTest(saved=saved), patch.object(agents, 'detected_providers', side_effect=AssertionError('Upgrade changed selection')):
+                self.assertEqual(agents.setup_providers(self.root, home=self.home), saved)
+        (self.root / 'agents.json').unlink()
+        (self.root / 'hub.sqlite3').touch()
+        with patch.object(agents, 'detected_providers', return_value=['claude']):
+            self.assertEqual(agents.setup_providers(self.root, home=self.home), ['codex'])
+
+    def test_installer_uses_detection_then_preserves_disables(self):
+        import os
+        import subprocess
+        import time
+        from omarchy import install
+        def run(*args, **kwargs):
+            return subprocess.CompletedProcess(args, 0, json.dumps({'running': True, 'startedAt': time.time()}), '')
+        with patch.object(install.Path, 'home', return_value=self.home), \
+                patch.dict(os.environ, {'XDG_STATE_HOME': str(self.home / 'state'), 'XDG_CONFIG_HOME': str(self.home / 'config')}), \
+                patch.object(install, 'run', side_effect=run), patch.object(install.socket, 'socket'), \
+                patch('service.network.ensure_private_route', return_value='https://test.ts.net'), \
+                patch.object(agents, 'detected_providers', return_value=['claude']) as detect, \
+                patch('sys.argv', ['install.py', 'install', '--no-bar', '--no-push-setup']), patch('builtins.print'):
+            install.main()
+            state = self.home / 'state/paceman'
+            app = self.home / '.local/lib/paceman'
+            self.assertEqual(agents.configured_providers(state), ['claude'])
+            self.assertFalse((self.home / '.codex/hooks.json').exists())
+            agents.configure(state, app, disable='claude', home=self.home)
+            install.main()
+            self.assertEqual(agents.configured_providers(state), [])
+            self.assertEqual(detect.call_count, 1)
+
+    def test_detection_is_symmetric_for_editor_only_installations(self):
+        with patch.object(agents.shutil, 'which', return_value=None):
+            for extension in ('openai.chatgpt-0.4.0', 'anthropic.claude-code-2.1.211'):
+                (self.home / '.vscode/extensions' / extension).mkdir(parents=True)
+            self.assertEqual(agents.detected_providers(self.root, home=self.home), ['codex', 'claude'])
+
     def test_opt_in_idempotence_disable_and_preservation_of_other_settings(self):
         path = self.home / "custom-claude/settings.json"
         path.parent.mkdir()

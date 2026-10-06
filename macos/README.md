@@ -144,7 +144,7 @@ Download the source from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/r
 python3 -m macos.install
 ```
 
-Current builds let you select Codex, Claude Code, or both during setup and later under **Manage Paceman… → Agents**.
+Fresh setup preselects detected Codex and Claude Code installations; change the selection during setup or later under **Manage Paceman… → Agents**. Updates preserve your choices, including disabled agents.
 
 The source installer builds the menu app and background helper, installs to `~/Applications/Paceman.app`, and prepares notifications, the private Tailscale route, and hooks for selected agents. It preserves existing pairings, Sharing choice, agent selection, notification configuration, and unrelated hooks. Pass `--agents claude` or `--agents codex claude` to select explicitly. If setup is incomplete, Paceman explains what needs attention. If your `python3` is too old, invoke a newer interpreter explicitly.
 

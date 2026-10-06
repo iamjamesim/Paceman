@@ -17,7 +17,7 @@ import sys
 import tempfile
 
 from macos.codex_hook import QUESTION_MATCHER
-from macos.agents import CLAUDE_PURPOSES, provider_config, PROVIDERS, configured_providers, hook_path, installed_hook_command
+from macos.agents import CLAUDE_PURPOSES, provider_config, PROVIDERS, configured_providers, setup_providers, hook_path, installed_hook_command
 from macos.paths import installed_app
 from service.hub import endpoint
 from service.network import RouteSetupError, ensure_private_route
@@ -249,7 +249,7 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
     if relay_url is not None:
         relay_url = endpoint(relay_url)
     if agents is None:
-        agents = configured_providers(ROOT)
+        agents = setup_providers(ROOT)
     if any(p not in PROVIDERS for p in agents):
         raise ValueError("Unsupported agent selection")
     agents = list(dict.fromkeys(agents))
@@ -285,7 +285,8 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                     replace_push_config: bool = False, open_menu: bool = True,
                     stop_installed_menu: bool = True, replace_app: bool = True,
                     agents: list[str] | None = None):
-    agents = agents or configured_providers(ROOT)
+    if agents is None:
+        agents = setup_providers(ROOT)
     try:
         previous_status = json.loads((ROOT / "status.json").read_text())
         had_activity = previous_status.get("mode") == "macos" and float(previous_status.get("lastAgentEventAt", 0)) > 0
@@ -637,7 +638,7 @@ if __name__ == "__main__":
                            help="Skip automatic relay setup for a developer-managed sender")
     parser.add_argument("--prebuilt-app", type=Path,
                         help="Install the signed app bundle without Xcode or an external Python")
-    parser.add_argument("--agents", nargs="+", choices=PROVIDERS, help="Agents to monitor; updates preserve the existing selection")
+    parser.add_argument("--agents", nargs="*", choices=PROVIDERS, help="Agents to monitor; updates preserve the existing selection")
     arguments = parser.parse_args()
     try:
         ready = install(relay_url=None if arguments.no_push_setup else
