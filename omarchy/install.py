@@ -1,4 +1,4 @@
-"""Per-user Omarchy installation with reviewed Paceman Codex hooks."""
+"""Per-user Omarchy installation with selected Paceman agent hooks."""
 import argparse
 import json
 import os
@@ -6,61 +6,24 @@ from pathlib import Path
 import shlex
 import shutil
 import socket
-import stat
 import subprocess
 import sys
-import tempfile
 import time
+
+if str(Path(__file__).resolve().parent.parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from omarchy.files import directory, write
+from omarchy.agents import (HOOK_PURPOSES, HOOK_EVENTS, CLAUDE_PURPOSES, hook_command,
+                            owns_hook, hook_document, configuration, prepare, apply)
 
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = "io.github.iamjamesim.paceman"
 SERVICE = "paceman-source.service"
 PUSH_SERVICE = "paceman-push.service"
-HOOK_PURPOSES = (
-    ("UserPromptSubmit", "show new work"),
-    ("PreToolUse", "track tool calls and input questions"),
-    ("PermissionRequest", "show approval needed"),
-    ("PostToolUse", "clear resolved blocking questions and approvals"),
-    ("Stop", "show a finished turn"),
-    ("Interrupt", "clear an interrupted turn"),
-    ("SessionEnd", "remove a closed session"),
-)
-HOOK_EVENTS = tuple(event for event, _ in HOOK_PURPOSES)
 
 
 def run(*args, check=True):
     return subprocess.run(args, check=check, capture_output=True, text=True, timeout=30)
-
-
-def directory(path):
-    """Refuse symlink destinations or directories writable by other users."""
-    if not path.is_absolute() or ".." in path.parts:
-        raise ValueError(f"Use an absolute destination: {path}")
-    current = Path(path.anchor)
-    for part in path.parts[1:]:
-        current /= part
-        if current.is_symlink():
-            raise ValueError(f"Refusing a symbolic-link destination: {current}")
-        current.mkdir(mode=0o700, exist_ok=True)
-        info = current.stat()
-        if not stat.S_ISDIR(info.st_mode) or (info.st_mode & 0o022 and not info.st_mode & stat.S_ISVTX):
-            raise ValueError(f"Unsafe destination directory: {current}")
-    if path.stat().st_uid != os.getuid():
-        raise ValueError(f"Destination is not owned by you: {path}")
-
-
-def write(path, data, mode=0o644):
-    directory(path.parent)
-    if path.is_symlink():
-        raise ValueError(f"Refusing a symbolic-link file: {path}")
-    fd, temporary = tempfile.mkstemp(dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as output:
-            output.write(data)
-            os.fchmod(output.fileno(), mode)
-        os.replace(temporary, path)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
 
 
 def unit_escape(path):
@@ -75,70 +38,12 @@ def render_unit(app, state, service=SERVICE):
         "@APP@", unit_escape(app)).replace("@STATE@", unit_escape(state))
 
 
-def hook_command(app):
-    return "/usr/bin/python3 -I " + shlex.quote(str(app / "omarchy/codex_hook.py"))
-
-
-def owns_hook(item, app):
-    if not isinstance(item, dict) or not isinstance(item.get("command"), str):
-        return False
-    try:
-        return shlex.split(item["command"]) in (
-            ["/usr/bin/python3", "-I", str(app / "omarchy/codex_hook.py")],
-            ["/usr/bin/python3", "-I", str(app / "desktop/codex_hook.py")])
-    except ValueError:
-        return False
-
-
-def hook_document(path, app, *, remove=False):
-    """Return a changed hooks document without touching unrelated entries."""
-    if path.is_symlink():
-        raise ValueError("Refusing a symbolic-link Codex hooks file")
-    document = json.loads(path.read_text()) if path.exists() else {}
-    if not isinstance(document, dict):
-        raise ValueError("Existing ~/.codex/hooks.json is not a JSON object")
-    hooks = document.setdefault("hooks", {})
-    if not isinstance(hooks, dict):
-        raise ValueError("Existing Codex hooks configuration is not an object")
-    changed = []
-    for event in (tuple(hooks) if remove else HOOK_EVENTS):
-        groups = hooks.get(event, [])
-        if not isinstance(groups, list):
-            raise ValueError(f"Existing {event} hooks are not a list")
-        remaining = []
-        found = False
-        modified = False
-        for group in groups:
-            if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
-                remaining.append(group)
-                continue
-            kept = []
-            for item in group["hooks"]:
-                if not owns_hook(item, app):
-                    kept.append(item)
-                elif remove or found:
-                    modified = True
-                else:
-                    replacement = {**item, "command": hook_command(app)}
-                    kept.append(replacement)
-                    modified |= replacement != item
-                    found = True
-            if kept or not remove:
-                remaining.append({**group, "hooks": kept})
-        if not remove and not found:
-            remaining.append({"hooks": [{"type": "command",
-                "command": hook_command(app), "timeout": 3}]})
-            modified = True
-        if modified:
-            hooks[event] = remaining
-            changed.append(event)
-    return document, changed
-
-
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("install", "uninstall"))
+    parser.add_argument("--agents", nargs="*", choices=("codex", "claude"),
+                        help="Enable these agents; upgrades preserve your selection")
     parser.add_argument("--no-bar", action="store_true", help="Install the daemon without an Omarchy widget")
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--relay-url", help="Use a self-hosted relay instead of the Paceman relay")
@@ -153,7 +58,6 @@ def main():
     unit = config / "systemd/user" / SERVICE
     push_unit = config / "systemd/user" / PUSH_SERVICE
     plugin = config / "omarchy/plugins" / PLUGIN
-    hooks_path = home / ".codex/hooks.json"
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     try:
@@ -161,15 +65,14 @@ def main():
             directory(path)
         if args.action == "uninstall":
             from service.network import remove_owned_route
-            hooks_document, changed_hooks = hook_document(hooks_path, app, remove=True)
+            documents = prepare(state, app, [], home=home)
             run("/usr/bin/systemctl", "--user", "disable", "--now", SERVICE, check=False)
             run("/usr/bin/systemctl", "--user", "disable", "--now", PUSH_SERVICE, check=False)
             if plugin.exists():
                 directory(plugin)
                 run("/usr/bin/omarchy", "plugin", "disable", PLUGIN, check=False)
                 shutil.rmtree(plugin)
-            if changed_hooks:
-                write(hooks_path, (json.dumps(hooks_document, indent=2) + "\n").encode(), 0o600)
+            apply(documents)
             shutil.rmtree(app)
             ctl.unlink(missing_ok=True)
             unit.unlink(missing_ok=True)
@@ -178,7 +81,7 @@ def main():
             route_removed = remove_owned_route(state)
             if Path("/usr/bin/omarchy").exists():
                 run("/usr/bin/omarchy", "shell", "shell", "rescanPlugins", check=False)
-            print("Paceman Omarchy source and its Codex hooks removed. Pairings, data, and unrelated hooks preserved.")
+            print("Paceman Omarchy source and its agent hooks removed. Pairings, data, and unrelated hooks preserved.")
             if route_removed:
                 print("Paceman's private Tailscale route removed.")
             elif (state / "tailscale-route.json").exists():
@@ -191,8 +94,8 @@ def main():
         from service.push import Config, DEFAULT_RELAY_URL, RelayConfig
         from service.network import RouteSetupError, ensure_private_route
         relay_url = endpoint(args.relay_url or DEFAULT_RELAY_URL)
-        directory(hooks_path.parent)
-        hooks_document, changed_hooks = hook_document(hooks_path, app)
+        providers = configuration(state)["providers"] if args.agents is None else args.agents
+        documents = prepare(state, app, providers, home=home)
         run("/usr/bin/systemctl", "--user", "show-environment")
         if not args.no_bar:
             run("/usr/bin/omarchy", "plugin", "validate", str(ROOT / "omarchy/plugin"))
@@ -250,6 +153,7 @@ def main():
         if not args.no_bar:
             for name in ("manifest.json", "BarWidget.qml", "PanelContent.qml", "ConnectionRow.qml", "PacemanMark.qml", "PanelModel.js", "PairingOverlay.qml"):
                 write(plugin / name, (ROOT / "omarchy/plugin" / name).read_bytes())
+        apply(documents)
         run("/usr/bin/systemctl", "--user", "daemon-reload")
         paused = (state / "sharing-paused").exists()
         if paused:
@@ -281,8 +185,6 @@ def main():
             run("/usr/bin/omarchy", "plugin", "enable", PLUGIN)
             # QML components are cached; rescanning alone does not load upgrades.
             run("/usr/bin/omarchy", "restart", "shell")
-        if changed_hooks:
-            write(hooks_path, (json.dumps(hooks_document, indent=2) + "\n").encode(), 0o600)
         legacy = app / "desktop"
         if legacy.is_dir() and not legacy.is_symlink():
             shutil.rmtree(legacy)
@@ -295,11 +197,15 @@ def main():
                 route_error = str(error)
         print("Paceman updated; sharing remains off." if paused else
               "Paceman is running and starts at login. Open its bar panel or run pacemanctl status.")
-        print("Review Paceman's Codex hooks with /hooks; Codex calls each entry Hook 1.")
-        print("Command:", hook_command(app))
-        for event, purpose in HOOK_PURPOSES:
-            print(f"  {event}: {purpose}")
-        print("After review, run a fresh local task and check lastAgentEventAt in pacemanctl status.")
+        for provider in providers:
+            name = "Codex" if provider == "codex" else "Claude Code"
+            print(f"Review Paceman's {name} hooks with /hooks, then start a new local task.")
+            if provider == "codex":
+                print("Codex calls each entry Hook 1; expand it to verify the command.")
+            print("Command:", hook_command(app, provider))
+            for event, purpose in (HOOK_PURPOSES if provider == "codex" else CLAUDE_PURPOSES):
+                print(f"  {event}: {purpose}")
+        print("Check lastAgentEventByProvider in pacemanctl status after a fresh task in each enabled agent.")
         if route_error:
             print(f"Phone connection setup is incomplete: {route_error}", file=sys.stderr)
             print("Complete the Tailscale step, then use the panel's pairing button to retry.", file=sys.stderr)

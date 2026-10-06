@@ -1,0 +1,198 @@
+import json
+from pathlib import Path
+import tempfile
+import time
+import unittest
+from unittest.mock import Mock, patch
+
+from service.claude_hooks import message_for
+from service.hub import Store
+from service.omarchy import OmarchySource
+from service.processes import AgentProcesses, ProcessIdentity
+from omarchy import agents
+
+
+class ClaudeSourceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.store = Store(self.root / "hub.sqlite3")
+        self.enabled = ["codex", "claude"]
+        self.processes = Mock(spec=AgentProcesses)
+        self.processes.identify.side_effect = lambda pid, provider="codex": ProcessIdentity(
+            100 if provider == "codex" else 200, "1", "boot") if pid else None
+        self.processes.is_alive.return_value = True
+        self.source = OmarchySource(self.store, socket_path=self.root / "agent.sock",
+            state_dir=self.root, processes=self.processes, providers=self.enabled,
+            settings_reader=lambda: self.enabled)
+        self.source.__enter__()
+        self.addCleanup(lambda: self.source.__exit__(None, None, None))
+
+    def claude(self, hook, turn="one", **extra):
+        command = message_for(dict(hook_event_name=hook, session_id="session",
+                                   prompt_id=turn, **extra))
+        self.assertIsNotNone(command)
+        self.source.receive(command, peer_pid=2)
+        return self.store.snapshot()
+
+    def codex(self, event="working", turn="one"):
+        self.source.receive(dict(command="agent-event", source="codex", session="session",
+            turn=turn, event=event), peer_pid=1)
+        return self.store.snapshot()
+
+    def test_providers_coexist_and_one_can_be_disabled_without_clearing_other(self):
+        self.codex()
+        self.claude("UserPromptSubmit")
+        before = self.claude("StopFailure")
+        self.assertEqual(before["state"], "failed")
+        self.assertEqual({s["provider"] for s in before["sessions"]}, {"codex", "claude"})
+        self.enabled = ["codex"]
+        self.source.tick(force=True)
+        value = self.store.snapshot()
+        self.assertEqual(value["state"], "working")
+        self.assertEqual([s["provider"] for s in value["sessions"]], ["codex"])
+        self.claude("UserPromptSubmit", turn="two")
+        self.assertEqual(self.store.snapshot()["sessions"], value["sessions"])
+        self.enabled = ["claude"]
+        self.source.tick(force=True)
+        self.claude("UserPromptSubmit", turn="two")
+        self.assertEqual([s["provider"] for s in self.store.snapshot()["sessions"]], ["claude"])
+
+    def test_attention_survives_unrelated_tool_results_and_source_restart(self):
+        self.claude("UserPromptSubmit")
+        self.claude("PreToolUse", tool_name="AskUserQuestion", tool_use_id="question")
+        self.claude("PreToolUse", tool_name="Bash", tool_use_id="parallel")
+        self.claude("PostToolUse", tool_name="Bash", tool_use_id="parallel")
+        with self.store.connect() as db:
+            row = db.execute("SELECT * FROM omarchy_claude").fetchone()
+            lifecycle = json.loads(row["lifecycle"])
+            lifecycle["waits"] = {scope: self.source.monotonic() - 1 for scope in lifecycle["waits"]}
+            db.execute("UPDATE omarchy_claude SET lifecycle=?", (json.dumps(lifecycle),))
+        self.source.__exit__(None, None, None)
+        self.source.__enter__()
+        self.assertEqual(self.store.snapshot()["state"], "needs_input")
+        self.claude("PostToolUse", tool_name="AskUserQuestion", tool_use_id="question")
+        self.assertEqual(self.store.snapshot()["state"], "working")
+        self.claude("Stop")
+        self.assertEqual(self.store.snapshot()["state"], "finished")
+
+    def test_old_prompt_callbacks_and_closed_session_cannot_reopen(self):
+        self.claude("UserPromptSubmit")
+        current = self.claude("UserPromptSubmit", turn="two")
+        self.claude("Stop", turn="one")
+        self.assertEqual(self.store.snapshot()["sessions"], current["sessions"])
+        self.claude("SessionEnd", turn="")
+        self.assertEqual(self.store.snapshot()["sessions"], [])
+        self.claude("PreToolUse", turn="two", tool_name="Bash", tool_use_id="late")
+        self.assertEqual(self.store.snapshot()["sessions"], [])
+        self.claude("UserPromptSubmit", turn="three")
+        self.assertEqual(self.store.snapshot()["state"], "working")
+
+    def test_stop_continuation_requires_fresh_tool_start(self):
+        self.claude("UserPromptSubmit")
+        self.claude("Stop")
+        self.claude("PostToolUse", tool_name="Bash", tool_use_id="late")
+        self.assertEqual(self.store.snapshot()["state"], "finished")
+        self.claude("PreToolUse", tool_name="Bash", tool_use_id="new")
+        self.assertEqual(self.store.snapshot()["state"], "working")
+
+    def test_process_exit_removes_claude_only_and_payload_does_not_include_hook_context(self):
+        self.codex()
+        self.claude("UserPromptSubmit", prompt="PRIVATE", cwd="/secret/workspace")
+        public = json.dumps(self.store.snapshot())
+        self.assertNotIn("PRIVATE", public)
+        self.assertNotIn("workspace", public)
+        self.processes.is_alive.side_effect = lambda identity: identity.pid != 200
+        self.source.tick(force=True)
+        self.assertEqual([s["provider"] for s in self.store.snapshot()["sessions"]], ["codex"])
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM omarchy_claude").fetchone()[0], 0)
+
+    def test_no_peer_or_wrong_provider_process_is_ignored(self):
+        message = message_for(dict(hook_event_name="UserPromptSubmit", session_id="one", prompt_id="one"))
+        self.assertFalse(self.source.receive(message))
+        self.processes.identify.return_value = None
+        self.processes.identify.side_effect = None
+        self.assertFalse(self.source.receive(message, peer_pid=2))
+        self.assertEqual(self.store.snapshot()["sessions"], [])
+
+
+class AgentConfigurationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name).resolve()
+        self.root = self.home / "state"
+        self.app = self.home / "app"
+        self.environment = patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(self.home / "custom-claude")})
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+
+    def test_opt_in_idempotence_disable_and_preservation_of_other_settings(self):
+        path = self.home / "custom-claude/settings.json"
+        path.parent.mkdir()
+        unrelated = {"env": {"CUSTOM": "kept"}, "hooks": {"Stop": [{"hooks": [
+            {"type": "command", "command": "/usr/bin/true"}]}]}}
+        path.write_text(json.dumps(unrelated))
+        self.assertEqual(agents.configured_providers(self.root), ["codex"])
+        agents.configure(self.root, self.app, enable="claude", home=self.home)
+        before = path.read_bytes()
+        configured = json.loads(before)
+        self.assertEqual(configured["env"], unrelated["env"])
+        self.assertEqual(configured["hooks"]["Stop"][0], unrelated["hooks"]["Stop"][0])
+        self.assertEqual(set(configured["hooks"]), set(agents.CLAUDE_EVENTS))
+        agents.configure(self.root, self.app, enable="claude", home=self.home)
+        self.assertEqual(path.read_bytes(), before)
+        agents.configure(self.root, self.app, disable="claude", home=self.home)
+        after = json.loads(path.read_text())
+        self.assertEqual(after["hooks"]["Stop"], unrelated["hooks"]["Stop"])
+        self.assertEqual(after["env"], unrelated["env"])
+        self.assertEqual(agents.configured_providers(self.root), ["codex"])
+
+    def test_detection_does_not_mistake_our_own_settings_for_an_installed_agent(self):
+        agents.configure(self.root, self.app, enable="claude", home=self.home)
+        agents.configure(self.root, self.app, disable="claude", home=self.home)
+        with patch.object(agents.shutil, "which", return_value=None):
+            self.assertNotIn("claude", agents.detected_providers(self.root, home=self.home))
+            extension = self.home / ".vscode/extensions/anthropic.claude-code-2.1.211"
+            extension.mkdir(parents=True)
+            self.assertIn("claude", agents.detected_providers(self.root, home=self.home))
+
+    def test_bad_claude_config_does_not_change_codex_or_selection(self):
+        agents.configure(self.root, self.app, enable="codex", home=self.home)
+        codex = self.home / ".codex/hooks.json"
+        before = codex.read_bytes()
+        settings = self.home / "custom-claude/settings.json"
+        settings.parent.mkdir(exist_ok=True)
+        settings.write_text("{")
+        with self.assertRaises(ValueError):
+            agents.configure(self.root, self.app, enable="claude", home=self.home)
+        self.assertEqual(codex.read_bytes(), before)
+        self.assertEqual(agents.configured_providers(self.root), ["codex"])
+
+    def test_partial_write_failure_restores_original_files(self):
+        agents.configure(self.root, self.app, enable="claude", home=self.home)
+        paths = agents.hook_paths(self.root, home=self.home)
+        originals = {path: path.read_bytes() for path in paths.values()}
+        originals[self.root / "agents.json"] = (self.root / "agents.json").read_bytes()
+        real_write = agents.write
+        failed = False
+        def write(path, data, mode):
+            nonlocal failed
+            if path.name == "agents.json" and not failed:
+                failed = True
+                raise OSError("fixture write failure")
+            real_write(path, data, mode)
+        with patch.object(agents, "write", side_effect=write), self.assertRaises(OSError):
+            agents.configure(self.root, self.app, disable="claude", home=self.home)
+        for path, before in originals.items():
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_symlink_settings_are_rejected_before_any_changes(self):
+        path = self.home / "custom-claude/settings.json"
+        path.parent.mkdir()
+        path.symlink_to(self.home / "missing")
+        with self.assertRaises(ValueError):
+            agents.configure(self.root, self.app, enable="claude", home=self.home)
+        self.assertFalse((self.root / "agents.json").exists())

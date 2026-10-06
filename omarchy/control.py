@@ -67,6 +67,9 @@ def read_status(path=None, now=None):
             with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
                 value["clients"] = Store.client_list(db)
                 value["pairedPhones"] = len(value["clients"])
+        from omarchy.agents import configured_providers, detected_providers
+        value["configuredProviders"] = configured_providers(state_directory())
+        value["detectedProviders"] = detected_providers(state_directory())
         value["sharingEnabled"] = not pause_path().exists()
         value["computerName"] = socket.gethostname()
     now = time.time() if now is None else now
@@ -119,13 +122,23 @@ def pair_phone(open_image=False, json_output=False):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description="Manage the Paceman desktop source")
-    parser.add_argument("command", choices=("status", "start", "restart", "stop", "logs", "pair", "share-on", "share-off", "remove-access"))
+    parser.add_argument("command", choices=("status", "start", "restart", "stop", "logs", "pair", "share-on", "share-off", "remove-access", "agents"))
     parser.add_argument("--client-id", help="Connection to remove (from pacemanctl status)")
     parser.add_argument("--open", action="store_true", help="Open the phone-pairing QR")
     parser.add_argument("--json", action="store_true", help="Return pairing image metadata for the panel")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--enable", choices=("codex", "claude"))
+    selection.add_argument("--disable", choices=("codex", "claude"))
     args = parser.parse_args()
+    if (args.enable or args.disable) and args.command != "agents":
+        parser.error("--enable and --disable require the agents command")
     try:
-        if args.command == "status":
+        if args.command == "agents":
+            from omarchy.agents import configure
+            configure(state_directory(), Path(__file__).resolve().parents[1],
+                      enable=args.enable, disable=args.disable)
+            print(json.dumps(read_status()))
+        elif args.command == "status":
             print(json.dumps(read_status(), indent=2))
         elif args.command == "remove-access":
             if not args.client_id:

@@ -5,23 +5,9 @@ import shlex
 import shutil
 from pathlib import Path
 
-from macos.claude_hook import EVENTS as CLAUDE_EVENTS
+from service.claude_hooks import EVENTS as CLAUDE_EVENTS, CLAUDE_PURPOSES
 
 PROVIDERS = ('codex', 'claude')
-CLAUDE_PURPOSES = (
-    ('SessionStart', 'show a new or resumed Claude session as idle'),
-    ('UserPromptSubmit', 'show work after a new prompt'),
-    ('PreToolUse', 'observe work and questions or plan approval'),
-    ('PermissionRequest', 'show approval pending after five seconds'),
-    ('PostToolUse', 'clear attention after the corresponding tool returns'),
-    ('PostToolUseFailure', 'clear tool attention; observe an interrupt when supplied'),
-    ('PostToolBatch', 'clear attention when the tool batch returns'),
-    ('Elicitation', 'show an MCP input request after five seconds'),
-    ('ElicitationResult', 'clear the corresponding MCP input request'),
-    ('Stop', 'show a finished main turn'),
-    ('StopFailure', 'show a failed main turn'),
-    ('SessionEnd', 'remove a closed session'),
-)
 
 
 def claude_config_dir(root=None, *, home=None):

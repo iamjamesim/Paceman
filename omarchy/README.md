@@ -14,7 +14,7 @@ bash scripts/install-omarchy.sh
 
 Prefer a Git checkout? Use [source setup](#install-from-a-git-checkout). Both installation paths continue with hook review and phone pairing below.
 
-The installer copies Paceman to `~/.local/lib/paceman`, prepares notifications through `https://relay.paceman.ai`, installs `pacemanctl`, enables its user service, prepares a private Tailscale Serve route, reloads the bar, and adds seven commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; Omarchy stores only a source credential. Re-run to update; `--no-bar` omits the panel. Updates preserve an existing relay or direct APNs configuration, pairing data, Sharing choice, and unrelated hooks. If notification or private route setup fails, the installer reports a partial installation and the pairing button can retry route setup. A fresh install ignores checkout `.runtime` data. The installer disables the old `omarchy-watch.service` but leaves its data and Codex plugin.
+The installer copies Paceman to `~/.local/lib/paceman`, prepares notifications through `https://relay.paceman.ai`, installs `pacemanctl`, enables its user service, prepares a private Tailscale Serve route, reloads the bar, and adds seven commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; Omarchy stores only a source credential. Re-run to update; `--no-bar` omits the panel. Current source builds support opt-in Claude Code activity; Desktop 0.1.0 is Codex-only. Updates preserve an existing relay or direct APNs configuration, pairing data, Sharing and agent choices, and unrelated hooks. If notification or private route setup fails, the installer reports a partial installation and the pairing button can retry route setup. A fresh install ignores checkout `.runtime` data. The installer disables the old `omarchy-watch.service` but leaves its data and Codex plugin.
 
 For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the install script. Developers managing a direct APNs sender can use `--no-push-setup` and follow [development-only direct APNs](../docs/push-delivery.md#development-only-direct-apns). Neither option is needed for the normal install.
 
@@ -30,6 +30,18 @@ bash scripts/install-omarchy.sh
 
 To follow current development instead, omit `--branch desktop-v0.1.0`. Continue with hook review and phone pairing below.
 
+## Choose agents
+
+Current source builds default to Codex. To enable Claude Code during installation:
+
+```sh
+bash scripts/install-omarchy.sh --agents codex claude
+```
+
+Choose either agent or both in the bar panel, or use `pacemanctl agents --enable claude` / `--disable claude` (also accepts `codex`). Changes apply without restarting the source and survive updates. An available installation is a hint, not automatic opt-in. Sharing pauses both agents.
+
+Claude Code needs 2.1.196+ for prompt IDs. Paceman observes local CLI and VS Code sessions that run its hooks on this computer; remote IDE sessions need Paceman on the remote computer. It uses `~/.claude/settings.json`, or the `CLAUDE_CONFIG_DIR` selected during installation, and preserves unrelated settings. Claude activity requires no credentials. Claude usage remains unsupported; existing usage meters are Codex-only.
+
 ## Review Codex hooks
 
 Installing and pairing do not enable session monitoring until you review the hooks. In Codex CLI, enter `/hooks` or choose **Review hooks** at startup. Expand each Paceman event row; Codex calls its command **Hook 1**. Verify that it runs the command printed by the installer, shaped like:
@@ -44,6 +56,18 @@ After review, start a fresh local Codex task and submit a prompt. Check that `la
 
 If `omarchy-watch-codex` is already installed, Paceman still accepts its events during migration. Paceman's own hooks take precedence for nonterminal events when both run. After verifying Paceman's hooks, remove the old Codex plugin with `codex plugin remove omarchy-watch-codex@omarchy-watch-codex` if it was used only for Paceman; the installer does not remove it for you.
 
+## Review Claude Code hooks
+
+After enabling Claude, start a new Claude Code session and inspect `/hooks`. Verify the printed command, shaped like:
+
+```sh
+/usr/bin/python3 -I /home/YOU/.local/lib/paceman/omarchy/claude_hook.py
+```
+
+Paceman observes session start/end, new prompts, tool start/results, permission requests, MCP input requests/results, and turn completion/failure. It sends only opaque session/prompt/call IDs, lifecycle states, and hashed tool/input scopes. It sends no prompts, replies, tool arguments, or credentials, and never changes approval decisions. If hooks are disabled by your Claude settings or organization, enable them there first.
+
+Submit a fresh local prompt in CLI or VS Code and check that `lastAgentEventByProvider.claude` advances in `pacemanctl status`. The panel distinguishes an enabled agent awaiting its first event from one with no active work. Process identity verifies ownership and clears exited sessions; source restart preserves live sessions and pending attention. Questions and approvals appear after five seconds and clear on the corresponding result or turn end.
+
 ## Private phone connection
 
 **[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**. Open the link on your iPhone and follow the installation steps; iOS 18 or later is required.
@@ -56,7 +80,7 @@ Paceman waits five seconds before showing an async input question, keeps it visi
 
 ## Panel and control
 
-The panel shows Sharing, paired phones, activity, and a pairing action. **Last contact** means the phone last fetched a snapshot; it does not prove watch delivery.
+The panel shows Sharing, paired phones, per-agent activity and monitoring switches, and a pairing action. **Last contact** means the phone last fetched a snapshot; it does not prove watch delivery.
 
 ```sh
 pacemanctl status
@@ -76,4 +100,4 @@ From the extracted release folder or repository root, run:
 bash scripts/uninstall-omarchy.sh
 ```
 
-This removes the installed app, command, services, panel, Paceman's Codex hooks, and any unchanged Tailscale Serve route that Paceman created. It retains source data, phone pairings, unrelated Codex hooks, the separate Omarchy Watch Codex plugin if installed, and routes created by someone else.
+This removes the installed app, command, services, panel, Paceman's agent hooks, and any unchanged Tailscale Serve route that Paceman created. It retains source data, phone pairings, unrelated agent hooks, the separate Omarchy Watch Codex plugin if installed, and routes created by someone else.

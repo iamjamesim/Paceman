@@ -1,11 +1,12 @@
 """Omarchy event receiver without Bluetooth ownership.
 
-Accepts Paceman's Codex hooks and the older omarchy-watch-codex protocol. Only
+Accepts Paceman's Codex and Claude hooks and the older omarchy-watch-codex protocol. Only
 opaque IDs and lifecycle states are retained; hook arguments and conversation
 content are ignored.
 """
 from __future__ import annotations
 
+from dataclasses import asdict
 import errno
 import hashlib
 import json
@@ -20,7 +21,9 @@ import threading
 import time
 
 from service.allowance import allowance_snapshot
-from service.processes import CodexProcesses, ProcessIdentity
+from service.claude import ClaudeSession
+from service.claude_hooks import validate_message
+from service.processes import AgentProcesses, ProcessIdentity
 
 MAX_AGE = 24 * 60 * 60
 FINISHED_RETENTION = 10 * 60
@@ -58,7 +61,10 @@ class EventHandler(socketserver.StreamRequestHandler):
 
 class OmarchySource:
     def __init__(self, store, *, socket_path: Path | None = None, state_dir: Path | None = None,
-                 processes=None, computer_name: str | None = None, monotonic=time.monotonic):
+                 processes=None, computer_name: str | None = None, monotonic=time.monotonic, providers=("codex",), settings_reader=None):
+        self.providers = tuple(providers)
+        self.settings_reader = settings_reader
+        self.last_event_by_provider = {}
         self.store = store
         self.socket_path = socket_path or default_socket()
         self.state_dir = state_dir or Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy"
@@ -71,7 +77,7 @@ class OmarchySource:
         self.pending_questions = {}
         self.native_turns = {}
         self.monotonic = monotonic
-        self.processes = processes if processes is not None else CodexProcesses()
+        self.processes = processes if processes is not None else AgentProcesses()
         self.computer_name = (computer_name or socket.gethostname()).split(".")[0][:80] or "Computer"
 
     def __enter__(self):
@@ -104,6 +110,10 @@ class OmarchySource:
                 db.execute("CREATE TABLE IF NOT EXISTS omarchy_processes (session_id TEXT PRIMARY KEY, "
                            "pid INTEGER NOT NULL, start_ticks TEXT NOT NULL, boot_id TEXT NOT NULL, "
                            "closed INTEGER NOT NULL DEFAULT 0)")
+                db.execute("CREATE TABLE IF NOT EXISTS omarchy_claude (id TEXT PRIMARY KEY, lifecycle TEXT NOT NULL)")
+                for row in db.execute("SELECT key,value FROM metadata WHERE key LIKE 'omarchy_last_event_%'"):
+                    self.last_event_by_provider[row["key"].removeprefix("omarchy_last_event_")] = float(row["value"])
+                self.last_event_at = max(self.last_event_by_provider.values(), default=0)
                 db.execute("INSERT OR REPLACE INTO metadata VALUES ('mode','omarchy')")
                 db.execute("DELETE FROM schedule WHERE fired=0")
                 # Legacy records cannot establish ownership. A new hook registers
@@ -133,6 +143,8 @@ class OmarchySource:
     def receive(self, command: dict, *, peer_pid=None) -> bool:
         if not isinstance(command, dict) or command.get("command") != "agent-event":
             raise ValueError("Unsupported command")
+        if command.get("provider") == "claude":
+            return self.receive_claude(command, peer_pid)
         source, session, turn = (command.get(key) for key in ("source", "session", "turn"))
         event = command.get("event")
         async_question = event == "needs-input" and command.get("attention") == "async"
@@ -147,11 +159,14 @@ class OmarchySource:
         owner = self.processes.identify(peer_pid) if source == "codex" else None
         if owner is None:
             # Neither a claimed PID in the payload nor a random local client is
-            # evidence of a live Codex session. Keep the protocol best-effort.
+            # evidence of a live agent session. Keep the protocol best-effort.
             return False
         with self.lock, self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            self.apply_settings(db)
             self.prune_processes(db)
+            if "codex" not in self.providers:
+                return self.publish(db, lifecycle_only=True)
             previous = db.execute("SELECT * FROM omarchy_sessions WHERE id=?", (key,)).fetchone()
             binding = db.execute("SELECT * FROM omarchy_processes WHERE session_id=?", (key,)).fetchone()
             same_owner = binding is not None and self.identity(binding) == owner
@@ -214,11 +229,100 @@ class OmarchySource:
                        (key, owner.pid, owner.start_ticks, owner.boot_id))
             db.execute("INSERT OR REPLACE INTO omarchy_sessions VALUES (?,?,?,?,?)",
                        (key, source, turn, state, time.time()))
-            self.last_event_at = time.time()
+            self.record_event(db, "codex")
             if event == "ended":
                 db.execute("UPDATE omarchy_processes SET closed=1 WHERE session_id=?", (key,))
                 self.native_turns.pop(key, None)
             return self.publish(db, lifecycle_only=event == "ended")
+
+    def record_event(self, db, provider):
+        self.last_event_at = time.time()
+        self.last_event_by_provider[provider] = self.last_event_at
+        db.execute("INSERT OR REPLACE INTO metadata VALUES (?,?)",
+                   ("omarchy_last_event_" + provider, str(self.last_event_at)))
+
+    def apply_settings(self, db):
+        if self.settings_reader is not None:
+            try:
+                providers = tuple(self.settings_reader())
+            except (OSError, ValueError):
+                return  # Atomic controls normally prevent this; keep other agents running.
+            if any(p not in ("codex", "claude") for p in providers):
+                raise ValueError("Unknown agent provider")
+            self.providers = providers
+        for row in db.execute("SELECT id,provider FROM omarchy_sessions").fetchall():
+            if row["provider"] not in self.providers:
+                db.execute("DELETE FROM omarchy_processes WHERE session_id=?", (row["id"],))
+                db.execute("DELETE FROM omarchy_sessions WHERE id=?", (row["id"],))
+                db.execute("DELETE FROM omarchy_claude WHERE id=?", (row["id"],))
+                self.pending_questions.pop(row["id"], None)
+                self.native_turns.pop(row["id"], None)
+
+    def receive_claude(self, command, peer_pid):
+        session, turn = command.get("session"), command.get("turn")
+        if (not isinstance(session, str) or not IDENTIFIER.fullmatch(session)
+                or not isinstance(turn, str) or (turn and not IDENTIFIER.fullmatch(turn))):
+            raise ValueError("Invalid Claude identity")
+        validate_message(command)
+        owner = self.processes.identify(peer_pid, provider="claude")
+        if owner is None:
+            return False
+        key = hashlib.sha256(("claude:" + session).encode()).hexdigest()
+        event, hook = command["event"], command["hook"]
+        with self.lock, self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.apply_settings(db)
+            self.prune_processes(db)
+            if "claude" not in self.providers:
+                return self.publish(db, lifecycle_only=True)
+            previous = db.execute("SELECT * FROM omarchy_sessions WHERE id=?", (key,)).fetchone()
+            binding = db.execute("SELECT * FROM omarchy_processes WHERE session_id=?", (key,)).fetchone()
+            if binding is not None:
+                same_owner = self.identity(binding) == owner
+                if ((not same_owner and not binding["closed"]) or
+                        (binding["closed"] and (hook != "UserPromptSubmit" or previous["turn"] == turn))):
+                    return self.publish(db, lifecycle_only=True)
+            if binding is None or binding["closed"]:
+                if db.execute("SELECT COUNT(*) FROM omarchy_processes WHERE closed=0 AND NOT "
+                              "(pid=? AND start_ticks=? AND boot_id=?)",
+                              (owner.pid, owner.start_ticks, owner.boot_id)).fetchone()[0] >= 100:
+                    raise ValueError("Too many active sessions")
+                current = ClaudeSession()
+            else:
+                saved = db.execute("SELECT lifecycle FROM omarchy_claude WHERE id=?", (key,)).fetchone()
+                current = ClaudeSession(**json.loads(saved[0])) if saved else ClaudeSession()
+            if event == "started":
+                if binding is not None:
+                    self.record_event(db, "claude")
+                    return self.publish(db, lifecycle_only=True)
+            elif event == "ended":
+                if binding is None:
+                    return self.publish(db, lifecycle_only=True)
+                if turn and current.turn and turn != current.turn:
+                    return self.publish(db, lifecycle_only=True)
+                current.base_state = "idle"
+                current.waits.clear()
+                current.tools.clear()
+            elif not current.receive({**command, "workspaceLabel": None}, self.monotonic(), ATTENTION_DELAY):
+                return self.publish(db, lifecycle_only=True)
+            # Linux monotonic time is shared across processes within a boot.
+            # Ownership reconciliation rejects records from earlier boots.
+            if len(current.waits) > 128 or len(current.tools) > 128:
+                raise ValueError("Too many pending Claude tools")
+            for row in db.execute("SELECT session_id FROM omarchy_processes WHERE pid=? AND "
+                                  "start_ticks=? AND boot_id=? AND session_id!=?",
+                                  (owner.pid, owner.start_ticks, owner.boot_id, key)).fetchall():
+                db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id=?", (row[0],))
+                db.execute("UPDATE omarchy_processes SET closed=1 WHERE session_id=?", (row[0],))
+                db.execute("DELETE FROM omarchy_claude WHERE id=?", (row[0],))
+            db.execute("INSERT OR REPLACE INTO omarchy_processes VALUES (?,?,?,?,?)",
+                       (key, owner.pid, owner.start_ticks, owner.boot_id, int(event == "ended")))
+            db.execute("INSERT OR REPLACE INTO omarchy_sessions VALUES (?,?,?,?,?)",
+                       (key, "claude", current.turn, current.base_state, current.updated))
+            db.execute("INSERT OR REPLACE INTO omarchy_claude VALUES (?,?)",
+                       (key, json.dumps(asdict(current), separators=(",", ":"))))
+            self.record_event(db, "claude")
+            return self.publish(db, lifecycle_only=event in ("started", "ended"))
 
     @staticmethod
     def identity(row):
@@ -229,6 +333,7 @@ class OmarchySource:
             if not self.processes.is_alive(self.identity(row)):
                 db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id=?", (row["session_id"],))
                 db.execute("DELETE FROM omarchy_processes WHERE session_id=?", (row["session_id"],))
+                db.execute("DELETE FROM omarchy_claude WHERE id=?", (row["session_id"],))
                 self.pending_questions.pop(row["session_id"], None)
                 self.native_turns.pop(row["session_id"], None)
 
@@ -238,6 +343,7 @@ class OmarchySource:
                 return
             with self.store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
+                self.apply_settings(db)
                 self.prune_processes(db)
                 # Keep verified process bindings even after a completed turn
                 # disappears from the display; a new turn can use the binding.
@@ -246,6 +352,7 @@ class OmarchySource:
                            "(SELECT id FROM omarchy_sessions WHERE updated<?)", (cutoff,))
                 db.execute("DELETE FROM omarchy_sessions WHERE updated<? AND id NOT IN "
                            "(SELECT session_id FROM omarchy_processes)", (cutoff,))
+                db.execute("DELETE FROM omarchy_claude WHERE id NOT IN (SELECT id FROM omarchy_sessions)")
                 self.publish(db, lifecycle_only=True)
             self.next_poll = self.monotonic() + 1
 
@@ -253,7 +360,7 @@ class OmarchySource:
         records = db.execute("SELECT s.* FROM omarchy_sessions s JOIN omarchy_processes p "
                              "ON p.session_id=s.id WHERE p.closed=0 ORDER BY s.id").fetchall()
         cutoff = time.time() - FINISHED_RETENTION
-        records = [row for row in records if row["state"] != "finished" or row["updated"] > cutoff]
+        records = [row for row in records if row["state"] not in ("finished", "failed") or row["updated"] > cutoff]
         now_monotonic = self.monotonic()
         sessions = []
         for row in records:
@@ -261,9 +368,13 @@ class OmarchySource:
             state = ("needs_input" if row["state"] not in ("finished", "idle")
                      and question and question[0] == row["turn"] and question[1] <= now_monotonic
                      else row["state"])
+            if row["provider"] == "claude":
+                saved = db.execute("SELECT lifecycle FROM omarchy_claude WHERE id=?", (row["id"],)).fetchone()
+                if saved:
+                    state = ClaudeSession(**json.loads(saved[0])).state(now_monotonic)
             sessions.append({"id": row["id"], "provider": row["provider"], "state": state})
         # Needs-input takes precedence; active work wins over old completions.
-        state = next((candidate for candidate in ("needs_input", "working", "finished")
+        state = next((candidate for candidate in ("needs_input", "failed", "working", "finished")
                       if any(session["state"] == candidate for session in sessions)), "idle")
         activity_key = json.dumps([(row["id"], row["turn"], session["state"])
                                    for row, session in zip(records, sessions)])
@@ -272,9 +383,12 @@ class OmarchySource:
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         old = json.loads(last["payload"]) if last["payload"] else {}
         # A temporarily unavailable allowance file must not erase the last reading.
-        current_allowance = allowance_snapshot(self.state_dir / "agents/usage/codex.json", int(time.time()))
+        current_allowance = (allowance_snapshot(self.state_dir / "agents/usage/codex.json", int(time.time()))
+                             if "codex" in self.providers else None)
         payload = {"sourceName": self.computer_name, "state": state, "sessions": sessions,
-                   "allowance": current_allowance if current_allowance is not None else old.get("allowance")}
+                   "configuredProviders": list(self.providers),
+                   "allowance": (current_allowance if current_allowance is not None else old.get("allowance"))
+                   if "codex" in self.providers else None}
         # Membership-only cleanup isn't a new alert. An aggregate state change
         # still needs a new event identity so an acknowledged watch state clears.
         activity_changed = sessions_changed and (not lifecycle_only or old.get("state") != state)

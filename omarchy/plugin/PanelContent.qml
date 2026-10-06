@@ -22,9 +22,11 @@ PanelKeyCatcher {
   onCursorChanged: {
     if (cursor === "pair" || cursor === "sharing") revealRequested(hero)
     else if (cursor === "restart") revealRequested(restartButton)
+    else if (cursor.indexOf("agent:") === 0) revealRequested(agentSection)
     else if (cursor === "help") revealRequested(setupGuideButton)
   }
   implicitHeight: content.implicitHeight
+  signal agentRequested(string provider, bool enabled)
   signal sharingRequested(bool enabled)
   signal removeRequested(string clientId)
   signal restartRequested()
@@ -49,6 +51,7 @@ PanelKeyCatcher {
       }
     })
     if ((view.sharing && !view.running) && !busy) items.push("restart")
+    if (!busy) view.agents.forEach(function(agent) { items.push("agent:" + agent.id) })
     return items
   }
   function activate(target) {
@@ -59,7 +62,11 @@ PanelKeyCatcher {
       expandedClient = wasExpanded ? "" : id
       removalClient = ""
     } else if (!busy) {
-      if (action === "sharing") sharingRequested(!view.sharing)
+      if (action === "agent") {
+        var agent = view.agents.filter(function(value) { return value.id === id })[0]
+        if (agent) agentRequested(id, !agent.enabled)
+      }
+      else if (action === "sharing") sharingRequested(!view.sharing)
       else if (action === "pair") pairRequested()
       else if (action === "restart") restartRequested()
       else if (action === "help") Qt.openUrlExternally("https://github.com/iamjamesim/paceman#get-started")
@@ -216,99 +223,138 @@ PanelKeyCatcher {
         foreground: root.foreground
         fontFamily: root.fontFamily
       }
-      RowLayout {
+      ColumnLayout {
+        id: agentSection
         Layout.fillWidth: true
-        Layout.bottomMargin: Style.space(2)
         spacing: Style.space(10)
-        Text {
-          text: root.view.activityTitle
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.subtitle
-        }
-        Text {
-          Layout.fillWidth: true
-          text: root.view.activity
-          horizontalAlignment: Text.AlignRight
-          elide: Text.ElideRight
-          color: root.sourceState.activity === "needs_input" && root.view.running && root.view.sharing ? root.foreground : root.dim
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-        }
-        Item {
-          // Reserve the same trailing slot even when there is no activity mark.
-          Layout.minimumWidth: Style.space(24)
-          Layout.maximumWidth: Style.space(24)
-          implicitHeight: Style.space(24)
-          PacemanMark {
-            id: activityMark
-            anchors.centerIn: parent
-            width: parent.width
-            height: parent.height
-            visible: root.view.running && root.view.sharing
-              && ["working", "needs_input", "failed", "finished"].indexOf(root.sourceState.activity) >= 0
-            expression: root.sourceState.activity
-            ink: root.foreground
-            property real bounceOffset: 0
-            property real swayPhase: 0
-            transform: [
-              Translate {
-                x: root.sourceState.activity === "finished"
-                  ? Math.sin(activityMark.swayPhase * Math.PI / 180) * 2 : 0
-                y: activityMark.bounceOffset
-              },
-              Rotation {
-                origin.x: activityMark.width / 2
-                origin.y: activityMark.height / 2
-                angle: root.sourceState.activity === "finished"
-                  ? Math.sin(activityMark.swayPhase * Math.PI / 180) * 4 : 0
+        Repeater {
+          model: root.view.agents.length ? root.view.agents : [{id: "codex", title: root.view.activityTitle,
+            label: root.view.activity, activity: root.sourceState.activity || "idle", enabled: true,
+            detail: root.view.activityBreakdown, guidance: root.view.activityGuidance}]
+          delegate: ColumnLayout {
+            required property var modelData
+            Layout.fillWidth: true
+            spacing: Style.space(4)
+            RowLayout {
+              Layout.fillWidth: true
+              Layout.bottomMargin: Style.space(2)
+              spacing: Style.space(10)
+              Text {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                text: modelData.title
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.subtitle
               }
-            ]
-            Accessible.ignored: true
-            SequentialAnimation on opacity {
-              running: root.animateActivity && activityMark.visible && root.sourceState.activity === "working"
-              loops: Animation.Infinite
-              alwaysRunToEnd: false
-              onStopped: activityMark.opacity = 1
-              NumberAnimation { from: 1; to: 0.4; duration: 1300; easing.type: Easing.InOutSine }
-              NumberAnimation { from: 0.4; to: 1; duration: 1300; easing.type: Easing.InOutSine }
+              Text {
+                Layout.maximumWidth: root.width * .48
+                text: modelData.label
+                horizontalAlignment: Text.AlignRight
+                wrapMode: Text.WordWrap
+                color: modelData.activity === "needs_input" && root.view.running && root.view.sharing ? root.foreground : root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+              }
+              Item {
+                // Reserve the same trailing slot even when there is no activity mark.
+                Layout.minimumWidth: Style.space(24)
+                Layout.maximumWidth: Style.space(24)
+                implicitHeight: Style.space(24)
+                PacemanMark {
+                  id: activityMark
+                  anchors.centerIn: parent
+                  width: parent.width
+                  height: parent.height
+                  visible: root.view.running && root.view.sharing
+                    && ["working", "needs_input", "failed", "finished"].indexOf(modelData.activity) >= 0
+                  expression: modelData.activity
+                  ink: root.foreground
+                  property real bounceOffset: 0
+                  property real swayPhase: 0
+                  transform: [
+                    Translate {
+                      x: modelData.activity === "finished"
+                        ? Math.sin(activityMark.swayPhase * Math.PI / 180) * 2 : 0
+                      y: activityMark.bounceOffset
+                    },
+                    Rotation {
+                      origin.x: activityMark.width / 2
+                      origin.y: activityMark.height / 2
+                      angle: modelData.activity === "finished"
+                        ? Math.sin(activityMark.swayPhase * Math.PI / 180) * 4 : 0
+                    }
+                  ]
+                  Accessible.ignored: true
+                  SequentialAnimation on opacity {
+                    running: root.animateActivity && activityMark.visible && modelData.activity === "working"
+                    loops: Animation.Infinite
+                    alwaysRunToEnd: false
+                    onStopped: activityMark.opacity = 1
+                    NumberAnimation { from: 1; to: 0.4; duration: 1300; easing.type: Easing.InOutSine }
+                    NumberAnimation { from: 0.4; to: 1; duration: 1300; easing.type: Easing.InOutSine }
+                  }
+                  SequentialAnimation on bounceOffset {
+                    running: root.animateActivity && activityMark.visible && modelData.activity === "needs_input"
+                    loops: Animation.Infinite
+                    alwaysRunToEnd: false
+                    onStopped: activityMark.bounceOffset = 0
+                    NumberAnimation { from: 0; to: -3; duration: 320; easing.type: Easing.InOutSine }
+                    NumberAnimation { from: -3; to: 0; duration: 320; easing.type: Easing.InOutSine }
+                    PauseAnimation { duration: 360 }
+                  }
+                  NumberAnimation on swayPhase {
+                    running: root.animateActivity && activityMark.visible && modelData.activity === "finished"
+                    loops: Animation.Infinite
+                    alwaysRunToEnd: false
+                    from: 0; to: 360; duration: 4200
+                    onStopped: activityMark.swayPhase = 0
+                  }
+                }
+              }
+              ToggleSwitch {
+                visible: root.view.agents.length > 0
+                checked: modelData.enabled
+                busy: root.busy
+                interactive: !root.busy
+                foreground: root.foreground
+                hasCursor: root.cursor === "agent:" + modelData.id
+                onHovered: function(on) { if (on) root.cursor = "agent:" + modelData.id }
+                onToggled: root.activate("agent:" + modelData.id)
+                Accessible.name: "Monitor " + modelData.title
+                Accessible.role: Accessible.CheckBox
+                Accessible.checked: checked
+              }
             }
-            SequentialAnimation on bounceOffset {
-              running: root.animateActivity && activityMark.visible && root.sourceState.activity === "needs_input"
-              loops: Animation.Infinite
-              alwaysRunToEnd: false
-              onStopped: activityMark.bounceOffset = 0
-              NumberAnimation { from: 0; to: -3; duration: 320; easing.type: Easing.InOutSine }
-              NumberAnimation { from: -3; to: 0; duration: 320; easing.type: Easing.InOutSine }
-              PauseAnimation { duration: 360 }
+            Text {
+              Layout.fillWidth: true
+              visible: text !== ""
+              text: modelData.detail
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
             }
-            NumberAnimation on swayPhase {
-              running: root.animateActivity && activityMark.visible && root.sourceState.activity === "finished"
-              loops: Animation.Infinite
-              alwaysRunToEnd: false
-              from: 0; to: 360; duration: 4200
-              onStopped: activityMark.swayPhase = 0
+            Text {
+              Layout.fillWidth: true
+              visible: text !== ""
+              text: root.view.agentGuidance ? "" : modelData.guidance
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
             }
           }
         }
-      }
-      Text {
-        Layout.fillWidth: true
-        visible: text !== ""
-        text: root.view.activityBreakdown
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
-      }
-      Text {
-        Layout.fillWidth: true
-        visible: text !== ""
-        text: root.view.activityGuidance
-        color: root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.WordWrap
+        Text {
+          Layout.fillWidth: true
+          visible: text !== ""
+          text: root.view.agentGuidance
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
       }
     }
 

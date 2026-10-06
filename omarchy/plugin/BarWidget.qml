@@ -10,13 +10,15 @@ Panel {
   moduleName: "io.github.iamjamesim.paceman"
   ipcTarget: "paceman"
   property var sourceState: ({})
+  property var configuredProviders: null
   property bool sharingEnabled: true
   property double now: Date.now() / 1000
   property string actionError: ""
   property string action: ""
   property var pairing: ({})
   property bool pairingOpen: false
-  readonly property var displayState: Object.assign({}, sourceState, {sharingEnabled: sharingEnabled})
+  readonly property var displayState: Object.assign({}, sourceState, {sharingEnabled: sharingEnabled,
+    configuredProviders: configuredProviders === null ? sourceState.configuredProviders : configuredProviders})
   readonly property var view: Model.present(displayState, now)
   readonly property color foreground: root.bar ? root.bar.foreground : Color.foreground
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
@@ -25,7 +27,7 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  function refresh() { stateFile.reload(); pauseFile.reload(); if (!statusQuery.running) statusQuery.running = true }
+  function refresh() { stateFile.reload(); pauseFile.reload(); agentsFile.reload(); if (!statusQuery.running) statusQuery.running = true }
   function showPairing() {
     if (command.running || !view.running || !view.sharing) return
     pairing = ({})
@@ -73,7 +75,7 @@ Panel {
       try {
         var parsed = JSON.parse(text())
         root.now = Date.now() / 1000
-        if (Number(parsed.schema) === 1) root.sourceState = parsed
+        if (Number(parsed.schema) === 1) root.sourceState = Object.assign({}, parsed, {detectedProviders: root.sourceState.detectedProviders || []})
       } catch (error) { root.sourceState = ({}) }
     }
   }
@@ -85,6 +87,20 @@ Panel {
     onFileChanged: reload()
     onLoaded: root.sharingEnabled = false
     onLoadFailed: root.sharingEnabled = true
+  }
+  FileView {
+    id: agentsFile
+    path: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/paceman/agents.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try {
+        var providers = JSON.parse(text()).providers
+        if (Array.isArray(providers) && providers.every(function(p) { return p === "codex" || p === "claude" }))
+          root.configuredProviders = providers
+      } catch (error) { console.warn("Paceman agent settings unavailable") }
+    }
   }
   Process {
     id: statusQuery
@@ -113,6 +129,7 @@ Panel {
               ? detail.slice("Paceman route: ".length)
               : "Couldn't create a pairing code. Run pacemanctl pair for details.")
           : root.action === "remove-access" ? "Couldn't remove access. Try again or check pacemanctl logs."
+          : root.action === "agents" ? "Couldn't change agent monitoring. Run pacemanctl agents for details."
           : "Couldn't change sharing. Try again or check pacemanctl logs."
         console.warn("Paceman action failed:", detail || "Unknown error")
       } else if (root.action === "pair") {
@@ -121,6 +138,9 @@ Panel {
       } else if (root.action === "share-off") {
         root.pairing = ({})
         root.pairingOpen = false
+      } else if (root.action === "agents") {
+        try { root.sourceState = JSON.parse(output.text); root.configuredProviders = root.sourceState.configuredProviders }
+        catch (error) { root.refresh() }
       } else if (root.action === "remove-access") {
         try { root.sourceState = JSON.parse(output.text) } catch (error) { root.refresh() }
         content.removalClient = ""
@@ -176,6 +196,7 @@ Panel {
         actionError: root.actionError
         foreground: root.foreground
         fontFamily: root.fontFamily
+        onAgentRequested: function(provider, enabled) { root.run(["agents", enabled ? "--enable" : "--disable", provider]) }
         onSharingRequested: function(enabled) { root.run([enabled ? "share-on" : "share-off"]) }
         onRestartRequested: root.run(["restart"])
         onPairRequested: root.showPairing()

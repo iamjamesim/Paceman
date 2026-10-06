@@ -14,7 +14,7 @@ import unittest
 
 from service.hub import Store
 from service.omarchy import OmarchySource
-from service.processes import CodexProcesses, ProcessIdentity
+from service.processes import AgentProcesses, ProcessIdentity
 from service.status import DesktopStatus
 
 
@@ -53,7 +53,7 @@ class ProcessTrackingTests(unittest.TestCase):
         shutil.copy2(Path(sys.executable).resolve(), self.executable)
         self.store = Store(self.root / 'hub.sqlite3')
         self.address = self.root / 'agent.sock'
-        self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root / 'theme')
+        self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root / 'theme', providers=("codex", "claude"))
         self.source.__enter__()
         self.addCleanup(lambda: self.source.__exit__(None, None, None))
 
@@ -64,8 +64,8 @@ class ProcessTrackingTests(unittest.TestCase):
         self.assertTrue(value, 'Fixture process exited before answering')
         return value
 
-    def spawn(self, terminal=None):
-        command = [str(self.executable), '-c', DRIVER, sys.executable, str(self.address), SENDER]
+    def spawn(self, terminal=None, executable=None):
+        command = [str(executable or self.executable), '-c', DRIVER, sys.executable, str(self.address), SENDER]
         if terminal is not None:
             command.append(str(terminal))
         process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -88,8 +88,68 @@ class ProcessTrackingTests(unittest.TestCase):
 
     def restart(self):
         self.source.__exit__(None, None, None)
-        self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root / 'theme')
+        self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root / 'theme', providers=("codex", "claude"))
         self.source.__enter__()
+
+    def test_installed_claude_hook_runs_under_isolated_python_and_tracks_native_version_owner(self):
+        versions = self.root / "home/.local/share/claude/versions"
+        versions.mkdir(parents=True)
+        executable = versions / "2.1.211"
+        shutil.copy2(Path(sys.executable).resolve(), executable)
+        self.source.processes = AgentProcesses(home=self.root / "home")
+        # Use the production socket path expected by the installed hook.
+        self.source.__exit__(None, None, None)
+        self.address = self.root / "omarchy-watch.sock"
+        self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root,
+                                   processes=self.source.processes, providers=("codex", "claude"))
+        self.source.__enter__()
+        hook = Path(__file__).resolve().parents[1] / "omarchy/claude_hook.py"
+        driver = """
+import subprocess, sys
+print('READY', flush=True)
+for line in sys.stdin:
+    subprocess.run([sys.argv[1], '-I', sys.argv[2]], input=line, text=True, check=True, timeout=3)
+    print('SENT', flush=True)
+"""
+        owner = subprocess.Popen([str(executable), "-c", driver, sys.executable, str(hook)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env={**os.environ, "XDG_RUNTIME_DIR": str(self.root)}, start_new_session=True)
+        def cleanup():
+            owner.kill()
+            owner.communicate(timeout=3)
+        self.addCleanup(cleanup)
+        self.assertEqual(self.line(owner), "READY")
+        for event, state in (("SessionStart", "idle"), ("UserPromptSubmit", "working"), ("Stop", "finished")):
+            owner.stdin.write(json.dumps(dict(hook_event_name=event, session_id="session",
+                prompt_id="one", prompt="PRIVATE context", cwd="/secret/path")) + "\n")
+            owner.stdin.flush()
+            self.assertEqual(self.line(owner), "SENT")
+            self.assertEqual(self.store.snapshot()["state"], state)
+        public = json.dumps(self.store.snapshot())
+        self.assertNotIn("PRIVATE", public)
+        self.assertNotIn("secret", public)
+        self.assertEqual(self.store.snapshot()["sessions"][0]["provider"], "claude")
+        self.assertEqual(self.source.processes.identify(owner.pid, "claude").pid, owner.pid)
+
+    def test_claude_native_hook_delivery_restart_and_owner_exit(self):
+        executable = self.root / "claude"
+        shutil.copy2(Path(sys.executable).resolve(), executable)
+        owner = self.spawn(executable=executable)
+        for hook, event in (("UserPromptSubmit", "working"), ("Stop", "completed")):
+            message = dict(command="agent-event", provider="claude", session="claude",
+                           turn="one", hook=hook, event=event)
+            owner.stdin.write(json.dumps(message) + "\n")
+            owner.stdin.flush()
+            self.assertTrue(json.loads(self.line(owner))["changed"])
+        self.restart()
+        self.assertEqual(self.store.snapshot()["state"], "finished")
+        self.assertEqual(self.store.snapshot()["sessions"][0]["provider"], "claude")
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT pid FROM omarchy_processes").fetchone()[0], owner.pid)
+        owner.kill()
+        owner.wait(timeout=3)
+        self.source.tick(force=True)
+        self.assertEqual(self.store.snapshot()["sessions"], [])
 
     def test_short_lived_hook_does_not_close_its_owner_and_finished_stays_visible(self):
         owner = self.spawn()
@@ -183,7 +243,7 @@ class ProcessTrackingTests(unittest.TestCase):
         self.source.thread = None
         owner.kill()
         owner.wait(timeout=3)
-        self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root / 'theme')
+        self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root / 'theme', providers=("codex", "claude"))
         self.source.__enter__()
         self.assertEqual(self.store.snapshot()['sessions'], [])
 
@@ -309,9 +369,30 @@ class ProcessMetadataTests(unittest.TestCase):
             process(10, 11, '/usr/bin/python3')
             process(11, 12, '/usr/bin/sh')
             process(12, 1, '/opt/codex (deleted)')
-            tracker = CodexProcesses(root)
+            tracker = AgentProcesses(root)
             self.assertEqual(tracker.identify(10), ProcessIdentity(12, '12345', 'test-boot'))
             process(12, 1, '/usr/bin/python3')
             self.assertIsNone(tracker.identify(10))
             process(12, 1, '/opt/codex', state='Z')
             self.assertIsNone(tracker.identify(10))
+
+    def test_claude_native_and_node_launcher_identity_never_matches_a_prompt_argument(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            boot = root / "sys/kernel/random/boot_id"
+            boot.parent.mkdir(parents=True)
+            boot.write_text("boot")
+            base = root / "20"
+            base.mkdir()
+            (base / "stat").write_text("20 (node) " + " ".join(["S", "1"] + ["0"] * 17 + ["100"]))
+            (base / "exe").symlink_to("/usr/bin/node")
+            tracker = AgentProcesses(root, home=root / "home")
+            script = b"/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+            (base / "cmdline").write_bytes(b"node\0" + script + b"\0PRIVATE prompt\0")
+            self.assertEqual(tracker.identify(20, "claude"), ProcessIdentity(20, "100", "boot"))
+            (base / "cmdline").write_bytes(b"node\0unrelated.js\0" + script + b"\0")
+            self.assertIsNone(tracker.identify(20, "claude"))
+            self.assertIsNone(tracker.identify(20, "codex"))
+            (base / "exe").unlink()
+            (base / "exe").symlink_to(root / "home/.local/share/claude/versions/2.1.211")
+            self.assertIsNotNone(tracker.identify(20, "claude"))

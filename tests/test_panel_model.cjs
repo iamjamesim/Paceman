@@ -182,3 +182,33 @@ test('new installations explain how to start receiving Codex activity', () => {
   const paused = present({ needs_input: 0, working: 0, finished: 0 }, {clients: phone, sharingEnabled: false});
   assert.equal(paused.activityGuidance, '');
 });
+
+test('agent selection and status stay independent, including first use and stale sources', () => {
+  const state = {configuredProviders: ['codex', 'claude'], detectedProviders: ['claude'],
+    lastAgentEventByProvider: {codex: now}, providerCounts: {codex: {working: 1}}};
+  const value = present({working: 1, needs_input: 0, finished: 0}, state);
+  assert.equal(value.agents[0].label, 'Working');
+  assert.equal(value.agents[1].label, 'Waiting for activity');
+  assert.match(value.agents[1].guidance, /hooks/);
+  const paused = present({}, {...state, sharingEnabled: false});
+  assert.equal(paused.agents[0].label, 'Paused');
+  assert.equal(paused.agents[1].guidance, '');
+  const stale = present({}, {...state, updatedAt: now - 21});
+  assert.equal(stale.agents[0].label, 'Unavailable');
+  const disabled = present({}, {...state, configuredProviders: ['codex']});
+  assert.equal(disabled.agents[1].enabled, false);
+  assert.equal(disabled.agents[1].label, 'Available');
+  const empty = present({}, {...state, configuredProviders: []});
+  assert.equal(empty.agents[0].enabled, false);
+  assert.equal(empty.agents[1].enabled, false);
+});
+
+test('setup guidance is shared only when both agents have never been observed', () => {
+  const state = {configuredProviders: ['codex', 'claude'], sessionLiveness: 'process'};
+  assert.match(present({}, state).agentGuidance, /each enabled agent/);
+  const upgraded = present({}, {...state, providerCounts: {codex: {working: 1}}});
+  assert.equal(upgraded.agents[0].label, 'Working');
+  assert.equal(upgraded.agents[0].guidance, '');
+  assert.equal(upgraded.agentGuidance, '');
+  assert.match(upgraded.agents[1].guidance, /hooks/);
+});
