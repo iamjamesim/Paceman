@@ -59,7 +59,7 @@ final class PresentationModel: ObservableObject {
         default: return .idle
         }
     }
-    var previewOffline: Bool { ["offline", "computer-offline", "computer-usage-stale", "single-offline", "offline-empty"].contains(previewScreen) }
+    var previewOffline: Bool { ["offline", "computer-offline", "computer-usage-stale", "single-offline", "offline-empty", "claude-offline"].contains(previewScreen) }
     var previewSessions: [AgentSession] {
         if previewScreen == "grouped" {
             return [AgentSession(id: "1", provider: "codex", state: .needsInput),
@@ -67,7 +67,12 @@ final class PresentationModel: ObservableObject {
                     AgentSession(id: "3", provider: "codex", state: .finished),
                     AgentSession(id: "4", provider: "codex", state: .failed)]
         }
-        guard previewScreen != "empty" else { return [] }
+        guard !["empty", "claude-empty", "legacy-empty", "providers-none"].contains(previewScreen) else { return [] }
+        if ["claude-only", "claude-offline", "claude-long"].contains(previewScreen) {
+            return [AgentSession(id: "1", provider: "claude", state: .working,
+                name: previewScreen == "claude-long" ? "Investigate multi-machine source recovery after a long disconnect" : "API cleanup",
+                project: "paceman")]
+        }
         if ["single-finished", "single-offline", "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(previewScreen) { return [AgentSession(id: "1", provider: "codex", state: .finished)] }
         if previewScreen == "single-working" { return [AgentSession(id: "1", provider: "codex", state: .working)] }
         if previewScreen == "single-input" { return [AgentSession(id: "1", provider: "codex", state: .needsInput)] }

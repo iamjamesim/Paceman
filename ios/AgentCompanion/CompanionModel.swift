@@ -15,6 +15,10 @@ final class CompanionModel: ObservableObject {
     @Published var revokedSources: Set<String> = []
     @Published var status = "Connect a work source"
     @Published var busy = false
+    var availableAgentApps: [AgentAppLink] {
+        AgentAppLink.available(in: pairedSources.filter { !isRevoked($0.sourceID) }
+            .compactMap { snapshots[$0.sourceID] })
+    }
     private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
     private let client = SourceClient()
     private let pairedStore = PairedSourcesStore()
@@ -85,6 +89,19 @@ final class CompanionModel: ObservableObject {
                 lastContacts[id] = Date(timeIntervalSince1970: observed)
                 fetchedUptimes[id] = ProcessInfo.processInfo.systemUptime - (stale ? 300 : 0)
                 if stale { errors[id] = "Connection unavailable" }
+            }
+            if let id = pairedSources.first?.sourceID, snapshots[id] == nil,
+               !["--screen=waiting", "--screen=offline-empty"].contains(screen) {
+                let providers: [String]? = screen == "--screen=legacy-empty" ? nil
+                    : screen == "--screen=providers-none" ? []
+                    : screen.hasPrefix("--screen=claude-") ? ["claude"]
+                    : screen.hasPrefix("--screen=single-") || screen == "--screen=grouped" ? ["codex"]
+                    : ["codex", "claude"]
+                let observed = Date().timeIntervalSince1970
+                snapshots[id] = Snapshot(schema: 1, sourceID: id, generation: id, revision: 1,
+                    sourceName: "MacBook Pro", observedAt: observed, changedAt: observed,
+                    freshFor: 30, state: .idle, eventID: "1", allowance: nil,
+                    sessions: [], configuredProviders: providers)
             }
             #endif
         } else {

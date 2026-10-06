@@ -52,17 +52,24 @@ struct CompanionHome: View {
                                 .padding(.top, paired.sourceID == model.pairedSources.first?.sourceID ? 0 : 12)
                                 .id(paired.sourceID)
                         }
-                        Link(destination: URL(string: "chatgpt://codex")!) {
-                            HStack(spacing: 6) {
-                                Text("Open Codex")
-                                Image(systemName: "arrow.up.right").accessibilityHidden(true)
+                        if !model.availableAgentApps.isEmpty {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(model.availableAgentApps) { app in
+                                    Link(destination: app.url) {
+                                        HStack(spacing: 6) {
+                                            Text(app.title).multilineTextAlignment(.leading)
+                                            Image(systemName: "arrow.up.right").accessibilityHidden(true)
+                                        }
+                                        .font(.subheadline.weight(.medium))
+                                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                    }
+                                    .foregroundStyle(theme.tint)
+                                }
                             }
-                            .font(.subheadline.weight(.medium))
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
+                            .padding(.top, 12)
+                            .id("agent-apps")
                         }
-                        .foregroundStyle(theme.tint)
-                        .padding(.top, 12)
                     } else { agentSetup }
                     if presentation.preview {
                         Text("Design preview · sample activity").font(.caption)
@@ -72,6 +79,11 @@ struct CompanionHome: View {
             }
             .refreshable { if !presentation.preview { await model.refreshAll() } }
             .onAppear {
+                #if DEBUG
+                if presentation.preview && ProcessInfo.processInfo.arguments.contains("--scroll-to-agent-apps") {
+                    DispatchQueue.main.async { proxy.scrollTo("agent-apps", anchor: .bottom) }
+                }
+                #endif
                 if let focusedSourceID { proxy.scrollTo(focusedSourceID, anchor: .top) }
             }
             .onChange(of: focusedSourceID) { _, id in

@@ -8,6 +8,36 @@ import CryptoKit
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    private func appLinkSnapshot(_ providers: [String]?, sessions: [AgentSession] = []) -> Snapshot {
+        Snapshot(schema: 1, sourceID: "source", generation: "g", revision: 1,
+            sourceName: "source", observedAt: 1, changedAt: 1, freshFor: 30,
+            state: .idle, eventID: "1", allowance: nil, sessions: sessions,
+            configuredProviders: providers)
+    }
+
+    func testAgentAppLinksUseConfigurationEvenWhenIdleOrStale() {
+        let claude = appLinkSnapshot(["claude"], sessions: [AgentSession(id: "old", provider: "codex", state: .finished)])
+        XCTAssertEqual(AgentAppLink.available(in: [claude]), [.claude])
+        XCTAssertEqual(AgentAppLink.available(in: [appLinkSnapshot(["codex"])]), [.codex])
+        XCTAssertEqual(AgentAppLink.available(in: [appLinkSnapshot([], sessions: claude.sessions ?? [])]), [])
+        XCTAssertEqual(AgentAppLink.available(in: []), [])
+    }
+
+    func testAgentAppLinksCombineComputersWithoutDuplicatingShortcuts() {
+        let links = AgentAppLink.available(in: [appLinkSnapshot(["claude"]), appLinkSnapshot(["codex", "claude", "unknown"])])
+        XCTAssertEqual(links, [.codex, .claude])
+        XCTAssertEqual(links.map { $0.url.absoluteString }, ["chatgpt://codex", "claude://code"])
+    }
+
+    func testAgentAppLinksSupportSourcesWithoutProviderMetadata() {
+        let claude = appLinkSnapshot(nil, sessions: [AgentSession(id: "1", provider: "claude", state: .working)])
+        XCTAssertEqual(AgentAppLink.available(in: [claude]), [.claude])
+        XCTAssertEqual(AgentAppLink.available(in: [appLinkSnapshot(nil)]), [.codex])
+        var usageOnly = claude
+        usageOnly.allowance = CodexAllowance(provider: "codex", remaining: 20, window: 2, updatedAt: 1_790_000_000, resetsAt: 1_790_003_600)
+        XCTAssertEqual(AgentAppLink.available(in: [usageOnly]), [.codex, .claude])
+    }
+
     func testWatchAllowancePrefersFreshConnectedSourceThenCachedHistory() {
         let now = 1_790_000_000.0
         func source(_ id: String, updated: Int64, reset: Int64, remaining: Int) -> Snapshot {
