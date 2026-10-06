@@ -55,10 +55,15 @@ Codex **Settings → Hooks → User config (All projects)**; for a CLI user, use
 their plain-language purposes from `macos/README.md`, explain that Codex calls
 each row **Hook 1**, and show how to expand one to verify the Paceman command.
 Stay with the user while they review the entries. Do not trust hooks on the
-user's behalf or bypass Codex's review. After their review, use a fresh local
-Codex task and verify `lastAgentEventAt` advances in `pacemanctl status`.
-Report the installation as partial if review or the real event check is still
-pending.
+user's behalf or bypass Codex's review. After their review, use a fresh saved
+local task in the Codex interface they use (app or interactive CLI); do not use
+`codex exec --ephemeral` for installation verification. Verify
+`lastAgentEventAt` advances in `pacemanctl status`, the task replies successfully,
+and Paceman shows that task as Finished. A start event alone is insufficient.
+Installation and diagnostic checks must not leave orphaned or invalid activity.
+Resolve any confirmed orphaned or invalid state created by the check before
+handing off, preserving real user sessions. Report the installation as partial
+if review or verification is pending or fails, or cleanup remains unresolved.
 
 For iPhone notifications, pairing and hook delivery are insufficient. The
 normal Mac installer prepares the relay sender before pairing. Follow the Mac

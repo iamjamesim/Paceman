@@ -624,10 +624,15 @@ def print_hook_review_steps(wrapper: Path):
     print("  replies, transcripts, tool arguments, or project paths.")
     print("  The user decides whether to trust each Paceman row individually.")
     print("  Do not choose Trust all or bypass review.")
-    print("  Stay with the user, then send a prompt in a fresh local Codex task")
-    print("  and verify lastAgentEventAt advances in:")
+    print("  Stay with the user, then send a short prompt in a fresh saved local task")
+    print("  in their Codex app or interactive CLI; do not use codex exec --ephemeral.")
+    print("  Verify lastAgentEventAt advances in:")
     print(f'     "{wrapper}" status')
-    print(f"  Until that real event arrives, setup is partial. Full steps: {REPO / 'macos/README.md'}")
+    print("  Wait for a successful reply and confirm Paceman shows the task as Finished.")
+    print("  A start event alone is insufficient. Setup checks must not leave orphaned or invalid activity.")
+    print("  Resolve confirmed leftovers from the check before handoff; preserve real user sessions.")
+    print("  Unresolved cleanup means setup remains partial.")
+    print(f"  Until review and this check succeed, setup is partial. Full steps: {REPO / 'macos/README.md'}")
 
 
 if __name__ == "__main__":
