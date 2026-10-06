@@ -61,6 +61,10 @@ final class PresentationModel: ObservableObject {
     }
     var previewOffline: Bool { ["offline", "computer-offline", "computer-usage-stale", "single-offline", "offline-empty", "claude-offline"].contains(previewScreen) }
     var previewSessions: [AgentSession] {
+        if previewScreen == "hook-session" {
+            return [AgentSession(id: "hook", provider: "claude", state: .working,
+                workspaceLabel: "paceman", remoteSessionID: "session_previewClaude")]
+        }
         if previewScreen == "grouped" {
             return [AgentSession(id: "1", provider: "codex", state: .needsInput),
                     AgentSession(id: "2", provider: "codex", state: .working),
@@ -74,6 +78,7 @@ final class PresentationModel: ObservableObject {
                 project: "paceman", remoteSessionID: previewScreen == "claude-local" ? nil : "session_previewClaude")]
         }
         if ["single-finished", "single-offline", "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(previewScreen) { return [AgentSession(id: "1", provider: "codex", state: .finished)] }
+        if previewScreen == "single-idle" { return [AgentSession(id: "1", provider: "codex", state: .idle)] }
         if previewScreen == "single-working" { return [AgentSession(id: "1", provider: "codex", state: .working)] }
         if previewScreen == "single-input" { return [AgentSession(id: "1", provider: "codex", state: .needsInput)] }
         if previewScreen == "single-failed" { return [AgentSession(id: "1", provider: "codex", state: .failed)] }
@@ -127,7 +132,7 @@ struct AgentSession: Codable, Identifiable, Equatable {
     var displayName: String { String((name ?? (provider == "fixture" ? "Test agent" : provider.capitalized)).prefix(80)) }
     var detail: String {
         if provider == "fixture" { return "Local test source" }
-        return [project, name == nil ? nil : provider.capitalized].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        return project ?? workspaceLabel ?? ""
     }
 }
 
@@ -189,6 +194,9 @@ struct AgentDisplayRow: Identifiable {
     let id: String
     let session: AgentSession
     let detail: String
+    // Grouped rows retain every state count; the leading mark shows priority.
+    var statusLabel: String { id.hasPrefix("group:") && !detail.isEmpty ? detail : session.state.title }
+    var contextLabel: String { id.hasPrefix("group:") ? "" : detail }
 
     static func rows(_ sessions: [AgentSession]) -> [Self] {
         var rows: [Self] = []

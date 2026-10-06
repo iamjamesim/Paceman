@@ -568,6 +568,9 @@ final class ProtocolTests: XCTestCase {
             "sessions":[["id":"task", "provider":"codex", "state":"working", "name":"Theme sync", "project":"companion"]]]))
         XCTAssertEqual(snapshot.sessions?.first?.displayName, "Theme sync")
         XCTAssertEqual(snapshot.sessions?.first?.state, .working)
+        XCTAssertEqual(snapshot.sessions?.first?.detail, "companion")
+        let hookSession = AgentSession(id: "hook", provider: "claude", state: .working, workspaceLabel: "paceman")
+        XCTAssertEqual(hookSession.detail, "paceman")
     }
 
     func testUnnamedSessionsGroupWithoutLosingStatesOrNamedRows() {
@@ -581,6 +584,8 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(rows.first?.session.displayName, "Codex · 3 sessions")
         XCTAssertEqual(rows.first?.session.state, .needsInput)
         XCTAssertEqual(rows.first?.detail, "1 needs input · 1 finished · 1 idle")
+        XCTAssertEqual(rows.first?.statusLabel, "1 needs input · 1 finished · 1 idle")
+        XCTAssertEqual(rows.first?.contextLabel, "")
         XCTAssertTrue(rows.contains { $0.session.displayName == "Fix checkout" })
         XCTAssertTrue(rows.contains { $0.session.displayName == "Claude" })
         XCTAssertEqual(rows.map(\.id), AgentDisplayRow.rows(Array(sessions.reversed())).map(\.id))

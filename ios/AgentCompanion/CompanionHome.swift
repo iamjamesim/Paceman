@@ -218,33 +218,19 @@ struct CompanionHome: View {
             } else {
                 switch content {
                 case .sessions:
-                    if let leading = rows.first {
-                        activityHeadline(leading.session.state, historical: historical)
-                        if rows.count == 1 {
-                            let layout = typeSize.isAccessibilitySize
-                                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
-                            layout {
-                                sessionDescription(leading, historical: historical)
-                                if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
-                                sessionPill(leading.session)
-                            }.padding(.top, 10)
-                        } else {
-                            VStack(spacing: 0) {
-                                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                                    if index > 0 { Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5) }
-                                    activityRow(row, historical: historical)
-                                }
-                            }.padding(.top, 11)
+                    VStack(spacing: 0) {
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                            if index > 0 { Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5) }
+                            activityRow(row, historical: historical)
                         }
-                    }
+                    }.padding(.top, 8)
                 case .waiting:
                     emptyActivity("No activity received yet", detail: nil)
                 case .empty:
                     emptyActivity(historical ? "Last known: No active sessions" : "No active sessions",
                                   detail: historical ? nil : "Activity appears when an agent starts.")
                 case .summary(let activity):
-                    activityHeadline(activity, historical: historical)
+                    emptyActivity(historical ? "Last known: \(activity.title)" : activity.title, detail: nil)
                 }
             }
         }
@@ -254,49 +240,36 @@ struct CompanionHome: View {
         .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
 
-    private func activityHeadline(_ state: ActivityState, historical: Bool) -> some View {
-        let title = state == .idle ? "No active sessions" : state.title
-        return HStack(spacing: 11) {
-            if state != .idle && !typeSize.isAccessibilitySize {
-                ActivityRobot(state: state, animate: !historical)
-                    .frame(width: 31, height: 31)
-                    .foregroundStyle(historical ? theme.secondaryInk : stateColor(state))
-                    .accessibilityHidden(true)
-            }
-            Text(historical ? "Last known: \(title)" : title)
-                .font(.system(.title2, design: .rounded, weight: .semibold))
-                .foregroundStyle(historical ? theme.secondaryInk : stateColor(state))
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }.padding(.top, 16)
-    }
-
     private func sessionDescription(_ row: AgentDisplayRow, historical: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let status = historical ? "Last known: " + row.statusLabel : row.statusLabel
+        let context = row.contextLabel.isEmpty ? "" : " · " + row.contextLabel
+        let color = historical || row.statusLabel != row.session.state.title
+            ? theme.secondaryInk : stateColor(row.session.state)
+        return VStack(alignment: .leading, spacing: 4) {
             Text(row.session.displayName).font(.subheadline.weight(.medium))
                 .foregroundStyle(historical ? theme.secondaryInk : theme.ink)
                 .fixedSize(horizontal: false, vertical: true)
-            if !row.detail.isEmpty {
-                Text(row.detail).font(.caption).foregroundStyle(theme.secondaryInk)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text("\(Text(status).foregroundColor(color))\(Text(context).foregroundColor(theme.secondaryInk))")
+                .font(.caption).fixedSize(horizontal: false, vertical: true)
         }.accessibilityElement(children: .combine)
     }
 
     private func activityRow(_ row: AgentDisplayRow, historical: Bool) -> some View {
         let layout = typeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         return layout {
-            sessionDescription(row, historical: historical)
-            if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
-            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 0) {
-                Text(row.session.state.title).font(.caption.weight(.medium))
+            if !typeSize.isAccessibilitySize {
+                ActivityRobot(state: row.session.state, animate: !historical)
+                    .frame(width: 22, height: 22)
                     .foregroundStyle(historical ? theme.secondaryInk : stateColor(row.session.state))
-                    .fixedSize(horizontal: false, vertical: true)
-                sessionPill(row.session)
-            }.fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: false)
-        }.padding(.vertical, 10)
+                    .accessibilityHidden(true)
+            }
+            sessionDescription(row, historical: historical)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            sessionPill(row.session)
+                .fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: false)
+        }.padding(.vertical, 12)
     }
 
     @ViewBuilder private func sessionPill(_ session: AgentSession) -> some View {
