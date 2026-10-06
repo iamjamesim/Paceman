@@ -31,13 +31,12 @@ Phone-side Remove watch removes access; it does not reset watch ownership.
 
 - A source with no snapshot says `No activity received yet`; expired activity
   appears as `Last known:`.
-- Each provider/window allowance retains its original observation and reset times; after reset it
+- Each Codex usage window retains its original observation and reset times; after reset it
   becomes unavailable until a new reading. Weather current conditions expire
   after three hours, and daily high/low at the forecast location's midnight.
   Failure does not refresh their timestamps. Older snapshot times, phone revisions
   and unpaired-source pushes are rejected. A complete snapshot removes absent
   windows only from its own computer; removing a computer also rejects its delayed pushes.
-  Legacy Claude usage is discarded; saved Claude complications show unavailable.
 - Theme, identity and preferences survive disconnection. Confirmed revocation
   clears the affected source cache; removing one source leaves others intact.
 - iOS owns suspended network and Bluetooth work. Core Bluetooth pending

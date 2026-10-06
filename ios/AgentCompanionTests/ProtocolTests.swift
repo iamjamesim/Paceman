@@ -24,7 +24,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(WatchAggregate.selectAllowance(current: [], profiles: [older], now: now)?.remaining, 5)
     }
 
-    func testOldClaudeUsageDoesNotReplaceCodexOrHideActivity() throws {
+    func testUnsupportedUsageDoesNotReplaceCodexOrHideActivity() throws {
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture([
             "configuredProviders": ["claude"],
             "sessions": [["id":"claude-task", "provider":"claude", "state":"working"]],
@@ -35,7 +35,6 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(snapshot.configuredProviders, ["claude"])
         XCTAssertEqual(snapshot.usageReadings.map(\.provider), ["codex"])
         XCTAssertEqual(snapshot.allowances?.count, 1)
-        XCTAssertNil(WatchAggregate.selectAllowance(current:[snapshot], profiles:[snapshot], now:1800000000, provider:"claude"))
     }
 
     func testWatchUsageFallsBackToConnectedSecondComputerWithoutMixingWindows() {
@@ -66,16 +65,16 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(WatchAggregate.selectAllowance(current: [snapshot], profiles: [snapshot], now: snapshot.observedAt))
     }
 
-    func testClaudeFirmwareProfilesRequireProviderAwareVersion() {
-        let now=Date(timeIntervalSince1970:1800000000)
-        let claude=CodexAllowance(provider:"claude",remaining:20,window:2,updatedAt:1800000000,resetsAt:1800003600,windowDurationMins:300)
-        let older=Array(WatchWire.profile(owner:UUID(),revision:1,now:now,offset:0,version:5,allowance:claude))
-        XCTAssertEqual(older[85],255)
-        let newer=Array(WatchWire.profile(owner:UUID(),revision:1,now:now,offset:0,version:6,allowance:claude))
-        XCTAssertEqual(newer.count,114)
-        XCTAssertEqual(newer[85],20)
-        XCTAssertEqual(newer[111],2)
-        XCTAssertEqual(Array(newer[112...113]),[44,1])
+    func testFirmwareIgnoresUnsupportedUsage() {
+        let now = Date(timeIntervalSince1970: 1800000000)
+        let unsupported = CodexAllowance(provider: "claude", remaining: 20, window: 2,
+            updatedAt: 1800000000, resetsAt: 1800003600, windowDurationMins: 300)
+        for version: UInt8 in [4, 5] {
+            let bytes = Array(WatchWire.profile(owner: UUID(), revision: 1, now: now,
+                offset: 0, version: version, allowance: unsupported))
+            XCTAssertEqual(bytes.count, version == 4 ? 103 : 111)
+            XCTAssertEqual(bytes[85], 255)
+        }
     }
 
     func testWatchAggregateChoosesFreshAttentionAcrossComputers() {
@@ -852,12 +851,12 @@ final class ProtocolTests: XCTestCase {
             XCTAssertEqual(body["environment"] as? String, "development")
             XCTAssertNil(body["mode"])
             XCTAssertEqual(body["usageSchema"] as? Int, 2)
-            XCTAssertEqual(body["provider"] as? String, "claude")
+            XCTAssertNil(body["provider"])
             XCTAssertEqual(body["selectionRevision"] as? Int, 9)
             return (200, Data(#"{"registered":true}"#.utf8))
         }
         try await client.registerWatchPush(source, token: String(repeating: "ab", count: 32),
-                                           environment: "development", provider: "claude", selectionRevision: 9, usageSchema: 2)
+                                           environment: "development", selectionRevision: 9, usageSchema: 2)
     }
 
     func testEveryComputerRegistersWatchPushEvenWhenFirstIsOffline() async {
@@ -870,7 +869,7 @@ final class ProtocolTests: XCTestCase {
             if request.url?.host == "offline.example" { throw URLError(.notConnectedToInternet) }
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer online")
             let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
-            XCTAssertEqual(body["provider"] as? String, "codex")
+            XCTAssertNil(body["provider"])
             XCTAssertEqual(body["selectionRevision"] as? Int, 10)
             XCTAssertEqual(body["usageSchema"] as? Int, 2)
             return (200, Data(#"{"registered":true}"#.utf8))

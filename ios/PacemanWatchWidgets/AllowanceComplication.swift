@@ -1,6 +1,5 @@
 import SwiftUI
 import WidgetKit
-import AppIntents
 
 @main
 struct PacemanWatchWidgets: WidgetBundle {
@@ -16,51 +15,30 @@ private enum AllowanceMetric {
     var kind: String { self == .limit ? "PacemanAllowance" : "PacemanReset" }
 }
 
-enum UsageProvider: String, AppEnum {
-    case codex, claude
-    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Provider"
-    static let caseDisplayRepresentations: [Self: DisplayRepresentation] = [
-        .codex: "Codex", .claude: "Claude"
-    ]
-    var name: String { self == .claude ? "Claude" : "Codex" }
-}
-
-struct UsageConfigurationIntent: WidgetConfigurationIntent {
-    static let title: LocalizedStringResource = "Codex usage"
-    static let description = IntentDescription("Codex allowance and reset time.")
-    // Preserve the saved provider for upgrades; new complications need no picker.
-    static var parameterSummary: some ParameterSummary { Summary() }
-    @Parameter(title: "Provider", default: .codex)
-    var provider: UsageProvider
-}
-
 private struct AllowanceEntry: TimelineEntry {
     let date: Date
-    let provider: UsageProvider
     let allowance: WatchAllowanceSnapshot?
 }
 
-private struct AllowanceProvider: AppIntentTimelineProvider {
+private struct AllowanceProvider: TimelineProvider {
     func placeholder(in context: Context) -> AllowanceEntry {
         let now = Date()
-        return AllowanceEntry(date: now, provider: .codex, allowance: .sample(at: now, provider: .codex))
+        return AllowanceEntry(date: now, allowance: .sample(at: now))
     }
 
-    func snapshot(for configuration: UsageConfigurationIntent, in context: Context) async -> AllowanceEntry {
+    func getSnapshot(in context: Context, completion: @escaping (AllowanceEntry) -> Void) {
         let now = Date()
-        let value = context.isPreview ? WatchAllowanceSnapshot.sample(at: now, provider: configuration.provider)
-            : WatchUsageState.load().reading(for: configuration.provider.rawValue, at: now)
-        return AllowanceEntry(date: now, provider: configuration.provider, allowance: value)
+        let value = context.isPreview ? WatchAllowanceSnapshot.sample(at: now)
+            : WatchUsageState.load().selected(at: now)
+        completion(AllowanceEntry(date: now, allowance: value))
     }
 
-    func recommendations() -> [AppIntentRecommendation<UsageConfigurationIntent>] { [] }
-
-    func timeline(for configuration: UsageConfigurationIntent, in context: Context) async -> Timeline<AllowanceEntry> {
+    func getTimeline(in context: Context, completion: @escaping (Timeline<AllowanceEntry>) -> Void) {
         let now = Date()
         let state = WatchUsageState.load()
         var dates = Set([now])
         var reload: Date?
-        for value in state.timelineReadings where value.provider == configuration.provider.rawValue && value.available(at: now) {
+        for value in state.timelineReadings where value.available(at: now) {
             let reset = Date(timeIntervalSince1970: value.resetsAt)
             var last = now
             // Keep the existing ring/countdown cadence for each quota window.
@@ -88,16 +66,15 @@ private struct AllowanceProvider: AppIntentTimelineProvider {
         // Select again at every entry: when a five-hour quota resets, an
         // unexpired weekly quota remains available for the same provider.
         let entries = dates.sorted().map { date in
-            AllowanceEntry(date: date, provider: configuration.provider,
-                           allowance: state.reading(for: configuration.provider.rawValue, at: date))
+            AllowanceEntry(date: date, allowance: state.selected(at: date))
         }
-        return Timeline(entries: entries, policy: reload.map { .after($0) } ?? .never)
+        completion(Timeline(entries: entries, policy: reload.map { .after($0) } ?? .never))
     }
 }
 
 private struct LimitComplication: Widget {
     var body: some WidgetConfiguration {
-        AppIntentConfiguration(kind: AllowanceMetric.limit.kind, intent: UsageConfigurationIntent.self, provider: AllowanceProvider()) { entry in
+        StaticConfiguration(kind: AllowanceMetric.limit.kind, provider: AllowanceProvider()) { entry in
             AllowanceView(entry: entry, metric: .limit)
                 .containerBackground(.clear, for: .widget)
         }
@@ -109,7 +86,7 @@ private struct LimitComplication: Widget {
 
 private struct ResetComplication: Widget {
     var body: some WidgetConfiguration {
-        AppIntentConfiguration(kind: AllowanceMetric.reset.kind, intent: UsageConfigurationIntent.self, provider: AllowanceProvider()) { entry in
+        StaticConfiguration(kind: AllowanceMetric.reset.kind, provider: AllowanceProvider()) { entry in
             AllowanceView(entry: entry, metric: .reset)
                 .containerBackground(.clear, for: .widget)
         }
@@ -130,7 +107,7 @@ private struct AllowanceView: View {
     }
 
     private var value: WatchAllowanceSnapshot? {
-        guard entry.provider == .codex, let allowance = entry.allowance, allowance.available(at: entry.date) else { return nil }
+        guard let allowance = entry.allowance, allowance.available(at: entry.date) else { return nil }
         return allowance
     }
 
@@ -194,19 +171,14 @@ private struct AllowanceView: View {
 
     var body: some View {
         Group {
-            if entry.provider == .claude {
-                Text("Claude —").font(.caption2)
-            } else {
-                switch family {
-                case .accessoryCircular: circular
-                case .accessoryCorner: corner
-                case .accessoryRectangular: rectangular
-                case .accessoryInline: inline
-                default: EmptyView()
-                }
+            switch family {
+            case .accessoryCircular: circular
+            case .accessoryCorner: corner
+            case .accessoryRectangular: rectangular
+            case .accessoryInline: inline
+            default: EmptyView()
             }
         }
-        .widgetURL(entry.provider == .claude ? URL(string: "paceman://claude-usage-unsupported") : nil)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
     }
@@ -312,7 +284,7 @@ private struct AllowanceView: View {
 
     private var rectangular: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("\(Image(systemName: "gauge.with.needle"))  \(entry.provider.name) · \(limitTitle)")
+            Text("\(Image(systemName: "gauge.with.needle"))  Codex · \(limitTitle)")
                 .font(.headline)
                 .fontWeight(.semibold)
                 .minimumScaleFactor(0.55)
@@ -353,19 +325,18 @@ private struct AllowanceView: View {
     private var inline: some View {
         Group {
             if let value {
-                Text("\(entry.provider.name) \(value.remaining)% left")
+                Text("Codex \(value.remaining)% left")
                     .foregroundStyle(fullColorAccent ?? Color.primary)
                     .widgetAccentable()
             } else {
-                Text("\(entry.provider.name) —")
+                Text("Codex —")
                     .foregroundStyle(.secondary)
             }
         }
     }
 
     private var accessibilityText: String {
-        if entry.provider == .claude { return "Claude usage is not supported. Open Paceman for details." }
-        guard let value else { return "\(entry.provider.name) \(metric == .limit ? "limit" : "reset") unavailable" }
+        guard let value else { return "Codex \(metric == .limit ? "limit" : "reset") unavailable" }
         let freshness = value.cached(at: entry.date) ? "last known" : "current"
         if metric == .limit {
             return "\(value.providerName) \(value.limitTitle), \(value.remaining) percent remaining, \(freshness), resets \(Date(timeIntervalSince1970: value.resetsAt).formatted())"
@@ -375,8 +346,8 @@ private struct AllowanceView: View {
 }
 
 private extension WatchAllowanceSnapshot {
-    static func sample(at date: Date, provider: UsageProvider) -> Self {
-        Self(provider: provider.rawValue, remaining: 64, window: 1,
+    static func sample(at date: Date) -> Self {
+        Self(provider: "codex", remaining: 64, window: 1,
              updatedAt: date.timeIntervalSince1970,
              resetsAt: date.addingTimeInterval(2.4 * 86_400).timeIntervalSince1970,
              windowDurationMins: 10_080)

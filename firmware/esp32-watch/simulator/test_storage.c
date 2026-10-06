@@ -13,7 +13,7 @@ typedef struct {
     size_t length;
     uint8_t bytes[128];
 } blob_t;
-static blob_t blobs[9];
+static blob_t blobs[8];
 static esp_err_t open_result, owned_result, revision_result, write_result, commit_result;
 static uint8_t owned_value;
 static uint32_t revision_value;
@@ -25,8 +25,8 @@ static void reset(void)
     blobs[0] = (blob_t){.key = "device_id", .result = ESP_ERR_NVS_NOT_FOUND};
     blobs[1] = (blob_t){.key = "owner_id", .result = ESP_ERR_NVS_NOT_FOUND};
     blobs[2] = (blob_t){.key = "owner_peer_v1", .result = ESP_ERR_NVS_NOT_FOUND};
-    const char *keys[] = {"profile_v1", "profile_v2", "profile_v3", "profile_v4", "profile_v5", "profile_v6"};
-    for (unsigned index = 0; index < 6; ++index) {
+    const char *keys[] = {"profile_v1", "profile_v2", "profile_v3", "profile_v4", "profile_v5"};
+    for (unsigned index = 0; index < 5; ++index) {
         blobs[index + 3] = (blob_t){.key = keys[index], .result = ESP_ERR_NVS_NOT_FOUND};
     }
     open_result = write_result = commit_result = ESP_OK;
@@ -249,10 +249,10 @@ static void ownership_checks(void)
 static void profile_save_checks(void)
 {
     const watch_peer_identity_t expected = {1, {1, 2, 3, 4, 5, 0xc6}};
-    omarchy_profile_v6_t profile = {0};
+    omarchy_profile_v5_t profile = {0};
     profile.base.base.magic[0] = 'O';
     profile.base.base.magic[1] = 'W';
-    profile.base.base.version = 6;
+    profile.base.base.version = 5;
     profile.base.base.kind = 1;
     profile.base.base.unix_time = 1800000000;
     profile.base.base.hour_cycle = 24;
@@ -260,49 +260,48 @@ static void profile_save_checks(void)
     profile.base.base.revision = 37;
     memset(profile.base.base.owner_id, 0x42, 16);
     profile.base.allowance_remaining = 255;
-    profile.allowance_provider = 1;
-    assert(omarchy_profile_v6_is_valid(&profile));
+    assert(omarchy_profile_v5_is_valid(&profile));
     const uint8_t *owner_id = profile.base.base.owner_id;
     /* Interrupt every initial-save write: partial ownership must not reopen setup. */
     for (unsigned failure = 1; failure <= 5; ++failure) {
         reset();
         fail_write = failure;
-        assert(watch_storage_profile(&profile, sizeof(profile), 6, owner_id, &expected, 37) == ESP_FAIL);
+        assert(watch_storage_profile(&profile, sizeof(profile), 5, owner_id, &expected, 37) == ESP_FAIL);
         bool owned = true;
         assert(watch_storage_owned(&owned) == (failure == 1 ? ESP_OK : ESP_ERR_INVALID_STATE));
         assert(!owned && commits == 0 && owned_result == ESP_ERR_NVS_NOT_FOUND);
         /* Retrying the same owner/profile can complete a failed enrollment. */
         fail_write = 0;
-        assert(watch_storage_profile(&profile, sizeof(profile), 6, owner_id, &expected, 37) == ESP_OK);
+        assert(watch_storage_profile(&profile, sizeof(profile), 5, owner_id, &expected, 37) == ESP_OK);
         assert(watch_storage_owned(&owned) == ESP_OK && owned);
     }
     reset();
     open_result = ESP_FAIL;
-    assert(watch_storage_profile(&profile, sizeof(profile), 6, owner_id, &expected, 37) == ESP_FAIL);
+    assert(watch_storage_profile(&profile, sizeof(profile), 5, owner_id, &expected, 37) == ESP_FAIL);
     assert(writes == 0 && closes == 0);
     reset();
     commit_result = ESP_FAIL;
-    assert(watch_storage_profile(&profile, sizeof(profile), 6, owner_id, &expected, 37) == ESP_FAIL);
+    assert(watch_storage_profile(&profile, sizeof(profile), 5, owner_id, &expected, 37) == ESP_FAIL);
     assert(commits == 1); /* A failed commit is never reported as a durable save. */
     reset();
-    assert(watch_storage_profile(&profile, sizeof(profile), 6, owner_id, &expected, 37) == ESP_OK);
+    assert(watch_storage_profile(&profile, sizeof(profile), 5, owner_id, &expected, 37) == ESP_OK);
     uint8_t restored_owner[16];
     watch_peer_identity_t restored_peer;
     uint32_t restored_revision;
     assert(watch_storage_owner(restored_owner, &restored_peer, &restored_revision) == ESP_OK);
     assert(memcmp(restored_owner, owner_id, 16) == 0);
     assert(memcmp(&restored_peer, &expected, sizeof(expected)) == 0 && restored_revision == 37);
-    assert(blobs[8].length == sizeof(profile) && memcmp(blobs[8].bytes, &profile, sizeof(profile)) == 0);
+    assert(blobs[7].length == sizeof(profile) && memcmp(blobs[7].bytes, &profile, sizeof(profile)) == 0);
     /* A legitimate downgrade cannot leave a newer cached profile authoritative. */
-    profile.base.base.version = 5;
+    profile.base.base.version = 4;
     profile.base.base.revision = 38;
-    assert(omarchy_profile_v5_is_valid((const omarchy_profile_v5_t *)&profile));
-    assert(watch_storage_profile(&profile, sizeof(omarchy_profile_v5_t), 5, owner_id, &expected, 38) == ESP_OK);
-    assert(blobs[7].result == ESP_OK && blobs[8].result == ESP_ERR_NVS_NOT_FOUND);
+    assert(omarchy_profile_v4_is_valid((const omarchy_profile_v4_t *)&profile));
+    assert(watch_storage_profile(&profile, sizeof(omarchy_profile_v4_t), 4, owner_id, &expected, 38) == ESP_OK);
+    assert(blobs[6].result == ESP_OK && blobs[7].result == ESP_ERR_NVS_NOT_FOUND);
     reset();
     profile.base.base.revision = 37;
     fail_write = 4; /* Newer-profile deletion also has to succeed before marking owned. */
-    assert(watch_storage_profile(&profile, sizeof(omarchy_profile_v5_t), 5, owner_id, &expected, 37) == ESP_FAIL);
+    assert(watch_storage_profile(&profile, sizeof(omarchy_profile_v4_t), 4, owner_id, &expected, 37) == ESP_FAIL);
     assert(owned_result == ESP_ERR_NVS_NOT_FOUND && commits == 0);
 }
 

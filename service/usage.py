@@ -1,9 +1,8 @@
-"""Provider-scoped usage helpers shared by source and watch push paths."""
-PROVIDERS = ('codex', 'claude')
+"""Codex usage helpers shared by source and watch push paths."""
 
 
 def valid_reading(value):
-    return (isinstance(value, dict) and value.get('provider') in PROVIDERS
+    return (isinstance(value, dict) and value.get('provider') == 'codex'
         and type(value.get('remaining')) is int and 0 <= value['remaining'] <= 100
         and type(value.get('window')) is int and value['window'] in (1, 2)
         and type(value.get('updatedAt')) is int and 1704067200 <= value['updatedAt']
@@ -12,11 +11,11 @@ def valid_reading(value):
              type(value['windowDurationMins']) is int and 1 <= value['windowDurationMins'] <= 10080))
 
 
-def readings(snapshot, provider):
+def readings(snapshot):
     if isinstance(snapshot.get('allowances'), list):
-        return [r for r in snapshot['allowances'] if valid_reading(r) and r['provider'] == provider]
+        return [r for r in snapshot['allowances'] if valid_reading(r)]
     reading = snapshot.get('allowance')
-    return [reading] if valid_reading(reading) and reading['provider'] == provider else []
+    return [reading] if valid_reading(reading) else []
 
 
 def selected_reading(values, now=None):

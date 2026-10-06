@@ -17,12 +17,12 @@ struct WatchAllowanceSnapshot: Codable, Equatable {
     var windowDurationMins: Int? = nil
 
     var valid: Bool {
-        ["codex", "claude"].contains(provider) && (0...100).contains(remaining) && [1, 2].contains(window)
+        provider == "codex" && (0...100).contains(remaining) && [1, 2].contains(window)
             && updatedAt >= 1_704_067_200 && resetsAt > updatedAt && resetsAt <= 3_155_759_999
             && (windowDurationMins == nil || (1...10_080).contains(windowDurationMins!))
     }
 
-    var providerName: String { provider == "claude" ? "Claude" : "Codex" }
+    var providerName: String { "Codex" }
     var usageID: String { "\(provider)/\(window)/\(windowDurationMins ?? 0)" }
 
     var limitTitle: String {
@@ -89,18 +89,17 @@ struct WatchSourceUsage: Codable, Equatable {
     var observedAt: TimeInterval? = nil
 
     var valid: Bool {
-        allowances.count <= 4 && allowances.allSatisfy(\.valid)
+        allowances.count <= 2 && allowances.allSatisfy(\.valid)
             && Set(allowances.map { "\($0.provider)/\($0.window)" }).count == allowances.count
             && (observedAt == nil || observedAt!.isFinite && observedAt! >= 1_704_067_200
                 && allowances.allSatisfy { $0.updatedAt <= observedAt! })
     }
 }
 
-/// Codex window cache; legacy Claude data is accepted on the wire but discarded.
+/// Codex usage windows, cached separately for each paired computer.
 /// Only the phone can change source identity; pushes must match its revision.
 struct WatchUsageState: Codable, Equatable {
     static let storageKey = "apple-watch-usage-v2"
-    var selectedProvider = "codex"
     var selectionRevision = 0
     var sourceID: String? = nil
     var readings: [WatchAllowanceSnapshot] = []
@@ -109,11 +108,7 @@ struct WatchUsageState: Codable, Equatable {
     var sources: [String: WatchSourceUsage]? = nil
 
     func selected(at date: Date) -> WatchAllowanceSnapshot? {
-        reading(for: selectedProvider, at: date)
-    }
-    func reading(for provider: String, at date: Date) -> WatchAllowanceSnapshot? {
-        guard provider == "codex" else { return nil }
-        return Self.select(displayReadings(at: date).filter { $0.provider == provider }, at: date)
+        Self.select(displayReadings(at: date), at: date)
     }
     static func select(_ values: [WatchAllowanceSnapshot], at date: Date) -> WatchAllowanceSnapshot? {
         let available = values.filter { $0.available(at: date) }
@@ -122,7 +117,7 @@ struct WatchUsageState: Codable, Equatable {
         }
     }
     func summaries(at date: Date) -> [WatchAllowanceSnapshot] {
-        [reading(for: "codex", at: date)].compactMap { $0 }
+        [selected(at: date)].compactMap { $0 }
     }
     var timelineReadings: [WatchAllowanceSnapshot] {
         sources.map { $0.values.flatMap(\.allowances) } ?? readings
@@ -160,14 +155,12 @@ struct WatchUsageState: Codable, Equatable {
                 next.sources?[sourceID] = WatchSourceUsage(allowances: readings, observedAt: observedAt)
             }
             next.selectionRevision = revision
-            next.selectedProvider = "codex"
             next.sourceID = ids.first
             for id in incoming.keys {
                 var state = next.sourceState(id)
                 var update = raw[id]!
                 update["schema"] = 1
                 update["sourceID"] = id
-                update["selectedProvider"] = "codex"
                 update["selectionRevision"] = revision
                 if state.receive(update, authoritative: true, now: now) {
                     next.sources?[id] = WatchSourceUsage(allowances: state.readings, observedAt: state.observedAt)
@@ -188,7 +181,7 @@ struct WatchUsageState: Codable, Equatable {
     }
     private func sourceState(_ id: String) -> Self {
         let value = sources?[id] ?? WatchSourceUsage()
-        return Self(selectedProvider: "codex", selectionRevision: selectionRevision, sourceID: id,
+        return Self(selectionRevision: selectionRevision, sourceID: id,
                     readings: value.allowances, observedAt: value.observedAt)
     }
     @discardableResult
@@ -206,11 +199,7 @@ struct WatchUsageState: Codable, Equatable {
             next.sourceIDs = nil
             next.sources = nil
             guard revision >= selectionRevision else { return false }
-            if let provider = message["selectedProvider"] as? String {
-                guard ["codex", "claude"].contains(provider) else { return false }
-                next.selectedProvider = provider
-                next.selectionRevision = revision
-            }
+            next.selectionRevision = revision
             if let source = message["sourceID"] as? String {
                 guard UUID(uuidString: source) != nil else { return false }
                 if source != sourceID { next.readings = []; next.observedAt = nil }
@@ -240,12 +229,11 @@ struct WatchUsageState: Codable, Equatable {
             } else {
                 raw = []
             }
-            guard raw.count <= 4,
+            guard raw.count <= 2,
                   let data = try? JSONSerialization.data(withJSONObject: raw),
                   let incoming = try? JSONDecoder().decode([WatchAllowanceSnapshot].self, from: data),
                   incoming.allSatisfy({ $0.valid && $0.updatedAt <= now.timeIntervalSince1970 + 60 }),
-                  Set(incoming.map { "\($0.provider)/\($0.window)" }).count == incoming.count,
-                  authoritative || schema == 2 || incoming.allSatisfy({ $0.provider == selectedProvider }) else { return false }
+                  Set(incoming.map { "\($0.provider)/\($0.window)" }).count == incoming.count else { return false }
             if complete {
                 if let observed = message["observedAt"] as? Double {
                     guard observed.isFinite, observed >= 1_704_067_200,
@@ -280,31 +268,26 @@ struct WatchUsageState: Codable, Equatable {
                 }
             }
         }
-        next.readings.removeAll { $0.provider != "codex" }
-        guard next.readings.count <= 4, next != self else { return false }
+        guard next.readings.count <= 2, next != self else { return false }
         self = next
         return true
     }
     static func load(defaults: UserDefaults? = UserDefaults(suiteName: WatchAllowanceSnapshot.appGroup)) -> Self {
-        if let data = defaults?.data(forKey: storageKey), var value = try? JSONDecoder().decode(Self.self, from: data),
-           ["codex", "claude"].contains(value.selectedProvider), value.readings.count <= 4,
+        if let data = defaults?.data(forKey: storageKey), let value = try? JSONDecoder().decode(Self.self, from: data),
+           value.readings.count <= 2,
            value.readings.allSatisfy(\.valid), value.selectionRevision >= 0,
            Set(value.readings.map { "\($0.provider)/\($0.window)" }).count == value.readings.count,
            value.observedAt == nil || value.observedAt!.isFinite && value.observedAt! >= 1_704_067_200 {
             if let ids = value.sourceIDs {
                 guard Set(ids).count == ids.count, ids.allSatisfy({ UUID(uuidString: $0) != nil }),
                       let sources = value.sources, Set(sources.keys).isSubset(of: Set(ids)),
-                      sources.values.allSatisfy({ $0.valid && $0.allowances.allSatisfy { $0.provider == "codex" } }) else { return Self() }
-            }
-            if value.readings.contains(where: { $0.provider != "codex" }) {
-                value.readings.removeAll { $0.provider != "codex" }
-                value.save(defaults: defaults)
+                      sources.values.allSatisfy(\.valid) else { return Self() }
             }
             return value
         }
         if let data = defaults?.data(forKey: WatchAllowanceSnapshot.storageKey),
-           let value = try? JSONDecoder().decode(WatchAllowanceSnapshot.self, from: data), value.valid, value.provider == "codex" {
-            return Self(selectedProvider: value.provider, readings: [value])
+           let value = try? JSONDecoder().decode(WatchAllowanceSnapshot.self, from: data), value.valid {
+            return Self(readings: [value])
         }
         return Self()
     }

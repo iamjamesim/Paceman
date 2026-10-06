@@ -101,13 +101,13 @@ esp_err_t watch_storage_profile(const void *profile,
     if (err == ESP_OK) {
         err = nvs_set_blob(nvs, "owner_id", profile_owner_id, 16);
     }
-    const char *profile_key = version == 6 ? "profile_v6" : version == 5 ? "profile_v5" : version == 4 ? "profile_v4" : version == 3 ? "profile_v3" :
+    const char *profile_key = version == 5 ? "profile_v5" : version == 4 ? "profile_v4" : version == 3 ? "profile_v3" :
                               version == 2 ? "profile_v2" : "profile_v1";
     if (err == ESP_OK) {
         err = nvs_set_blob(nvs, profile_key, profile, profile_size);
     }
     /* Remove newer layouts when a legacy desktop becomes authoritative. */
-    for (unsigned newer = version + 1; err == ESP_OK && newer <= 6; ++newer) {
+    for (unsigned newer = version + 1; err == ESP_OK && newer <= 5; ++newer) {
         char key[16];
         snprintf(key, sizeof(key), "profile_v%u", newer);
         esp_err_t erase_err = nvs_erase_key(nvs, key);

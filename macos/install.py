@@ -17,7 +17,7 @@ import sys
 import tempfile
 
 from macos.codex_hook import QUESTION_MATCHER
-from macos.agents import CLAUDE_PURPOSES, claude_config_dir, provider_config, PROVIDERS, configured_providers, hook_path, installed_hook_command
+from macos.agents import CLAUDE_PURPOSES, provider_config, PROVIDERS, configured_providers, hook_path, installed_hook_command
 from macos.paths import installed_app
 from service.hub import endpoint
 from service.network import RouteSetupError, ensure_private_route
@@ -330,8 +330,6 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                 "WorkingDirectory": str(lib), "RunAtLoad": True, "KeepAlive": True,
                 "StandardOutPath": str(ROOT / "background.log"),
                 "StandardErrorPath": str(ROOT / "background-error.log")}
-    if "claude" in agents:
-        document["EnvironmentVariables"] = {"CLAUDE_CONFIG_DIR": str(claude_config_dir(ROOT))}
     staged_plist.write_bytes(plistlib.dumps(document))
     staged_plist.chmod(0o600)
 

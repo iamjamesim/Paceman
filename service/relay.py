@@ -99,7 +99,7 @@ def valid_payload(mode: str, identity: str, payload: object) -> bool:
     if mode == "watch":
         def valid_watch_reading(reading):
             return (exact(reading, ("provider", "remaining", "window", "windowDurationMins", "updatedAt", "resetsAt"))
-                    and reading["provider"] in ("codex", "claude") and all(type(reading[k]) is int for k in
+                    and reading["provider"] == "codex" and all(type(reading[k]) is int for k in
                     ("remaining", "window", "windowDurationMins", "updatedAt", "resetsAt"))
                     and 0 <= reading["remaining"] <= 100 and reading["window"] in (1, 2)
                     and 1 <= reading["windowDurationMins"] <= 10080
@@ -114,7 +114,7 @@ def valid_payload(mode: str, identity: str, payload: object) -> bool:
             return (exact(payload, ("aps", "schema", "sourceID", "selectionRevision", "observedAt", "allowances"))
                     and type(payload["schema"]) is int and type(payload["observedAt"]) in (int, float)
                     and 1704067200 <= payload["observedAt"] <= 3155759999
-                    and isinstance(values, list) and len(values) <= 4
+                    and isinstance(values, list) and len(values) <= 2
                     and all(valid_watch_reading(r) and r["updatedAt"] <= payload["observedAt"] for r in values)
                     and len({(r["provider"], r["window"]) for r in values}) == len(values))
         return (exact(payload, ("aps", "schema", "allowance"), ("selectionRevision", "sourceID"))

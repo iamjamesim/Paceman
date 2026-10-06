@@ -12,19 +12,13 @@ struct WatchUsageTransitions {
             try JSONDecoder().decode(WatchAllowanceSnapshot.self, from: JSONSerialization.data(withJSONObject:value))
         }
         var cache = WatchUsageState()
-        // Old phones remain decodable, but a saved Claude choice never becomes a Codex reading.
-        assert(cache.receive(["schema":1,"selectedProvider":"claude","selectionRevision":1,"sourceID":source,
-            "allowances":[reading("codex",70),reading("claude",20)]],authoritative:true,now:now))
-        assert(cache.selected(at:now) == nil)
-        assert(cache.reading(for:"claude",at:now) == nil)
-        assert(cache.summaries(at:now).map(\.provider) == ["codex"])
-        assert(cache.readings.count == 1)
+        // Only Codex quota is accepted; activity providers are unrelated.
         assert(!cache.receive(["schema":1,"selectionRevision":1,"sourceID":source,
-            "allowance":reading("claude",19,1800000001)],authoritative:false,now:now))
-        assert(cache.receive(["schema":1,"selectedProvider":"codex","selectionRevision":2,"sourceID":source,
+            "allowances":[reading("claude",20)]],authoritative:true,now:now))
+        assert(cache.receive(["schema":1,"selectionRevision":2,"sourceID":source,
             "allowances":[reading("codex",70)]],authoritative:true,now:now))
         assert(cache.selected(at:now)?.remaining == 70)
-        assert(!cache.receive(["schema":1,"selectedProvider":"claude","selectionRevision":1,"sourceID":source,
+        assert(!cache.receive(["schema":1,"selectionRevision":1,"sourceID":source,
             "allowances":[reading("claude",99)]],authoritative:true,now:now))
         assert(!cache.receive(["schema":1,"selectionRevision":1,"sourceID":source,
             "allowance":reading("codex",99)],authoritative:false,now:now))
@@ -53,7 +47,7 @@ struct WatchUsageTransitions {
             "allowance":session],authoritative:false,now:now))
         let later = now.addingTimeInterval(10)
         let bundle: [String:Any] = ["schema":2,"selectionRevision":2,"sourceID":source,
-            "observedAt":1800000010.0,"allowances":[reading("codex",50,1800000010),reading("claude",10,1800000010)]]
+            "observedAt":1800000010.0,"allowances":[reading("codex",50,1800000010)]]
         assert(cache.receive(bundle,authoritative:false,now:later))
         assert(cache.readings.count == 1 && cache.selected(at:later)?.remaining == 50)
         assert(!cache.receive(["schema":2,"selectionRevision":2,"sourceID":source,
@@ -75,25 +69,23 @@ struct WatchUsageTransitions {
         var fiveHour = reading("codex",1)
         fiveHour["window"] = 2; fiveHour["windowDurationMins"] = 300; fiveHour["resetsAt"] = 1800000005.0
         let windows = WatchUsageState(readings:[try decode(reading("codex",70)),try decode(fiveHour)])
-        assert(windows.reading(for:"codex",at:now)?.remaining == 1)
-        assert(windows.reading(for:"codex",at:later)?.remaining == 70)
+        assert(windows.selected(at:now)?.remaining == 1)
+        assert(windows.selected(at:later)?.remaining == 70)
         assert(windows.selected(at:now.addingTimeInterval(90000))?.available(at:now.addingTimeInterval(90000)) == false)
         let name = "paceman-usage-test-" + UUID().uuidString
         let defaults = UserDefaults(suiteName:name)!
         defer { defaults.removePersistentDomain(forName:name) }
-        let legacy = WatchUsageState(selectedProvider:"claude", readings:[try decode(reading("codex",70)),try decode(reading("claude",20))])
-        defaults.set(try JSONEncoder().encode(legacy),forKey:WatchUsageState.storageKey)
-        let migrated = WatchUsageState.load(defaults:defaults)
-        assert(migrated.selected(at:now) == nil && migrated.readings.map(\.provider) == ["codex"])
-        let saved = try JSONDecoder().decode(WatchUsageState.self,from:defaults.data(forKey:WatchUsageState.storageKey)!)
-        assert(saved == migrated)
-        assert(cache.receive(["schema":1,"selectedProvider":"codex","selectionRevision":3,"sourceID":other,
+        // Preserve the Codex cache written by the released Watch app.
+        let saved = try decode(reading("codex",70))
+        defaults.set(try JSONEncoder().encode(saved),forKey:WatchAllowanceSnapshot.storageKey)
+        assert(WatchUsageState.load(defaults:defaults).selected(at:now) == saved)
+        assert(cache.receive(["schema":1,"selectionRevision":3,"sourceID":other,
             "observedAt":1800000000.0,"allowances":[]],authoritative:true,now:later))
         assert(!cache.receive(bundle,authoritative:false,now:later))
         // After configuration, both computers deliver directly to the Watch;
         // there are no further phone callbacks in this offline-first scenario.
         func configuration(_ ids: [String], revision: Int, snapshots: [String: Any] = [:]) -> [String: Any] {
-            ["schema":1, "selectionRevision":revision, "selectedProvider":"codex", "sourceIDs":ids, "sources":snapshots]
+            ["schema":1, "selectionRevision":revision,  "sourceIDs":ids, "sources":snapshots]
         }
         func push(_ id: String, revision: Int = 4, at: Double, values: [[String: Any]]) -> [String: Any] {
             ["schema":2, "selectionRevision":revision, "sourceID":id, "observedAt":at, "allowances":values]

@@ -82,7 +82,6 @@ static uint32_t weather_detail_until;
 static uint32_t allowance_detail_until;
 static uint8_t allowance_remaining = 255;
 static uint8_t allowance_window;
-static uint8_t allowance_provider = 1;
 static int64_t allowance_updated_at;
 static int64_t allowance_resets_at;
 static int64_t weather_updated_at;
@@ -349,7 +348,6 @@ static void update_allowance(void)
     const int64_t now = time(NULL);
     const int remaining = omarchy_allowance_remaining(allowance_remaining, allowance_updated_at,
                                                      allowance_resets_at, now);
-    face_layout.allowance_provider = allowance_provider;
     watch_face_layout_set_allowance(&face_layout, remaining,
                                     allowance_window, allowance_resets_at - now);
     watch_face_layout_allowance_age(&face_layout, remaining, allowance_updated_at,
@@ -841,7 +839,6 @@ void watch_ui_apply_profile_v3(const omarchy_profile_v3_t *profile)
 void watch_ui_apply_profile_v4(const omarchy_profile_v4_t *profile)
 {
     if (profile == NULL) return;
-    allowance_provider = profile->base.version >= 6 ? allowance_provider : 1;
     allowance_remaining = profile->allowance_remaining;
     allowance_window = profile->allowance_window;
     allowance_updated_at = profile->allowance_updated_at;
@@ -854,13 +851,6 @@ void watch_ui_apply_profile_v5(const omarchy_profile_v5_t *profile)
     if (!profile) return;
     weather_daily_expires_at = profile->weather_daily_expires_at;
     watch_ui_apply_profile_v4(&profile->base);
-}
-
-void watch_ui_apply_profile_v6(const omarchy_profile_v6_t *profile)
-{
-    if (!profile) return;
-    allowance_provider = profile->allowance_provider;
-    watch_ui_apply_profile_v5((const omarchy_profile_v5_t *)profile);
 }
 
 void watch_ui_apply_activity(uint8_t state, uint32_t revision, bool alert, bool sound)

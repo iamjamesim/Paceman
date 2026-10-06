@@ -7,7 +7,6 @@ import WidgetKit
 struct PacemanWatchApp: App {
     @WKApplicationDelegateAdaptor(WatchPushDelegate.self) private var pushDelegate
     @StateObject private var store = WatchAllowanceStore.shared
-    @State private var showUnsupportedUsage = false
     // Ayu dark is the iPhone app's default glance palette.
     private let accent = Color(red: 1, green: 0.8, blue: 0.4)
 
@@ -28,12 +27,7 @@ struct PacemanWatchApp: App {
                     .padding(.vertical, 4)
                 }
             }
-            .onOpenURL { url in showUnsupportedUsage = url.host == "claude-usage-unsupported" }
-            .alert("Claude usage isn’t supported", isPresented: $showUnsupportedUsage) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("Use a Codex Limit or Codex Reset complication. Claude Code activity remains supported.")
-            }
+
         }
     }
 
@@ -136,11 +130,10 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
             let scenario = String(preview.dropFirst(16))
             let stale = scenario == "stale"
             let expired = scenario == "expired"
-            let providers = scenario == "claude-only" ? ["claude"] : ["codex", "claude"]
-            usage = WatchUsageState(selectedProvider: providers.first!, readings: scenario == "empty" ? [] : providers.map { provider in
-                WatchAllowanceSnapshot(provider: provider, remaining: provider == "claude" ? 20 : 70, window: 2,
+            usage = WatchUsageState(readings: scenario == "empty" ? [] : [
+                WatchAllowanceSnapshot(provider: "codex", remaining: 70, window: 2,
                     updatedAt: now - (stale ? 7200 : expired ? 4000 : 0), resetsAt: now + (expired ? -60 : 3600), windowDurationMins: 300)
-            })
+            ])
             return
         }
         #endif

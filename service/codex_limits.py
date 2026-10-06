@@ -105,11 +105,6 @@ def parse_codex_allowances(result: dict, observed_at: int) -> list[dict]:
             for used, window, reset, minutes in windows]
 
 
-def parse_codex_allowance(result: dict, observed_at: int) -> dict | None:
-    from service.usage import selected_reading
-    return selected_reading(parse_codex_allowances(result, observed_at))
-
-
 def read_codex_allowances() -> list[dict]:
     binary = codex_binary()
     if binary is None:
@@ -145,8 +140,3 @@ def read_codex_allowances() -> list[dict]:
                     pass
             process.stdin.close()
             process.stdout.close()
-
-
-def read_codex_allowance() -> dict | None:
-    from service.usage import selected_reading
-    return selected_reading(read_codex_allowances())

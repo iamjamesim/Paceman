@@ -1,7 +1,7 @@
 import Foundation
 import WatchConnectivity
 
-/// Only bounded usage readings and the user’s selection cross to watchOS. No source credentials do.
+/// Only bounded usage readings and paired source IDs cross to watchOS. No source credentials do.
 final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
     static let shared = AppleWatchAllowanceBridge()
     private var pending: [String: Any] = ["schema": 1]
@@ -14,7 +14,7 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
         WCSession.default.activate()
     }
 
-    func update(_ allowance: CodexAllowance?, readings: [CodexAllowance] = [], provider: String = "codex",
+    func update(_ allowance: CodexAllowance?, readings: [CodexAllowance] = [],
                 selectionRevision: Int = 0, sourceID: String? = nil, observedAt: TimeInterval? = nil, clear: Bool = false, sourceIDs: [String] = [], snapshots: [Snapshot] = []) {
         if let allowance, allowance.valid {
             pending = ["schema": 1, "provider": allowance.provider, "remaining": allowance.remaining,
@@ -26,7 +26,6 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
         }
         if let sourceID { pending["sourceID"] = sourceID }
         if let observedAt { pending["observedAt"] = observedAt }
-        pending["selectedProvider"] = provider
         pending["selectionRevision"] = selectionRevision
         if let data = try? JSONEncoder().encode(readings.filter { $0.valid }),
            let values = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {

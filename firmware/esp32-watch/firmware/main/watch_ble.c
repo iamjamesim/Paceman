@@ -76,7 +76,7 @@ static omarchy_activity_v1_t activity = {
 
 /* Keep I2C, flash, and display work out of NimBLE callbacks. */
 typedef struct {
-    omarchy_profile_v6_t packet;
+    omarchy_profile_v5_t packet;
     uint16_t packet_length;
     watch_peer_identity_t peer;
 } pending_profile_t;
@@ -216,10 +216,8 @@ static void apply_profile_task(void *argument)
             ESP_LOGW(TAG, "Could not update RTC: %s", esp_err_to_name(rtc_err));
         }
 
-        if (base->version == 6) {
-            watch_ui_apply_profile_v6(&pending.packet);
-        } else if (base->version == 5) {
-            watch_ui_apply_profile_v5((const omarchy_profile_v5_t *)&pending.packet);
+        if (base->version == 5) {
+            watch_ui_apply_profile_v5(&pending.packet);
         } else if (base->version == 4) {
             watch_ui_apply_profile_v4(&pending.packet.base);
         } else if (base->version == 3) {
@@ -443,12 +441,11 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
             packet_length != sizeof(omarchy_profile_v2_t) &&
             packet_length != sizeof(omarchy_profile_v3_t) &&
             packet_length != sizeof(omarchy_profile_v4_t) &&
-            packet_length != sizeof(omarchy_profile_v5_t) &&
-            packet_length != sizeof(omarchy_profile_v6_t)) {
+            packet_length != sizeof(omarchy_profile_v5_t)) {
             return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
         }
 
-        omarchy_profile_v6_t packet = {0};
+        omarchy_profile_v5_t packet = {0};
         uint16_t copied = 0;
         if (ble_hs_mbuf_to_flat(ctxt->om, &packet, packet_length, &copied) != 0 ||
             copied != packet_length) {
@@ -464,9 +461,7 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
                            omarchy_profile_v4_is_valid(&packet.base);
         const bool is_v5 = packet_length == sizeof(omarchy_profile_v5_t) &&
                            omarchy_profile_v5_is_valid((const omarchy_profile_v5_t *)&packet);
-        const bool is_v6 = packet_length == sizeof(omarchy_profile_v6_t) &&
-                           omarchy_profile_v6_is_valid(&packet);
-        if (!is_v1 && !is_v2 && !is_v3 && !is_v4 && !is_v5 && !is_v6) {
+        if (!is_v1 && !is_v2 && !is_v3 && !is_v4 && !is_v5) {
             return BLE_ATT_ERR_UNLIKELY;
         }
         const omarchy_profile_v1_t *base = (const omarchy_profile_v1_t *)&packet;

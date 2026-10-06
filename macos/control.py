@@ -15,7 +15,7 @@ import sys
 import time
 import uuid
 
-from macos.agents import CLAUDE_PURPOSES, PROVIDERS, configured_providers, detected_providers, claude_config_dir, provider_config, hook_path, installed_hook_command
+from macos.agents import CLAUDE_PURPOSES, PROVIDERS, configured_providers, detected_providers, provider_config, hook_path, installed_hook_command
 from service.network import ensure_private_route
 from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint

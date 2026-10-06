@@ -14,7 +14,8 @@ import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from service.codex_limits import codex_binary, parse_codex_allowance, read_codex_allowance
+from service.codex_limits import codex_binary, parse_codex_allowances, read_codex_allowances
+from service.usage import selected_reading
 from service.codex_turns import read_codex_turn_statuses
 from service.hub import Store
 from service.macos import FINISHED_RETENTION, MacSource
@@ -220,18 +221,18 @@ class MacSourceTests(unittest.TestCase):
         limits = {"rateLimitsByLimitId": {"codex": {"limitId": "codex",
             "primary": {"usedPercent": 25, "windowDurationMins": 300, "resetsAt": now + 1000},
             "secondary": {"usedPercent": 61, "windowDurationMins": 10080, "resetsAt": now + 5000}}}}
-        self.assertEqual(parse_codex_allowance(limits, now),
+        self.assertEqual(selected_reading(parse_codex_allowances(limits, now)),
                          {"provider": "codex", "remaining": 39, "window": 1,
                           "windowDurationMins": 10080,
                           "updatedAt": now, "resetsAt": now + 5000})
         limits["rateLimitsByLimitId"]["codex"]["primary"]["usedPercent"] = 61
-        self.assertEqual(parse_codex_allowance(limits, now)["window"], 1)
+        self.assertEqual(selected_reading(parse_codex_allowances(limits, now))["window"], 1)
         limits["rateLimitsByLimitId"]["codex"]["primary"]["usedPercent"] = 25
         limits["rateLimitsByLimitId"]["codex"]["secondary"]["usedPercent"] = 101
-        self.assertIsNone(parse_codex_allowance(limits, now))
+        self.assertIsNone(selected_reading(parse_codex_allowances(limits, now)))
         limits["rateLimitsByLimitId"]["codex"]["secondary"]["usedPercent"] = 61
         limits["rateLimitsByLimitId"]["codex"]["secondary"]["resetsAt"] = now - 1
-        self.assertIsNone(parse_codex_allowance(limits, now))
+        self.assertIsNone(selected_reading(parse_codex_allowances(limits, now)))
 
     def test_codex_limit_reader_uses_only_chatgpt_account(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -249,13 +250,15 @@ class MacSourceTests(unittest.TestCase):
                 " print(json.dumps({'id': msg['id'], 'result': result}), flush=True)\n")
             binary.chmod(0o700)
             with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": str(binary)}):
-                value = read_codex_allowance()
+                values = read_codex_allowances()
+            self.assertEqual(len(values), 1)
+            value = values[0]
             self.assertEqual(value["provider"], "codex")
             self.assertEqual(value["remaining"], 80)
             self.assertEqual(value["window"], 2)
             with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": str(binary),
                                               "FAKE_ACCOUNT_TYPE": "apiKey"}):
-                self.assertIsNone(read_codex_allowance())
+                self.assertEqual(read_codex_allowances(), [])
 
     def test_lifecycle_and_multiple_sessions(self):
         with tempfile.TemporaryDirectory() as temporary:

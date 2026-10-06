@@ -54,12 +54,11 @@ final class CompanionModel: ObservableObject {
                 let observed = Int64(now) - (stale ? 7200 : expired ? 4000 : 0)
                 let reset = Int64(now) + (expired ? -60 : 3600)
                 let providers = claudeOnly ? ["claude"] : ["codex", "claude"]
-                let values = empty ? [] : providers.flatMap { provider in
-                    [CodexAllowance(provider: provider, remaining: provider == "claude" ? 20 : 70,
-                        window: 2, updatedAt: observed, resetsAt: reset, windowDurationMins: 300),
-                     CodexAllowance(provider: provider, remaining: provider == "claude" ? 80 : 5,
-                        window: 1, updatedAt: observed, resetsAt: Int64(now) + 86400, windowDurationMins: 10080)]
-                }
+                let values = empty || claudeOnly ? [] : [
+                    CodexAllowance(provider: "codex", remaining: 70, window: 2,
+                        updatedAt: observed, resetsAt: reset, windowDurationMins: 300),
+                    CodexAllowance(provider: "codex", remaining: 5, window: 1,
+                        updatedAt: observed, resetsAt: Int64(now) + 86400, windowDurationMins: 10080)]
                 snapshots[id] = Snapshot(schema: 1, sourceID: id, generation: id, revision: 1,
                     sourceName: "Jamess-MacBook-Pro", observedAt: Double(observed), changedAt: Double(observed),
                     freshFor: 30, state: .needsInput, eventID: "1", allowance: nil,
@@ -184,10 +183,8 @@ final class CompanionModel: ObservableObject {
     private func forwardWatchAggregate() {
         let sourceIDs = pairedSources.filter { !isRevoked($0.sourceID) }.map(\.sourceID)
         let sourceID = sourceIDs.first
-        if !designPreview && (UserDefaults.standard.string(forKey: "usage-provider") != "codex"
-            || UserDefaults.standard.stringArray(forKey: "usage-sources") != sourceIDs) {
+        if !designPreview && UserDefaults.standard.stringArray(forKey: "usage-sources") != sourceIDs {
             usageSelectionRevision = max(usageSelectionRevision + 1, Int(Date().timeIntervalSince1970 * 1000))
-            UserDefaults.standard.set("codex", forKey: "usage-provider")
             UserDefaults.standard.set(sourceIDs, forKey: "usage-sources")
             UserDefaults.standard.set(usageSelectionRevision, forKey: "usage-selection-revision")
             Task { await syncWatchPush() }
@@ -198,7 +195,7 @@ final class CompanionModel: ObservableObject {
         if !designPreview {
             AppleWatchAllowanceBridge.shared.update(value?.allowance,
                 readings: watchUsageSource?.usageReadings ?? [],
-                provider: "codex", selectionRevision: usageSelectionRevision, sourceID: sourceID, observedAt: watchUsageSource?.observedAt,
+                selectionRevision: usageSelectionRevision, sourceID: sourceID, observedAt: watchUsageSource?.observedAt,
                 clear: sourceIDs.isEmpty, sourceIDs: sourceIDs,
                 snapshots: sourceIDs.compactMap { snapshots[$0] })
         }

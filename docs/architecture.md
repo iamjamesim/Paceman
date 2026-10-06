@@ -46,7 +46,7 @@ so one computer going offline does not require the phone to switch sources.
 The Watch caches each computer separately, chooses the newest available Codex
 reading by its quota observation time, and shows its most constrained unexpired
 window in Codex Limit and Codex Reset. Older or empty data from another computer
-cannot erase that reading. This still assumes one Codex account across computers.
+cannot erase that reading.
 
 WatchConnectivity also supplies the paired-computer list and cached readings.
 Apple Watch delivery is independent of ESP32 Bluetooth. Exact fields and
