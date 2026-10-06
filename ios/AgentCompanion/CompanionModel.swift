@@ -15,10 +15,6 @@ final class CompanionModel: ObservableObject {
     @Published var revokedSources: Set<String> = []
     @Published var status = "Connect a work source"
     @Published var busy = false
-    var availableAgentApps: [AgentAppLink] {
-        AgentAppLink.available(in: pairedSources.filter { !isRevoked($0.sourceID) }
-            .compactMap { snapshots[$0.sourceID] })
-    }
     private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
     private let client = SourceClient()
     private let pairedStore = PairedSourcesStore()

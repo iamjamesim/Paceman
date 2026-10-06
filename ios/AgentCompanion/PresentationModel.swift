@@ -68,17 +68,17 @@ final class PresentationModel: ObservableObject {
                     AgentSession(id: "4", provider: "codex", state: .failed)]
         }
         guard !["empty", "claude-empty", "legacy-empty", "providers-none"].contains(previewScreen) else { return [] }
-        if ["claude-only", "claude-offline", "claude-long"].contains(previewScreen) {
+        if ["claude-only", "claude-offline", "claude-long", "claude-local"].contains(previewScreen) {
             return [AgentSession(id: "1", provider: "claude", state: .working,
                 name: previewScreen == "claude-long" ? "Investigate multi-machine source recovery after a long disconnect" : "API cleanup",
-                project: "paceman")]
+                project: "paceman", remoteSessionID: previewScreen == "claude-local" ? nil : "session_previewClaude")]
         }
         if ["single-finished", "single-offline", "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(previewScreen) { return [AgentSession(id: "1", provider: "codex", state: .finished)] }
         if previewScreen == "single-working" { return [AgentSession(id: "1", provider: "codex", state: .working)] }
         if previewScreen == "single-input" { return [AgentSession(id: "1", provider: "codex", state: .needsInput)] }
         if previewScreen == "single-failed" { return [AgentSession(id: "1", provider: "codex", state: .failed)] }
         return [AgentSession(id: "1", provider: "codex", state: .needsInput, name: "Fix checkout redirect", project: "storefront"),
-                AgentSession(id: "2", provider: "claude", state: .working, name: "API cleanup", project: "paceman"),
+                AgentSession(id: "2", provider: "claude", state: .working, name: "API cleanup", project: "paceman", remoteSessionID: "session_previewClaude"),
                 AgentSession(id: "3", provider: "codex", state: .finished, name: "Update watch theme", project: "paceman")]
     }
     func theme(dark: Bool) -> CompanionTheme { themeFamily.phone(dark: dark) }
@@ -107,6 +107,23 @@ struct AgentSession: Codable, Identifiable, Equatable {
     var name: String?
     var project: String?
     var workspaceLabel: String?
+    var remoteSessionID: String?
+    var appURL: URL? {
+        switch provider {
+        case "codex": return URL(string: "chatgpt://codex")
+        case "claude":
+            if let remoteSessionID,
+               remoteSessionID.range(of: "^session_[A-Za-z0-9_-]{1,152}\\z", options: .regularExpression) != nil {
+                return URL(string: "claude://code/" + remoteSessionID)
+            }
+            return URL(string: "claude://code")
+        default: return nil
+        }
+    }
+    var appLinkTitle: String {
+        if provider == "codex" { return "Open Codex" }
+        return "Open in Claude"
+    }
     var displayName: String { String((name ?? (provider == "fixture" ? "Test agent" : provider.capitalized)).prefix(80)) }
     var detail: String {
         if provider == "fixture" { return "Local test source" }
@@ -179,7 +196,7 @@ struct AgentDisplayRow: Identifiable {
         for session in sessions {
             let identifiable = [session.name, session.project].compactMap { $0 }
                 .contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            if identifiable {
+            if identifiable || (session.provider == "claude" && session.remoteSessionID != nil) {
                 rows.append(Self(id: "session:" + session.id, session: session, detail: session.detail))
             } else { unnamed[session.provider, default: []].append(session) }
         }

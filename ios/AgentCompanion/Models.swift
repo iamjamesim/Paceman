@@ -44,24 +44,6 @@ struct Snapshot: Codable {
     var identity: String { "\(sourceID)/\(generation)/\(eventID)" }
 }
 
-enum AgentAppLink: String, CaseIterable, Identifiable {
-    case codex, claude
-    var id: String { rawValue }
-    var title: String { self == .codex ? "Open Codex" : "Open Claude Code" }
-    var url: URL { URL(string: self == .codex ? "chatgpt://codex" : "claude://code")! }
-
-    static func available(in snapshots: [Snapshot]) -> [AgentAppLink] {
-        let providers = Set(snapshots.flatMap { snapshot -> [String] in
-            // Configuration stays authoritative even when old sessions or usage remain.
-            if let configured = snapshot.configuredProviders { return configured }
-            let observed = (snapshot.sessions ?? []).map(\.provider) + snapshot.usageReadings.map(\.provider)
-            // Sources predating provider metadata supported Codex only.
-            return observed.isEmpty ? ["codex"] : observed
-        })
-        return allCases.filter { providers.contains($0.rawValue) }
-    }
-}
-
 enum WatchAggregate {
     static func usageSource(current: [Snapshot], profiles: [Snapshot], now: Double) -> Snapshot? {
         func recent(_ snapshot: Snapshot) -> Bool {

@@ -8,6 +8,7 @@ class ClaudeSession:
     turn: str = ""
     base_state: str = "idle"
     workspace_label: str | None = None
+    remote_session_id: str | None = None
     updated: float = field(default_factory=time.time)
     # Pending attention survives unrelated parallel tool completions.
     waits: dict[str, float] = field(default_factory=dict)
@@ -40,6 +41,8 @@ class ClaudeSession:
         else:
             self.turn = turn
             self.base_state = "working"
+        if "remoteSessionID" in command:
+            self.remote_session_id = command["remoteSessionID"]
         self.workspace_label = command.get("workspaceLabel") or self.workspace_label
         self.updated = time.time()
         tool, tool_id = command.get("tool"), command.get("toolUse")

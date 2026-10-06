@@ -52,24 +52,6 @@ struct CompanionHome: View {
                                 .padding(.top, paired.sourceID == model.pairedSources.first?.sourceID ? 0 : 12)
                                 .id(paired.sourceID)
                         }
-                        if !model.availableAgentApps.isEmpty {
-                            VStack(alignment: .leading, spacing: 0) {
-                                ForEach(model.availableAgentApps) { app in
-                                    Link(destination: app.url) {
-                                        HStack(spacing: 6) {
-                                            Text(app.title).multilineTextAlignment(.leading)
-                                            Image(systemName: "arrow.up.right").accessibilityHidden(true)
-                                        }
-                                        .font(.subheadline.weight(.medium))
-                                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                        .contentShape(Rectangle())
-                                    }
-                                    .foregroundStyle(theme.tint)
-                                }
-                            }
-                            .padding(.top, 12)
-                            .id("agent-apps")
-                        }
                     } else { agentSetup }
                     if presentation.preview {
                         Text("Design preview · sample activity").font(.caption)
@@ -81,7 +63,7 @@ struct CompanionHome: View {
             .onAppear {
                 #if DEBUG
                 if presentation.preview && ProcessInfo.processInfo.arguments.contains("--scroll-to-agent-apps") {
-                    DispatchQueue.main.async { proxy.scrollTo("agent-apps", anchor: .bottom) }
+                    DispatchQueue.main.async { proxy.scrollTo(model.pairedSources.last?.sourceID, anchor: .bottom) }
                 }
                 #endif
                 if let focusedSourceID { proxy.scrollTo(focusedSourceID, anchor: .top) }
@@ -245,6 +227,7 @@ struct CompanionHome: View {
                             if !leading.detail.isEmpty {
                                 Text(leading.detail).font(.caption).foregroundStyle(theme.secondaryInk).padding(.top, 3)
                             }
+                            sessionPill(leading.session).padding(.top, 6)
                         } else {
                             VStack(spacing: 0) {
                                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
@@ -288,22 +271,46 @@ struct CompanionHome: View {
     }
 
     private func activityRow(_ row: AgentDisplayRow, historical: Bool) -> some View {
-        let layout = typeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-        return layout {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(row.session.displayName).font(.subheadline.weight(.medium))
-                    .foregroundStyle(historical ? theme.secondaryInk : theme.ink)
-                if !row.detail.isEmpty {
-                    Text(row.detail).font(.caption).foregroundStyle(theme.secondaryInk)
+        VStack(alignment: .leading, spacing: 6) {
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            layout {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(row.session.displayName).font(.subheadline.weight(.medium))
+                        .foregroundStyle(historical ? theme.secondaryInk : theme.ink)
+                    if !row.detail.isEmpty {
+                        Text(row.detail).font(.caption).foregroundStyle(theme.secondaryInk)
+                    }
                 }
-            }
-            if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
-            Text(row.session.state.title).font(.caption.weight(.medium))
-                .foregroundStyle(historical ? theme.secondaryInk : stateColor(row.session.state))
-                .fixedSize(horizontal: true, vertical: false)
-        }.padding(.vertical, 10).accessibilityElement(children: .combine)
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
+                Text(row.session.state.title).font(.caption.weight(.medium))
+                    .foregroundStyle(historical ? theme.secondaryInk : stateColor(row.session.state))
+                    .fixedSize(horizontal: false, vertical: true)
+            }.accessibilityElement(children: .combine)
+            sessionPill(row.session)
+        }.padding(.vertical, 10)
+    }
+
+    @ViewBuilder private func sessionPill(_ session: AgentSession) -> some View {
+        if let url = session.appURL {
+            Link(destination: url) {
+                HStack(spacing: 5) {
+                    Text(session.appLinkTitle).multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Image(systemName: "arrow.up.right").accessibilityHidden(true)
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(theme.tint)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(theme.tint.opacity(0.12), in: Capsule())
+                .overlay(Capsule().strokeBorder(theme.tint.opacity(0.3), lineWidth: 0.5))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .accessibilityHint(session.provider == "claude" && session.appURL?.path.isEmpty == false
+                    ? "Open \(session.displayName) in Claude Code" : "Open the agent app")
+        }
     }
 
     private func stateColor(_ state: ActivityState) -> Color {

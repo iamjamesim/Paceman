@@ -8,34 +8,39 @@ import CryptoKit
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
-    private func appLinkSnapshot(_ providers: [String]?, sessions: [AgentSession] = []) -> Snapshot {
-        Snapshot(schema: 1, sourceID: "source", generation: "g", revision: 1,
-            sourceName: "source", observedAt: 1, changedAt: 1, freshFor: 30,
-            state: .idle, eventID: "1", allowance: nil, sessions: sessions,
-            configuredProviders: providers)
+    func testSessionLinksUseRemoteIdentityInsteadOfOpaqueRowID() throws {
+        let session = try JSONDecoder().decode(AgentSession.self, from: Data(
+            #"{"id":"hashed-local-row","provider":"claude","state":"working","remoteSessionID":"session_remote123"}"#.utf8))
+        XCTAssertEqual(session.appURL?.absoluteString, "claude://code/session_remote123")
+        XCTAssertEqual(session.appLinkTitle, "Open in Claude")
+        for state in ActivityState.allCases {
+            let codex = AgentSession(id: "opaque", provider: "codex", state: state)
+            XCTAssertEqual(codex.appURL?.absoluteString, "chatgpt://codex")
+            XCTAssertEqual(codex.appLinkTitle, "Open Codex")
+        }
     }
 
-    func testAgentAppLinksUseConfigurationEvenWhenIdleOrStale() {
-        let claude = appLinkSnapshot(["claude"], sessions: [AgentSession(id: "old", provider: "codex", state: .finished)])
-        XCTAssertEqual(AgentAppLink.available(in: [claude]), [.claude])
-        XCTAssertEqual(AgentAppLink.available(in: [appLinkSnapshot(["codex"])]), [.codex])
-        XCTAssertEqual(AgentAppLink.available(in: [appLinkSnapshot([], sessions: claude.sessions ?? [])]), [])
-        XCTAssertEqual(AgentAppLink.available(in: []), [])
+    func testSessionLinksFallbackForLocalClaudeAndRejectUnsafeIDs() throws {
+        let legacy = try JSONDecoder().decode(AgentSession.self, from: Data(
+            #"{"id":"local-only","provider":"claude","state":"finished"}"#.utf8))
+        XCTAssertEqual(legacy.appURL?.absoluteString, "claude://code")
+        XCTAssertEqual(legacy.appLinkTitle, "Open in Claude")
+        for invalid in ["local-uuid", "session_x\n", "session_x/other", "session_x?prompt=secret", "session_", "session_" + String(repeating: "x", count: 153)] {
+            var session = legacy
+            session.remoteSessionID = invalid
+            XCTAssertEqual(session.appURL?.absoluteString, "claude://code")
+            XCTAssertEqual(session.appLinkTitle, "Open in Claude")
+        }
+        XCTAssertNil(AgentSession(id: "test", provider: "fixture", state: .working).appURL)
     }
 
-    func testAgentAppLinksCombineComputersWithoutDuplicatingShortcuts() {
-        let links = AgentAppLink.available(in: [appLinkSnapshot(["claude"]), appLinkSnapshot(["codex", "claude", "unknown"])])
-        XCTAssertEqual(links, [.codex, .claude])
-        XCTAssertEqual(links.map { $0.url.absoluteString }, ["chatgpt://codex", "claude://code"])
-    }
-
-    func testAgentAppLinksSupportSourcesWithoutProviderMetadata() {
-        let claude = appLinkSnapshot(nil, sessions: [AgentSession(id: "1", provider: "claude", state: .working)])
-        XCTAssertEqual(AgentAppLink.available(in: [claude]), [.claude])
-        XCTAssertEqual(AgentAppLink.available(in: [appLinkSnapshot(nil)]), [.codex])
-        var usageOnly = claude
-        usageOnly.allowance = CodexAllowance(provider: "codex", remaining: 20, window: 2, updatedAt: 1_790_000_000, resetsAt: 1_790_003_600)
-        XCTAssertEqual(AgentAppLink.available(in: [usageOnly]), [.codex, .claude])
+    func testRemotelyAddressableClaudeRowsRemainIndividual() {
+        let rows = AgentDisplayRow.rows([
+            AgentSession(id: "a", provider: "claude", state: .working, remoteSessionID: "session_a"),
+            AgentSession(id: "b", provider: "claude", state: .working, remoteSessionID: "session_b")])
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(Set(rows.compactMap { $0.session.appURL?.absoluteString }),
+                       ["claude://code/session_a", "claude://code/session_b"])
     }
 
     func testWatchAllowancePrefersFreshConnectedSourceThenCachedHistory() {

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from macos.claude_hook import message_for
 from service.hub import Store
@@ -138,11 +139,13 @@ class ClaudeTests(unittest.TestCase):
             prompt_id='private-prompt-id', cwd=str(project), prompt='PRIVATE PROMPT',
             transcript_path='/PRIVATE TRANSCRIPT', tool_input={'command': 'PRIVATE COMMAND'})
         result = subprocess.run([sys.executable, 'macos/claude_hook.py'], input=json.dumps(payload),
-            env={**os.environ, 'PACEMAN_HOOK_SOCKET': str(self.root / 'hook.sock')},
+            env={**os.environ, 'PACEMAN_HOOK_SOCKET': str(self.root / 'hook.sock'),
+                 'CLAUDE_CODE_BRIDGE_SESSION_ID': 'session_socketRemote'},
             capture_output=True, text=True, check=True)
         self.assertEqual((result.stdout, result.stderr), ('', ''))
         snapshot = self.store.snapshot()
         self.assertEqual(snapshot['sessions'][0]['provider'], 'claude')
+        self.assertEqual(snapshot['sessions'][0]['remoteSessionID'], 'session_socketRemote')
         content = live_notification(snapshot, time.time())[0]['aps']['content-state']
         self.assertEqual(content['providers'], ['claude'])
         self.assertEqual(content['workspaceLabel'], 'project')
@@ -154,6 +157,45 @@ class ClaudeTests(unittest.TestCase):
         status = json.loads((self.root / 'status.json').read_text())
         self.assertEqual(status['providers'], ['claude'])
         self.assertGreater(status['lastAgentEventByProvider']['claude'], 0)
+
+    def test_remote_id_round_trip_updates_and_disconnect_without_new_alert(self):
+        with patch.dict(os.environ, {'CLAUDE_CODE_BRIDGE_SESSION_ID': 'session_remoteA'}):
+            message = self.hook('UserPromptSubmit')
+        snapshot = self.store.snapshot()
+        self.assertEqual(message['remoteSessionID'], 'session_remoteA')
+        self.assertEqual(snapshot['sessions'][0]['remoteSessionID'], 'session_remoteA')
+        self.assertNotEqual(snapshot['sessions'][0]['id'], 'one')
+        event_id = snapshot['eventID']
+        with patch.dict(os.environ, {'CLAUDE_CODE_BRIDGE_SESSION_ID': 'session_remoteB'}):
+            self.hook('PreToolUse', tool_name='Read', tool_use_id='r')
+        updated = self.store.snapshot()
+        self.assertEqual(updated['sessions'][0]['remoteSessionID'], 'session_remoteB')
+        self.assertEqual(updated['eventID'], event_id)
+        with patch.dict(os.environ, {'CLAUDE_CODE_BRIDGE_SESSION_ID': ''}):
+            self.hook('PostToolUse', tool_name='Read', tool_use_id='r')
+        self.assertNotIn('remoteSessionID', self.store.snapshot()['sessions'][0])
+        self.assertEqual(self.store.snapshot()['eventID'], event_id)
+
+    def test_remote_id_does_not_follow_stale_callback_or_leak_into_live_activity(self):
+        with patch.dict(os.environ, {'CLAUDE_CODE_BRIDGE_SESSION_ID': 'session_current'}):
+            self.hook('UserPromptSubmit', turn='new')
+        with patch.dict(os.environ, {'CLAUDE_CODE_BRIDGE_SESSION_ID': 'session_old'}):
+            self.hook('Stop', turn='old')
+        snapshot = self.store.snapshot()
+        self.assertEqual(snapshot['sessions'][0]['remoteSessionID'], 'session_current')
+        content = live_notification(snapshot, time.time())[0]['aps']['content-state']
+        self.assertNotIn('session_current', json.dumps(content))
+        self.hook('SessionEnd', turn='new')
+        self.assertEqual(self.store.snapshot()['sessions'], [])
+
+    def test_invalid_remote_ids_cannot_become_links(self):
+        for remote_id in ('local-uuid', 'session_x\n', 'session_x/other', 'session_x?prompt=secret', 'session_', 'session_' + 'x' * 153):
+            with patch.dict(os.environ, {'CLAUDE_CODE_BRIDGE_SESSION_ID': remote_id}):
+                self.assertIsNone(message_for(dict(hook_event_name='UserPromptSubmit',
+                    session_id='one', prompt_id='prompt'))['remoteSessionID'])
+            with self.assertRaises(ValueError):
+                self.source.receive(dict(command='agent-event', provider='claude', session='one',
+                    turn='prompt', event='working', hook='UserPromptSubmit', remoteSessionID=remote_id))
 
     def test_adapter_failure_never_blocks_claude(self):
         for payload in ('garbage', '[]', json.dumps(dict(hook_event_name='Stop',

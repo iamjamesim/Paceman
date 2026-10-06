@@ -43,7 +43,7 @@ Keep Paceman’s hook-review window open while checking. If you use the Codex CL
 
 The command shown in setup uses this installation’s Python runtime, the `-B` flag, and the hook script in your Mac user account. It is generated for your installation. Compare the full command in every Paceman row; don’t run it in a terminal or trust unrelated hooks.
 
-The hooks send event names, opaque task and turn IDs, and an optional short project label to Paceman’s private local socket. They don’t send prompts, replies, transcripts, tool arguments, or full paths. Project labels may appear on your iPhone Lock Screen.
+The hooks send event names, opaque task and turn IDs, and an optional short project label to Paceman’s private local socket. Claude hooks also send the Remote Control session ID when available, so the iPhone can open that chat. They don’t send prompts, replies, transcripts, tool arguments, or full paths. Project labels may appear on your iPhone Lock Screen.
 
 </details>
 
