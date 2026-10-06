@@ -61,11 +61,6 @@ struct CompanionHome: View {
             }
             .refreshable { if !presentation.preview { await model.refreshAll() } }
             .onAppear {
-                #if DEBUG
-                if presentation.preview && ProcessInfo.processInfo.arguments.contains("--scroll-to-agent-apps") {
-                    DispatchQueue.main.async { proxy.scrollTo(model.pairedSources.last?.sourceID, anchor: .bottom) }
-                }
-                #endif
                 if let focusedSourceID { proxy.scrollTo(focusedSourceID, anchor: .top) }
             }
             .onChange(of: focusedSourceID) { _, id in
@@ -77,7 +72,7 @@ struct CompanionHome: View {
     }
 
     private var computersHeading: some View {
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 3)) : AnyLayout(HStackLayout())
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout())
         return layout {
             if typeSize.isAccessibilitySize {
                 Text("Computers").font(.headline).accessibilityAddTraits(.isHeader)
@@ -173,12 +168,12 @@ struct CompanionHome: View {
         }()
         return VStack(alignment: .leading, spacing: 0) {
             Button { open(.otherComputer(id)) } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     if !typeSize.isAccessibilitySize {
                         Image(systemName: "laptopcomputer")
                             .font(.caption).foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
                     }
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(presentation.displayName(source: paired, snapshot: value))
                             .font(.system(.subheadline, design: .rounded, weight: .medium))
                             .multilineTextAlignment(.leading)
@@ -205,16 +200,16 @@ struct CompanionHome: View {
                         Button("Reconnect") { open(.otherComputer(id)) }
                             .buttonStyle(.plain).font(.caption.weight(.semibold)).foregroundStyle(theme.ink).frame(minHeight: 44)
                     }
-                }.padding(.top, 3)
+                }.padding(.top, 4)
             }
             if content != .waiting && (firstPreview || model.lastContacts[id] != nil) {
                 ComputerReceiptLabel(model: model, presentation: presentation, sourceID: id)
-                    .font(.caption2).foregroundStyle(theme.secondaryInk).padding(.top, 5)
+                    .font(.caption2).foregroundStyle(theme.secondaryInk).padding(.top, 4)
             }
             Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5).padding(.top, 16)
             if state == .revoked {
                 Text("Reconnect to receive activity from this computer.")
-                    .font(.subheadline).foregroundStyle(theme.secondaryInk).padding(.top, 18)
+                    .font(.subheadline).foregroundStyle(theme.secondaryInk).padding(.top, 16)
             } else {
                 switch content {
                 case .sessions:
@@ -256,12 +251,12 @@ struct CompanionHome: View {
 
     private func activityRow(_ row: AgentDisplayRow, historical: Bool) -> some View {
         let layout = typeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         return layout {
             if !typeSize.isAccessibilitySize {
                 ActivityRobot(state: row.session.state, animate: !historical)
-                    .frame(width: 22, height: 22)
+                    .frame(width: 24, height: 24)
                     .foregroundStyle(historical ? theme.secondaryInk : stateColor(row.session.state))
                     .accessibilityHidden(true)
             }
@@ -279,7 +274,7 @@ struct CompanionHome: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .font(.caption2.weight(.medium))
                 .foregroundStyle(theme.canvas)
-                .padding(.horizontal, 9).padding(.vertical, 5)
+                .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(theme.ink, in: Capsule())
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
@@ -294,10 +289,10 @@ struct CompanionHome: View {
     }
 
     private func emptyActivity(_ title: String, detail: String?) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.system(.title3, design: .rounded, weight: .semibold))
             if let detail { Text(detail).font(.caption).foregroundStyle(theme.secondaryInk) }
-        }.padding(.top, 18)
+        }.padding(.top, 16)
     }
 }
 
@@ -359,8 +354,8 @@ struct WatchConnectionSummary: View {
         }
     }
     var body: some View {
-        VStack(alignment: centered ? .center : .leading, spacing: 7) {
-            HStack(spacing: 5) {
+        VStack(alignment: centered ? .center : .leading, spacing: 8) {
+            HStack(spacing: 4) {
                 if !typeSize.isAccessibilitySize {
                     Circle().fill(ready ? theme.tint : theme.ink.opacity(0.3)).frame(width: 5, height: 5)
                 }
