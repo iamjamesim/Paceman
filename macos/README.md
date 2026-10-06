@@ -22,9 +22,14 @@ Hooks let Codex send activity events to Paceman. Review them yourself before tru
 
 1. In Codex, open **Settings → Hooks → User config (All projects)**.
 2. Expand **Hook 1** under each of the eight events listed in Paceman. Click **Trust** only if the command matches the one in Paceman’s setup window.
-3. Start a **new local Codex task** on this Mac and send a prompt. Paceman should show **A new Codex event reached Paceman.**
+3. Start a **new saved local Codex task** in the interface you use on this Mac and send a short prompt. Paceman should show **A new Codex event reached Paceman.** Wait for a successful reply and confirm Paceman shows the task as **Finished**.
 
 Keep Paceman’s hook-review window open while checking. If you use the Codex CLI, enter `/hooks` or select **Review hooks** at startup instead.
+
+Agents helping with setup should use the app or interactive CLI, rather than
+`codex exec --ephemeral`: if that check exits without an ending hook, it leaves
+no saved turn for Paceman to recover. A failed check does not complete setup;
+inspect any leftover **Working** row before handing off.
 
 <details>
 <summary>The eight hooks and what they send</summary>
@@ -159,7 +164,8 @@ For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the installer.
 
 Open **Review agent hooks…** in Manage Paceman (or **Review Codex hooks…** under Activity on a Codex-only install) and recheck each selected agent’s rows. **Setup needed** means commands are missing; **No activity yet** means no event has arrived; **No active work** means an observed session is idle.
 
-For a terminal check, start a fresh local task and verify that `lastAgentEventAt` advances:
+For a terminal check, follow the [Codex verification steps](#codex) above and
+verify that `lastAgentEventAt` advances:
 
 ```sh
 "$HOME/Library/Application Support/Paceman/bin/pacemanctl" status
