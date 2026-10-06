@@ -24,12 +24,12 @@ final class ProtocolTests: XCTestCase {
         let legacy = try JSONDecoder().decode(AgentSession.self, from: Data(
             #"{"id":"local-only","provider":"claude","state":"finished"}"#.utf8))
         XCTAssertEqual(legacy.appURL?.absoluteString, "claude://code")
-        XCTAssertEqual(legacy.appLinkTitle, "Open in Claude")
+        XCTAssertEqual(legacy.appLinkTitle, "Open Claude")
         for invalid in ["local-uuid", "session_x\n", "session_x/other", "session_x?prompt=secret", "session_", "session_" + String(repeating: "x", count: 153)] {
             var session = legacy
             session.remoteSessionID = invalid
             XCTAssertEqual(session.appURL?.absoluteString, "claude://code")
-            XCTAssertEqual(session.appLinkTitle, "Open in Claude")
+            XCTAssertEqual(session.appLinkTitle, "Open Claude")
         }
         XCTAssertNil(AgentSession(id: "test", provider: "fixture", state: .working).appURL)
     }

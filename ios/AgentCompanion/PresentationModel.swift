@@ -127,7 +127,7 @@ struct AgentSession: Codable, Identifiable, Equatable {
     }
     var appLinkTitle: String {
         if provider == "codex" { return "Open Codex" }
-        return "Open in Claude"
+        return appURL?.path.isEmpty == false ? "Open in Claude" : "Open Claude"
     }
     var displayName: String { String((name ?? (provider == "fixture" ? "Test agent" : provider.capitalized)).prefix(80)) }
     var detail: String {
