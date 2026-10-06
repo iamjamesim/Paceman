@@ -308,10 +308,9 @@ struct CompanionHome: View {
                     Image(systemName: "arrow.up.right").accessibilityHidden(true)
                 }
                 .font(.caption2.weight(.medium))
-                .foregroundStyle(theme.tint)
+                .foregroundStyle(theme.canvas)
                 .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(theme.tint.opacity(0.12), in: Capsule())
-                .overlay(Capsule().strokeBorder(theme.tint.opacity(0.3), lineWidth: 0.5))
+                .background(theme.ink, in: Capsule())
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }.buttonStyle(.plain)
