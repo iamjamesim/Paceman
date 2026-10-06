@@ -26,9 +26,8 @@ is available through TestFlight.
 
 You can also try [Paceman Watch](firmware/esp32-watch/README.md), an ESP32-S3
 prototype focused on the complete Codex experience: activity and usage limits.
-Its feature development is frozen. It demonstrates an open system you can extend
-to gear you choose or build; new devices still need custom firmware and iPhone
-pairing support today.
+It demonstrates an open system you can extend to gear you choose or build;
+new devices still need custom firmware and iPhone pairing support today.
 
 <p align="center">
   <a href="docs/images/esp32-watch.jpg"><img src="docs/images/esp32-watch.jpg" alt="Paceman on an experimental ESP32-S3 watch" width="300"></a>
