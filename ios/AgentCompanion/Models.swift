@@ -31,7 +31,6 @@ struct Snapshot: Codable {
     var sessions: [AgentSession]?
     var allowances: [CodexAllowance]? = nil
     var configuredProviders: [String]? = nil
-    var usageStatus: [String: String]? = nil
     var usageReadings: [CodexAllowance] {
         var values: [CodexAllowance] = []
         for value in (allowances ?? allowance.map { [$0] } ?? []).filter({ $0.valid }) {
@@ -41,31 +40,29 @@ struct Snapshot: Codable {
         }
         return values
     }
-    enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, observedAt, changedAt, freshFor, state, eventID, sessions, allowance, allowances, configuredProviders, usageStatus }
+    enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, observedAt, changedAt, freshFor, state, eventID, sessions, allowance, allowances, configuredProviders }
     var identity: String { "\(sourceID)/\(generation)/\(eventID)" }
 }
 
 enum WatchAggregate {
-    static func selectAllowance(current: [Snapshot], profiles: [Snapshot], now: Double, provider: String = "codex") -> CodexAllowance? {
-        func select(_ snapshot: Snapshot) -> CodexAllowance? {
-            let values = snapshot.usageReadings.filter { $0.provider == provider }
-            let unexpired = values.filter { Double($0.updatedAt) <= now && now < Double($0.resetsAt) }
-            return (unexpired.isEmpty ? values : unexpired).min {
-                $0.remaining == $1.remaining ? $0.window < $1.window : $0.remaining < $1.remaining
+    static func usageSource(current: [Snapshot], profiles: [Snapshot], now: Double) -> Snapshot? {
+        func recent(_ snapshot: Snapshot) -> Bool {
+            snapshot.usageReadings.contains {
+                Double($0.updatedAt) <= now && now - Double($0.updatedAt) <= 1800 && Double($0.resetsAt) > now
             }
         }
-        func recent(_ snapshot: Snapshot) -> CodexAllowance? {
-            guard let value = select(snapshot), value.valid,
-                  Double(value.updatedAt) <= now,
-                  now - Double(value.updatedAt) <= 1800,
-                  Double(value.resetsAt) > now else { return nil }
-            return value
+        return current.first(where: recent) ?? profiles.first(where: recent)
+            ?? profiles.first { !$0.usageReadings.isEmpty }
+            ?? profiles.max { $0.observedAt < $1.observedAt }
+    }
+
+    static func selectAllowance(current: [Snapshot], profiles: [Snapshot], now: Double) -> CodexAllowance? {
+        guard let snapshot = usageSource(current: current, profiles: profiles, now: now) else { return nil }
+        let values = snapshot.usageReadings
+        let available = values.filter { Double($0.updatedAt) <= now && now < Double($0.resetsAt) }
+        return (available.isEmpty ? values : available).min {
+            $0.remaining == $1.remaining ? $0.window < $1.window : $0.remaining < $1.remaining
         }
-        // Prefer a reading from a connected computer. Pairing order breaks ties,
-        // rather than whichever agent happened to change state most recently.
-        return current.compactMap(recent).first
-            ?? profiles.compactMap(recent).first
-            ?? profiles.compactMap(select).first { $0.valid }
     }
 
     static func make(current: [Snapshot], allowance: CodexAllowance?, now: Double) -> Snapshot {
@@ -207,11 +204,11 @@ enum WatchWire {
     static func identity(_ data: Data) throws -> (id: String, owned: Bool, capabilities: UInt32, profileVersion: UInt8) {
         let bytes = Array(data)
         guard bytes.count == 32, bytes[0] == 79, bytes[1] == 87,
-              bytes[2] >= 1, bytes[2] <= 6, bytes[3] >= bytes[2] else {
+              bytes[2] >= 1, bytes[2] <= 5, bytes[3] >= bytes[2] else {
             throw HubError.message("Unsupported watch identity")
         }
         let id = bytes[8..<24].map { String(format: "%02x", $0) }.joined()
-        return (id, bytes[4] & 1 != 0, read32(bytes, at: 24), min(6, bytes[3]))
+        return (id, bytes[4] & 1 != 0, read32(bytes, at: 24), min(5, bytes[3]))
     }
 
     static func read32(_ bytes: [UInt8], at offset: Int) -> UInt32 {
@@ -229,9 +226,9 @@ enum WatchWire {
 
     static func profile(owner: UUID, revision: UInt32, now: Date = Date(), offset: Int,
                         version: UInt8 = 1, theme: CompanionTheme = ThemeFamily.ayu.glance,
-                        allowance: CodexAllowance? = nil, usageProvider: String = "codex", brightness: Int = 50, hours: UInt8 = 24,
+                        allowance: CodexAllowance? = nil, brightness: Int = 50, hours: UInt8 = 24,
                         weather: WatchWeather? = nil, fahrenheit: Bool = false) -> Data {
-        let version = min(6, max(1, version))
+        let version = min(5, max(1, version))
         let weather = weather.flatMap { value -> WatchWeather? in
             guard version >= 2, value.usable(at: now), version >= 5 || now < value.dayExpiresAt else { return nil }
             return value
@@ -268,7 +265,7 @@ enum WatchWire {
         if version >= 4 {
             let epoch = now.timeIntervalSince1970
             let usable = allowance.flatMap { value -> CodexAllowance? in
-                guard value.valid, (version >= 6 || value.provider == "codex"), Double(value.updatedAt) <= epoch else { return nil }
+                guard value.valid, Double(value.updatedAt) <= epoch else { return nil }
                 if version == 4 && (epoch - Double(value.updatedAt) > 1800 || Double(value.resetsAt) <= epoch) { return nil }
                 return value
             }
@@ -278,11 +275,6 @@ enum WatchWire {
             data.appendLE(usable?.resetsAt ?? Int64(0))
         }
         if version >= 5 { data.appendLE(weather.map { Int64($0.dayExpiresAt.timeIntervalSince1970) } ?? Int64(0)) }
-        if version >= 6 {
-            let valid = allowance.flatMap { $0.valid && Double($0.updatedAt) <= now.timeIntervalSince1970 ? $0 : nil }
-            data.append((valid?.provider ?? usageProvider) == "claude" ? 2 : 1)
-            data.appendLE(UInt16(valid?.windowDurationMins ?? valid.map { $0.window == 1 ? 10080 : 300 } ?? 0))
-        }
         return data
     }
 
@@ -295,7 +287,7 @@ struct CodexAllowance: Codable, Equatable {
     let updatedAt: Int64
     let resetsAt: Int64
     var windowDurationMins: Int? = nil
-    var providerName: String { provider == "claude" ? "Claude" : "Codex" }
+    var providerName: String { "Codex" }
     var limitTitle: String {
         let minutes = windowDurationMins ?? (window == 1 ? 10080 : 300)
         if minutes == 10080 { return "Weekly limit" }
@@ -304,7 +296,7 @@ struct CodexAllowance: Codable, Equatable {
         return "\(minutes)-minute limit"
     }
     var valid: Bool {
-        ["codex", "claude"].contains(provider) && (0...100).contains(remaining) && [1, 2].contains(window)
+        provider == "codex" && (0...100).contains(remaining) && [1, 2].contains(window)
             && updatedAt >= 1704067200 && resetsAt > updatedAt && resetsAt <= 3155759999
             && (windowDurationMins == nil || (1...10080).contains(windowDurationMins!))
     }
@@ -340,11 +332,10 @@ extension Snapshot {
         sessions = try? c.decode([AgentSession].self, forKey: .sessions)
         let limits = try? c.decode(CodexAllowance.self, forKey: .allowance)
         allowance = limits?.valid == true ? limits : nil
-        if let values = try? c.decode([CodexAllowance].self, forKey: .allowances), values.count <= 4 {
+        if let values = try? c.decode([CodexAllowance].self, forKey: .allowances), values.count <= 2 {
             allowances = values.filter { $0.valid }
         } else { allowances = nil }
         configuredProviders = (try? c.decode([String].self, forKey: .configuredProviders))?.filter { ["codex", "claude"].contains($0) }
-        usageStatus = try? c.decode([String: String].self, forKey: .usageStatus)
     }
 }
 

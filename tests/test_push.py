@@ -36,37 +36,37 @@ class PushWorkerTests(unittest.TestCase):
     def pair(self):
         return self.store.redeem(self.store.invite("https://source.example")["invitation"], device=device())
 
-    def test_watch_provider_selection_survives_newer_other_provider_readings(self):
+    def test_watch_registration_revision_rejects_delayed_updates(self):
         now=1800000000
         def reading(provider,left):
             return dict(provider=provider,remaining=left,window=1,windowDurationMins=10080,
                         updatedAt=now,resetsAt=now+86400)
         source=dict(sourceID=self.store.metadata("source_id"),allowance=reading("codex",3),
                     allowances=[reading("codex",3),reading("claude",80)])
-        payload={"deviceToken":"ef"*32,"environment":"development","provider":"claude","selectionRevision":2}
+        payload={"deviceToken":"ef"*32,"environment":"development","selectionRevision":2}
         self.store.watch_push_device(self.client["credential"],payload)
         self.worker.step_watch_allowance(now,source)
-        self.assertEqual(self.sender.calls[-1][1]["allowance"]["provider"],"claude")
+        self.assertEqual(self.sender.calls[-1][1]["allowance"]["provider"],"codex")
         self.assertEqual(self.sender.calls[-1][1]["selectionRevision"],2)
         self.assertEqual(self.sender.calls[-1][1]["sourceID"],source["sourceID"])
-        # A late registration cannot undo the user's newer choice.
-        self.assertEqual(self.store.watch_push_device(self.client["credential"],{**payload,"provider":"codex","selectionRevision":1}),{"registered":False})
+        # A late registration cannot undo the newer source-list revision.
+        self.assertEqual(self.store.watch_push_device(self.client["credential"],{**payload,"selectionRevision":1}),{"registered":False})
         source["allowances"]=[reading("codex",1)]
         self.worker.step_watch_allowance(now+2000,source)
         self.assertEqual(len(self.sender.calls),1)
-        self.store.watch_push_device(self.client["credential"],{**payload,"provider":"codex","selectionRevision":3})
+        self.store.watch_push_device(self.client["credential"],{**payload,"selectionRevision":3})
         self.worker.step_watch_allowance(now,source)
         self.assertEqual(self.sender.calls[-1][1]["allowance"]["provider"],"codex")
 
-    def test_complete_watch_usage_preserves_legacy_delivery_and_clears_signed_out_provider(self):
+    def test_complete_watch_usage_preserves_single_reading_delivery_and_clears_missing_windows(self):
         now = 1800000000
         def reading(provider, window, left):
             return dict(provider=provider, remaining=left, window=window,
                         windowDurationMins=10080 if window == 1 else 300,
                         updatedAt=now, resetsAt=now+86400)
-        values = [reading(p, w, left) for p, left in (("codex", 70), ("claude", 20)) for w in (1, 2)]
+        values = [reading("codex", w, 70) for w in (1, 2)]
         source = dict(sourceID=self.store.metadata("source_id"), observedAt=now+0.5, allowances=values)
-        modern = {"deviceToken": "ef"*32, "environment": "development", "provider": "claude",
+        modern = {"deviceToken": "ef"*32, "environment": "development",
                   "selectionRevision": 2, "usageSchema": 2}
         self.store.watch_push_device(self.client["credential"], modern)
         other = self.pair()
@@ -82,7 +82,7 @@ class PushWorkerTests(unittest.TestCase):
             self.assertTrue(valid_payload("watch", source["sourceID"], payload))
         self.worker.step_watch_allowance(now+1199, source)
         self.assertEqual(len(self.sender.calls), 2)
-        source["allowances"] = [v for v in values if v["provider"] == "codex"]
+        source["allowances"] = [v for v in values if v["window"] == 1]
         self.worker.step_watch_allowance(now+1200, source)
         self.assertEqual(self.sender.calls[-1][1]["allowances"], source["allowances"])
         source["allowances"] = []
@@ -95,13 +95,14 @@ class PushWorkerTests(unittest.TestCase):
     def test_complete_watch_payload_rejects_unbounded_duplicate_and_future_data(self):
         now = 1800000000
         source = self.store.metadata("source_id")
-        reading = dict(provider="claude", remaining=20, window=2, windowDurationMins=300,
+        reading = dict(provider="codex", remaining=20, window=2, windowDurationMins=300,
                        updatedAt=now, resetsAt=now+3600)
         payload = {"aps": {"content-available": 1}, "schema": 2, "sourceID": source,
                    "selectionRevision": 2, "observedAt": now, "allowances": [reading]}
         self.assertTrue(valid_payload("watch", source, payload))
         self.assertTrue(valid_payload("watch", source, {**payload, "allowances": []}))
-        for bad in ({**payload, "allowances": [reading]*5},
+        for bad in ({**payload, "allowances": [{**reading, "provider": "claude"}]},
+                    {**payload, "allowances": [reading]*5},
                     {**payload, "allowances": [reading, {**reading, "windowDurationMins": 60}]},
                     {**payload, "allowances": [{**reading, "updatedAt": now+1}]},
                     {**payload, "allowances": [{**reading, "prompt": "private"}]},

@@ -54,13 +54,12 @@ void watch_face_layout_set_allowance(watch_face_layout_t *layout, int remaining,
     lv_obj_set_style_text_color(layout->allowance_history, lv_obj_get_style_text_color(layout->date, 0), 0);
     lv_obj_add_flag(layout->allowance_history, LV_OBJ_FLAG_HIDDEN);
     char title[40], reset[48];
-    const char *provider = layout->allowance_provider == 2 ? "CLAUDE" : "CODEX";
     if (remaining < 0 || remaining > 100 || reset_seconds <= 0) {
         remaining = -1;
-        snprintf(title, sizeof(title), "%s  --%% LEFT", provider);
+        snprintf(title, sizeof(title), "CODEX  --%% LEFT");
         snprintf(reset, sizeof(reset), "LIMITS UNAVAILABLE");
     } else {
-        snprintf(title, sizeof(title), "%s  %d%% LEFT", provider, remaining);
+        snprintf(title, sizeof(title), "CODEX  %d%% LEFT", remaining);
         int64_t minutes = reset_seconds / 60;
         const char *name = window == 1 ? "WEEKLY" : "SESSION";
         if (minutes >= 1440)

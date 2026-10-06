@@ -221,15 +221,33 @@ final class SourceClient {
         try await relayCall(source, path: "v2/destinations", method: "DELETE", fields: ["mode": "alert"])
     }
 
+    func registerWatchPush(_ sources: [PairedSource], token: String, environment: String,
+                           selectionRevision: Int, usageSchema: Int) async -> [Bool] {
+        await withTaskGroup(of: Bool.self) { group in
+            for source in sources {
+                group.addTask {
+                    do {
+                        try await self.registerWatchPush(source, token: token, environment: environment,
+                            selectionRevision: selectionRevision, usageSchema: usageSchema)
+                        return true
+                    } catch { return false }
+                }
+            }
+            var results: [Bool] = []
+            for await result in group { results.append(result) }
+            return results
+        }
+    }
+
     func registerWatchPush(_ source: PairedSource, token: String, environment: String,
-                           provider: String = "codex", selectionRevision: Int = 0, usageSchema: Int = 1) async throws {
+                           selectionRevision: Int = 0, usageSchema: Int = 1) async throws {
         try await registerRelayDestination(source, mode: "watch", token: token, environment: environment)
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/watch-push"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["deviceToken": token,
-                                                                      "environment": environment, "provider": provider,
+                                                                      "environment": environment,
                                                                       "selectionRevision": selectionRevision, "usageSchema": usageSchema])
         let data = try await response(request)
         struct Registration: Decodable { let registered: Bool }

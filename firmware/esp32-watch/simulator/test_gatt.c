@@ -33,7 +33,7 @@ static uint32_t profile_revision, last_cued_activity_revision, sync_sequence;
 static void *profile_queue = (void *)1, *ui_queue = (void *)1;
 static omarchy_activity_v1_t activity = {.magic={'O','A'}, .version=1};
 typedef struct {
-  omarchy_profile_v6_t packet; uint16_t packet_length; watch_peer_identity_t peer;
+  omarchy_profile_v5_t packet; uint16_t packet_length; watch_peer_identity_t peer;
 } pending_profile_t;
 enum { UI_EVENT_ACTIVITY };
 typedef struct {
@@ -69,11 +69,10 @@ static void update_connection_readiness(void) {}
 #include "gatt_access.inc"
 
 int main(void) {
-  omarchy_profile_v6_t profile = {
-    .base = {.base = {.magic={'O','W'}, .version=6, .kind=1, .revision=1,
+  omarchy_profile_v5_t profile = {
+    .base = {.base = {.magic={'O','W'}, .version=5, .kind=1, .revision=1,
                      .unix_time=1800000000, .hour_cycle=24, .brightness_percent=50,
                      .owner_id={42}}, .allowance_remaining=255},
-    .allowance_provider=1,
   };
   struct os_mbuf write = {.length=sizeof(profile)};
   memcpy(write.bytes,&profile,sizeof(profile));

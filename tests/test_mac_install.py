@@ -11,6 +11,7 @@ from unittest.mock import patch
 import macos.install as installer
 from macos.install import PYTHON, install_hooks
 from macos.codex_hook import EVENTS, QUESTION_MATCHER
+from macos.agents import detected_providers
 from macos.control import missing_hooks
 import macos.control as control
 from service.hub import Store
@@ -41,6 +42,7 @@ class MacInstallTests(unittest.TestCase):
                 self.assertEqual(installer.PYTHON,
                                  str(installed / "Contents/Resources/python/bin/python3"))
                 self.assertFalse(kwargs["open_menu"])
+                self.assertEqual(kwargs["agents"], ["codex"])
                 return True
 
             with patch.multiple(installer, ROOT=root, APP=installed, REPO=library,
@@ -90,6 +92,50 @@ class MacInstallTests(unittest.TestCase):
             self.assertEqual(second["hooks"]["Stop"][0]["hooks"][0]["command"], "echo existing")
             self.assertEqual(len(second["hooks"]), 8)
             self.assertEqual(second["hooks"]["PreToolUse"][0]["matcher"], QUESTION_MATCHER)
+
+    def test_reinstall_preserves_hook_definitions_when_runtime_changes(self):
+        for provider in ("codex", "claude"):
+            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                path = root / "hooks.json"
+                next_runtime = root / "new python"
+                next_runtime.symlink_to(sys.executable)
+                with patch.multiple(installer, ROOT=root, PYTHON=sys.executable):
+                    install_hooks(path, provider=provider)
+                    document = json.loads(path.read_text())
+                    script = root / f"lib/macos/{provider}_hook.py"
+                    for groups in document["hooks"].values():
+                        item = groups[0]["hooks"][0]
+                        item["command"] = f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
+                        item["timeout"] = 5
+                    # A legacy definition may use the agent's default timeout.
+                    document["hooks"]["Stop"][0]["hooks"][0].pop("timeout")
+                    path.write_text(json.dumps(document))
+                    original, modified = path.read_bytes(), path.stat().st_mtime_ns
+                    with patch.object(installer, "PYTHON", str(next_runtime)):
+                        self.assertEqual(install_hooks(path, provider=provider), [])
+                    self.assertEqual(path.read_bytes(), original)
+                    self.assertEqual(path.stat().st_mtime_ns, modified)
+
+    def test_hook_repair_changes_only_broken_definitions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "hooks.json"
+            with patch.multiple(installer, ROOT=root, PYTHON=sys.executable):
+                install_hooks(path)
+                document = json.loads(path.read_text())
+                script = root / "lib/macos/codex_hook.py"
+                document["hooks"]["Stop"][0]["hooks"][0]["command"] = f"{sys.executable} -X {shlex.quote(str(script))}"
+                document["hooks"]["Interrupt"][0]["hooks"][0]["timeout"] = False
+                path.write_text(json.dumps(document))
+                self.assertEqual(set(install_hooks(path)), {"Stop", "Interrupt"})
+                repaired = json.loads(path.read_text())
+                self.assertEqual(repaired["hooks"]["Stop"][0]["hooks"][0]["command"],
+                                 f"{shlex.quote(sys.executable)} -B {shlex.quote(str(script))}")
+                self.assertEqual(repaired["hooks"]["Interrupt"][0]["hooks"][0]["timeout"], 3)
+                for event in set(EVENTS) - {"Stop", "Interrupt"}:
+                    self.assertEqual(repaired["hooks"][event], document["hooks"][event])
+                self.assertEqual(install_hooks(path), [])
 
     def test_hook_upgrade_replaces_old_interpreter_without_adding_a_second_row(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -156,6 +202,24 @@ class MacInstallTests(unittest.TestCase):
             self.assertEqual(result["hookCommand"],
                              f"{shlex.quote(str(python))} -B "
                              f"{shlex.quote(str(root / 'lib/macos/codex_hook.py'))}")
+
+    def test_review_command_uses_retained_hook_instead_of_current_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "hooks.json"
+            command = f"{shlex.quote(sys.executable)} {shlex.quote(str(root / 'lib/macos/codex_hook.py'))}"
+            config.write_text(json.dumps({"hooks": {"Stop": [{"hooks": [
+                {"type": "command", "command": command}]}]}}))
+            plist = root / "source.plist"
+            plist.write_bytes(plistlib.dumps({"ProgramArguments": ["/app/background", "/different/python", str(root)]}))
+            with patch.multiple(control, ROOT=root, PLIST=plist), \
+                 patch("macos.agents.hook_path", return_value=config), \
+                 patch.object(control, "missing_hooks", return_value=[]):
+                self.assertEqual(control.status()["hookCommand"], command)
+            with patch.multiple(installer, ROOT=root, PYTHON="/different/python"), \
+                 patch("macos.agents.hook_path", return_value=config), patch("builtins.print") as output:
+                installer.print_hook_review_steps(root / "pacemanctl")
+                output.assert_any_call("     " + command)
 
     def test_failed_service_start_restores_previous_install(self):
         self._exercise_replacement(fail_start=True)
@@ -313,6 +377,54 @@ class MacInstallTests(unittest.TestCase):
                 self.assertEqual(push_config.exists(), not fail_push or existing_push)
                 if existing_push:
                     self.assertEqual(push_config.read_text(), preserved_push)
+
+
+class AgentDetectionTests(unittest.TestCase):
+    def detect(self, home, **kwargs):
+        with patch('service.codex_limits.codex_binary', return_value=None), \
+             patch('macos.agents.shutil.which', return_value=None), \
+             patch.dict('os.environ', {}, clear=True), \
+             patch('subprocess.run', side_effect=AssertionError('Detection launched a process')):
+            return detected_providers(home=home, application_dirs=(home / 'Applications',),
+                                      binary_dirs=(home / '.local/bin',), **kwargs)
+
+    def test_absent_agents_does_not_claim_detection_or_create_profile(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            self.assertEqual(self.detect(home), [])
+            self.assertEqual(list(home.iterdir()), [])
+
+    def test_cli_without_profile_is_detected_without_launch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            binary = home / '.local/bin/claude'
+            binary.parent.mkdir(parents=True)
+            binary.touch()
+            self.assertEqual(self.detect(home), [])
+            binary.chmod(0o700)
+            self.assertEqual(self.detect(home), ['claude'])
+
+    def test_editor_only_installations_and_desktop_are_detected(self):
+        for artifact in ('.vscode/extensions/anthropic.claude-code-2.1.196',
+                         '.vscode-insiders/extensions/anthropic.claude-code-2.1.196',
+                         '.cursor/extensions/anthropic.claude-code-2.1.196',
+                         '.windsurf/extensions/anthropic.claude-code-2.1.196',
+                         'Applications/Claude.app'):
+            with self.subTest(artifact=artifact), tempfile.TemporaryDirectory() as temporary:
+                home = Path(temporary)
+                (home / artifact).mkdir(parents=True)
+                self.assertEqual(self.detect(home), ['claude'])
+
+    def test_saved_custom_profile_is_detected_without_reading_credentials(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            profile = home / 'custom'
+            profile.mkdir()
+            root = home / 'paceman'
+            root.mkdir()
+            (root / 'agents.json').write_text(json.dumps({'claudeConfigDir': str(profile)}))
+            self.assertEqual(self.detect(home, root=root), ['claude'])
+            self.assertEqual(list(profile.iterdir()), [])
 
 
 if __name__ == "__main__":

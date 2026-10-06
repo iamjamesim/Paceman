@@ -75,17 +75,6 @@ struct CompanionSettings: View {
     let theme: CompanionTheme
     var body: some View {
         List {
-            if (presentation.preview ? presentation.previewHasWatch : model.watch.paired) && model.availableUsageProviders.count > 1 {
-                Section {
-                    Picker("ESP32 usage", selection: Binding(get: { model.selectedUsageProvider }, set: { model.selectUsageProvider($0) })) {
-                        ForEach(model.availableUsageProviders, id: \.self) { provider in
-                            Text(provider == "claude" ? "Claude" : "Codex").tag(provider)
-                        }
-                    }
-                } footer: {
-                    Text("Chooses usage shown on your ESP32 watch. Apple Watch complications are configured on the watch face.")
-                }.listRowBackground(theme.panel)
-            }
             Section {
                 NavigationLink(value: FeedDestination.appearance) {
                     HStack {

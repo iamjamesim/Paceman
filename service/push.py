@@ -14,7 +14,7 @@ import uuid
 from urllib.parse import urlsplit
 
 from service.hub import Store
-from service.usage import PROVIDERS, readings, selected_reading
+from service.usage import readings, selected_reading
 
 DEFAULT_RELAY_URL = "https://relay.paceman.ai"
 
@@ -448,20 +448,20 @@ class Worker:
                 "SELECT w.* FROM watch_push_devices w JOIN clients c ON w.client_id=c.id")]
         for device in devices:
             if device["usage_schema"] == 2:
-                # Cache age is carried unchanged; signed-out providers disappear
+                # Cache age is carried unchanged; signed-out windows disappear
                 # from this complete snapshot. One push updates every complication.
                 observed_at = snapshot.get("observedAt", now)
-                values = [r for provider in PROVIDERS for r in readings(snapshot, provider)
+                values = [r for r in readings(snapshot)
                           if r["updatedAt"] <= observed_at and type(r.get("windowDurationMins")) is int]
                 values.sort(key=lambda r: (r["provider"], r["window"]))
                 fields = ("provider", "remaining", "window", "windowDurationMins", "updatedAt", "resetsAt")
                 values = [{key: r[key] for key in fields} for r in values]
-                if len(values) > 4 or len({(r["provider"], r["window"]) for r in values}) != len(values):
+                if len(values) > 2 or len({(r["provider"], r["window"]) for r in values}) != len(values):
                     continue
                 fingerprint_values = [[r[key] for key in fields if key != "updatedAt"] for r in values]
                 payload, headers = watch_usage_notification(snapshot["sourceID"], values, now, device["selection_revision"], observed_at)
             else:
-                allowance = selected_reading([r for r in readings(snapshot, device["provider"])
+                allowance = selected_reading([r for r in readings(snapshot)
                     if 0 <= now - r["updatedAt"] <= 1800 and type(r.get("windowDurationMins")) is int], now)
                 if allowance is None:
                     continue
@@ -503,12 +503,12 @@ class Worker:
                 else:
                     db.execute("UPDATE watch_push_devices SET last_fingerprint=?,last_sent=?,next_attempt=?,"
                                "attempts=?,last_result=?,last_apns_id=?,recovery_sends=? "
-                               "WHERE client_id=? AND token=? AND provider=? AND selection_revision=? AND usage_schema=?",
+                               "WHERE client_id=? AND token=? AND selection_revision=? AND usage_schema=?",
                                (fingerprint if accepted else device["last_fingerprint"],
                                 now if accepted else device["last_sent"], now + delay,
                                 0 if accepted else device["attempts"] + 1, result.reason, result.apns_id,
                                 recovery_sends,
-                                device["client_id"], device["token"], device["provider"], device["selection_revision"], device["usage_schema"]))
+                                device["client_id"], device["token"], device["selection_revision"], device["usage_schema"]))
             self.log({"at": now, "stage": "watch_allowance_accepted" if accepted else "watch_allowance_failed",
                       "clientID": device["client_id"], "status": result.status, "reason": result.reason,
                       "apnsID": result.apns_id})

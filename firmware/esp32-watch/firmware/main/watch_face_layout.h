@@ -54,7 +54,6 @@ typedef struct {
     lv_point_precise_t allowance_points[70];
     lv_point_precise_t allowance_fill_points[70];
     int allowance_remaining;
-    uint8_t allowance_provider;
     bool allowance_drawn;
 } watch_face_layout_t;
 

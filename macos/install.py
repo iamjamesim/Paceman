@@ -17,7 +17,7 @@ import sys
 import tempfile
 
 from macos.codex_hook import QUESTION_MATCHER
-from macos.agents import CLAUDE_PURPOSES, claude_config_dir, provider_config, PROVIDERS, configured_providers, detected_providers, hook_path
+from macos.agents import CLAUDE_PURPOSES, provider_config, PROVIDERS, configured_providers, hook_path, installed_hook_command
 from macos.paths import installed_app
 from service.hub import endpoint
 from service.network import RouteSetupError, ensure_private_route
@@ -150,8 +150,19 @@ def install_hooks(path: Path | None = None, *, provider="codex"):
                             item.pop(field)
                             if event not in changed:
                                 changed.append(event)
-                    if item.get("type") != "command" or item.get("command") != command or item.get("timeout") != 3:
-                        item.update(type="command", command=command, timeout=3)
+                    # Codex trust is bound to the definition. Keep a usable
+                    # existing interpreter and spelling across runtime updates.
+                    updates = {}
+                    if item.get("type") != "command":
+                        updates["type"] = "command"
+                    if (not Path(arguments[0]).is_absolute() or not Path(arguments[0]).is_file()
+                            or not os.access(arguments[0], os.X_OK)
+                            or len(arguments) == 3 and arguments[1] != "-B"):
+                        updates["command"] = command
+                    if "timeout" in item and (type(item["timeout"]) is not int or item["timeout"] <= 0):
+                        updates["timeout"] = 3
+                    if updates:
+                        item.update(updates)
                         if event not in changed:
                             changed.append(event)
                     break
@@ -238,9 +249,9 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
     if relay_url is not None:
         relay_url = endpoint(relay_url)
     if agents is None:
-        agents = configured_providers(ROOT) if (ROOT / "agents.json").exists() or (ROOT / "bin/pacemanctl").exists() else detected_providers()
-    if not agents or any(p not in PROVIDERS for p in agents):
-        raise ValueError("Choose at least one supported agent")
+        agents = configured_providers(ROOT)
+    if any(p not in PROVIDERS for p in agents):
+        raise ValueError("Unsupported agent selection")
     agents = list(dict.fromkeys(agents))
     os.umask(0o077)
     ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -319,8 +330,6 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                 "WorkingDirectory": str(lib), "RunAtLoad": True, "KeepAlive": True,
                 "StandardOutPath": str(ROOT / "background.log"),
                 "StandardErrorPath": str(ROOT / "background-error.log")}
-    if "claude" in agents:
-        document["EnvironmentVariables"] = {"CLAUDE_CONFIG_DIR": str(claude_config_dir(ROOT))}
     staged_plist.write_bytes(plistlib.dumps(document))
     staged_plist.chmod(0o600)
 
@@ -589,14 +598,14 @@ def print_claude_review_steps(wrapper: Path):
     print("  Claude CLI: /hooks. VS Code/desktop Code: inspect the local user settings.")
     print(f"  Claude settings: {hook_path('claude', root=ROOT)}")
     print("  Check the user-settings entries and this exact command:")
-    print(f"     {shlex.quote(PYTHON)} -B {shlex.quote(str(ROOT / 'lib/macos/claude_hook.py'))}")
+    print("     " + (installed_hook_command("claude", ROOT) or f"{shlex.quote(PYTHON)} -B {shlex.quote(str(ROOT / 'lib/macos/claude_hook.py'))}"))
     for event, purpose in CLAUDE_PURPOSES:
         print(f"     {event}: {purpose}")
     print("  Only event names, opaque IDs and an optional short project label leave the hook.")
     print("  No prompts, replies, transcript contents or tool arguments are sent.")
     print("  Requires Claude Code 2.1.196 or later; restart existing sessions after setup.")
     print("  Send a prompt in a fresh local Claude session and verify lastAgentEventByProvider.claude.")
-    print("  If Claude usage needs Keychain access, use Manage Paceman > Allow Claude usage access.")
+    print("  Claude Code activity is supported; usage limits are not supported.")
     print(f"  Status: {shlex.quote(str(wrapper))} status")
 
 
@@ -605,7 +614,7 @@ def print_hook_review_steps(wrapper: Path):
     print("  Codex CLI: enter /hooks, or choose Review hooks at startup.")
     print("  Codex calls each row 'Hook 1'. Identify Paceman by expanding the row")
     print("  and checking its source (User config, ~/.codex/hooks.json) and command:")
-    print(f"     {shlex.quote(PYTHON)} -B {shlex.quote(str(ROOT / 'lib/macos/codex_hook.py'))}")
+    print("     " + (installed_hook_command("codex", ROOT) or f"{shlex.quote(PYTHON)} -B {shlex.quote(str(ROOT / 'lib/macos/codex_hook.py'))}"))
     print("  Review these eight event rows with the user:")
     for event, purpose in HOOK_PURPOSES:
         print(f"     {event}: {purpose}")

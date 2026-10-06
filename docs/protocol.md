@@ -12,7 +12,7 @@ private Tailscale HTTPS.
 | Source push worker → authenticated relay → iOS Notification Center | Ordinary APNs alert | Notification event and a hint for the phone app to fetch. |
 | iOS Notification Center → ESP32 watch | Apple ANCS over BLE | Identifies a Paceman notification so the watch can request a fetch; does not forward APNs JSON. |
 | Source push worker → authenticated relay → iPhone Live Activity | ActivityKit APNs | Expiring display copy for the Lock Screen and Dynamic Island. |
-| Source push worker → authenticated relay → Paceman watchOS app | Background APNs | Optional provider/window usage bundle; the app then reloads its WidgetKit complications. |
+| Source push worker → authenticated relay → Paceman watchOS app | Background APNs | Optional Codex usage windows; the app then reloads its WidgetKit complications. |
 | Paceman iPhone app ↔ ESP32 watch | Encrypted BLE packets | Phone-selected profile and activity; watch acknowledgement and fetch requests. |
 
 ## Pairing and access
@@ -109,17 +109,15 @@ example, an allowance change raised `revision` to 12 without changing activity
 | `state` | `idle`, `working`, `needs_input`, `finished`, or `failed`. |
 | `eventID` | Opaque activity identity, 1–128 UTF-8 bytes without control characters; stable across presentation-only revisions. |
 | `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded workspace labels; no prompts or transcripts. |
-| `allowance` | Legacy optional Codex-only reading; may advance `revision` without a new activity event. |
-| `allowances` | Optional array of up to four provider/window readings for Codex and Claude. Each has its own observation and reset time. |
-| `configuredProviders` | Optional configured agent names (`codex`, `claude`), including agents without a received event/reading. |
-| `usageStatus` | Optional per-provider setup status; Claude reports `ready`, `sign_in_needed`, `access_needed` or `unavailable`. |
+| `allowance` | Optional selected Codex reading; may advance `revision` without a new activity event. |
+| `allowances` | Optional array of up to two Codex usage windows, each with its own observation and reset time. |
+| `configuredProviders` | Optional enabled activity providers (`codex`, `claude`), including providers without a received event. |
 
 Omarchy has its own `sourceID`, `generation`, and revisions, using this same
 schema. Mac uses hook-observed session liveness and clears sessions on restart;
 Omarchy verifies owning processes locally. Neither sends process identity.
 Within a source, session identity is provider-scoped and both providers aggregate to
-one state/Live Activity. Selection of usage does not filter activity. The legacy
-`allowance` field remains Codex-only so an older phone cannot mislabel Claude.
+one state/Live Activity. Usage does not filter activity.
 The phone presents sources separately. For the ESP32 watch it selects among
 **fresh** sources in this order: needs input, failed, working, finished, idle.
 
@@ -131,7 +129,7 @@ Push registration is authenticated and scoped to the paired client:
 | --- | --- |
 | `POST/GET/DELETE /v1/push` | One iPhone ordinary-alert token. Registration sends `deviceToken`, `environment` (`development` or `production`), and optional `displayName`; status omits the token. |
 | `POST /v1/live-activity` | iPhone Live Activity start/update token, or its removal. |
-| `POST /v1/watch-push` | Optional watchOS app background-push token for allowance only, with optional `provider`, monotonic `selectionRevision`, and `usageSchema`. Capable watches advertise schema 2; older registrations default to Codex/revision 0/schema 1. |
+| `POST /v1/watch-push` | Optional watchOS app background-push token for allowance only, with optional monotonic `selectionRevision` and `usageSchema`. Capable watches advertise schema 2; older registrations default to revision 0/schema 1. |
 
 The phone first approves a source/client pairing on the relay. Its five-minute
 `POST /v2/attest/challenge` binds the source ID and relay-credential hash,
@@ -238,22 +236,25 @@ and display name. An end push sets `event` to `end`.
 
 The watchOS app receives usage-only background pushes
 (`apns-push-type: background`, `aps.content-available: 1`) at its app token from the
-first paired source, stores the readings and reloads its complications. WatchConnectivity also
-supplies full usage snapshots. Accounts from separate computers are not combined.
-Each Limit or Reset complication chooses Codex or Claude independently and shows
-that provider's most constrained unexpired window. Apple Watch requires watchOS 26+.
+paired sources, caches their readings separately and reloads its complications.
+WatchConnectivity also supplies per-computer snapshots. See [source selection](architecture.md#watches).
+Complications display Codex usage only.
+Apple Watch requires watchOS 26+.
 
 The watch app advertises `usageSchema: 2` with its token; the phone forwards this
-capability in source registration. Schema 2 pushes carry all available windows
-(at most four), including an empty array when no readings remain. Older destinations
-receive schema 1's single `allowance` reading for their registered provider.
+capability in source registration. `multipleSources: true` in the Watch token
+message lets the phone register every paired computer; older watches retain
+single-source registration. Schema 2 pushes carry up to two Codex windows, including an empty array when no readings remain. Older destinations
+receive schema 1's single Codex `allowance` reading.
 
 WatchConnectivity uses schema 1 with `allowances`, `observedAt`, `sourceID`,
-`selectedProvider` and `selectionRevision`, retaining flat selected-reading fields
-for older watch apps. Schema 2 pushes require the source and revision to match the
-phone's current settings. Only the phone changes that identity. `observedAt` orders
-complete snapshots, including sign-out removals; each reading keeps its original
-`updatedAt` and reset time. Older registrations cannot undo a newer phone revision.
+and `selectionRevision`, retaining flat selected-reading fields
+for older watch apps. It also carries `sourceIDs` (the allowed paired computers)
+and `sources` (a map from source ID to `allowances` and `observedAt`). Only the
+phone changes that list and its revision. Pushes must match the revision and an
+allowed source. `observedAt` orders complete snapshots within each source,
+including removals; each reading keeps its original `updatedAt` and reset time.
+A source cannot clear another source's cache.
 Example background push:
 
 ```json
@@ -266,7 +267,7 @@ Example background push:
   "allowances": [
     {"provider": "codex", "remaining": 42, "window": 2,
      "windowDurationMins": 300, "updatedAt": 1790000003, "resetsAt": 1790003600},
-    {"provider": "claude", "remaining": 20, "window": 1,
+    {"provider": "codex", "remaining": 20, "window": 1,
      "windowDurationMins": 10080, "updatedAt": 1790000003, "resetsAt": 1790604800}
   ]
 }
@@ -282,7 +283,7 @@ The encrypted link uses service
 | Characteristic suffix | Packet | Purpose |
 | --- | --- | --- |
 | `03` identity | 32-byte `OW` read | Watch ID, ownership, supported profile versions and capabilities. |
-| `02` profile | v1–v6 write, 36–114 bytes | Owner, clock, palette, weather, preferences, optional allowance. |
+| `02` profile | v1–v5 write, 36–111 bytes | Owner, clock, palette, weather, preferences, optional allowance. |
 | `04` activity | 14-byte `OA` read/write/notify | State, alert/sound flags, phone revision, wearer acknowledgement. |
 | `05` notification sync | 8-byte `ON` read/notify | Watch sequence requesting a current phone fetch. |
 
@@ -305,7 +306,6 @@ The profile layout is negotiated using the identity read:
 | v3 / 85 bytes | Accent RGB and brightness. |
 | v4 / 103 bytes | Allowance remaining, window, observation and reset times. |
 | v5 / 111 bytes | Forecast-day expiry. |
-| v6 / 114 bytes | Usage provider (`1` Codex, `2` Claude) and window duration in minutes. |
 
 All multibyte values are little-endian. The profile byte ranges are:
 
@@ -320,12 +320,8 @@ All multibyte values are little-endian. The profile byte ranges are:
 | 81–83, 84 | Accent RGB; brightness (`20`–`100`) |
 | 85, 86, 87–94, 95–102 | Remaining allowance (`255` = unavailable), window (`0` unavailable, `1` weekly, `2` session), observation and reset times |
 | 103–110 | Signed forecast-day expiry time |
-| 111, 112–113 (v6) | Usage provider (`1` Codex, `2` Claude); unsigned window duration minutes (`0` when unavailable, otherwise `1`–`10080`) |
 
-Versions 4 and 5 retain their original Codex-only meaning. When Claude is selected
-on older firmware, the phone sends unavailable instead of relabeling Claude as
-Codex. Profile v6 is negotiated through the identity version range and persisted
-separately on the watch. Provider selection remains visible when quota is unavailable.
+Allowance is Codex-only.
 
 Profile flags mark valid weather, Fahrenheit, night mode and a transient
 preview. The location is null-terminated UTF-8 (at most 23 data bytes).

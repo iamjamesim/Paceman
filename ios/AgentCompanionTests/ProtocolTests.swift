@@ -24,33 +24,57 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(WatchAggregate.selectAllowance(current: [], profiles: [older], now: now)?.remaining, 5)
     }
 
-    func testQuotaSelectionStaysWithinChosenProviderAndPreservesObservation() {
-        let now = 1800000000.0
-        var source = Snapshot(schema: 1, sourceID: "source", generation: "g", revision: 1,
-            sourceName: "source", observedAt: now, changedAt: now, freshFor: 30, state: .working,
-            eventID: "1", allowance: nil, sessions: nil)
-        source.allowances = [
-            CodexAllowance(provider: "codex", remaining: 5, window: 1, updatedAt: Int64(now), resetsAt: Int64(now)+86400),
-            CodexAllowance(provider: "claude", remaining: 80, window: 1, updatedAt: Int64(now)-4000, resetsAt: Int64(now)+86400),
-            CodexAllowance(provider: "claude", remaining: 20, window: 2, updatedAt: Int64(now)-4000, resetsAt: Int64(now)+3600)]
-        let pinned = WatchAggregate.selectAllowance(current:[source],profiles:[source],now:now,provider:"claude")
-        XCTAssertEqual(pinned?.provider,"claude")
-        XCTAssertEqual(pinned?.remaining,20)
-        XCTAssertEqual(pinned?.updatedAt,Int64(now)-4000)
-        source.allowances = source.allowances?.filter { $0.provider == "codex" }
-        XCTAssertNil(WatchAggregate.selectAllowance(current:[source],profiles:[source],now:now,provider:"claude"))
+    func testUnsupportedUsageDoesNotReplaceCodexOrHideActivity() throws {
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture([
+            "configuredProviders": ["claude"],
+            "sessions": [["id":"claude-task", "provider":"claude", "state":"working"]],
+            "allowances": [
+                ["provider":"codex", "remaining":70, "window":1, "updatedAt":1800000000, "resetsAt":1800086400],
+                ["provider":"claude", "remaining":10, "window":2, "updatedAt":1800000000, "resetsAt":1800003600]]]))
+        XCTAssertEqual(snapshot.sessions?.first?.provider, "claude")
+        XCTAssertEqual(snapshot.configuredProviders, ["claude"])
+        XCTAssertEqual(snapshot.usageReadings.map(\.provider), ["codex"])
+        XCTAssertEqual(snapshot.allowances?.count, 1)
     }
 
-    func testClaudeFirmwareProfilesRequireProviderAwareVersion() {
-        let now=Date(timeIntervalSince1970:1800000000)
-        let claude=CodexAllowance(provider:"claude",remaining:20,window:2,updatedAt:1800000000,resetsAt:1800003600,windowDurationMins:300)
-        let older=Array(WatchWire.profile(owner:UUID(),revision:1,now:now,offset:0,version:5,allowance:claude))
-        XCTAssertEqual(older[85],255)
-        let newer=Array(WatchWire.profile(owner:UUID(),revision:1,now:now,offset:0,version:6,allowance:claude))
-        XCTAssertEqual(newer.count,114)
-        XCTAssertEqual(newer[85],20)
-        XCTAssertEqual(newer[111],2)
-        XCTAssertEqual(Array(newer[112...113]),[44,1])
+    func testWatchUsageFallsBackToConnectedSecondComputerWithoutMixingWindows() {
+        let now = 1800000000.0
+        func source(_ id: String, left: Int, updated: Int64) -> Snapshot {
+            Snapshot(schema: 1, sourceID: id, generation: "g", revision: 1, sourceName: id,
+                observedAt: Double(updated), changedAt: Double(updated), freshFor: 30, state: .working,
+                eventID: "1", allowance: nil, sessions: nil,
+                allowances: [CodexAllowance(provider:"codex", remaining:left, window:2,
+                    updatedAt:updated, resetsAt:Int64(now)+3600, windowDurationMins:300)])
+        }
+        let first = source("offline", left:5, updated:Int64(now)-4000)
+        let second = source("connected", left:80, updated:Int64(now))
+        let chosen = WatchAggregate.usageSource(current:[second], profiles:[first,second], now:now)
+        XCTAssertEqual(chosen?.sourceID, second.sourceID)
+        XCTAssertEqual(chosen?.usageReadings, second.usageReadings)
+        XCTAssertEqual(WatchAggregate.selectAllowance(current:[second], profiles:[first,second], now:now)?.remaining,80)
+        // Pairing order remains the preference when both computers are current.
+        let recovered = source("recovered", left:30, updated:Int64(now))
+        XCTAssertEqual(WatchAggregate.usageSource(current:[recovered,second], profiles:[recovered,second], now:now)?.sourceID,"recovered")
+    }
+
+    func testEmptyUsageCarriesObservationTimeToClearWatchCache() throws {
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(["allowances": []]))
+        let chosen = WatchAggregate.usageSource(current: [snapshot], profiles: [snapshot], now: snapshot.observedAt)
+        XCTAssertEqual(chosen?.observedAt, snapshot.observedAt)
+        XCTAssertEqual(chosen?.usageReadings, [])
+        XCTAssertNil(WatchAggregate.selectAllowance(current: [snapshot], profiles: [snapshot], now: snapshot.observedAt))
+    }
+
+    func testFirmwareIgnoresUnsupportedUsage() {
+        let now = Date(timeIntervalSince1970: 1800000000)
+        let unsupported = CodexAllowance(provider: "claude", remaining: 20, window: 2,
+            updatedAt: 1800000000, resetsAt: 1800003600, windowDurationMins: 300)
+        for version: UInt8 in [4, 5] {
+            let bytes = Array(WatchWire.profile(owner: UUID(), revision: 1, now: now,
+                offset: 0, version: version, allowance: unsupported))
+            XCTAssertEqual(bytes.count, version == 4 ? 103 : 111)
+            XCTAssertEqual(bytes[85], 255)
+        }
     }
 
     func testWatchAggregateChoosesFreshAttentionAcrossComputers() {
@@ -827,12 +851,33 @@ final class ProtocolTests: XCTestCase {
             XCTAssertEqual(body["environment"] as? String, "development")
             XCTAssertNil(body["mode"])
             XCTAssertEqual(body["usageSchema"] as? Int, 2)
-            XCTAssertEqual(body["provider"] as? String, "claude")
+            XCTAssertNil(body["provider"])
             XCTAssertEqual(body["selectionRevision"] as? Int, 9)
             return (200, Data(#"{"registered":true}"#.utf8))
         }
         try await client.registerWatchPush(source, token: String(repeating: "ab", count: 32),
-                                           environment: "development", provider: "claude", selectionRevision: 9, usageSchema: 2)
+                                           environment: "development", selectionRevision: 9, usageSchema: 2)
+    }
+
+    func testEveryComputerRegistersWatchPushEvenWhenFirstIsOffline() async {
+        let sources = ["offline", "online"].map { name in
+            PairedSource(endpoint: URL(string: "https://\(name).example")!, sourceID: name,
+                         clientID: name, credential: name)
+        }
+        let client = stubClient { request in
+            XCTAssertEqual(request.url?.path, "/v1/watch-push")
+            if request.url?.host == "offline.example" { throw URLError(.notConnectedToInternet) }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer online")
+            let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
+            XCTAssertNil(body["provider"])
+            XCTAssertEqual(body["selectionRevision"] as? Int, 10)
+            XCTAssertEqual(body["usageSchema"] as? Int, 2)
+            return (200, Data(#"{"registered":true}"#.utf8))
+        }
+        let results = await client.registerWatchPush(sources, token: String(repeating: "ab", count: 32),
+            environment: "development", selectionRevision: 10, usageSchema: 2)
+        XCTAssertEqual(results.count, 2)
+        XCTAssertEqual(results.filter { $0 }.count, 1)
     }
 
     func testRemovalIsSelfScopedAndAlreadyRevokedIsSuccess() async throws {

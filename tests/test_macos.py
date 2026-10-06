@@ -8,12 +8,14 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
-from service.codex_limits import codex_binary, parse_codex_allowance, read_codex_allowance
+from service.codex_limits import codex_binary, parse_codex_allowances, read_codex_allowances
+from service.usage import selected_reading
 from service.codex_turns import read_codex_turn_statuses
 from service.hub import Store
 from service.macos import FINISHED_RETENTION, MacSource
@@ -111,6 +113,74 @@ class MacSourceTests(unittest.TestCase):
                 binary.chmod(0o700)
                 self.assertEqual(codex_binary(application_dirs=(root,)), str(cli.resolve()))
 
+    def test_provider_changes_preserve_other_activity_and_codex_usage(self):
+        from macos.claude_hook import message_for
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            providers = [["codex"]]
+            quota = dict(provider="codex",remaining=68,window=1,updatedAt=1780000000,resetsAt=1780600000)
+            with MacSource(store, socket_path=root / "hook.sock", providers=["codex"],
+                           settings_reader=lambda: providers[0], allowance_reader=lambda: [quota],
+                           turn_status_reader=lambda _: {}) as source:
+                source.receive(dict(command="agent-event",session=str(uuid4()),turn=str(uuid4()),
+                                    event="working",hook="UserPromptSubmit"))
+                source.tick(); source.allowance_thread.join(timeout=2)
+                original = store.snapshot()
+                providers[0] = ["codex", "claude"]
+                source.tick()
+                self.assertEqual(store.snapshot()["sessions"], original["sessions"])
+                self.assertEqual(store.snapshot()["eventID"], original["eventID"])
+                event = message_for(dict(hook_event_name="UserPromptSubmit",session_id="claude",prompt_id="one"))
+                self.assertTrue(source.receive(event))
+                self.assertEqual(len(store.snapshot()["sessions"]), 2)
+                self.assertEqual(store.snapshot()["allowances"], [quota])
+                providers[0] = ["codex"]
+                source.tick()
+                self.assertEqual(store.snapshot()["sessions"], original["sessions"])
+                self.assertEqual(store.snapshot()["allowances"], [quota])
+                self.assertFalse(source.receive(event))
+                providers[0] = []
+                source.tick()
+                self.assertEqual(store.snapshot()["sessions"], [])
+                self.assertEqual(store.snapshot()["allowances"], [])
+                self.assertFalse(source.closed)
+
+    def test_claude_only_monitors_activity_without_reading_usage(self):
+        from macos.claude_hook import message_for
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            reader = Mock()
+            with MacSource(store, socket_path=root / "hook.sock", providers=("claude",),
+                           allowance_reader=reader) as source:
+                source.receive(message_for({"hook_event_name": "UserPromptSubmit", "session_id": "claude", "prompt_id": "one"}))
+                source.tick()
+                reader.assert_not_called()
+                self.assertEqual(store.snapshot()["state"], "working")
+                self.assertEqual(store.snapshot()["allowances"], [])
+
+    def test_disabled_codex_rejects_an_inflight_quota_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            providers = [["codex", "claude"]]
+            entered, release = threading.Event(), threading.Event()
+            def read():
+                entered.set(); release.wait(3)
+                return dict(provider="codex",remaining=68,window=1,updatedAt=1780000000,resetsAt=1780600000)
+            with MacSource(store,socket_path=root/'hook.sock',settings_reader=lambda: providers[0],
+                           allowance_reader=read,turn_status_reader=lambda _: {}) as source:
+                try:
+                    source.tick(); self.assertTrue(entered.wait(2))
+                    providers[0] = ["claude"]
+                    source.tick()
+                finally:
+                    release.set(); source.allowance_thread.join(timeout=2)
+                self.assertEqual(store.snapshot()["allowances"], [])
+
     def test_mac_allowance_is_presentation_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -151,18 +221,18 @@ class MacSourceTests(unittest.TestCase):
         limits = {"rateLimitsByLimitId": {"codex": {"limitId": "codex",
             "primary": {"usedPercent": 25, "windowDurationMins": 300, "resetsAt": now + 1000},
             "secondary": {"usedPercent": 61, "windowDurationMins": 10080, "resetsAt": now + 5000}}}}
-        self.assertEqual(parse_codex_allowance(limits, now),
+        self.assertEqual(selected_reading(parse_codex_allowances(limits, now)),
                          {"provider": "codex", "remaining": 39, "window": 1,
                           "windowDurationMins": 10080,
                           "updatedAt": now, "resetsAt": now + 5000})
         limits["rateLimitsByLimitId"]["codex"]["primary"]["usedPercent"] = 61
-        self.assertEqual(parse_codex_allowance(limits, now)["window"], 1)
+        self.assertEqual(selected_reading(parse_codex_allowances(limits, now))["window"], 1)
         limits["rateLimitsByLimitId"]["codex"]["primary"]["usedPercent"] = 25
         limits["rateLimitsByLimitId"]["codex"]["secondary"]["usedPercent"] = 101
-        self.assertIsNone(parse_codex_allowance(limits, now))
+        self.assertIsNone(selected_reading(parse_codex_allowances(limits, now)))
         limits["rateLimitsByLimitId"]["codex"]["secondary"]["usedPercent"] = 61
         limits["rateLimitsByLimitId"]["codex"]["secondary"]["resetsAt"] = now - 1
-        self.assertIsNone(parse_codex_allowance(limits, now))
+        self.assertIsNone(selected_reading(parse_codex_allowances(limits, now)))
 
     def test_codex_limit_reader_uses_only_chatgpt_account(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -180,13 +250,15 @@ class MacSourceTests(unittest.TestCase):
                 " print(json.dumps({'id': msg['id'], 'result': result}), flush=True)\n")
             binary.chmod(0o700)
             with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": str(binary)}):
-                value = read_codex_allowance()
+                values = read_codex_allowances()
+            self.assertEqual(len(values), 1)
+            value = values[0]
             self.assertEqual(value["provider"], "codex")
             self.assertEqual(value["remaining"], 80)
             self.assertEqual(value["window"], 2)
             with patch.dict(os.environ, {"PACEMAN_CODEX_BIN": str(binary),
                                               "FAKE_ACCOUNT_TYPE": "apiKey"}):
-                self.assertIsNone(read_codex_allowance())
+                self.assertEqual(read_codex_allowances(), [])
 
     def test_lifecycle_and_multiple_sessions(self):
         with tempfile.TemporaryDirectory() as temporary:

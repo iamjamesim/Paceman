@@ -87,6 +87,20 @@ private struct MacPanelTransitions {
 
     @MainActor static func main() async {
         exerciseSetupWindow()
+        // Agent selection never requests credentials or restarts the source.
+        for enabled in [true, false] {
+            let c = ControlledCommands(); let m = model(c)
+            m.status.configuredProviders = enabled ? ["codex"] : ["claude"]
+            m.setAgent("claude", enabled: enabled)
+            await until("provider action") { c.count == 1 }
+            assert(c.args(0) == (enabled ? ["agents", "--providers", "codex", "claude"] : ["agents", "--providers"]))
+            c.reply(0)
+            await until("provider status refresh") { c.count == 2 }
+            c.reply(1,true, enabled ? #"{"running":true,"sharingEnabled":true,"configuredProviders":["codex","claude"]}"# : #"{"running":true,"sharingEnabled":true,"configuredProviders":[]}"#)
+            await until("provider state") { !m.busy && m.hasReadStatus }
+            assert(m.status.selectedProviders == (enabled ? ["codex","claude"] : []))
+            assert(c.count == 2) // No restart or credential action.
+        }
         // Quitting/closing never marks setup finished. Progress survives a new model/process.
         do {
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -251,13 +265,19 @@ private struct MacPanelTransitions {
             let c = ControlledCommands()
             let install = ControlledCommands()
             let unpaired = #"{"running":true,"sharingEnabled":true,"clients":[],"missingHooks":[],"lastAgentEventAt":1}"#
-            let hooks = PanelModel(command: { c.execute($0) }, installer: {
-                _ = install.execute(["install"])
+            let hooks = PanelModel(command: { c.execute($0) }, installer: { providers in
+                _ = install.execute(["install"] + (providers ?? []))
                 return (0, "Phone connection setup is incomplete: Connect Tailscale, then try again.")
             }, needsSetup: { install.count == 0 }, progressURL: url)
+            hooks.selectSetupProvider("codex", enabled: false)
+            hooks.selectSetupProvider("claude", enabled: true)
             hooks.installBundled()
-            await until("route warning installer") { install.count == 1 }; install.reply(0)
-            await until("route warning status") { c.count == 1 }; c.reply(0, true, unpaired)
+            await until("route warning installer") { install.count == 1 }
+            assert(install.args(0) == ["install", "claude"])
+            install.reply(0)
+            await until("route warning status") { c.count == 1 }
+            assert(c.args(0) == ["status"])
+            c.reply(0, true, unpaired)
             await until("route warning hooks") { hooks.hasReadStatus }
             assert(!hooks.needsInstallation && hooks.setupStep == .hooks && hooks.message == nil)
             let resumedHooks = PanelModel(command: { c.execute($0) }, needsSetup: { false }, progressURL: url)
@@ -284,15 +304,51 @@ private struct MacPanelTransitions {
             assert(!finished.shouldPresentSetup)
             phone.endPairing()
         }
+        // Discovery never selects Claude. An empty choice cannot launch installation.
+        do {
+            let c = ControlledCommands(); let install = ControlledCommands()
+            let m = PanelModel(command: { c.execute($0) }, installer: { providers in
+                _ = install.execute(["install"] + (providers ?? [])); return (0, "")
+            }, needsSetup: { true }, progressURL: nil)
+            m.refresh(); await until("setup discovery") { c.count == 1 }
+            c.reply(0, true, #"{"running":false,"sharingEnabled":false,"configuredProviders":["codex"],"detectedProviders":["claude"]}"#)
+            await until("discovery read") { m.hasReadStatus }
+            assert(m.setupProviders == ["codex"])
+            assert(m.status.providerLabel("claude") == "Claude Code (detected)")
+            m.selectSetupProvider("codex", enabled: false)
+            m.installBundled()
+            assert(!m.busy && install.count == 0)
+            m.selectSetupProvider("claude", enabled: true)
+            assert(m.setupProviders == ["claude"])
+        }
+        // Notification repair preserves an all-off selection and remains retryable.
+        do {
+            let marker = URL(fileURLWithPath: InstalledBuild.notificationMarker)
+            try! Data().write(to: marker)
+            defer { try? FileManager.default.removeItem(at: marker) }
+            let c = ControlledCommands(); let install = ControlledCommands()
+            let m = PanelModel(command: { c.execute($0) }, installer: { providers in
+                assert(providers == nil)
+                _ = install.execute(["install"]); return (1, "fixture failure")
+            }, needsSetup: { true }, progressURL: nil)
+            m.refresh(); await until("repair status") { c.count == 1 }
+            c.reply(0, true, #"{"running":false,"sharingEnabled":false,"configuredProviders":[]}"#)
+            await until("repair status read") { m.hasReadStatus }
+            assert(m.setupProviders.isEmpty && m.needsNotificationRepair)
+            m.installBundled(); await until("all-off notification repair") { install.count == 1 }
+            install.reply(0); await until("repair remains retryable") { !m.busy }
+            assert(m.message == "fixture failure")
+        }
         // Setup completion stays in the same model; partial failure remains retryable.
         for code: Int32 in [0, 1, 2] {
             let c = ControlledCommands()
             let install = ControlledCommands()
-            let m = PanelModel(command: { c.execute($0) }, installer: {
-                _ = install.execute(["install"]); return (code, "setup failed")
+            let m = PanelModel(command: { c.execute($0) }, installer: { providers in
+                _ = install.execute(["install"] + (providers ?? [])); return (code, "setup failed")
             }, needsSetup: { install.count == 0 || code != 0 }, progressURL: nil)
             m.installBundled(); m.installBundled()
             await until("single installer") { install.count == 1 }
+            assert(install.args(0) == ["install"]) // Preserve saved choices unless explicitly changed.
             assert(m.operation == .installing)
             install.reply(0)
             await until("installer complete") { !m.busy }

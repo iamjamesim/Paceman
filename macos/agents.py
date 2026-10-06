@@ -1,6 +1,8 @@
 """Selected local agent providers and their hook review metadata."""
 import json
 import os
+import shlex
+import shutil
 from pathlib import Path
 
 from macos.claude_hook import EVENTS as CLAUDE_EVENTS
@@ -46,23 +48,50 @@ def hook_path(provider, *, home=None, root=None):
             claude_config_dir(root, home=home) / 'settings.json')
 
 
+def installed_hook_command(provider, root):
+    """Show the actual retained command, which may use an older interpreter."""
+    script = str(root / f"lib/macos/{provider}_hook.py")
+    try:
+        hooks = json.loads(hook_path(provider, root=root).read_text()).get('hooks', {})
+        for groups in hooks.values():
+            for group in groups:
+                for item in group.get('hooks', []):
+                    if item.get('type') != 'command':
+                        continue
+                    command = item.get('command', '')
+                    arguments = shlex.split(command)
+                    if (len(arguments) in (2, 3) and arguments[-1] == script
+                            and (len(arguments) == 2 or arguments[1] == '-B')):
+                        return command
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return None
+
+
 def configured_providers(root):
     try:
         value = json.loads((root / 'agents.json').read_text())['providers']
-        if isinstance(value, list) and value and all(p in PROVIDERS for p in value):
+        if isinstance(value, list) and all(p in PROVIDERS for p in value):
             return list(dict.fromkeys(value))
     except (OSError, ValueError, KeyError, TypeError):
         pass
     return ['codex']  # Existing installations keep their original provider.
 
 
-def detected_providers():
-    result = []
+def detected_providers(*, home=None, application_dirs=None, binary_dirs=None, root=None):
+    """Installation hints only: never launch an agent or inspect credentials."""
+    home = home or Path.home()
+    application_dirs = application_dirs or (Path('/Applications'), home / 'Applications')
     from service.codex_limits import codex_binary
-    if codex_binary():
-        result.append('codex')
-    home = Path.home()
-    if (Path('/Applications/Claude.app').exists() or (home / '.claude').exists()
-            or any((home / '.vscode/extensions').glob('anthropic.claude-code-*'))):
+    result = ['codex'] if codex_binary(application_dirs=application_dirs) else []
+    binary_dirs = binary_dirs if binary_dirs is not None else (
+        home / '.local/bin', home / '.claude/local', Path('/opt/homebrew/bin'), Path('/usr/local/bin'))
+    binaries = [directory / 'claude' for directory in binary_dirs]
+    editors = ('.vscode', '.vscode-insiders', '.cursor', '.windsurf')
+    if (shutil.which('claude') or any(p.is_file() and os.access(p, os.X_OK) for p in binaries)
+            or any((directory / 'Claude.app').is_dir() for directory in application_dirs)
+            or claude_config_dir(root, home=home).is_dir()
+            or any(any((home / editor / 'extensions').glob('anthropic.claude-code-*'))
+                   for editor in editors)):
         result.append('claude')
-    return result or ['codex']
+    return result

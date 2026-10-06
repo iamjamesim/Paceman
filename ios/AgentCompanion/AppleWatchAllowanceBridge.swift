@@ -1,11 +1,11 @@
 import Foundation
 import WatchConnectivity
 
-/// Only bounded usage readings and the user’s selection cross to watchOS. No source credentials do.
+/// Only bounded usage readings and paired source IDs cross to watchOS. No source credentials do.
 final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
     static let shared = AppleWatchAllowanceBridge()
     private var pending: [String: Any] = ["schema": 1]
-    var onWatchPushToken: ((String, String, Int) -> Void)?
+    var onWatchPushToken: ((String, String, Int, Bool) -> Void)?
 
     private override init() {
         super.init()
@@ -14,8 +14,8 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
         WCSession.default.activate()
     }
 
-    func update(_ allowance: CodexAllowance?, readings: [CodexAllowance] = [], provider: String = "codex",
-                selectionRevision: Int = 0, sourceID: String? = nil, observedAt: TimeInterval? = nil, clear: Bool = false) {
+    func update(_ allowance: CodexAllowance?, readings: [CodexAllowance] = [],
+                selectionRevision: Int = 0, sourceID: String? = nil, observedAt: TimeInterval? = nil, clear: Bool = false, sourceIDs: [String] = [], snapshots: [Snapshot] = []) {
         if let allowance, allowance.valid {
             pending = ["schema": 1, "provider": allowance.provider, "remaining": allowance.remaining,
                        "window": allowance.window, "updatedAt": Double(allowance.updatedAt),
@@ -26,12 +26,20 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
         }
         if let sourceID { pending["sourceID"] = sourceID }
         if let observedAt { pending["observedAt"] = observedAt }
-        pending["selectedProvider"] = provider
         pending["selectionRevision"] = selectionRevision
         if let data = try? JSONEncoder().encode(readings.filter { $0.valid }),
            let values = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             pending["allowances"] = values
         }
+        pending["sourceIDs"] = sourceIDs
+        var sources: [String: Any] = [:]
+        for snapshot in snapshots where sourceIDs.contains(snapshot.sourceID) {
+            if let data = try? JSONEncoder().encode(snapshot.usageReadings),
+               let values = try? JSONSerialization.jsonObject(with: data) {
+                sources[snapshot.sourceID] = ["allowances": values, "observedAt": snapshot.observedAt]
+            }
+        }
+        pending["sources"] = sources
         sendCurrent()
     }
 
@@ -71,7 +79,7 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
               ["development", "production"].contains(environment) else { return false }
         let usageSchema = message["usageSchema"] as? Int ?? 1
         guard [1, 2].contains(usageSchema) else { return false }
-        DispatchQueue.main.async { self.onWatchPushToken?(token, environment, usageSchema) }
+        DispatchQueue.main.async { self.onWatchPushToken?(token, environment, usageSchema, message["multipleSources"] as? Bool == true) }
         return true
     }
 

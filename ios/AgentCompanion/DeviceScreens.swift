@@ -55,6 +55,11 @@ struct ComputerDetail: View {
                     Text("It will reconnect when this computer is awake and online.")
                         .font(.footnote).foregroundStyle(theme.secondaryInk)
                 }
+                if connection != .revoked,
+                   paired.flatMap({ model.snapshots[$0.sourceID]?.configuredProviders })?.contains("claude") == true {
+                    Text("Claude Code activity is supported; Claude usage limits are not.")
+                        .font(.footnote).foregroundStyle(theme.secondaryInk)
+                }
                 if connection != .revoked, let snapshot = paired.flatMap({ model.snapshots[$0.sourceID] }),
                    !snapshot.usageReadings.isEmpty {
                     CompanionRule(theme: theme)

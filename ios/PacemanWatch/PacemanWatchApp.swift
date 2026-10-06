@@ -27,6 +27,7 @@ struct PacemanWatchApp: App {
                     .padding(.vertical, 4)
                 }
             }
+
         }
     }
 
@@ -90,9 +91,9 @@ struct PacemanWatchApp: App {
 
     private var setupSummary: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("No limit yet")
+            Text("No Codex limit yet")
                 .font(.headline)
-            Text("Open Paceman on iPhone to finish setup.")
+            Text("Open Paceman on iPhone to connect a computer using Codex. Claude usage limits are not supported.")
                 .font(.footnote).foregroundStyle(.secondary)
         }
     }
@@ -129,11 +130,10 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
             let scenario = String(preview.dropFirst(16))
             let stale = scenario == "stale"
             let expired = scenario == "expired"
-            let providers = scenario == "claude-only" ? ["claude"] : ["codex", "claude"]
-            usage = WatchUsageState(selectedProvider: providers.first!, readings: scenario == "empty" ? [] : providers.map { provider in
-                WatchAllowanceSnapshot(provider: provider, remaining: provider == "claude" ? 20 : 70, window: 2,
+            usage = WatchUsageState(readings: scenario == "empty" ? [] : [
+                WatchAllowanceSnapshot(provider: "codex", remaining: 70, window: 2,
                     updatedAt: now - (stale ? 7200 : expired ? 4000 : 0), resetsAt: now + (expired ? -60 : 3600), windowDurationMins: 300)
-            })
+            ])
             return
         }
         #endif
@@ -146,7 +146,7 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
         guard let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
               ["development", "production"].contains(environment) else { return }
         pushTokenMessage = ["schema": 1, "watchPushToken": data.map { String(format: "%02x", $0) }.joined(),
-                            "environment": environment, "usageSchema": 2]
+                            "environment": environment, "usageSchema": 2, "multipleSources": true]
         sendPushToken()
     }
 

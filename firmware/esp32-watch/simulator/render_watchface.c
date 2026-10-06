@@ -233,7 +233,7 @@ int main(int argc, char **argv)
     }
     const char *profile_path = getenv("WATCH_PREVIEW_PROFILE");
     if (profile_path != NULL) {
-        omarchy_profile_v6_t packet = {0};
+        omarchy_profile_v5_t packet = {0};
         omarchy_profile_v4_t profile;
         FILE *input = fopen(profile_path, "rb");
         if (input == NULL) { perror(profile_path); return 2; }
@@ -241,15 +241,13 @@ int main(int argc, char **argv)
         const bool extra = fgetc(input) != EOF;
         fclose(input);
         profile = packet.base;
-        if (extra || !((size == sizeof(packet) && omarchy_profile_v6_is_valid(&packet)) ||
-                      (size == sizeof(omarchy_profile_v5_t) && omarchy_profile_v5_is_valid((const omarchy_profile_v5_t *)&packet)) ||
+        if (extra || !((size == sizeof(packet) && omarchy_profile_v5_is_valid(&packet)) ||
                        (size == sizeof(profile) && omarchy_profile_v4_is_valid(&profile)))) {
             fputs("Invalid preview profile\n", stderr);
             return 2;
         }
         const int64_t now = time(NULL);
         watch_face_layout_set_connected(&layout, true);
-        layout.allowance_provider = packet.base.base.version >= 6 ? packet.allowance_provider : 1;
         watch_face_layout_set_allowance(&layout,
             omarchy_allowance_remaining(profile.allowance_remaining, profile.allowance_updated_at,
                                         profile.allowance_resets_at, now),
