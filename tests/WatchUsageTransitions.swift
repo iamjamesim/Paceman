@@ -90,6 +90,55 @@ struct WatchUsageTransitions {
         assert(cache.receive(["schema":1,"selectedProvider":"codex","selectionRevision":3,"sourceID":other,
             "observedAt":1800000000.0,"allowances":[]],authoritative:true,now:later))
         assert(!cache.receive(bundle,authoritative:false,now:later))
+        // After configuration, both computers deliver directly to the Watch;
+        // there are no further phone callbacks in this offline-first scenario.
+        func configuration(_ ids: [String], revision: Int, snapshots: [String: Any] = [:]) -> [String: Any] {
+            ["schema":1, "selectionRevision":revision, "selectedProvider":"codex", "sourceIDs":ids, "sources":snapshots]
+        }
+        func push(_ id: String, revision: Int = 4, at: Double, values: [[String: Any]]) -> [String: Any] {
+            ["schema":2, "selectionRevision":revision, "sourceID":id, "observedAt":at, "allowances":values]
+        }
+        var multi = WatchUsageState()
+        assert(multi.receive(configuration([source,other],revision:4),authoritative:true,now:now))
+        assert(multi.receive(push(source,at:1800000000,values:[reading("codex",70)]),authoritative:false,now:later))
+        assert(multi.receive(push(other,at:1800000010,values:[reading("codex",40,1800000010)]),authoritative:false,now:later))
+        assert(multi.selected(at:later)?.remaining == 40)
+        // A reconnecting computer's newer envelope carries an older quota.
+        assert(multi.receive(push(source,at:1800000011,values:[reading("codex",99)]),authoritative:false,now:later))
+        assert(multi.selected(at:later)?.remaining == 40)
+        assert(multi.receive(push(source,at:1800000012,values:[]),authoritative:false,now:later))
+        assert(multi.selected(at:later)?.remaining == 40)
+        assert(!multi.receive(push(other,at:1800000001,values:[reading("codex",99,1800000001)]),authoritative:false,now:later))
+        // A delayed phone snapshot cannot roll back the Watch's newer direct reading.
+        assert(multi.receive(configuration([source,other],revision:4,snapshots:[source:["observedAt":1800000013.0,"allowances":[]],other:["observedAt":1800000000.0,"allowances":[reading("codex",99)]]]),authoritative:true,now:later))
+        assert(multi.selected(at:later)?.remaining == 40)
+        let unpaired = "cccccccc-2222-4333-8444-555555555555"
+        assert(!multi.receive(push(unpaired,at:1800000014,values:[reading("codex",1,1800000014)]),authoritative:false,now:later))
+        assert(!multi.receive(push(other,revision:3,at:1800000014,values:[reading("codex",1,1800000014)]),authoritative:false,now:later))
+        assert(!multi.receive(configuration([source],revision:4),authoritative:true,now:later))
+        multi.save(defaults:defaults)
+        assert(WatchUsageState.load(defaults:defaults) == multi)
+        assert(multi.receive(push(source,at:1800000015,values:[reading("codex",30,1800000015)]),authoritative:false,now:later))
+        assert(multi.selected(at:now.addingTimeInterval(15))?.remaining == 30)
+        // Removing the freshest source exposes the other source's cache and
+        // prevents delayed pushes from restoring removed data.
+        assert(multi.receive(configuration([other],revision:5),authoritative:true,now:later))
+        assert(multi.selected(at:later)?.remaining == 40)
+        assert(!multi.receive(push(source,revision:5,at:1800000016,values:[reading("codex",1,1800000016)]),authoritative:false,now:later))
+        assert(multi.receive(configuration([],revision:6),authoritative:true,now:later))
+        assert(multi.selected(at:later) == nil)
+        assert(!multi.receive(push(other,revision:6,at:1800000016,values:[reading("codex",1,1800000016)]),authoritative:false,now:later))
+        // Migration keeps a newer legacy Watch cache when phone history is absent.
+        var upgrade = WatchUsageState(sourceID:source, readings:[try decode(reading("codex",33))])
+        assert(upgrade.receive(configuration([source,other],revision:4),authoritative:true,now:now))
+        assert(upgrade.selected(at:now)?.remaining == 33)
+        // Window expiry can move to a different cached source without a new push.
+        assert(upgrade.receive(push(other,at:1800000001,values:[fiveHour.merging(["updatedAt":1800000001.0]) { _, new in new }]),authoritative:false,now:later))
+        assert(upgrade.selected(at:now.addingTimeInterval(2))?.remaining == 1)
+        assert(upgrade.selected(at:later)?.remaining == 33)
+        let beforeInvalid = upgrade
+        assert(!upgrade.receive(configuration([source,other],revision:4,snapshots:[other:["observedAt":1800001000.0,"allowances":[]]]),authoritative:true,now:later))
+        assert(upgrade == beforeInvalid)
         print("watch usage transitions passed")
     }
 }

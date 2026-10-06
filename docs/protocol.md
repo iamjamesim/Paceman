@@ -238,22 +238,27 @@ and display name. An end push sets `event` to `end`.
 
 The watchOS app receives usage-only background pushes
 (`apns-push-type: background`, `aps.content-available: 1`) at its app token from the
-first paired source, stores the readings and reloads its complications. WatchConnectivity also
-supplies full usage snapshots using the phone's [source selection](architecture.md#watches).
+paired sources, caches their readings separately and reloads its complications.
+WatchConnectivity also supplies per-computer snapshots. See [source selection](architecture.md#watches).
 Complications display Codex only; saved Claude configurations show unavailable.
 Apple Watch requires watchOS 26+.
 
 The watch app advertises `usageSchema: 2` with its token; the phone forwards this
-capability in source registration. Schema 2 pushes carry all available windows
+capability in source registration. `multipleSources: true` in the Watch token
+message lets the phone register every paired computer; older watches retain
+single-source registration. This capability does not change relay payloads.
+Schema 2 pushes carry all available windows
 (at most four), including an empty array when no readings remain. Older destinations
 receive schema 1's single `allowance` reading for their registered provider.
 
 WatchConnectivity uses schema 1 with `allowances`, `observedAt`, `sourceID`,
 `selectedProvider` and `selectionRevision`, retaining flat selected-reading fields
-for older watch apps. Schema 2 pushes require the source and revision to match the
-phone's current settings. Only the phone changes that identity. `observedAt` orders
-complete snapshots, including sign-out removals; each reading keeps its original
-`updatedAt` and reset time. Older registrations cannot undo a newer phone revision.
+for older watch apps. It also carries `sourceIDs` (the allowed paired computers)
+and `sources` (a map from source ID to `allowances` and `observedAt`). Only the
+phone changes that list and its revision. Pushes must match the revision and an
+allowed source. `observedAt` orders complete snapshots within each source,
+including removals; each reading keeps its original `updatedAt` and reset time.
+A source cannot clear another source's cache.
 Example background push:
 
 ```json

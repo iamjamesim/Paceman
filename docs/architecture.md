@@ -41,8 +41,14 @@ prefers a recent reading from a connected computer, then recent cached usage,
 then older cached usage, in pairing order. Windows come from one computer;
 accounts are not combined. Claude Code contributes activity only.
 
-Apple Watch's Codex Limit and Codex Reset complications show the most constrained
-unexpired window. The phone forwards its chosen computer's readings, but direct
-background pushes still come only from the first paired computer. Independent
-background failover is not supported.
-Apple Watch receives usage readings through WatchConnectivity or its own background push path, independently of ESP32 Bluetooth. Exact fields, compatibility and versions are in the [protocol](protocol.md); freshness and clearing rules are in [data lifecycle](data-lifecycle.md).
+Apple Watch registers for direct background pushes from every paired computer,
+so one computer going offline does not require the phone to switch sources.
+The Watch caches each computer separately, chooses the newest available Codex
+reading by its quota observation time, and shows its most constrained unexpired
+window in Codex Limit and Codex Reset. Older or empty data from another computer
+cannot erase that reading. This still assumes one Codex account across computers.
+
+WatchConnectivity also supplies the paired-computer list and cached readings.
+Apple Watch delivery is independent of ESP32 Bluetooth. Exact fields and
+compatibility are in the [protocol](protocol.md); freshness and clearing rules
+are in [data lifecycle](data-lifecycle.md).

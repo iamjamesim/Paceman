@@ -153,7 +153,7 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
         guard let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
               ["development", "production"].contains(environment) else { return }
         pushTokenMessage = ["schema": 1, "watchPushToken": data.map { String(format: "%02x", $0) }.joined(),
-                            "environment": environment, "usageSchema": 2]
+                            "environment": environment, "usageSchema": 2, "multipleSources": true]
         sendPushToken()
     }
 

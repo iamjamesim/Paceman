@@ -60,7 +60,7 @@ private struct AllowanceProvider: AppIntentTimelineProvider {
         let state = WatchUsageState.load()
         var dates = Set([now])
         var reload: Date?
-        for value in state.readings where value.provider == configuration.provider.rawValue && value.available(at: now) {
+        for value in state.timelineReadings where value.provider == configuration.provider.rawValue && value.available(at: now) {
             let reset = Date(timeIntervalSince1970: value.resetsAt)
             var last = now
             // Keep the existing ring/countdown cadence for each quota window.

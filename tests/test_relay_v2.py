@@ -261,6 +261,24 @@ class RelayV2Tests(unittest.TestCase):
                                    method="PUT", credential=self.client_secret)[0], 200)
         self.assertEqual(self.call("/v2/send", watch_send, credential=self.source_secret)[0], 200)
 
+    def test_same_watch_token_remains_bound_to_both_computers(self):
+        sends = []
+        for _ in range(2):
+            self.source_id = str(uuid.uuid4())
+            self.source_secret = secrets.token_urlsafe(32)
+            self.approve()
+            binding = {"sourceID": self.source_id, "sourceCredentialHash": digest(self.source_secret),
+                       "clientID": self.client_id, "mode": "watch", "tokenHash": digest(self.token),
+                       "environment": "production"}
+            self.assertEqual(self.call("/v2/destinations", binding, method="PUT", credential=self.client_secret)[0], 200)
+            payload, headers = watch_allowance_notification(self.source_id, {"provider": "codex",
+                "remaining": 42, "window": 2, "windowDurationMins": 300,
+                "updatedAt": 100, "resetsAt": 3600}, 100)
+            sends.append(({**self.send, "sourceID": self.source_id, "mode": "watch",
+                           "payload": payload, "headers": headers}, self.source_secret))
+        for send, secret in sends:
+            self.assertEqual(self.call("/v2/send", send, credential=secret)[0], 200)
+
     def test_phone_can_unbind_and_revoke_itself(self):
         self.approve()
         self.bind()

@@ -221,6 +221,24 @@ final class SourceClient {
         try await relayCall(source, path: "v2/destinations", method: "DELETE", fields: ["mode": "alert"])
     }
 
+    func registerWatchPush(_ sources: [PairedSource], token: String, environment: String,
+                           selectionRevision: Int, usageSchema: Int) async -> [Bool] {
+        await withTaskGroup(of: Bool.self) { group in
+            for source in sources {
+                group.addTask {
+                    do {
+                        try await self.registerWatchPush(source, token: token, environment: environment,
+                            selectionRevision: selectionRevision, usageSchema: usageSchema)
+                        return true
+                    } catch { return false }
+                }
+            }
+            var results: [Bool] = []
+            for await result in group { results.append(result) }
+            return results
+        }
+    }
+
     func registerWatchPush(_ source: PairedSource, token: String, environment: String,
                            provider: String = "codex", selectionRevision: Int = 0, usageSchema: Int = 1) async throws {
         try await registerRelayDestination(source, mode: "watch", token: token, environment: environment)

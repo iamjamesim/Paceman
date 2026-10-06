@@ -860,6 +860,27 @@ final class ProtocolTests: XCTestCase {
                                            environment: "development", provider: "claude", selectionRevision: 9, usageSchema: 2)
     }
 
+    func testEveryComputerRegistersWatchPushEvenWhenFirstIsOffline() async {
+        let sources = ["offline", "online"].map { name in
+            PairedSource(endpoint: URL(string: "https://\(name).example")!, sourceID: name,
+                         clientID: name, credential: name)
+        }
+        let client = stubClient { request in
+            XCTAssertEqual(request.url?.path, "/v1/watch-push")
+            if request.url?.host == "offline.example" { throw URLError(.notConnectedToInternet) }
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer online")
+            let body = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: Any]
+            XCTAssertEqual(body["provider"] as? String, "codex")
+            XCTAssertEqual(body["selectionRevision"] as? Int, 10)
+            XCTAssertEqual(body["usageSchema"] as? Int, 2)
+            return (200, Data(#"{"registered":true}"#.utf8))
+        }
+        let results = await client.registerWatchPush(sources, token: String(repeating: "ab", count: 32),
+            environment: "development", selectionRevision: 10, usageSchema: 2)
+        XCTAssertEqual(results.count, 2)
+        XCTAssertEqual(results.filter { $0 }.count, 1)
+    }
+
     func testRemovalIsSelfScopedAndAlreadyRevokedIsSuccess() async throws {
         let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "source", clientID: "client", credential: "secret")
         for code in [200, 401] {
