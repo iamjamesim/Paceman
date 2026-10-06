@@ -45,6 +45,16 @@ enum WatchChannelReadiness {
     }
 }
 
+enum WatchSetupRecovery {
+    static func ownershipSavePending(error: Error?, activityRead: Bool,
+                                     paired: Bool, profileAccepted: Bool) -> Bool {
+        guard !paired, profileAccepted, activityRead, let error else { return false }
+        let failure = error as NSError
+        return failure.domain == CBATTErrorDomain &&
+            failure.code == CBATTError.insufficientResources.rawValue
+    }
+}
+
 /// Accessory access is not proof of a completed ownership/profile handshake.
 struct WatchPairingReceipt: Codable, Equatable {
     let bluetoothID: UUID
@@ -553,8 +563,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         connect(identifier)
     }
 
-    private func recoverConnection(_ message: String) {
-        guard paired else { stopForTerminalFailure(message); return }
+    private func recoverConnection(_ message: String, ownershipSavePending: Bool = false) {
+        guard paired || ownershipSavePending else { stopForTerminalFailure(message); return }
         ready = false
         preparing = false
         handshakeTimeout?.cancel()
@@ -567,7 +577,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         profileWritePending = false
         acceptedProfileFingerprint = nil
         writePending = false
-        status = message + " Reconnecting…"
+        status = ownershipSavePending ? "Checking the connection…" : message + " Reconnecting…"
         Diagnostics.shared.record("ble_connection_recovering")
         if let peripheral, peripheral.state != .disconnected { cancelForRecovery(peripheral) }
         else { reconnectIfNeeded() }
@@ -778,6 +788,15 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard enabled, preparing || ready, peripheral.state == .connected,
               self.peripheral?.identifier == peripheral.identifier else { return }
+        if WatchSetupRecovery.ownershipSavePending(error: error,
+            activityRead: characteristic.uuid == activityUUID,
+            paired: paired, profileAccepted: acceptedProfile) {
+            // The first profile was queued, but its owner record is not saved yet.
+            // Rebuild the session through didDisconnect, within the setup deadline.
+            Diagnostics.shared.record("ble_ownership_save_pending")
+            recoverConnection("Checking the connection…", ownershipSavePending: true)
+            return
+        }
         guard error == nil, let value = characteristic.value else { recoverConnection("Couldn’t read encrypted watch data."); return }
         if characteristic.uuid == identityUUID {
             do {

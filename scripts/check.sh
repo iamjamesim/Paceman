@@ -25,6 +25,7 @@ done
 "${CC:-cc}" -std=c11 -UNDEBUG -I "$watch/simulator/storage_stubs" -I "$watch/firmware/main" \
   "$watch/simulator/test_storage.c" "$watch/firmware/main/watch_storage.c" -o "$check_dir/test-storage"
 "$check_dir/test-storage"
+"$python" "$watch/simulator/check_gatt.py"
 for helper in scripts/*.sh "$watch"/tools/*.sh "$watch"/firmware/release/flash.sh; do
   bash -n "$helper"
 done
