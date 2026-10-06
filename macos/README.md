@@ -4,15 +4,13 @@ For Apple Silicon Macs running macOS 15 or later.
 
 ## Install the released app
 
-1. Download the **[Mac DMG](https://github.com/iamjamesim/Paceman/releases/download/desktop-v0.1.0/Paceman-macos-arm64-0.1.0.dmg)** from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/releases/tag/desktop-v0.1.0). The release is signed and notarized.
+1. Download the **Mac DMG** from [Releases](https://github.com/iamjamesim/Paceman/releases). The release is signed and notarized.
 2. Open the DMG, drag **Paceman** onto **Applications**, then open it from Applications.
-3. Choose **Set up Paceman**. This starts Paceman at login, enables its background item, and prepares Codex hooks.
+3. Choose **Set up Paceman**. This starts Paceman at login, enables its background item, and prepares hooks for the selected agents.
 
 macOS may show notifications about login and background items. You can manage them in **System Settings → General → Login Items & Extensions**. The Mac release includes Python; no separate runtime installation is needed.
 
 Prefer to build locally? Use [source setup](#build-and-install-from-source). Both installation paths continue with hook review and iPhone pairing below.
-
-Desktop 0.1.0 monitors Codex. Claude support below requires a build from the current source until a newer desktop release includes it.
 
 ## Review agent hooks
 
@@ -138,7 +136,7 @@ To update a release install, quit Paceman, replace it with the newer app from [R
 
 ## Build and install from source
 
-Download the source from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/releases/tag/desktop-v0.1.0) or clone this repository. Use Python 3.11+ installed outside the checkout, Xcode, and an Apple Silicon Mac. From the repository root, run:
+Clone this repository. Use Python 3.11+ installed outside the checkout, Xcode, and an Apple Silicon Mac. From the repository root, run:
 
 ```sh
 python3 -m macos.install

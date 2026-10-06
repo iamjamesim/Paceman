@@ -6,7 +6,7 @@ The Omarchy package installs a per-user source service and a bar panel. The serv
 
 Requires Python 3.11+, a user systemd session, Omarchy 4.0+, and Tailscale on computer and phone. `qrencode` enables QR pairing; without it, the CLI emits invitation JSON.
 
-Download the **[Omarchy archive](https://github.com/iamjamesim/Paceman/releases/download/desktop-v0.1.0/Paceman-Omarchy-0.1.0.tar.gz)** from [Desktop 0.1.0](https://github.com/iamjamesim/Paceman/releases/tag/desktop-v0.1.0). This package contains source and an installer. Extract it, open a terminal in the extracted `Paceman-Omarchy-0.1.0` folder, and run:
+Download the **Omarchy archive** from [Releases](https://github.com/iamjamesim/Paceman/releases). Extract it, open a terminal in the extracted folder, and run:
 
 ```sh
 bash scripts/install-omarchy.sh
@@ -14,21 +14,21 @@ bash scripts/install-omarchy.sh
 
 Prefer a Git checkout? Use [source setup](#install-from-a-git-checkout). Both installation paths continue with hook review and phone pairing below.
 
-The installer copies Paceman to `~/.local/lib/paceman`, prepares notifications through `https://relay.paceman.ai`, installs `pacemanctl`, enables its user service, prepares a private Tailscale Serve route, reloads the bar, and adds seven commands to `~/.codex/hooks.json`. The relay keeps the APNs signing key; Omarchy stores only a source credential. Re-run to update; `--no-bar` omits the panel. Current source builds support Claude Code activity; Desktop 0.1.0 is Codex-only. Updates preserve an existing relay or direct APNs configuration, pairing data, Sharing and agent choices, and unrelated hooks. If notification or private route setup fails, the installer reports a partial installation and the pairing button can retry route setup. A fresh install ignores checkout `.runtime` data. The installer disables the old `omarchy-watch.service` but leaves its data and Codex plugin.
+The installer copies Paceman to `~/.local/lib/paceman`, prepares notifications through `https://relay.paceman.ai`, installs `pacemanctl`, enables its user service, prepares a private Tailscale Serve route, reloads the bar, and installs hooks for the selected agents. The relay keeps the APNs signing key; Omarchy stores only a source credential. Re-run to update; `--no-bar` omits the panel. Updates preserve an existing relay or direct APNs configuration, pairing data, Sharing and agent choices, and unrelated hooks. If notification or private route setup fails, the installer reports a partial installation and the pairing button can retry route setup.
 
 For a self-hosted relay, pass `--relay-url https://YOUR-RELAY` to the install script. Developers managing a direct APNs sender can use `--no-push-setup` and follow [development-only direct APNs](../docs/push-delivery.md#development-only-direct-apns). Neither option is needed for the normal install.
 
 ## Install from a Git checkout
 
-Clone the release tag, then run the same installer from the repository root:
+Clone the repository, then run the installer:
 
 ```sh
-git clone --branch desktop-v0.1.0 https://github.com/iamjamesim/Paceman.git paceman
+git clone https://github.com/iamjamesim/Paceman.git paceman
 cd paceman
 bash scripts/install-omarchy.sh
 ```
 
-To follow current development instead, omit `--branch desktop-v0.1.0`. Continue with hook review and phone pairing below.
+Continue with hook review and phone pairing below.
 
 ## Choose agents
 
@@ -53,8 +53,6 @@ Installing and pairing do not enable session monitoring until you review the hoo
 The seven events are `UserPromptSubmit` (new work), `PreToolUse` (tool calls and input questions), `PermissionRequest` (approval needed), `PostToolUse` (resolved blocking input and approvals), `Stop` (finished turn), `Interrupt` (interrupted turn), and `SessionEnd` (closed session). The hook sends event and tool names plus opaque session, turn, and call IDs to Paceman's private local socket. It does not send prompts, replies, command arguments, or answers. The user decides whether to trust each entry.
 
 After review, start a fresh local Codex task and submit a prompt. Check that `lastAgentEventAt` advances in `pacemanctl status`. If it does not, review the hook rows and installed command; monitoring setup remains incomplete. Paceman verifies the sending Codex process and reconciles its identity after source restart.
-
-If `omarchy-watch-codex` is already installed, Paceman still accepts its events during migration. Paceman's own hooks take precedence for nonterminal events when both run. After verifying Paceman's hooks, remove the old Codex plugin with `codex plugin remove omarchy-watch-codex@omarchy-watch-codex` if it was used only for Paceman; the installer does not remove it for you.
 
 ## Review Claude Code hooks
 
