@@ -7,6 +7,7 @@ private enum SetupGuide {
     static let url = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md")!
     static let phoneSetupURL = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md#connect-your-iphone")!
     static let testFlightURL = URL(string: "https://testflight.apple.com/join/wpMWQb7d")!
+    static let claudeHooks = URL(string: "https://code.claude.com/docs/en/hooks#the-hooks-menu")!
     static let codexSettings = URL(string: "codex://settings")!
     static var codexApp: URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") }
     static var tailscaleApp: URL? {
@@ -683,10 +684,10 @@ private struct HookReviewView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("1. Open hook settings").font(.headline)
                         Text(provider == "codex" ? "Codex Settings → Hooks → User config (All projects). In the CLI, use /hooks."
-                             : "Claude CLI: /hooks. VS Code: / → Customize → Hooks. For local desktop Code sessions, inspect your Claude user settings.")
+                             : "Claude CLI: /hooks. VS Code: / → Customize → Hooks (Claude Code 2.1.269+). For local desktop Code sessions, inspect your Claude user settings.")
                             .fixedSize(horizontal: false, vertical: true)
                         if provider == "claude" {
-                            Text("Requires Claude Code 2.1.196 or later.").font(.caption).foregroundStyle(.secondary)
+                            Text("Activity requires Claude Code 2.1.196+. Session links require 2.1.199+ with Remote Control enabled.").font(.caption).foregroundStyle(.secondary)
                         }
                         if provider == "codex", SetupGuide.codexApp != nil {
                             Button("Open Codex Settings") { NSWorkspace.shared.open(SetupGuide.codexSettings) }
@@ -695,7 +696,7 @@ private struct HookReviewView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("2. Review Paceman’s hooks").font(.headline)
                         Text(provider == "codex" ? "Expand “Hook 1” under each of the 8 events. Trust it only if the command matches:"
-                             : "Check the Paceman command under each of the 12 events. Complete any review Claude requests, then start a new session.")
+                             : "Check the Paceman command under each of the 12 events. Claude runs configured hooks in trusted workspaces; there is no separate acceptance step for each hook.")
                             .fixedSize(horizontal: false, vertical: true)
                         if let command = model.status.hookCommands?[provider] ?? (provider == "codex" ? model.status.hookCommand : nil) {
                             Text(command).font(.system(.callout, design: .monospaced))
@@ -716,7 +717,9 @@ private struct HookReviewView: View {
                                 }
                             }.padding(.top, 8)
                         }.id(provider)
-                        Text("Hooks send event names, task and turn IDs, and optional project labels. They exclude prompts, replies, transcripts, tool arguments, and full paths. Labels may appear on your Lock Screen.")
+                        Text(provider == "claude"
+                             ? "Hooks send lifecycle metadata, optional project labels, and a Remote Control session ID when available. They exclude prompts, replies, transcripts, tool arguments, and full paths. Labels may appear on your Lock Screen."
+                             : "Hooks send event names, task and turn IDs, and optional project labels. They exclude prompts, replies, transcripts, tool arguments, and full paths. Labels may appear on your Lock Screen.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                     VStack(alignment: .leading, spacing: 6) {
@@ -734,7 +737,8 @@ private struct HookReviewView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.id(provider)
             HStack {
-                Link("Setup guide", destination: SetupGuide.url)
+                Link(provider == "claude" ? "Claude hook reference" : "Setup guide",
+                     destination: provider == "claude" ? SetupGuide.claudeHooks : SetupGuide.url)
                 Spacer()
                 if let nextProvider {
                     Button("Next: \(nextProvider == "claude" ? "Claude Code" : "Codex")") { reviewProvider = nextProvider }

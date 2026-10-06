@@ -204,6 +204,9 @@ def main():
             print(f"Review Paceman's {name} hooks with /hooks, then start a new local task.")
             if provider == "codex":
                 print("Codex calls each entry Hook 1; expand it to verify the command.")
+            else:
+                print("Claude /hooks lists configured hooks; there is no separate per-hook acceptance step in trusted workspaces.")
+                print("VS Code: / > Customize > Hooks (Claude Code 2.1.269+). Hook reference: https://code.claude.com/docs/en/hooks#the-hooks-menu")
             print("Command:", hook_command(app, provider))
             for event, purpose in (HOOK_PURPOSES if provider == "codex" else CLAUDE_PURPOSES):
                 print(f"  {event}: {purpose}")

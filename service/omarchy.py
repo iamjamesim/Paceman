@@ -292,15 +292,15 @@ class OmarchySource:
                 saved = db.execute("SELECT lifecycle FROM omarchy_claude WHERE id=?", (key,)).fetchone()
                 current = ClaudeSession(**json.loads(saved[0])) if saved else ClaudeSession()
             if event == "started":
-                if binding is not None:
-                    self.record_event(db, "claude")
-                    return self.publish(db, lifecycle_only=True)
+                if "remoteSessionID" in command:
+                    current.remote_session_id = command["remoteSessionID"]
             elif event == "ended":
                 if binding is None:
                     return self.publish(db, lifecycle_only=True)
                 if turn and current.turn and turn != current.turn:
                     return self.publish(db, lifecycle_only=True)
                 current.base_state = "idle"
+                current.remote_session_id = None
                 current.waits.clear()
                 current.tools.clear()
             elif not current.receive({**command, "workspaceLabel": None}, self.monotonic(), ATTENTION_DELAY):
@@ -368,11 +368,15 @@ class OmarchySource:
             state = ("needs_input" if row["state"] not in ("finished", "idle")
                      and question and question[0] == row["turn"] and question[1] <= now_monotonic
                      else row["state"])
+            session = {"id": row["id"], "provider": row["provider"], "state": state}
             if row["provider"] == "claude":
                 saved = db.execute("SELECT lifecycle FROM omarchy_claude WHERE id=?", (row["id"],)).fetchone()
                 if saved:
-                    state = ClaudeSession(**json.loads(saved[0])).state(now_monotonic)
-            sessions.append({"id": row["id"], "provider": row["provider"], "state": state})
+                    current = ClaudeSession(**json.loads(saved[0]))
+                    session["state"] = current.state(now_monotonic)
+                    if current.remote_session_id:
+                        session["remoteSessionID"] = current.remote_session_id
+            sessions.append(session)
         # Needs-input takes precedence; active work wins over old completions.
         state = next((candidate for candidate in ("needs_input", "failed", "working", "finished")
                       if any(session["state"] == candidate for session in sessions)), "idle")

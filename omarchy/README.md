@@ -58,13 +58,13 @@ After review, start a fresh local Codex task and submit a prompt. Check that `la
 
 ## Review Claude Code hooks
 
-After enabling Claude, start a new Claude Code session and inspect `/hooks`. Verify the printed command, shaped like:
+After enabling Claude, inspect the loaded hooks with `/hooks` in the CLI, or **/ → Customize → Hooks** in VS Code (Claude Code 2.1.269+). Configured hooks run after workspace trust; there is no separate per-hook acceptance step. See [Claude's hook reference](https://code.claude.com/docs/en/hooks#the-hooks-menu). Verify the printed command, shaped like:
 
 ```sh
 /usr/bin/python3 -I /home/YOU/.local/lib/paceman/omarchy/claude_hook.py
 ```
 
-Paceman observes session start/end, new prompts, tool start/results, permission requests, MCP input requests/results, and turn completion/failure. It sends only opaque session/prompt/call IDs, lifecycle states, and hashed tool/input scopes. It sends no prompts, replies, tool arguments, or credentials, and never changes approval decisions. If hooks are disabled by your Claude settings or organization, enable them there first.
+Paceman observes session start/end, new prompts, tool start/results, permission requests, MCP input requests/results, and turn completion/failure. It sends only opaque session/prompt/call IDs, lifecycle states, and hashed tool/input scopes. With Remote Control active on Claude Code 2.1.199+, it also sends the remote session ID so the iPhone can open that specific chat; otherwise the button opens the Claude Code session list. It sends no prompts, replies, tool arguments, or credentials, and never changes approval decisions. If hooks are disabled by your Claude settings or organization, enable them there first.
 
 Submit a fresh local prompt in CLI or VS Code and check that `lastAgentEventByProvider.claude` advances in `pacemanctl status`. The panel distinguishes an enabled agent awaiting its first event from one with no active work. Process identity verifies ownership and clears exited sessions; source restart preserves live sessions and pending attention. Questions and approvals appear after five seconds and clear on the corresponding result or turn end.
 

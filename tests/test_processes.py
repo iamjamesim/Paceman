@@ -113,7 +113,8 @@ for line in sys.stdin:
 """
         owner = subprocess.Popen([str(executable), "-c", driver, sys.executable, str(hook)],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            env={**os.environ, "XDG_RUNTIME_DIR": str(self.root)}, start_new_session=True)
+            env={**os.environ, "XDG_RUNTIME_DIR": str(self.root),
+                 "CLAUDE_CODE_BRIDGE_SESSION_ID": "session_nativeRemote"}, start_new_session=True)
         def cleanup():
             owner.kill()
             owner.communicate(timeout=3)
@@ -125,6 +126,7 @@ for line in sys.stdin:
             owner.stdin.flush()
             self.assertEqual(self.line(owner), "SENT")
             self.assertEqual(self.store.snapshot()["state"], state)
+            self.assertEqual(self.store.snapshot()["sessions"][0]["remoteSessionID"], "session_nativeRemote")
         public = json.dumps(self.store.snapshot())
         self.assertNotIn("PRIVATE", public)
         self.assertNotIn("secret", public)

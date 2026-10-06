@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 import tempfile
 import time
@@ -9,6 +12,7 @@ from service.claude_hooks import message_for
 from service.hub import Store
 from service.omarchy import OmarchySource
 from service.processes import AgentProcesses, ProcessIdentity
+from service.push import live_notification
 from omarchy import agents
 
 
@@ -116,6 +120,118 @@ class ClaudeSourceTests(unittest.TestCase):
         self.processes.identify.side_effect = None
         self.assertFalse(self.source.receive(message, peer_pid=2))
         self.assertEqual(self.store.snapshot()["sessions"], [])
+
+
+    def test_remote_links_update_and_clear_without_new_activity(self):
+        with patch.dict(os.environ, {"CLAUDE_CODE_BRIDGE_SESSION_ID": "session_first"}):
+            first = self.claude("UserPromptSubmit")
+        self.assertEqual(first["sessions"][0]["remoteSessionID"], "session_first")
+        self.assertNotEqual(first["sessions"][0]["id"], "session")
+        with patch.dict(os.environ, {"CLAUDE_CODE_BRIDGE_SESSION_ID": "session_second"}):
+            updated = self.claude("PreToolUse", tool_name="Read", tool_use_id="r")
+        self.assertEqual(updated["sessions"][0]["remoteSessionID"], "session_second")
+        self.assertGreater(updated["revision"], first["revision"])
+        self.assertEqual(updated["eventID"], first["eventID"])
+        self.assertEqual(updated["changedAt"], first["changedAt"])
+        with patch.dict(os.environ, {"CLAUDE_CODE_BRIDGE_SESSION_ID": ""}):
+            disconnected = self.claude("PostToolUse", tool_name="Read", tool_use_id="r")
+        self.assertNotIn("remoteSessionID", disconnected["sessions"][0])
+        self.assertEqual(disconnected["eventID"], first["eventID"])
+
+    def test_session_start_updates_link_without_resetting_activity(self):
+        with patch.dict(os.environ, {"CLAUDE_CODE_BRIDGE_SESSION_ID": "session_start"}):
+            first = self.claude("SessionStart", turn="")
+            self.assertEqual(first["sessions"][0]["remoteSessionID"], "session_start")
+            working = self.claude("UserPromptSubmit")
+        with patch.dict(os.environ, {"CLAUDE_CODE_BRIDGE_SESSION_ID": "session_resumed"}):
+            resumed = self.claude("SessionStart", turn="")
+        self.assertEqual(resumed["state"], "working")
+        self.assertEqual(resumed["sessions"][0]["remoteSessionID"], "session_resumed")
+        self.assertEqual(resumed["eventID"], working["eventID"])
+        with patch.dict(os.environ, {"CLAUDE_CODE_BRIDGE_SESSION_ID": ""}):
+            local = self.claude("SessionStart", turn="")
+        self.assertNotIn("remoteSessionID", local["sessions"][0])
+        self.assertEqual(local["state"], "working")
+        self.assertEqual(local["eventID"], working["eventID"])
+
+    def test_remote_links_survive_restart_ignore_stale_events_and_clear_on_end(self):
+        with patch.dict(os.environ, {"CLAUDE_CODE_BRIDGE_SESSION_ID": "session_current"}):
+            current = self.claude("UserPromptSubmit", turn="new")
+        with patch.dict(os.environ, {"CLAUDE_CODE_BRIDGE_SESSION_ID": "session_stale"}):
+            self.claude("Stop", turn="old")
+        self.assertEqual(self.store.snapshot()["sessions"], current["sessions"])
+        self.source.__exit__(None, None, None)
+        self.source.__enter__()
+        restarted = self.store.snapshot()
+        self.assertEqual(restarted["sessions"][0]["remoteSessionID"], "session_current")
+        self.assertEqual(restarted["eventID"], current["eventID"])
+        content = live_notification(restarted, time.time())[0]["aps"]["content-state"]
+        self.assertNotIn("session_current", json.dumps(content))
+        self.claude("SessionEnd", turn="new")
+        self.assertEqual(self.store.snapshot()["sessions"], [])
+        with self.store.connect() as db:
+            lifecycle = json.loads(db.execute("SELECT lifecycle FROM omarchy_claude").fetchone()[0])
+        self.assertIsNone(lifecycle["remote_session_id"])
+
+    def test_remote_links_clear_when_provider_disabled_or_owner_exits(self):
+        for clear in ("disable", "exit"):
+            with self.subTest(clear=clear):
+                self.enabled = ["codex", "claude"]
+                self.processes.is_alive.return_value = True
+                self.source.tick(force=True)
+                with patch.dict(os.environ, {"CLAUDE_CODE_BRIDGE_SESSION_ID": "session_clear"}):
+                    self.claude("UserPromptSubmit", turn=clear)
+                if clear == "disable":
+                    self.enabled = ["codex"]
+                else:
+                    self.processes.is_alive.return_value = False
+                self.source.tick(force=True)
+                self.assertEqual(self.store.snapshot()["sessions"], [])
+                with self.store.connect() as db:
+                    self.assertEqual(db.execute("SELECT COUNT(*) FROM omarchy_claude").fetchone()[0], 0)
+
+    def test_distinct_owners_keep_their_own_remote_links(self):
+        self.processes.identify.side_effect = lambda pid, provider="codex": ProcessIdentity(pid, "1", "boot")
+        for pid, local_id, remote_id in ((2, "local-a", "session_a"), (3, "local-b", "session_b")):
+            with patch.dict(os.environ, {"CLAUDE_CODE_BRIDGE_SESSION_ID": remote_id}):
+                command = message_for(dict(hook_event_name="UserPromptSubmit", session_id=local_id,
+                                           prompt_id="one"))
+            self.source.receive(command, peer_pid=pid)
+        sessions = self.store.snapshot()["sessions"]
+        self.assertEqual(len(sessions), 2)
+        self.assertEqual({s["remoteSessionID"] for s in sessions}, {"session_a", "session_b"})
+
+    def test_invalid_remote_ids_are_normalized_or_rejected(self):
+        for remote_id in ("local-uuid", "session_x\n", "session_x/other", "session_x?prompt=secret", "session_", "session_" + "x" * 153):
+            with self.subTest(remote_id=remote_id):
+                with patch.dict(os.environ, {"CLAUDE_CODE_BRIDGE_SESSION_ID": remote_id}):
+                    command = message_for(dict(hook_event_name="UserPromptSubmit", session_id="session", prompt_id="one"))
+                self.assertIsNone(command["remoteSessionID"])
+                command["remoteSessionID"] = remote_id
+                with self.assertRaises(ValueError):
+                    self.source.receive(command, peer_pid=2)
+        self.assertEqual(self.store.snapshot()["sessions"], [])
+
+    def test_isolated_omarchy_hook_subprocess_delivers_remote_metadata(self):
+        self.source.__exit__(None, None, None)
+        self.source.socket_path = self.root / "omarchy-watch.sock"
+        self.source.__enter__()
+        receive = self.source.receive
+        # Mac lacks Linux peer credentials. Linux's real owner check is covered
+        # in test_processes; this verifies the installed script and wire payload.
+        with patch.object(self.source, "receive", side_effect=lambda command, peer_pid=None: receive(command, peer_pid=2)):
+            result = subprocess.run([sys.executable, "-I", "omarchy/claude_hook.py"],
+                input=json.dumps(dict(hook_event_name="UserPromptSubmit", session_id="private-session",
+                    prompt_id="private-prompt", remoteSessionID="session_injected", cwd="/PRIVATE/PATH",
+                    prompt="PRIVATE PROMPT", transcript_path="/PRIVATE/TRANSCRIPT", tool_input={"command": "PRIVATE COMMAND"})),
+                env={**os.environ, "XDG_RUNTIME_DIR": str(self.root), "CLAUDE_CODE_BRIDGE_SESSION_ID": "session_socket"},
+                capture_output=True, text=True, check=True, timeout=3)
+        self.assertEqual((result.stdout, result.stderr), ("", ""))
+        snapshot = self.store.snapshot()
+        self.assertEqual(snapshot["sessions"][0]["remoteSessionID"], "session_socket")
+        public = json.dumps(snapshot)
+        for secret in ("PRIVATE", "private-session", "private-prompt", "session_injected"):
+            self.assertNotIn(secret, public)
 
 
 class AgentConfigurationTests(unittest.TestCase):

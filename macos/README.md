@@ -58,10 +58,12 @@ The hooks send event names, opaque task and turn IDs, and an optional short proj
 
 Use Claude Code **2.1.196 or later**. Paceman adds twelve observer commands to
 `~/.claude/settings.json` (or the saved `CLAUDE_CONFIG_DIR`) and preserves unrelated
-hooks and settings. In Claude Code, use `/hooks` to inspect those commands; for
-VS Code or desktop Code, inspect the same local user settings. Complete any hook
-review requested by Claude. If `disableAllHooks` is enabled, decide whether to
-change it yourself; Paceman does not override it.
+hooks and settings. In the CLI, `/hooks` is a read-only list of loaded hooks. In
+VS Code, use **/ → Customize → Hooks** (Claude Code 2.1.269+); for local desktop Code sessions,
+inspect the same user settings. Hooks run after workspace trust; there is no
+separate acceptance step for each hook. See [Claude's hook reference](https://code.claude.com/docs/en/hooks#the-hooks-menu).
+If `disableAllHooks` is enabled, decide whether to change it yourself; Paceman
+does not override it.
 
 Expand a Paceman entry and compare its complete command against Paceman's setup
 window. A typical command has this shape, with the actual runtime and user path
@@ -87,7 +89,9 @@ shown by your installation:
 | `SessionEnd` | Remove a closed session. |
 
 The commands forward lifecycle names, opaque IDs, hashed tool/server names and an
-optional short project label to Paceman's private local socket. They do not send
+optional short project label to Paceman's private local socket. With Remote
+Control active on Claude Code 2.1.199+, they also send its remote session ID so
+the phone can open the specific session. They do not send
 prompts, replies, transcripts, tool arguments/results or full paths. They make no
 Claude approval decisions. Project labels may appear on your iPhone Lock Screen.
 
