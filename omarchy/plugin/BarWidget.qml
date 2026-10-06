@@ -38,7 +38,7 @@ Panel {
   function run(args) {
     if (command.running) return
     actionError = ""
-    action = args[0]
+    action = args[0] === "agents" && args[1] === "--repair" ? "repair-hooks" : args[0]
     command.command = [ctlPath].concat(args)
     command.running = true
   }
@@ -63,6 +63,7 @@ Panel {
       root.now = Date.now() / 1000
       stateFile.reload()
       pauseFile.reload()
+      if (root.opened && !statusQuery.running) statusQuery.running = true
     }
   }
   FileView {
@@ -75,7 +76,7 @@ Panel {
       try {
         var parsed = JSON.parse(text())
         root.now = Date.now() / 1000
-        if (Number(parsed.schema) === 1) root.sourceState = Object.assign({}, parsed, {detectedProviders: root.sourceState.detectedProviders || []})
+        if (Number(parsed.schema) === 1) root.sourceState = Object.assign({}, root.sourceState, parsed)
       } catch (error) { root.sourceState = ({}) }
     }
   }
@@ -129,6 +130,7 @@ Panel {
               ? detail.slice("Paceman route: ".length)
               : "Couldn't create a pairing code. Run pacemanctl pair for details.")
           : root.action === "remove-access" ? "Couldn't remove access. Try again or check pacemanctl logs."
+          : root.action === "repair-hooks" ? "Couldn’t restore hooks. Check the agent’s settings, then try again."
           : root.action === "agents" ? "Couldn't change agent monitoring. Run pacemanctl agents for details."
           : "Couldn't change sharing. Try again or check pacemanctl logs."
         console.warn("Paceman action failed:", detail || "Unknown error")
@@ -138,7 +140,7 @@ Panel {
       } else if (root.action === "share-off") {
         root.pairing = ({})
         root.pairingOpen = false
-      } else if (root.action === "agents") {
+      } else if (root.action === "agents" || root.action === "repair-hooks") {
         try { root.sourceState = JSON.parse(output.text); root.configuredProviders = root.sourceState.configuredProviders }
         catch (error) { root.refresh() }
       } else if (root.action === "remove-access") {
@@ -197,6 +199,7 @@ Panel {
         foreground: root.foreground
         fontFamily: root.fontFamily
         onAgentRequested: function(provider, enabled) { root.run(["agents", enabled ? "--enable" : "--disable", provider]) }
+        onHookRepairRequested: function(provider) { root.run(["agents", "--repair", provider]) }
         onSharingRequested: function(enabled) { root.run([enabled ? "share-on" : "share-off"]) }
         onRestartRequested: root.run(["restart"])
         onPairRequested: root.showPairing()

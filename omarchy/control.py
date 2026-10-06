@@ -67,9 +67,11 @@ def read_status(path=None, now=None):
             with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as db:
                 value["clients"] = Store.client_list(db)
                 value["pairedPhones"] = len(value["clients"])
-        from omarchy.agents import configured_providers, detected_providers
+        from omarchy.agents import configured_providers, detected_providers, hook_status, configuration
         value["configuredProviders"] = configured_providers(state_directory())
         value["detectedProviders"] = detected_providers(state_directory())
+        value["hookStatusByProvider"] = hook_status(state_directory(), Path(__file__).resolve().parents[1])
+        value["hookReviewAfterByProvider"] = configuration(state_directory()).get("hookReviewAfter", {})
         value["sharingEnabled"] = not pause_path().exists()
         value["computerName"] = socket.gethostname()
     now = time.time() if now is None else now
@@ -129,14 +131,15 @@ def main():
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--enable", choices=("codex", "claude"))
     selection.add_argument("--disable", choices=("codex", "claude"))
+    selection.add_argument("--repair", choices=("codex", "claude"), help="Restore an enabled agent’s Paceman hooks")
     args = parser.parse_args()
-    if (args.enable or args.disable) and args.command != "agents":
-        parser.error("--enable and --disable require the agents command")
+    if (args.enable or args.disable or args.repair) and args.command != "agents":
+        parser.error("--enable, --disable and --repair require the agents command")
     try:
         if args.command == "agents":
             from omarchy.agents import configure
             configure(state_directory(), Path(__file__).resolve().parents[1],
-                      enable=args.enable, disable=args.disable)
+                      enable=args.enable, disable=args.disable, repair=args.repair)
             print(json.dumps(read_status()))
         elif args.command == "status":
             print(json.dumps(read_status(), indent=2))

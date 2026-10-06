@@ -173,6 +173,77 @@ class AgentConfigurationTests(unittest.TestCase):
                 (self.home / '.vscode/extensions' / extension).mkdir(parents=True)
             self.assertEqual(agents.detected_providers(self.root, home=self.home), ['codex', 'claude'])
 
+    def prepare_hook_fixture(self):
+        (self.app / "omarchy").mkdir(parents=True)
+        for provider in agents.PROVIDERS:
+            (self.app / f"omarchy/{provider}_hook.py").touch()
+        agents.configure(self.root, self.app, enable="claude", home=self.home)
+        return agents.hook_paths(self.root, home=self.home)
+
+    def test_missing_hooks_repair_is_scoped_preserves_settings_and_requires_new_event(self):
+        paths = self.prepare_hook_fixture()
+        for provider in agents.PROVIDERS:
+            with self.subTest(provider=provider):
+                before = {p: path.read_bytes() for p, path in paths.items()}
+                value = json.loads(paths[provider].read_text())
+                value['env'] = {'USER_SETTING': 'keep'}
+                value['hooks']['Stop'] = [{'hooks': [{'type': 'command', 'command': '/usr/bin/true'}]}]
+                paths[provider].write_text(json.dumps(value))
+                status = agents.hook_status(self.root, self.app, home=self.home)
+                self.assertEqual(status[provider], 'missing')
+                agents.configure(self.root, self.app, repair=provider, home=self.home)
+                self.assertEqual(agents.hook_status(self.root, self.app, home=self.home)[provider], 'ready')
+                repaired = json.loads(paths[provider].read_text())
+                self.assertEqual(repaired['env'], value['env'])
+                self.assertEqual(repaired['hooks']['Stop'][0], value['hooks']['Stop'][0])
+                self.assertGreater(agents.configuration(self.root)['hookReviewAfter'][provider], 0)
+                other = 'claude' if provider == 'codex' else 'codex'
+                self.assertEqual(paths[other].read_bytes(), before[other])
+                self.assertEqual(agents.configured_providers(self.root), ['codex', 'claude'])
+
+    def test_disabled_malformed_and_missing_script_have_distinct_diagnosis(self):
+        paths = self.prepare_hook_fixture()
+        value = json.loads(paths['claude'].read_text())
+        value['disableAllHooks'] = True
+        paths['claude'].write_text(json.dumps(value))
+        agents.configure(self.root, self.app, repair='claude', home=self.home)
+        self.assertEqual(agents.hook_status(self.root, self.app, home=self.home),
+                         {'codex': 'ready', 'claude': 'disabled'})
+        self.assertTrue(json.loads(paths['claude'].read_text())['disableAllHooks'])
+        paths['claude'].write_text('{')
+        before = (self.root / 'agents.json').read_bytes()
+        with self.assertRaises(ValueError):
+            agents.configure(self.root, self.app, repair='claude', home=self.home)
+        self.assertEqual((self.root / 'agents.json').read_bytes(), before)
+        self.assertEqual(agents.hook_status(self.root, self.app, home=self.home),
+                         {'codex': 'ready', 'claude': 'invalid'})
+        (self.app / 'omarchy/claude_hook.py').unlink()
+        self.assertEqual(agents.hook_status(self.root, self.app, home=self.home)['claude'], 'unavailable')
+
+    def test_repair_does_not_enable_disabled_agents_or_touch_broken_other_provider(self):
+        paths = self.prepare_hook_fixture()
+        paths['codex'].write_text('{')
+        paths['claude'].unlink()
+        agents.configure(self.root, self.app, repair='claude', home=self.home)
+        self.assertEqual(paths['codex'].read_text(), '{')
+        self.assertEqual(agents.hook_status(self.root, self.app, home=self.home)['claude'], 'ready')
+        paths['codex'].write_text('{}')
+        agents.configure(self.root, self.app, disable='claude', home=self.home)
+        with self.assertRaises(ValueError):
+            agents.configure(self.root, self.app, repair='claude', home=self.home)
+        self.assertEqual(agents.configured_providers(self.root), ['codex'])
+
+    def test_scoped_or_async_owned_hooks_are_detected_and_restored(self):
+        paths = self.prepare_hook_fixture()
+        for provider in agents.PROVIDERS:
+            value = json.loads(paths[provider].read_text())
+            value['hooks']['Stop'][0]['matcher'] = 'restricted'
+            value['hooks']['PreToolUse'][0]['hooks'][0]['async'] = True
+            paths[provider].write_text(json.dumps(value))
+            self.assertEqual(agents.hook_status(self.root, self.app, home=self.home)[provider], 'missing')
+            agents.configure(self.root, self.app, repair=provider, home=self.home)
+            self.assertEqual(agents.hook_status(self.root, self.app, home=self.home)[provider], 'ready')
+
     def test_opt_in_idempotence_disable_and_preservation_of_other_settings(self):
         path = self.home / "custom-claude/settings.json"
         path.parent.mkdir()

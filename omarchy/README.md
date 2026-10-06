@@ -42,6 +42,8 @@ Fresh installs enable detected Codex and Claude Code installations. Pass `--agen
 
 Claude Code needs 2.1.196+ for prompt IDs. Paceman observes local CLI and VS Code sessions that run its hooks on this computer; remote IDE sessions need Paceman on the remote computer. It uses `~/.claude/settings.json`, or the `CLAUDE_CONFIG_DIR` selected during installation, and preserves unrelated settings. Claude activity requires no credentials. Claude usage remains unsupported; existing usage meters are Codex-only.
 
+Missing Paceman hooks show **Setup needed** in the panel. Use **Restore hooks** (or `pacemanctl agents --repair codex` / `--repair claude`), then review the hooks and start a fresh task. Disabled or unreadable agent settings need attention in the agent’s settings first.
+
 ## Review Codex hooks
 
 Installing and pairing do not enable session monitoring until you review the hooks. In Codex CLI, enter `/hooks` or choose **Review hooks** at startup. Expand each Paceman event row; Codex calls its command **Hook 1**. Verify that it runs the command printed by the installer, shaped like:

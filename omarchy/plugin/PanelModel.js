@@ -56,12 +56,22 @@ function agentRows(state, running, sharing) {
       sessions: total, sessionCounts: Object.assign({needs_input: 0, failed: 0, working: 0, finished: 0, idle: 0}, counts),
       sessionLiveness: state.sessionLiveness}, available)
     var detected = (state.detectedProviders || []).indexOf(provider) >= 0
+    var hooks = (state.hookStatusByProvider || {})[provider]
+    var setupNeeded = available && ["missing", "disabled", "invalid", "unavailable"].indexOf(hooks) >= 0
+    var review = available && Number((state.hookReviewAfterByProvider || {})[provider] || 0)
+      > Number((state.lastAgentEventByProvider || {})[provider] || 0)
+    var guidance = setupNeeded ? (hooks === "missing" ? "Restore Paceman’s hooks, then review them with /hooks and start a new local task."
+      : hooks === "disabled" ? "Hooks are disabled in Claude Code settings. Enable them there, then start a new session."
+      : hooks === "invalid" ? "Agent settings could not be read. Fix the settings before restoring Paceman’s hooks."
+      : "Paceman’s hook script is missing. Run the installer again.")
+      : available && (!seen || review) ? "Review Paceman's hooks with /hooks, then start a new local task." : ""
     return {id: provider, title: provider === "claude" ? "Claude Code" : "Codex", enabled: enabled,
-      activity: available ? activity : "idle",
+      activity: available && !setupNeeded && !review ? activity : "idle",
       label: !enabled ? (detected ? "Available" : "Off") : !sharing ? "Paused" : !running ? "Unavailable"
-        : !seen ? "Waiting for activity" : summary.label,
-      detail: available && total > 1 ? (summary.breakdown || total + " sessions") : "",
-      guidance: available && !seen ? "Review Paceman's hooks with /hooks, then start a new local task." : ""}
+        : setupNeeded ? "Setup needed" : !seen || review ? "Waiting for activity" : summary.label,
+      detail: available && !setupNeeded && !review && total > 1 ? (summary.breakdown || total + " sessions") : "",
+      repairAction: setupNeeded ? (hooks === "missing" ? "restore" : "guide") : "",
+      guidance: guidance}
   })
 }
 
@@ -91,10 +101,11 @@ function present(state, now) {
         : "Open the paired app on this device to check for updates."}
   })
   var agents = agentRows(state, running, sharing)
-  var setupCount = agents.filter(function(agent) { return agent.guidance !== "" }).length
+  var setupCount = agents.filter(function(agent) { return agent.guidance !== "" && !agent.repairAction }).length
+  var hasProblem = agents.some(function(agent) { return !!agent.repairAction })
   return {
     agents: agents,
-    agentGuidance: setupCount > 1 ? "Review hooks with /hooks in each enabled agent, then start a new local task." : "",
+    agentGuidance: setupCount > 1 && !hasProblem ? "Review hooks with /hooks in each enabled agent, then start a new local task." : "",
     connections: connections,
     connectionHeading: connections.some(function(client) { return !client.phone }) ? "CONNECTIONS"
       : connections.length > 1 ? "PHONES" : "PHONE",
