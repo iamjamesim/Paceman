@@ -189,6 +189,15 @@ static inline bool omarchy_activity_v1_is_valid(const omarchy_activity_v1_t *act
            activity->revision != 0;
 }
 
+/* Dismiss only the revision the wearer actually saw, never a newer queued one. */
+static inline bool omarchy_activity_can_acknowledge(const omarchy_activity_v1_t *activity,
+                                                   uint32_t displayed_revision)
+{
+    return activity != NULL && displayed_revision != 0 && activity->revision == displayed_revision &&
+        (activity->state == OMARCHY_ACTIVITY_ATTENTION ||
+         activity->state == OMARCHY_ACTIVITY_FINISHED || activity->state == OMARCHY_ACTIVITY_FAILED);
+}
+
 typedef struct {
     bool alert;
     bool sound;

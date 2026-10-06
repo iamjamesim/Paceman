@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "bootloader_random.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_pm.h"
@@ -13,6 +14,7 @@
 #include "watch_power.h"
 #include "watch_profile.h"
 #include "watch_rtc.h"
+#include "watch_storage.h"
 #include "watch_ui.h"
 
 #if !CONFIG_PM_ENABLE
@@ -31,25 +33,8 @@ static const char *TAG = "omarchy_watch";
 
 static esp_err_t initialize_nvs(void)
 {
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    return err;
-}
-
-static bool load_owned_state(void)
-{
-    nvs_handle_t nvs;
-    if (nvs_open("omarchy", NVS_READONLY, &nvs) != ESP_OK) {
-        return false;
-    }
-
-    uint8_t owned = 0;
-    esp_err_t err = nvs_get_u8(nvs, "owned", &owned);
-    nvs_close(nvs);
-    return err == ESP_OK && owned == 1;
+    /* Storage recovery must not silently erase the owner and reopen pairing. */
+    return nvs_flash_init();
 }
 
 static bool load_cached_profile(omarchy_profile_v1_t *profile)
@@ -135,10 +120,19 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(esp_pm_configure(&power_config));
 
-    const bool owned = load_owned_state();
-    const uint32_t passkey = owned ? 0 : 100000 + (esp_random() % 900000);
+    bool owned = false;
+    const esp_err_t ownership_err = watch_storage_owned(&owned);
+    /* Enable the documented entropy source before ADC or Bluetooth starts. */
+    bootloader_random_enable();
+    const uint32_t passkey = 100000 + (esp_random() % 900000);
+    bootloader_random_disable();
 
     ESP_ERROR_CHECK(watch_ui_start());
+    if (ownership_err != ESP_OK) {
+        ESP_LOGE(TAG, "Ownership storage invalid: %s", esp_err_to_name(ownership_err));
+        watch_ui_show_error("RESET PAIRING REQUIRED");
+        return;
+    }
     ESP_ERROR_CHECK(watch_haptics_start());
     esp_err_t power_err = watch_power_init();
     if (power_err != ESP_OK) {
@@ -205,6 +199,7 @@ void app_main(void)
     esp_err_t err = watch_ble_start(passkey, owned);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Bluetooth startup failed: %s", esp_err_to_name(err));
-        watch_ui_show_error("BLUETOOTH UNAVAILABLE");
+        watch_ui_show_error(err == ESP_ERR_INVALID_STATE
+            ? "RESET PAIRING REQUIRED" : "BLUETOOTH UNAVAILABLE");
     }
 }

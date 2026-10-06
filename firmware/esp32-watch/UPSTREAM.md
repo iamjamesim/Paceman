@@ -11,7 +11,10 @@ The MIT files are the source, build, simulator, and release files under
 
 - New Paceman files under Apache License 2.0: `firmware/main/watch_ancs.c`,
   `firmware/main/watch_ancs.h`, `firmware/main/watch_ancs_parser.h`,
-  `simulator/test_ancs.c`, and `firmware/main/fonts/paceman_32_agent.c`.
+  `simulator/test_ancs.c`, `firmware/main/watch_security.h`,
+  `simulator/test_security.c`, `firmware/main/watch_storage.h`,
+  `simulator/test_storage.c`, `simulator/storage_stubs/*.h`, and
+  `firmware/main/fonts/paceman_32_agent.c`.
 - Generated `firmware/main/fonts/jetbrains_mono_*.c` arrays carry the font and
   glyph licenses in `THIRD_PARTY_NOTICES.md`; `firmware/main/fonts-OFL.txt`
   contains the font license.

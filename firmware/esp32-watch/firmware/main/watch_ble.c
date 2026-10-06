@@ -1,6 +1,7 @@
 #include "watch_ble.h"
 
 #include <assert.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -20,6 +21,8 @@
 #include "watch_profile.h"
 #include "watch_ancs.h"
 #include "watch_rtc.h"
+#include "watch_security.h"
+#include "watch_storage.h"
 #include "watch_ui.h"
 
 static const char *TAG = "omarchy_ble";
@@ -51,6 +54,11 @@ static uint32_t profile_revision;
 static bool watch_owned;
 static omarchy_identity_v1_t identity;
 static uint8_t owner_id[16];
+static watch_peer_identity_t owner_peer;
+static atomic_bool ownership_committed = ATOMIC_VAR_INIT(false);
+static watch_channel_state_t channel;
+static atomic_uint_fast32_t requested_acknowledgement = ATOMIC_VAR_INIT(0);
+static struct ble_npl_event acknowledgement_event;
 static uint16_t idle_params_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t activity_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t activity_attr_handle;
@@ -70,11 +78,13 @@ static omarchy_activity_v1_t activity = {
 typedef struct {
     omarchy_profile_v6_t packet;
     uint16_t packet_length;
+    watch_peer_identity_t peer;
 } pending_profile_t;
 
 typedef enum {
     UI_EVENT_ACTIVITY,
     UI_EVENT_CONNECTION,
+    UI_EVENT_ACKNOWLEDGEMENT,
 } ui_event_type_t;
 
 typedef struct {
@@ -87,6 +97,7 @@ typedef struct {
             bool sound;
         } activity;
         bool connected;
+        uint32_t acknowledgement;
     } data;
 } pending_ui_event_t;
 
@@ -103,6 +114,40 @@ enum {
 };
 
 void ble_store_config_init(void);
+static void queue_connection_update(bool connected);
+static void persist_activity_acknowledgement(uint32_t revision);
+
+static watch_peer_identity_t peer_identity(const struct ble_gap_conn_desc *desc)
+{
+    watch_peer_identity_t peer = {.type = desc->peer_id_addr.type};
+    memcpy(peer.address, desc->peer_id_addr.val, sizeof(peer.address));
+    return peer;
+}
+
+static bool authenticated_connection(uint16_t conn_handle,
+                                     struct ble_gap_conn_desc *desc)
+{
+    return ble_gap_conn_find(conn_handle, desc) == 0 &&
+        watch_security_link_authenticated(desc->sec_state.encrypted,
+            desc->sec_state.authenticated, desc->sec_state.bonded,
+            desc->sec_state.key_size);
+}
+
+static bool owner_connection(uint16_t conn_handle)
+{
+    struct ble_gap_conn_desc desc;
+    if (!authenticated_connection(conn_handle, &desc)) return false;
+    const watch_peer_identity_t peer = peer_identity(&desc);
+    return watch_security_owner_connection(watch_owned, &owner_peer, &peer,
+        desc.sec_state.encrypted, desc.sec_state.authenticated,
+        desc.sec_state.bonded, desc.sec_state.key_size);
+}
+
+static void update_connection_readiness(void)
+{
+    queue_connection_update(watch_security_channel_ready(&channel,
+        owner_connection(activity_conn_handle), atomic_load(&ownership_committed)));
+}
 
 static void log_connection_parameters(uint16_t conn_handle, const char *context)
 {
@@ -137,43 +182,6 @@ static void request_idle_connection_parameters(uint16_t conn_handle)
     }
 }
 
-static esp_err_t persist_profile(const void *profile,
-                                 size_t profile_size,
-                                 uint8_t version,
-                                 const uint8_t profile_owner_id[16],
-                                 uint32_t revision)
-{
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open("omarchy", NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = nvs_set_u8(nvs, "owned", 1);
-    if (err == ESP_OK) {
-        err = nvs_set_blob(nvs, "owner_id", profile_owner_id, 16);
-    }
-    const char *profile_key = version == 6 ? "profile_v6" : version == 5 ? "profile_v5" : version == 4 ? "profile_v4" : version == 3 ? "profile_v3" :
-                              version == 2 ? "profile_v2" : "profile_v1";
-    if (err == ESP_OK) {
-        err = nvs_set_blob(nvs, profile_key, profile, profile_size);
-    }
-    /* Remove newer layouts when a legacy desktop becomes authoritative. */
-    for (unsigned newer = version + 1; err == ESP_OK && newer <= 6; ++newer) {
-        char key[16];
-        snprintf(key, sizeof(key), "profile_v%u", newer);
-        esp_err_t erase_err = nvs_erase_key(nvs, key);
-        if (erase_err != ESP_OK && erase_err != ESP_ERR_NVS_NOT_FOUND) err = erase_err;
-    }
-    if (err == ESP_OK) {
-        err = nvs_set_u32(nvs, "profile_rev", revision);
-    }
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    return err;
-}
-
 static void apply_profile_task(void *argument)
 {
     (void)argument;
@@ -191,19 +199,21 @@ static void apply_profile_task(void *argument)
 
         const omarchy_profile_v1_t *base =
             (const omarchy_profile_v1_t *)&pending.packet;
-        esp_err_t rtc_err = watch_rtc_set_time(base->unix_time);
-        if (rtc_err != ESP_OK) {
-            ESP_LOGW(TAG, "Could not update RTC: %s", esp_err_to_name(rtc_err));
-        }
-        esp_err_t persist_err = persist_profile(
+        esp_err_t persist_err = watch_storage_profile(
             &pending.packet, pending.packet_length, base->version,
-            base->owner_id, base->revision
+            base->owner_id, &pending.peer, base->revision
         );
         if (persist_err != ESP_OK) {
             ESP_LOGE(TAG, "Could not persist profile revision %lu: %s",
                      (unsigned long)base->revision, esp_err_to_name(persist_err));
             esp_pm_lock_release(work_pm_lock);
             continue;
+        }
+        /* A queued profile is not proof that ownership survived a reboot. */
+        atomic_store(&ownership_committed, true);
+        esp_err_t rtc_err = watch_rtc_set_time(base->unix_time);
+        if (rtc_err != ESP_OK) {
+            ESP_LOGW(TAG, "Could not update RTC: %s", esp_err_to_name(rtc_err));
         }
 
         if (base->version == 6) {
@@ -245,13 +255,16 @@ static void apply_ui_task(void *argument)
         if (pending.type == UI_EVENT_ACTIVITY) {
             watch_ui_apply_activity(
                 pending.data.activity.state,
+                pending.data.activity.revision,
                 pending.data.activity.alert,
                 pending.data.activity.sound
             );
             ESP_LOGI(TAG, "Activity applied state=%u revision=%lu",
                      pending.data.activity.state, (unsigned long)pending.data.activity.revision);
-        } else {
+        } else if (pending.type == UI_EVENT_CONNECTION) {
             watch_ui_set_connected(pending.data.connected);
+        } else if (pending.type == UI_EVENT_ACKNOWLEDGEMENT) {
+            persist_activity_acknowledgement(pending.data.acknowledgement);
         }
         esp_pm_lock_release(work_pm_lock);
     }
@@ -268,41 +281,6 @@ static void queue_connection_update(bool connected)
     }
 }
 
-static esp_err_t load_owner_state(uint8_t loaded_owner_id[16], uint32_t *loaded_revision)
-{
-    nvs_handle_t nvs;
-    esp_err_t err = nvs_open("omarchy", NVS_READONLY, &nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-    size_t length = 16;
-    err = nvs_get_blob(nvs, "owner_id", loaded_owner_id, &length);
-    if (err == ESP_OK && length == 16 &&
-        nvs_get_u32(nvs, "profile_rev", loaded_revision) != ESP_OK) {
-        /* Profiles written before revision tracking remain compatible. */
-        *loaded_revision = 0;
-    }
-    nvs_close(nvs);
-    return err == ESP_OK && length == 16 ? ESP_OK : ESP_ERR_INVALID_SIZE;
-}
-
-static void load_or_create_device_id(uint8_t device_id[16])
-{
-    nvs_handle_t nvs;
-    ESP_ERROR_CHECK(nvs_open("omarchy", NVS_READWRITE, &nvs));
-    size_t length = 16;
-    esp_err_t err = nvs_get_blob(nvs, "device_id", device_id, &length);
-    if (err != ESP_OK || length != 16) {
-        for (size_t index = 0; index < 16; index += sizeof(uint32_t)) {
-            uint32_t random = esp_random();
-            memcpy(device_id + index, &random, sizeof(random));
-        }
-        ESP_ERROR_CHECK(nvs_set_blob(nvs, "device_id", device_id, 16));
-        ESP_ERROR_CHECK(nvs_commit(nvs));
-    }
-    nvs_close(nvs);
-}
-
 static void load_activity_acknowledgement(void)
 {
     nvs_handle_t nvs;
@@ -315,21 +293,24 @@ static void load_activity_acknowledgement(void)
     }
 }
 
-static void persist_activity_acknowledgement(void)
+static void persist_activity_acknowledgement(uint32_t revision)
 {
     nvs_handle_t nvs;
-    if (nvs_open("omarchy", NVS_READWRITE, &nvs) != ESP_OK) {
+    esp_err_t err = nvs_open("omarchy", NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Activity dismissal storage unavailable: %s", esp_err_to_name(err));
         return;
     }
-    if (nvs_set_u32(nvs, "activity_ack", activity.acknowledged_revision) == ESP_OK) {
-        nvs_commit(nvs);
-    }
+    err = nvs_set_u32(nvs, "activity_ack", revision);
+    if (err == ESP_OK) err = nvs_commit(nvs);
+    if (err != ESP_OK) ESP_LOGW(TAG, "Could not persist activity dismissal: %s", esp_err_to_name(err));
     nvs_close(nvs);
 }
 
 static void notify_activity(void)
 {
-    if (activity_conn_handle == BLE_HS_CONN_HANDLE_NONE || activity_attr_handle == 0) {
+    if (activity_conn_handle == BLE_HS_CONN_HANDLE_NONE || activity_attr_handle == 0 ||
+        !owner_connection(activity_conn_handle) || !atomic_load(&ownership_committed)) {
         return;
     }
     struct os_mbuf *packet = ble_hs_mbuf_from_flat(&activity, sizeof(activity));
@@ -346,7 +327,8 @@ static void notify_activity(void)
 
 static void notification_changed(void)
 {
-    if (!watch_owned || activity_conn_handle == BLE_HS_CONN_HANDLE_NONE) return;
+    if (activity_conn_handle == BLE_HS_CONN_HANDLE_NONE ||
+        !owner_connection(activity_conn_handle) || !atomic_load(&ownership_committed)) return;
     sync_sequence++;
     uint8_t value[] = {'O', 'N', 1, 0, sync_sequence, sync_sequence >> 8,
                        sync_sequence >> 16, sync_sequence >> 24};
@@ -362,9 +344,26 @@ static void notification_changed(void)
 static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
                        struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
-    (void)conn_handle;
     (void)attr_handle;
     const ble_uuid_t *requested = (const ble_uuid_t *)arg;
+    struct ble_gap_conn_desc desc;
+    if (!authenticated_connection(conn_handle, &desc)) {
+        return BLE_ATT_ERR_INSUFFICIENT_AUTHEN;
+    }
+    if (watch_owned && !owner_connection(conn_handle)) {
+        return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
+    }
+    if (!watch_owned && ble_uuid_cmp(requested, &identity_uuid.u) != 0 &&
+        ble_uuid_cmp(requested, &control_uuid.u) != 0) {
+        return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
+    }
+    if (ble_uuid_cmp(requested, &identity_uuid.u) != 0 &&
+        ble_uuid_cmp(requested, &control_uuid.u) != 0) {
+        if (!atomic_load(&ownership_committed)) return BLE_ATT_ERR_INSUFFICIENT_RES;
+        if (!channel.profile_accepted || conn_handle != activity_conn_handle) {
+            return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
+        }
+    }
 
     if (ble_uuid_cmp(requested, &sync_uuid.u) == 0 &&
         ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
@@ -382,8 +381,12 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
 
     if (ble_uuid_cmp(requested, &activity_uuid.u) == 0) {
         if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
-            return os_mbuf_append(ctxt->om, &activity, sizeof(activity)) == 0
-                ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+            if (os_mbuf_append(ctxt->om, &activity, sizeof(activity)) != 0) {
+                return BLE_ATT_ERR_INSUFFICIENT_RES;
+            }
+            channel.activity_read = true;
+            update_connection_readiness();
+            return 0;
         }
         if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR ||
             OS_MBUF_PKTLEN(ctxt->om) != sizeof(omarchy_activity_v1_t)) {
@@ -478,9 +481,14 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
         }
 
         const bool becoming_owned = !watch_owned;
+        const watch_peer_identity_t peer = peer_identity(&desc);
+        if (!watch_security_peer_valid(&peer)) {
+            return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
+        }
         const pending_profile_t pending = {
             .packet = packet,
             .packet_length = packet_length,
+            .peer = peer,
         };
         if (profile_queue == NULL ||
             xQueueOverwrite(profile_queue, &pending) != pdPASS) {
@@ -490,12 +498,18 @@ static int gatt_access(uint16_t conn_handle, uint16_t attr_handle,
         }
 
         memcpy(owner_id, base->owner_id, sizeof(owner_id));
+        owner_peer = peer;
         profile_revision = base->revision;
         identity.flags |= 1;
         watch_owned = true;
         if (becoming_owned) {
+            channel = (watch_channel_state_t){0};
+            activity_conn_handle = conn_handle;
+            watch_ancs_connected(conn_handle);
             request_idle_connection_parameters(conn_handle);
         }
+        channel.profile_accepted = true;
+        update_connection_readiness();
         return 0;
     }
 
@@ -514,12 +528,15 @@ static const struct ble_gatt_svc_def services[] = {
                 .flags = BLE_GATT_CHR_F_WRITE |
                          BLE_GATT_CHR_F_WRITE_ENC |
                          BLE_GATT_CHR_F_WRITE_AUTHEN,
+                .min_key_size = 16,
             },
             {
                 .uuid = &identity_uuid.u,
                 .access_cb = gatt_access,
                 .arg = (void *)&identity_uuid.u,
-                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC,
+                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC |
+                         BLE_GATT_CHR_F_READ_AUTHEN,
+                .min_key_size = 16,
             },
             {
                 .uuid = &activity_uuid.u,
@@ -527,9 +544,13 @@ static const struct ble_gatt_svc_def services[] = {
                 .arg = (void *)&activity_uuid.u,
                 .val_handle = &activity_attr_handle,
                 .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC |
+                         BLE_GATT_CHR_F_READ_AUTHEN |
                          BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC |
                          BLE_GATT_CHR_F_WRITE_AUTHEN |
-                         BLE_GATT_CHR_F_NOTIFY,
+                         BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_NOTIFY_INDICATE_ENC |
+                         BLE_GATT_CHR_F_NOTIFY_INDICATE_AUTHEN |
+                         BLE_GATT_CHR_F_NOTIFY_INDICATE_AUTHOR,
+                .min_key_size = 16,
             },
             {
                 .uuid = &sync_uuid.u,
@@ -537,7 +558,11 @@ static const struct ble_gatt_svc_def services[] = {
                 .arg = (void *)&sync_uuid.u,
                 .val_handle = &sync_attr_handle,
                 .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC |
-                         BLE_GATT_CHR_F_NOTIFY,
+                         BLE_GATT_CHR_F_READ_AUTHEN |
+                         BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_NOTIFY_INDICATE_ENC |
+                         BLE_GATT_CHR_F_NOTIFY_INDICATE_AUTHEN |
+                         BLE_GATT_CHR_F_NOTIFY_INDICATE_AUTHOR,
+                .min_key_size = 16,
             },
             {0},
         },
@@ -554,9 +579,7 @@ static int gap_event(struct ble_gap_event *event, void *arg)
 
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
-        if (event->connect.status == 0) {
-            activity_conn_handle = event->connect.conn_handle;
-        } else {
+        if (event->connect.status != 0) {
             advertise(true);
         }
         return 0;
@@ -579,8 +602,11 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         }
         if (event->disconnect.conn.conn_handle == activity_conn_handle) {
             activity_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+            channel = (watch_channel_state_t){0};
         }
-        queue_connection_update(false);
+        if (activity_conn_handle == BLE_HS_CONN_HANDLE_NONE) {
+            queue_connection_update(false);
+        }
         advertise(true);
         return 0;
 
@@ -598,6 +624,10 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_PASSKEY_ACTION: {
+        if (!watch_security_pairing_allowed(watch_owned)) {
+            ble_gap_terminate(event->passkey.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            return BLE_HS_EAUTHEN;
+        }
         if (event->passkey.params.action != BLE_SM_IOACT_DISP) {
             return BLE_HS_EINVAL;
         }
@@ -606,19 +636,25 @@ static int gap_event(struct ble_gap_event *event, void *arg)
             .passkey = passkey,
         };
         rc = ble_sm_inject_io(event->passkey.conn_handle, &io);
-        ESP_LOGI(TAG, "Displayed pairing passkey %06lu, result=%d", (unsigned long)passkey, rc);
+        ESP_LOGI(TAG, "Pairing confirmation supplied, result=%d", rc);
         return rc;
     }
 
     case BLE_GAP_EVENT_ENC_CHANGE:
         ESP_LOGI(TAG, "Encryption changed, status=%d", event->enc_change.status);
         if (event->enc_change.status == 0) {
+            if (!owner_connection(event->enc_change.conn_handle)) {
+                if (watch_owned) {
+                    ble_gap_terminate(event->enc_change.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+                }
+                return 0;
+            }
             watch_ancs_connected(event->enc_change.conn_handle);
-            activity_conn_handle = event->enc_change.conn_handle;
-            /* Encryption establishes the shared BLE/ANCS link. The watch is not
-             * ready for Paceman updates until the app subscribes to the activity
-             * channel during its authenticated handshake. */
-            queue_connection_update(false);
+            if (activity_conn_handle != event->enc_change.conn_handle) {
+                channel = (watch_channel_state_t){0};
+                activity_conn_handle = event->enc_change.conn_handle;
+            }
+            update_connection_readiness();
             if (watch_owned && event->enc_change.conn_handle != idle_params_conn_handle) {
                 request_idle_connection_parameters(event->enc_change.conn_handle);
             }
@@ -626,20 +662,37 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         return 0;
 
     case BLE_GAP_EVENT_NOTIFY_RX:
-        watch_ancs_received(event);
+        if (owner_connection(event->notify_rx.conn_handle)) {
+            watch_ancs_received(event);
+        }
+        return 0;
+
+    case BLE_GAP_EVENT_AUTHORIZE:
+        event->authorize.out_response = owner_connection(event->authorize.conn_handle) &&
+            atomic_load(&ownership_committed)
+            ? BLE_GAP_AUTHORIZE_ACCEPT : BLE_GAP_AUTHORIZE_REJECT;
         return 0;
 
     case BLE_GAP_EVENT_SUBSCRIBE:
+        if (event->subscribe.attr_handle != activity_attr_handle &&
+            event->subscribe.attr_handle != sync_attr_handle) return 0;
+        if (!owner_connection(event->subscribe.conn_handle) || !atomic_load(&ownership_committed)) {
+            if (event->subscribe.cur_notify) {
+                ble_gap_terminate(event->subscribe.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+            }
+            return 0;
+        }
         if (event->subscribe.attr_handle == activity_attr_handle) {
-            bool ready = event->subscribe.cur_notify != 0;
+            channel.activity_subscribed = event->subscribe.cur_notify != 0;
             ESP_LOGI(TAG, "Activity subscription notify=%u reason=%u",
                      event->subscribe.cur_notify, event->subscribe.reason);
-            queue_connection_update(ready);
         }
         if (event->subscribe.attr_handle == sync_attr_handle) {
+            channel.sync_subscribed = event->subscribe.cur_notify != 0;
             ESP_LOGI(TAG, "Notification sync subscription notify=%u reason=%u",
                      event->subscribe.cur_notify, event->subscribe.reason);
         }
+        update_connection_readiness();
         return 0;
 
     case BLE_GAP_EVENT_NOTIFY_TX:
@@ -651,7 +704,7 @@ static int gap_event(struct ble_gap_event *event, void *arg)
     case BLE_GAP_EVENT_REPEAT_PAIRING: {
         struct ble_gap_conn_desc desc;
         rc = ble_gap_conn_find(event->repeat_pairing.conn_handle, &desc);
-        if (rc != 0 || identity.flags != 0) {
+        if (rc != 0 || !watch_security_pairing_allowed(watch_owned)) {
             return BLE_GAP_REPEAT_PAIRING_IGNORE;
         }
         ble_store_util_delete_peer(&desc.peer_id_addr);
@@ -718,6 +771,33 @@ static void host_task(void *param)
     nimble_port_freertos_deinit();
 }
 
+static int store_status(struct ble_store_status_event *event, void *arg)
+{
+    /* Never evict the owner's bond to make room for another peer. */
+    if (watch_owned && event->event_code == BLE_STORE_EVENT_OVERFLOW) {
+        return BLE_HS_ESTORE_CAP;
+    }
+    return ble_store_util_status_rr(event, arg);
+}
+
+static void acknowledge_activity_on_host(struct ble_npl_event *event)
+{
+    (void)event;
+    const uint32_t revision = atomic_exchange(&requested_acknowledgement, 0);
+    if (!omarchy_activity_can_acknowledge(&activity, revision)) return;
+    const pending_ui_event_t pending = {
+        .type = UI_EVENT_ACKNOWLEDGEMENT,
+        .data.acknowledgement = revision,
+    };
+    if (ui_queue == NULL || xQueueSend(ui_queue, &pending, 0) != pdPASS) {
+        ESP_LOGW(TAG, "Could not queue activity dismissal");
+        return;
+    }
+    activity.acknowledged_revision = revision;
+    activity.state = OMARCHY_ACTIVITY_NONE;
+    notify_activity();
+}
+
 esp_err_t watch_ble_start(uint32_t pairing_passkey, bool owned)
 {
     watch_owned = owned;
@@ -737,12 +817,19 @@ esp_err_t watch_ble_start(uint32_t pairing_passkey, bool owned)
         .firmware_minor = OMARCHY_FIRMWARE_VERSION_MINOR,
         .firmware_patch = OMARCHY_FIRMWARE_VERSION_PATCH,
     };
-    load_or_create_device_id(identity.device_id);
-    load_activity_acknowledgement();
-    if (owned && load_owner_state(owner_id, &profile_revision) != ESP_OK) {
-        ESP_LOGE(TAG, "Owned watch is missing its desktop identity");
+    esp_err_t identity_err = watch_storage_device_id(identity.device_id, owned);
+    if (identity_err != ESP_OK) {
+        ESP_LOGE(TAG, "Watch identity storage unavailable: %s", esp_err_to_name(identity_err));
         return ESP_ERR_INVALID_STATE;
     }
+    load_activity_acknowledgement();
+    if (owned && watch_storage_owner(owner_id, &owner_peer, &profile_revision) != ESP_OK) {
+        /* Legacy UUID-only ownership cannot safely identify the owner's bond. */
+        ESP_LOGE(TAG, "Owner bond binding missing or invalid; local reset and re-pair required");
+        return ESP_ERR_INVALID_STATE;
+    }
+    atomic_store(&ownership_committed, owned);
+    channel = (watch_channel_state_t){0};
 
     esp_err_t err = nimble_port_init();
     if (err != ESP_OK) {
@@ -760,7 +847,7 @@ esp_err_t watch_ble_start(uint32_t pairing_passkey, bool owned)
         return ESP_FAIL;
     }
     ble_hs_cfg.sync_cb = on_sync;
-    ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
+    ble_hs_cfg.store_status_cb = store_status;
     ble_hs_cfg.sm_io_cap = BLE_HS_IO_DISPLAY_ONLY;
     ble_hs_cfg.sm_bonding = 1;
     ble_hs_cfg.sm_mitm = 1;
@@ -785,6 +872,7 @@ esp_err_t watch_ble_start(uint32_t pairing_passkey, bool owned)
     if (profile_queue == NULL || ui_queue == NULL) {
         goto work_init_failed;
     }
+    ble_npl_event_init(&acknowledgement_event, acknowledge_activity_on_host, NULL);
 
     TaskHandle_t profile_task = NULL;
     if (xTaskCreate(
@@ -818,15 +906,10 @@ work_init_failed:
     return ESP_ERR_NO_MEM;
 }
 
-void watch_ble_acknowledge_activity(void)
+void watch_ble_acknowledge_activity(uint32_t displayed_revision)
 {
-    if ((activity.state != OMARCHY_ACTIVITY_ATTENTION &&
-         activity.state != OMARCHY_ACTIVITY_FINISHED &&
-         activity.state != OMARCHY_ACTIVITY_FAILED) || activity.revision == 0) {
-        return;
-    }
-    activity.acknowledged_revision = activity.revision;
-    activity.state = OMARCHY_ACTIVITY_NONE;
-    persist_activity_acknowledgement();
-    notify_activity();
+    if (displayed_revision == 0) return;
+    atomic_store(&requested_acknowledgement, displayed_revision);
+    /* Serialize dismissal with incoming activity on the NimBLE host thread. */
+    ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &acknowledgement_event);
 }

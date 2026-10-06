@@ -336,9 +336,26 @@ reports the watch ID, owner status, protocol range and firmware version.
 Activity states are 0 idle, 1 working, 2 needs input, 3 finished, 4 failed.
 Finished and failed require their capability bits; the phone maps them to
 supported older states when needed. Acknowledgement records a wearer action,
-not a source change. The phone sends only fresh aggregate activity and resends
-current state on reconnect. The watch packet has no local source-freshness
-lease, so a watch without its phone link cannot expire upstream activity.
+not a source change. Dismissal acknowledges the displayed revision only when it
+matches the current dismissible event. The phone sends only fresh aggregate
+activity and resends current state on reconnect. The watch packet has no local
+source-freshness lease, so a watch without its phone link cannot expire upstream
+activity.
+
+## Accessory authorization baseline
+
+Discovery and owner UUIDs are not credentials. After enrollment, protected reads,
+writes, subscriptions and notifications require the saved owner's resolved peer
+identity on an encrypted, authenticated, bonded link with a 16-byte key.
+
+An owned accessory rejects fresh/repeat pairing and owner-bond replacement.
+An explicit local reset or transfer clears ownership and its bond together.
+Storage errors fail closed without replacing identity or reopening pairing.
+Setup codes use the platform's cryptographic random source.
+
+Profile-write responses acknowledge queuing. Initial protected activity access
+waits until ownership is saved. The [connection lifecycle](../firmware/esp32-watch/CONNECTION.md#readiness-and-reconciliation)
+defines readiness and recovery.
 
 ## Evolving the protocol
 

@@ -47,10 +47,11 @@ pause and removal are the only user actions that disable updates.
 
 ## Readiness and reconciliation
 
-A physical encrypted BLE link is not sufficient. `ready` requires the ownership
-and profile handshake, a valid activity read, and restoration of required event
-subscriptions. The watch connection indicator follows the activity subscription,
-so an ANCS-only system link does not masquerade as a working Paceman data channel.
+`ready` and the watch connection indicator require the authenticated owner,
+saved ownership, a profile accepted in the current connection, a valid activity
+read, and both activity and notification-sync subscriptions. Disconnect clears
+the handshake state. Restored subscriptions or an ANCS-only link cannot establish
+readiness by themselves.
 
 Every successful handshake asks the model for the latest snapshot. The phone
 sends current state and uses watch acknowledgements to decide whether a fresh

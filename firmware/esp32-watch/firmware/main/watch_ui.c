@@ -64,6 +64,7 @@ static bool battery_percentage_visible;
 static bool battery_percentage_available;
 static bool ble_connected;
 static uint8_t agent_activity_state;
+static uint32_t agent_activity_revision;
 static uint32_t agent_tap_allowed_after;
 static int16_t utc_offset_minutes;
 static uint8_t hour_cycle = 24;
@@ -476,7 +477,7 @@ static void on_agent_tap(lv_event_t *event)
     }
     agent_activity_state = OMARCHY_ACTIVITY_NONE;
     update_agent();
-    watch_ble_acknowledge_activity();
+    watch_ble_acknowledge_activity(agent_activity_revision);
 }
 
 static const char *weather_icon_for_code(uint8_t code, bool night)
@@ -862,7 +863,7 @@ void watch_ui_apply_profile_v6(const omarchy_profile_v6_t *profile)
     watch_ui_apply_profile_v5((const omarchy_profile_v5_t *)profile);
 }
 
-void watch_ui_apply_activity(uint8_t state, bool alert, bool sound)
+void watch_ui_apply_activity(uint8_t state, uint32_t revision, bool alert, bool sound)
 {
     if (state > OMARCHY_ACTIVITY_FAILED) {
         return;
@@ -870,6 +871,7 @@ void watch_ui_apply_activity(uint8_t state, bool alert, bool sound)
     const bool wake = alert && display_preview_allowed();
     bsp_display_lock(0);
     agent_activity_state = state;
+    agent_activity_revision = revision;
     update_agent();
     if (wake) {
         wake_display_locked(DISPLAY_PREVIEW_TIMEOUT_MS);

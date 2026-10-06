@@ -16,13 +16,16 @@ cache. See the [source protocol](protocol.md) for freshness fields.
 | iPhone Keychain | Source endpoints and credentials, installation ID, ESP32 watch owner identity; device-only, available after first unlock | Explicit removal or confirmed revocation |
 | iPhone protected Application Support | One last-known snapshot per source, weather cache and bounded transport diagnostics | Source removal, relevant setting change or replacement data |
 | iPhone preferences | Phone theme, source names, per-watch settings, ESP32 usage provider/source revision and delivery bookkeeping | User change or corresponding device removal |
-| ESP32 watch NVS | Owner/bond, accepted profile, clock and preferences | Deliberate factory reset or owner transfer |
+| ESP32 watch NVS | Owner bond, stable device ID, saved profile and wearer acknowledgement | Deliberate factory reset or owner transfer |
 | Apple Watch shared preferences | Provider/window usage cache, snapshot observation time, phone revision and reporting source; WidgetKit owns each complication’s provider choice | Authoritative phone clear/source change or newer accepted data; expired readings remain unavailable |
 | Live Activity | Expiring ActivityKit display copy | New event, stale date or lifecycle end |
 
 The watch keeps activity in RAM, so reboot clears old alerts. The phone keeps
 no durable queue of BLE writes. Omarchy verifies living Codex owners after a
 source restart; Mac clears hook-only sessions until another hook arrives.
+
+Storage errors do not erase ownership, replace the watch ID or reopen pairing.
+Phone-side Remove watch removes access; it does not reset watch ownership.
 
 ## Freshness and recovery
 

@@ -313,6 +313,29 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
+    func testInitialOwnershipSaveIsRecoverableOnlyAfterTheProfileIsAccepted() {
+        let pending = NSError(domain: CBATTErrorDomain,
+                              code: CBATTError.insufficientResources.rawValue)
+        XCTAssertTrue(WatchSetupRecovery.ownershipSavePending(error: pending,
+            activityRead: true, paired: false, profileAccepted: true))
+        XCTAssertFalse(WatchSetupRecovery.ownershipSavePending(error: nil,
+            activityRead: true, paired: false, profileAccepted: true))
+        XCTAssertFalse(WatchSetupRecovery.ownershipSavePending(error: pending,
+            activityRead: false, paired: false, profileAccepted: true))
+        XCTAssertFalse(WatchSetupRecovery.ownershipSavePending(error: pending,
+            activityRead: true, paired: false, profileAccepted: false))
+        XCTAssertFalse(WatchSetupRecovery.ownershipSavePending(error: pending,
+            activityRead: true, paired: true, profileAccepted: true))
+        for code in [CBATTError.insufficientAuthentication, .insufficientAuthorization] {
+            XCTAssertFalse(WatchSetupRecovery.ownershipSavePending(
+                error: NSError(domain: CBATTErrorDomain, code: code.rawValue),
+                activityRead: true, paired: false, profileAccepted: true))
+        }
+        XCTAssertFalse(WatchSetupRecovery.ownershipSavePending(
+            error: NSError(domain: CBErrorDomain, code: pending.code),
+            activityRead: true, paired: false, profileAccepted: true))
+    }
+
     func testWatchIsReadyOnlyAfterItsRequiredChannelsAreSubscribed() {
         func ready(_ validated: Bool = true, _ activity: Bool = true,
                    syncRequired: Bool = true, sync: Bool = true) -> Bool {

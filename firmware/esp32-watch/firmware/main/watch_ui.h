@@ -16,5 +16,5 @@ void watch_ui_apply_profile_v3(const omarchy_profile_v3_t *profile);
 void watch_ui_apply_profile_v6(const omarchy_profile_v6_t *profile);
 void watch_ui_apply_profile_v5(const omarchy_profile_v5_t *profile);
 void watch_ui_apply_profile_v4(const omarchy_profile_v4_t *profile);
-void watch_ui_apply_activity(uint8_t state, bool alert, bool sound);
+void watch_ui_apply_activity(uint8_t state, uint32_t revision, bool alert, bool sound);
 void watch_ui_set_connected(bool connected);
