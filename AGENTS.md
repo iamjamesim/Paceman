@@ -29,6 +29,12 @@ Use `docs/architecture.md` and `docs/data-lifecycle.md` for current system
 semantics. Cross-surface consistency means consistent meanings; layout differences
 need a user-facing reason.
 
+# Documentation
+
+Keep permanent documentation concise and limited to critical current behavior.
+Put migration steps and verification results in release notes or PRs, and avoid
+repeating details across architecture, lifecycle and protocol docs.
+
 # Lifecycle engineering
 
 Use platform-owned pending operations and delegate callbacks for work that must

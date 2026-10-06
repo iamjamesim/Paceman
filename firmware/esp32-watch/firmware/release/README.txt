@@ -15,6 +15,13 @@ Replace /dev/ttyACM0 if the board appears at another serial port. The helper
 writes the bootloader, partition table, and application at separate offsets.
 It does not erase the NVS partition containing pairing and settings.
 
+Security upgrade:
+  Watches paired before owner-bond binding was added require one factory reset
+  and re-pair. They show RESET PAIRING REQUIRED after updating. Remove/forget the
+  watch on the old phone, erase flash, reinstall this firmware and pair using
+  the displayed code. Reset also removes cached settings. Later updates preserve
+  pairing normally.
+
 Files:
   bootloader.bin         offset 0x0
   partition-table.bin    offset 0x8000
