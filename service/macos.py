@@ -284,6 +284,7 @@ class MacSource:
     def _receive_claude(self, command):
         validate_message(command)
         event = command["event"]
+        remote_id = command.get("remoteSessionID")
         key = hashlib.sha256(("claude:" + command["session"]).encode()).hexdigest()
         with self.lock, self.store.connect() as db:
             if "claude" not in self.providers:
@@ -294,7 +295,9 @@ class MacSource:
                 self.claude_sessions.pop(key, None)
             elif event == "started":
                 if previous is None:
-                    self.claude_sessions[key] = ClaudeSession(workspace_label=command.get("workspaceLabel"))
+                    self.claude_sessions[key] = ClaudeSession(workspace_label=command.get("workspaceLabel"), remote_session_id=remote_id)
+                elif "remoteSessionID" in command:
+                    previous.remote_session_id = remote_id
             else:
                 current = previous or ClaudeSession()
                 if not current.receive(command, self.monotonic(), ATTENTION_DELAY):
@@ -462,7 +465,7 @@ class MacSource:
         records = [{**dict(row), "provider": "codex"} for row in
                    db.execute("SELECT * FROM mac_sessions ORDER BY id")]
         records.extend({"id": key, "turn": item.turn, "state": item.state(now_monotonic),
-                        "workspace_label": item.workspace_label, "provider": "claude"}
+                        "workspace_label": item.workspace_label, "remote_session_id": item.remote_session_id, "provider": "claude"}
                        for key, item in self.claude_sessions.items())
         records.sort(key=lambda row: row["id"])
         sessions = []
@@ -476,6 +479,8 @@ class MacSource:
             session = {"id": row["id"], "provider": row["provider"], "state": state}
             if row["workspace_label"]:
                 session["workspaceLabel"] = row["workspace_label"]
+            if row.get("remote_session_id"):
+                session["remoteSessionID"] = row["remote_session_id"]
             sessions.append(session)
         state = next((candidate for candidate in ("needs_input", "failed", "working", "finished")
                       if any(session["state"] == candidate for session in sessions)), "idle")

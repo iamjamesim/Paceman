@@ -12,11 +12,17 @@ else:
 
 # Direct scripts run with an isolated interpreter; import only the installed package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from service.claude_hooks import EVENTS, message_for as normalize_message
+from service.claude_hooks import EVENTS, REMOTE_IDENTIFIER, message_for as normalize_message
 
 
 def message_for(data):
-    return normalize_message(data, workspace_label)
+    message = normalize_message(data, workspace_label)
+    if message is not None:
+        # The local hook session ID is not the Remote Control session ID.
+        remote_id = os.environ.get("CLAUDE_CODE_BRIDGE_SESSION_ID", "")
+        message["remoteSessionID"] = remote_id if REMOTE_IDENTIFIER.fullmatch(remote_id) else None
+    return message
+
 
 
 def main():

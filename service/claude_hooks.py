@@ -11,6 +11,7 @@ EVENTS = {
     "StopFailure": "failed", "SessionEnd": "ended",
 }
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
+REMOTE_IDENTIFIER = re.compile(r"session_[A-Za-z0-9_-]{1,152}\Z")
 QUESTIONS = {"AskUserQuestion", "ExitPlanMode"}
 
 
@@ -59,6 +60,9 @@ def validate_message(command):
             or (event != EVENTS[hook] and (hook, event) not in
                 (("PreToolUse", "question-opened"), ("PostToolUseFailure", "interrupted")))):
         raise ValueError("Invalid Claude lifecycle")
+    remote_id = command.get("remoteSessionID")
+    if remote_id is not None and (not isinstance(remote_id, str) or not REMOTE_IDENTIFIER.fullmatch(remote_id)):
+        raise ValueError("Invalid Claude remote session ID")
     for field in ("tool", "toolUse", "inputID"):
         value = command.get(field)
         if value is not None and (not isinstance(value, str) or not IDENTIFIER.fullmatch(value)):

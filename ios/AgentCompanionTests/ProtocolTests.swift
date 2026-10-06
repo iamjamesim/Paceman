@@ -8,6 +8,41 @@ import CryptoKit
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    func testSessionLinksUseRemoteIdentityInsteadOfOpaqueRowID() throws {
+        let session = try JSONDecoder().decode(AgentSession.self, from: Data(
+            #"{"id":"hashed-local-row","provider":"claude","state":"working","remoteSessionID":"session_remote123"}"#.utf8))
+        XCTAssertEqual(session.appURL?.absoluteString, "claude://code/session_remote123")
+        XCTAssertEqual(session.appLinkTitle, "Open in Claude")
+        for state in ActivityState.allCases {
+            let codex = AgentSession(id: "opaque", provider: "codex", state: state)
+            XCTAssertEqual(codex.appURL?.absoluteString, "chatgpt://codex")
+            XCTAssertEqual(codex.appLinkTitle, "Open Codex")
+        }
+    }
+
+    func testSessionLinksFallbackForLocalClaudeAndRejectUnsafeIDs() throws {
+        let legacy = try JSONDecoder().decode(AgentSession.self, from: Data(
+            #"{"id":"local-only","provider":"claude","state":"finished"}"#.utf8))
+        XCTAssertEqual(legacy.appURL?.absoluteString, "claude://code")
+        XCTAssertEqual(legacy.appLinkTitle, "Open in Claude")
+        for invalid in ["local-uuid", "session_x\n", "session_x/other", "session_x?prompt=secret", "session_", "session_" + String(repeating: "x", count: 153)] {
+            var session = legacy
+            session.remoteSessionID = invalid
+            XCTAssertEqual(session.appURL?.absoluteString, "claude://code")
+            XCTAssertEqual(session.appLinkTitle, "Open in Claude")
+        }
+        XCTAssertNil(AgentSession(id: "test", provider: "fixture", state: .working).appURL)
+    }
+
+    func testRemotelyAddressableClaudeRowsRemainIndividual() {
+        let rows = AgentDisplayRow.rows([
+            AgentSession(id: "a", provider: "claude", state: .working, remoteSessionID: "session_a"),
+            AgentSession(id: "b", provider: "claude", state: .working, remoteSessionID: "session_b")])
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(Set(rows.compactMap { $0.session.appURL?.absoluteString }),
+                       ["claude://code/session_a", "claude://code/session_b"])
+    }
+
     func testWatchAllowancePrefersFreshConnectedSourceThenCachedHistory() {
         let now = 1_790_000_000.0
         func source(_ id: String, updated: Int64, reset: Int64, remaining: Int) -> Snapshot {
@@ -533,6 +568,9 @@ final class ProtocolTests: XCTestCase {
             "sessions":[["id":"task", "provider":"codex", "state":"working", "name":"Theme sync", "project":"companion"]]]))
         XCTAssertEqual(snapshot.sessions?.first?.displayName, "Theme sync")
         XCTAssertEqual(snapshot.sessions?.first?.state, .working)
+        XCTAssertEqual(snapshot.sessions?.first?.detail, "companion")
+        let hookSession = AgentSession(id: "hook", provider: "claude", state: .working, workspaceLabel: "paceman")
+        XCTAssertEqual(hookSession.detail, "paceman")
     }
 
     func testUnnamedSessionsGroupWithoutLosingStatesOrNamedRows() {
@@ -546,6 +584,8 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(rows.first?.session.displayName, "Codex · 3 sessions")
         XCTAssertEqual(rows.first?.session.state, .needsInput)
         XCTAssertEqual(rows.first?.detail, "1 needs input · 1 finished · 1 idle")
+        XCTAssertEqual(rows.first?.statusLabel, "1 needs input · 1 finished · 1 idle")
+        XCTAssertEqual(rows.first?.contextLabel, "")
         XCTAssertTrue(rows.contains { $0.session.displayName == "Fix checkout" })
         XCTAssertTrue(rows.contains { $0.session.displayName == "Claude" })
         XCTAssertEqual(rows.map(\.id), AgentDisplayRow.rows(Array(sessions.reversed())).map(\.id))

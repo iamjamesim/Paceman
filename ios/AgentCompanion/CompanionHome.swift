@@ -52,17 +52,6 @@ struct CompanionHome: View {
                                 .padding(.top, paired.sourceID == model.pairedSources.first?.sourceID ? 0 : 12)
                                 .id(paired.sourceID)
                         }
-                        Link(destination: URL(string: "chatgpt://codex")!) {
-                            HStack(spacing: 6) {
-                                Text("Open Codex")
-                                Image(systemName: "arrow.up.right").accessibilityHidden(true)
-                            }
-                            .font(.subheadline.weight(.medium))
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .foregroundStyle(theme.tint)
-                        .padding(.top, 12)
                     } else { agentSetup }
                     if presentation.preview {
                         Text("Design preview · sample activity").font(.caption)
@@ -83,7 +72,7 @@ struct CompanionHome: View {
     }
 
     private var computersHeading: some View {
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 3)) : AnyLayout(HStackLayout())
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout())
         return layout {
             if typeSize.isAccessibilitySize {
                 Text("Computers").font(.headline).accessibilityAddTraits(.isHeader)
@@ -179,12 +168,12 @@ struct CompanionHome: View {
         }()
         return VStack(alignment: .leading, spacing: 0) {
             Button { open(.otherComputer(id)) } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     if !typeSize.isAccessibilitySize {
                         Image(systemName: "laptopcomputer")
                             .font(.caption).foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
                     }
-                    VStack(alignment: .leading, spacing: 3) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(presentation.displayName(source: paired, snapshot: value))
                             .font(.system(.subheadline, design: .rounded, weight: .medium))
                             .multilineTextAlignment(.leading)
@@ -211,44 +200,32 @@ struct CompanionHome: View {
                         Button("Reconnect") { open(.otherComputer(id)) }
                             .buttonStyle(.plain).font(.caption.weight(.semibold)).foregroundStyle(theme.ink).frame(minHeight: 44)
                     }
-                }.padding(.top, 3)
+                }.padding(.top, 4)
             }
             if content != .waiting && (firstPreview || model.lastContacts[id] != nil) {
                 ComputerReceiptLabel(model: model, presentation: presentation, sourceID: id)
-                    .font(.caption2).foregroundStyle(theme.secondaryInk).padding(.top, 5)
+                    .font(.caption2).foregroundStyle(theme.secondaryInk).padding(.top, 4)
             }
             Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5).padding(.top, 16)
             if state == .revoked {
                 Text("Reconnect to receive activity from this computer.")
-                    .font(.subheadline).foregroundStyle(theme.secondaryInk).padding(.top, 18)
+                    .font(.subheadline).foregroundStyle(theme.secondaryInk).padding(.top, 16)
             } else {
                 switch content {
                 case .sessions:
-                    if let leading = rows.first {
-                        activityHeadline(leading.session.state, historical: historical)
-                        if rows.count == 1 {
-                            Text(leading.session.displayName)
-                                .font(.subheadline.weight(.medium)).foregroundStyle(historical ? theme.secondaryInk : theme.ink)
-                                .padding(.top, 10)
-                            if !leading.detail.isEmpty {
-                                Text(leading.detail).font(.caption).foregroundStyle(theme.secondaryInk).padding(.top, 3)
-                            }
-                        } else {
-                            VStack(spacing: 0) {
-                                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                                    if index > 0 { Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5) }
-                                    activityRow(row, historical: historical)
-                                }
-                            }.padding(.top, 11)
+                    VStack(spacing: 0) {
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                            if index > 0 { Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5) }
+                            activityRow(row, historical: historical)
                         }
-                    }
+                    }.padding(.top, 8)
                 case .waiting:
                     emptyActivity("No activity received yet", detail: nil)
                 case .empty:
                     emptyActivity(historical ? "Last known: No active sessions" : "No active sessions",
                                   detail: historical ? nil : "Activity appears when an agent starts.")
                 case .summary(let activity):
-                    activityHeadline(activity, historical: historical)
+                    emptyActivity(historical ? "Last known: \(activity.title)" : activity.title, detail: nil)
                 }
             }
         }
@@ -258,40 +235,53 @@ struct CompanionHome: View {
         .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
 
-    private func activityHeadline(_ state: ActivityState, historical: Bool) -> some View {
-        let title = state == .idle ? "No active sessions" : state.title
-        return HStack(spacing: 11) {
-            if state != .idle && !typeSize.isAccessibilitySize {
-                ActivityRobot(state: state, animate: !historical)
-                    .frame(width: 31, height: 31)
-                    .foregroundStyle(historical ? theme.secondaryInk : stateColor(state))
-                    .accessibilityHidden(true)
-            }
-            Text(historical ? "Last known: \(title)" : title)
-                .font(.system(.title2, design: .rounded, weight: .semibold))
-                .foregroundStyle(historical ? theme.secondaryInk : stateColor(state))
+    private func sessionDescription(_ row: AgentDisplayRow, historical: Bool) -> some View {
+        let status = historical ? "Last known: " + row.statusLabel : row.statusLabel
+        let context = row.contextLabel.isEmpty ? "" : " · " + row.contextLabel
+        let color = historical || row.statusLabel != row.session.state.title
+            ? theme.secondaryInk : stateColor(row.session.state)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(row.session.displayName).font(.subheadline.weight(.medium))
+                .foregroundStyle(historical ? theme.secondaryInk : theme.ink)
                 .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }.padding(.top, 16)
+            Text("\(Text(status).foregroundColor(color))\(Text(context).foregroundColor(theme.secondaryInk))")
+                .font(.caption).fixedSize(horizontal: false, vertical: true)
+        }.accessibilityElement(children: .combine)
     }
 
     private func activityRow(_ row: AgentDisplayRow, historical: Bool) -> some View {
         let layout = typeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         return layout {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(row.session.displayName).font(.subheadline.weight(.medium))
-                    .foregroundStyle(historical ? theme.secondaryInk : theme.ink)
-                if !row.detail.isEmpty {
-                    Text(row.detail).font(.caption).foregroundStyle(theme.secondaryInk)
-                }
+            if !typeSize.isAccessibilitySize {
+                ActivityRobot(state: row.session.state, animate: !historical)
+                    .frame(width: 24, height: 24)
+                    .foregroundStyle(historical ? theme.secondaryInk : stateColor(row.session.state))
+                    .accessibilityHidden(true)
             }
-            if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
-            Text(row.session.state.title).font(.caption.weight(.medium))
-                .foregroundStyle(historical ? theme.secondaryInk : stateColor(row.session.state))
-                .fixedSize(horizontal: true, vertical: false)
-        }.padding(.vertical, 10).accessibilityElement(children: .combine)
+            sessionDescription(row, historical: historical)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            sessionPill(row.session)
+                .fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: false)
+        }.padding(.vertical, 12)
+    }
+
+    @ViewBuilder private func sessionPill(_ session: AgentSession) -> some View {
+        if let url = session.appURL {
+            Link(destination: url) {
+                Text(session.appLinkTitle).multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(theme.canvas)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(theme.ink, in: Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .accessibilityHint(session.provider == "claude" && session.appURL?.path.isEmpty == false
+                    ? "Open \(session.displayName) in Claude Code" : "Open the agent app")
+        }
     }
 
     private func stateColor(_ state: ActivityState) -> Color {
@@ -299,10 +289,10 @@ struct CompanionHome: View {
     }
 
     private func emptyActivity(_ title: String, detail: String?) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.system(.title3, design: .rounded, weight: .semibold))
             if let detail { Text(detail).font(.caption).foregroundStyle(theme.secondaryInk) }
-        }.padding(.top, 18)
+        }.padding(.top, 16)
     }
 }
 
@@ -364,8 +354,8 @@ struct WatchConnectionSummary: View {
         }
     }
     var body: some View {
-        VStack(alignment: centered ? .center : .leading, spacing: 7) {
-            HStack(spacing: 5) {
+        VStack(alignment: centered ? .center : .leading, spacing: 8) {
+            HStack(spacing: 4) {
                 if !typeSize.isAccessibilitySize {
                     Circle().fill(ready ? theme.tint : theme.ink.opacity(0.3)).frame(width: 5, height: 5)
                 }

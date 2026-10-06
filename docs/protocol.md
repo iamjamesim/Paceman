@@ -108,7 +108,7 @@ example, an allowance change raised `revision` to 12 without changing activity
 | `freshFor` | Seconds the observation may count as current; the phone accepts greater than 0 and at most 60. |
 | `state` | `idle`, `working`, `needs_input`, `finished`, or `failed`. |
 | `eventID` | Opaque activity identity, 1–128 UTF-8 bytes without control characters; stable across presentation-only revisions. |
-| `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded workspace labels; no prompts or transcripts. |
+| `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded workspace labels and Claude `remoteSessionID` (the Remote Control ID, distinct from the opaque row ID); no prompts or transcripts. |
 | `allowance` | Optional selected Codex reading; may advance `revision` without a new activity event. |
 | `allowances` | Optional array of up to two Codex usage windows, each with its own observation and reset time. |
 | `configuredProviders` | Optional enabled activity providers (`codex`, `claude`), including providers without a received event. |
