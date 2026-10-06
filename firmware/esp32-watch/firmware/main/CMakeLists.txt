@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.c"
         "watch_ble.c"
+        "watch_storage.c"
         "watch_ancs.c"
         "watch_face_layout.c"
         "watch_allowance_layout.c"
@@ -24,6 +25,7 @@ idf_component_register(
         "fonts"
     PRIV_REQUIRES
         bt
+        bootloader_support
         esp_driver_i2c
         espressif__esp_lcd_touch
         esp_pm

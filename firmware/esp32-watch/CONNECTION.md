@@ -49,8 +49,16 @@ pause and removal are the only user actions that disable updates.
 
 A physical encrypted BLE link is not sufficient. `ready` requires the ownership
 and profile handshake, a valid activity read, and restoration of required event
-subscriptions. The watch connection indicator follows the activity subscription,
-so an ANCS-only system link does not masquerade as a working Paceman data channel.
+subscriptions. The watch connection indicator requires the authenticated owner,
+durably saved ownership, a profile accepted in the current connection, a valid
+activity read, and both activity and notification-sync subscriptions. Disconnect
+clears these handshake facts. Restored subscriptions or an ANCS-only system link
+do not establish readiness by themselves.
+
+Profile writes enqueue work outside the Bluetooth host. Their ATT response is
+acceptance for processing, not proof of persistence or a screen update. During
+initial pairing, the activity read cannot succeed until ownership has been saved;
+an early read fails and uses the normal callback-driven repair path.
 
 Every successful handshake asks the model for the latest snapshot. The phone
 sends current state and uses watch acknowledgements to decide whether a fresh

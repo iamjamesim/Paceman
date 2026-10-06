@@ -94,6 +94,36 @@ remove it from the old device as well: use **Remove watch** in the Paceman iPhon
 app, or forget it in the old device's Bluetooth settings. Disconnecting alone
 does not remove the old bond.
 
+### One-time security upgrade
+
+Older firmware saved an owner UUID but did not bind it to a Bluetooth peer. It
+also supplied `000000` during fresh pairing after an owned reboot, allowing a
+nearby peer to authenticate and inject activity. The bond-binding implementation
+rejects new/repeat pairing while owned and permits protected access only from the
+saved authenticated owner bond. It does not change the BLE packet formats.
+
+An already-owned installation without `owner_peer_v1` shows
+`RESET PAIRING REQUIRED` and does not start Bluetooth. This upgrade requires one
+deliberate local factory reset and re-pair: remove the watch from the old phone,
+erase its flash, reinstall the patched firmware, and pair using the new displayed
+code. Do not guess or automatically migrate an owner from stored bonds. This
+reset removes cached preferences as well as ownership. Later routine updates
+preserve the binding and do not require another reset.
+
+The surrounding safeguards also preserve identity on storage errors, keep initial
+activity access closed until ownership is saved, and require a fresh app handshake
+before showing connected. A tap dismisses only the displayed revision, with the
+decision serialized with incoming Bluetooth activity. Startup enables the hardware
+entropy source before generating a setup code and disables it before ADC/Bluetooth
+initialization, following [ESP-IDF's random-source prerequisites](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/api-reference/system/random.html).
+
+Host tests cover authorization, session readiness, stale displayed-revision
+dismissal and NVS fault injection against the production readers and profile
+writer, including interrupted initial enrollment and downgrade cleanup. The
+ESP-IDF build checks NimBLE integration. Physical initial-pairing/save-failure,
+second-peer rejection and owner reconnection with address rotation remain required
+before publishing this security upgrade; a passing build is not that verification.
+
 ## Boot behavior
 
 | Ownership | RTC | Initial screen | Recovery |

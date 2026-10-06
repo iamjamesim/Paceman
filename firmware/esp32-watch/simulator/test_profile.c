@@ -28,6 +28,22 @@ int main(int argc, char **argv)
     assert(!cue.sound && !cue.alert);  /* acknowledged revision */
     activity.state = OMARCHY_ACTIVITY_FAILED + 1;
     assert(!omarchy_activity_v1_is_valid(&activity));
+    /* Revision 41 arrived while revision 40 was displayed: a tap cannot dismiss 41. */
+    activity.revision = 41;
+    activity.state = OMARCHY_ACTIVITY_ATTENTION;
+    assert(!omarchy_activity_can_acknowledge(&activity, 40));
+    assert(!omarchy_activity_can_acknowledge(&activity, 0));
+    assert(!omarchy_activity_can_acknowledge(NULL, 41));
+    const uint8_t dismissible[] = {OMARCHY_ACTIVITY_ATTENTION,
+        OMARCHY_ACTIVITY_FINISHED, OMARCHY_ACTIVITY_FAILED};
+    for (size_t index = 0; index < sizeof(dismissible); ++index) {
+        activity.state = dismissible[index];
+        assert(omarchy_activity_can_acknowledge(&activity, 41));
+    }
+    activity.state = OMARCHY_ACTIVITY_WORKING;
+    assert(!omarchy_activity_can_acknowledge(&activity, 41));
+    activity.state = OMARCHY_ACTIVITY_NONE;
+    assert(!omarchy_activity_can_acknowledge(&activity, 41));
     omarchy_profile_v4_t p = {0};
     if (argc == 2) {
         omarchy_profile_v5_t incoming = {0};

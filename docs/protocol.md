@@ -336,9 +336,61 @@ reports the watch ID, owner status, protocol range and firmware version.
 Activity states are 0 idle, 1 working, 2 needs input, 3 finished, 4 failed.
 Finished and failed require their capability bits; the phone maps them to
 supported older states when needed. Acknowledgement records a wearer action,
-not a source change. The phone sends only fresh aggregate activity and resends
+not a source change. Dismissal must carry the displayed revision and only
+acknowledge it if it still matches the current dismissible event. Serialize
+that decision with incoming activity so a tap cannot dismiss a newer unseen
+event. The phone sends only fresh aggregate activity and resends
 current state on reconnect. The watch packet has no local source-freshness
 lease, so a watch without its phone link cannot expire upstream activity.
+
+## Accessory authorization baseline
+
+The discovery UUID/name and capability claims identify a candidate accessory;
+they are not authentication. Every conforming Paceman BLE accessory must bind
+its ownership record to the peer identity of an authenticated Bluetooth bond.
+The owner UUID in a profile is a marker, not a secret or proof of authorization.
+
+Protected access requires an encrypted, authenticated, bonded link with a
+16-byte key. ESP32 stores the resolved owner peer identity alongside the profile
+in NVS. An owned device refuses fresh and repeat pairing; it never
+supplies a fallback passkey after reboot or silently replaces the owner's bond.
+Only the bonded owner may read activity, write profiles/activity, subscribe to
+activity or notification sync, or receive those notifications. The same checks
+apply to future machine collections and commands. A Bluetooth connection or an
+activity subscription alone must not authorize a peer or mark it ready.
+
+Generate setup codes using a cryptographically suitable platform random source,
+with its documented entropy prerequisites enabled. Stable device identity may
+be created only for genuinely new, unowned storage; a storage error or malformed
+identity must not silently generate a replacement or reopen enrollment.
+
+Initial enrollment closes to other peers immediately, but protected state access
+and channel readiness wait until ownership has been saved successfully. ESP32
+queues profile work outside the Bluetooth callback: its profile write response
+means accepted for processing, not saved or displayed. The subsequent activity
+read is refused until initial ownership is durable. A transient storage/write
+failure uses the existing delegate-driven reconnection path.
+
+For the current BLE contract, readiness requires the authenticated owner, durable
+ownership, a profile accepted in this connection, a valid activity read and both
+activity and notification-sync subscriptions. Reset these handshake facts on
+disconnect. Restored subscriptions alone cannot establish a new app session.
+
+Owner transfer requires a deliberate local reset/transfer that clears ownership
+and its bond together. Missing or malformed owner binding on an owned device
+fails closed. Older ESP32 firmware stored only an owner UUID, so upgrading to
+the bond-binding implementation requires a one-time local factory reset and
+re-pair. Do not infer an owner from the first reconnecting peer or the first
+bond found in storage. Subsequent updates retain the binding normally.
+
+Verify each hardware port with a second peer attempting fresh pairing after an
+owned reboot, profile/activity writes (including a copied owner UUID), activity
+reads and notification subscriptions. All must fail without altering activity,
+producing cues, or evicting the owner's bond. Separately verify owner reconnect
+with a rotating private address, ownership persistence, and explicit reset.
+Exercise missing/corrupt identity and ownership, initial-save failure, restored
+subscriptions before a new handshake, and a newer event arriving before an old
+displayed event is dismissed.
 
 ## Evolving the protocol
 

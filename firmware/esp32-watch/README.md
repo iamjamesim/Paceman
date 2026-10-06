@@ -19,6 +19,9 @@ prompts. A watch owned by another phone needs a deliberate factory reset first.
 
 See `UPSTREAM.md` for provenance and the root [development guide](../../docs/development.md) for builds.
 Do not erase flash for routine updates: NVS contains the phone bond and ownership.
+The first upgrade from UUID-only ownership to bond binding is an exception:
+it requires one local reset and re-pair. See the
+[security upgrade instructions](firmware/README.md#one-time-security-upgrade).
 
 New Paceman code uses the root [Apache License 2.0](../../LICENSE).
 Imported Omarchy Watch files, including Paceman's changes to them, retain their

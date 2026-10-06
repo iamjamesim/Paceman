@@ -36,6 +36,12 @@ When configured, the source sends notifications through the relay, which holds t
 
 The iPhone owns the ESP32 watch's Bluetooth connection and chooses activity from fresh computers. The watch retains its bond, owner, and profile, but keeps current activity only in RAM. Reconnection sends current state rather than replaying missed events. See [Bluetooth lifecycle](../firmware/esp32-watch/CONNECTION.md) and [data lifecycle](data-lifecycle.md).
 
+Accessory discovery is not authorization. BLE firmware binds ownership to an
+authenticated bonded peer and checks it for protected reads, writes and
+subscriptions. An owned device refuses new pairing until a deliberate local
+reset/transfer. Older ESP32 ownership records without that binding require a
+one-time reset and re-pair when upgraded; missing binding does not enable setup.
+
 Usage stays with the first paired computer, with separate windows for Codex and Claude; accounts from different computers are never combined. The phone shows both providers. Each Apple Watch complication chooses its provider in the watch-face editor; the phone's ESP32 usage setting controls the ESP32 meter. Neither selection filters activity or alerts.
 
 Apple Watch receives all usage readings through WatchConnectivity or its own background push path, independently of ESP32 Bluetooth. Exact fields, compatibility and versions are in the [protocol](protocol.md); freshness and clearing rules are in [data lifecycle](data-lifecycle.md).
