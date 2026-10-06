@@ -221,13 +221,14 @@ struct CompanionHome: View {
                     if let leading = rows.first {
                         activityHeadline(leading.session.state, historical: historical)
                         if rows.count == 1 {
-                            Text(leading.session.displayName)
-                                .font(.subheadline.weight(.medium)).foregroundStyle(historical ? theme.secondaryInk : theme.ink)
-                                .padding(.top, 10)
-                            if !leading.detail.isEmpty {
-                                Text(leading.detail).font(.caption).foregroundStyle(theme.secondaryInk).padding(.top, 3)
-                            }
-                            sessionPill(leading.session).padding(.top, 6)
+                            let layout = typeSize.isAccessibilitySize
+                                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+                            layout {
+                                sessionDescription(leading, historical: historical)
+                                if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
+                                sessionPill(leading.session)
+                            }.padding(.top, 10)
                         } else {
                             VStack(spacing: 0) {
                                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
@@ -270,25 +271,31 @@ struct CompanionHome: View {
         }.padding(.top, 16)
     }
 
+    private func sessionDescription(_ row: AgentDisplayRow, historical: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(row.session.displayName).font(.subheadline.weight(.medium))
+                .foregroundStyle(historical ? theme.secondaryInk : theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            if !row.detail.isEmpty {
+                Text(row.detail).font(.caption).foregroundStyle(theme.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }.accessibilityElement(children: .combine)
+    }
+
     private func activityRow(_ row: AgentDisplayRow, historical: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            let layout = typeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-            layout {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(row.session.displayName).font(.subheadline.weight(.medium))
-                        .foregroundStyle(historical ? theme.secondaryInk : theme.ink)
-                    if !row.detail.isEmpty {
-                        Text(row.detail).font(.caption).foregroundStyle(theme.secondaryInk)
-                    }
-                }
-                if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        return layout {
+            sessionDescription(row, historical: historical)
+            if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
+            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 0) {
                 Text(row.session.state.title).font(.caption.weight(.medium))
                     .foregroundStyle(historical ? theme.secondaryInk : stateColor(row.session.state))
                     .fixedSize(horizontal: false, vertical: true)
-            }.accessibilityElement(children: .combine)
-            sessionPill(row.session)
+                sessionPill(row.session)
+            }.fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: false)
         }.padding(.vertical, 10)
     }
 
@@ -300,9 +307,9 @@ struct CompanionHome: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Image(systemName: "arrow.up.right").accessibilityHidden(true)
                 }
-                .font(.caption.weight(.semibold))
+                .font(.caption2.weight(.medium))
                 .foregroundStyle(theme.tint)
-                .padding(.horizontal, 12).padding(.vertical, 7)
+                .padding(.horizontal, 9).padding(.vertical, 5)
                 .background(theme.tint.opacity(0.12), in: Capsule())
                 .overlay(Capsule().strokeBorder(theme.tint.opacity(0.3), lineWidth: 0.5))
                 .frame(minHeight: 44)
