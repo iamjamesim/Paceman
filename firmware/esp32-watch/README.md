@@ -4,7 +4,7 @@ Waveshare ESP32-S3-Touch-AMOLED-2.06 device package for Paceman Watch. The
 watch began as [omarchy-watch](https://github.com/iamjamesim/omarchy-watch);
 the BLE protocol and pairing identity remain compatible with that firmware.
 
-This prototype focuses on Codex activity and usage limits.
+This experimental watch shows agent activity, with additional Codex usage monitoring.
 
 For a new unowned watch, open **Settings → Experimental → Paceman Watch** on the
 iPhone and choose **Connect your watch**. Follow the Bluetooth and pairing-code

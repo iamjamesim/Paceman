@@ -24,10 +24,10 @@ is available through TestFlight.
   <a href="docs/images/mac-menu-bar-live-activity.png"><img src="docs/images/mac-menu-bar-live-activity.png" alt="Paceman Live Activity in the Mac menu bar with its expanded status panel" width="640"></a>
 </p>
 
-You can also try [Paceman Watch](firmware/esp32-watch/README.md), an ESP32-S3
-prototype focused on the complete Codex experience: activity and usage limits.
-It demonstrates an open system you can extend to gear you choose or build;
-new devices still need custom firmware and iPhone pairing support today.
+You can also try [Paceman Watch](firmware/esp32-watch/README.md), an experimental
+ESP32-S3 watch for agent activity, with additional Codex usage monitoring. It
+demonstrates how Paceman can extend to gear you choose or build. New devices
+still need custom firmware and iPhone pairing support today.
 
 <p align="center">
   <a href="docs/images/esp32-watch.jpg"><img src="docs/images/esp32-watch.jpg" alt="Paceman on an experimental ESP32-S3 watch" width="300"></a>
