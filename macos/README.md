@@ -28,8 +28,10 @@ Keep Paceman’s hook-review window open while checking. If you use the Codex CL
 
 Agents helping with setup should use the app or interactive CLI, rather than
 `codex exec --ephemeral`: if that check exits without an ending hook, it leaves
-no saved turn for Paceman to recover. A failed check does not complete setup;
-inspect any leftover **Working** row before handing off.
+no saved turn for Paceman to recover. A failed check does not complete setup.
+Resolve any confirmed orphaned or invalid activity created by setup before
+handing off, preserving real user sessions. Unresolved cleanup means setup
+remains partial.
 
 <details>
 <summary>The eight hooks and what they send</summary>

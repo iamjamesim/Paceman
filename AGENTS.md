@@ -60,8 +60,10 @@ local task in the Codex interface they use (app or interactive CLI); do not use
 `codex exec --ephemeral` for installation verification. Verify
 `lastAgentEventAt` advances in `pacemanctl status`, the task replies successfully,
 and Paceman shows that task as Finished. A start event alone is insufficient.
-Report the installation as partial if review or this check is pending or fails;
-inspect any leftover Working row from a failed check before handing off.
+Installation and diagnostic checks must not leave orphaned or invalid activity.
+Resolve any confirmed orphaned or invalid state created by the check before
+handing off, preserving real user sessions. Report the installation as partial
+if review or verification is pending or fails, or cleanup remains unresolved.
 
 For iPhone notifications, pairing and hook delivery are insufficient. The
 normal Mac installer prepares the relay sender before pairing. Follow the Mac

@@ -629,7 +629,9 @@ def print_hook_review_steps(wrapper: Path):
     print("  Verify lastAgentEventAt advances in:")
     print(f'     "{wrapper}" status')
     print("  Wait for a successful reply and confirm Paceman shows the task as Finished.")
-    print("  A start event alone is insufficient. If the check fails, inspect any leftover Working row.")
+    print("  A start event alone is insufficient. Setup checks must not leave orphaned or invalid activity.")
+    print("  Resolve confirmed leftovers from the check before handoff; preserve real user sessions.")
+    print("  Unresolved cleanup means setup remains partial.")
     print(f"  Until review and this check succeed, setup is partial. Full steps: {REPO / 'macos/README.md'}")
 
 
