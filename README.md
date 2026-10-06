@@ -2,14 +2,15 @@
 
 **Take your agents for a walk.**
 
-Paceman is a personal gear system for agentic engineering. Agents keep working
+Paceman is an open gear system for agentic engineering. Agents keep working
 while your attention is elsewhere. Paceman gives that work a quiet presence in
 the gear you take with you, so you can stay in touch without being tied to your
 desk.
 
-Paceman shows Codex and Claude Code activity in Live Activities on the iPhone
-Lock Screen, Apple Watch Smart Stack, and Mac menu bar. Apple Watch complications
-show how much Codex usage remains and when it resets.
+Paceman shows agent activity in Live Activities on the iPhone Lock Screen,
+Apple Watch Smart Stack, and Mac menu bar. Mac and Omarchy support Codex and
+Claude Code. Apple Watch usage complications remain Codex-only. New development
+focuses on agent activity and interaction.
 
 Paceman is in **alpha**. Desktop installers are available, and the iPhone app
 is available through TestFlight.
@@ -24,9 +25,8 @@ is available through TestFlight.
 </p>
 
 You can also try [Paceman Watch](firmware/esp32-watch/README.md), an experimental
-ESP32-S3 watch built for quick glances at agent activity without the usual
-smartwatch distractions. It’s a working demo of Paceman’s longer-term goal: an
-open system you can extend to the personal gear you choose or build. New devices
+ESP32-S3 watch for agent activity, with additional Codex usage monitoring. It
+demonstrates how Paceman can extend to gear you choose or build. New devices
 still need custom firmware and iPhone pairing support today.
 
 <p align="center">
@@ -63,8 +63,8 @@ Bluetooth recovery; [relay setup](service/RELAY.md) is for operators.
 | Path | Purpose |
 | --- | --- |
 | `service/` | Local source API, pairing, persistence, push worker and APNs relay |
-| `macos/` | Menu-bar app, Codex and Claude hooks, per-user installer |
-| `omarchy/` | Omarchy bar panel, Codex and Claude hooks, source controls and installer |
+| `macos/` | Menu-bar app, Codex and Claude Code hooks, per-user installer |
+| `omarchy/` | Omarchy bar panel, Codex and Claude Code hooks, source controls and installer |
 | `ios/` | iPhone app, Live Activities, Apple Watch app and complications |
 | `firmware/esp32-watch/` | Experimental watch firmware and simulator |
 | `tests/`, `scripts/` | Portable checks and development tools |
