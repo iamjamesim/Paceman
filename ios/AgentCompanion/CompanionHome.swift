@@ -52,6 +52,17 @@ struct CompanionHome: View {
                                 .padding(.top, paired.sourceID == model.pairedSources.first?.sourceID ? 0 : 12)
                                 .id(paired.sourceID)
                         }
+                        Link(destination: URL(string: "chatgpt://codex")!) {
+                            HStack(spacing: 6) {
+                                Text("Open Codex")
+                                Image(systemName: "arrow.up.right").accessibilityHidden(true)
+                            }
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .foregroundStyle(theme.tint)
+                        .padding(.top, 12)
                     } else { agentSetup }
                     if presentation.preview {
                         Text("Design preview · sample activity").font(.caption)
