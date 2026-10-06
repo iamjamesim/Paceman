@@ -38,6 +38,7 @@ private struct SourceStatus: Decodable {
     let hookCommand: String?
     var configuredProviders: [String]? = nil
     var detectedProviders: [String]? = nil
+    var setupProviders: [String]? = nil
     var providers: [String]? = nil
     var providerCounts: [String: [String: Int]]? = nil
     var missingHooksByProvider: [String: [String]]? = nil
@@ -144,7 +145,7 @@ private final class PanelModel: ObservableObject {
     private let now: () -> Double
     private let command: @Sendable ([String]) -> (Bool, String)
     @Published var installationProviders: [String]? = nil
-    var setupProviders: [String] { installationProviders ?? status.selectedProviders }
+    var setupProviders: [String] { installationProviders ?? status.setupProviders ?? status.selectedProviders }
     func selectSetupProvider(_ provider: String, enabled: Bool) {
         installationProviders = ["codex", "claude"].filter {
             $0 == provider ? enabled : setupProviders.contains($0)
@@ -328,8 +329,8 @@ private final class PanelModel: ObservableObject {
     }
 
     func installBundled() {
-        guard (needsNotificationRepair || !setupProviders.isEmpty), begin(.installing) else { return }
-        let providers = needsNotificationRepair ? nil : installationProviders
+        guard (needsNotificationRepair || ((hasReadStatus || installationProviders != nil) && !setupProviders.isEmpty)), begin(.installing) else { return }
+        let providers = needsNotificationRepair ? nil : setupProviders
         let installer = self.installer
         DispatchQueue.global(qos: .userInitiated).async {
             let (code, result) = installer(providers)
@@ -570,7 +571,7 @@ private struct InstallationView: View {
                         Toggle(model.status.providerLabel(provider, selected: model.setupProviders.contains(provider)), isOn: Binding(
                             get: { model.setupProviders.contains(provider) },
                             set: { model.selectSetupProvider(provider, enabled: $0) }))
-                            .disabled(model.busy)
+                            .disabled(model.busy || !model.hasReadStatus)
                     }
                     if model.setupProviders.contains("claude") {
                         Text("Claude Code activity is supported; Claude usage limits are not.")
@@ -615,7 +616,7 @@ private struct InstallationView: View {
                         NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications"))
                     }
                 }
-                    .disabled(model.busy || (InstalledBuild.isInApplications && !model.needsNotificationRepair && model.setupProviders.isEmpty))
+                    .disabled(model.busy || (InstalledBuild.isInApplications && !model.needsNotificationRepair && (!model.hasReadStatus || model.setupProviders.isEmpty)))
                     .keyboardShortcut(.defaultAction)
             }
         }

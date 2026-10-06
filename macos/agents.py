@@ -5,23 +5,9 @@ import shlex
 import shutil
 from pathlib import Path
 
-from macos.claude_hook import EVENTS as CLAUDE_EVENTS
+from service.claude_hooks import EVENTS as CLAUDE_EVENTS, CLAUDE_PURPOSES
 
 PROVIDERS = ('codex', 'claude')
-CLAUDE_PURPOSES = (
-    ('SessionStart', 'show a new or resumed Claude session as idle'),
-    ('UserPromptSubmit', 'show work after a new prompt'),
-    ('PreToolUse', 'observe work and questions or plan approval'),
-    ('PermissionRequest', 'show approval pending after five seconds'),
-    ('PostToolUse', 'clear attention after the corresponding tool returns'),
-    ('PostToolUseFailure', 'clear tool attention; observe an interrupt when supplied'),
-    ('PostToolBatch', 'clear attention when the tool batch returns'),
-    ('Elicitation', 'show an MCP input request after five seconds'),
-    ('ElicitationResult', 'clear the corresponding MCP input request'),
-    ('Stop', 'show a finished main turn'),
-    ('StopFailure', 'show a failed main turn'),
-    ('SessionEnd', 'remove a closed session'),
-)
 
 
 def claude_config_dir(root=None, *, home=None):
@@ -78,19 +64,27 @@ def configured_providers(root):
     return ['codex']  # Existing installations keep their original provider.
 
 
+def setup_providers(root):
+    """Use detection only for fresh setup; preserve saved and pre-selection installs."""
+    if ((root / 'agents.json').exists() or (root / 'agents.json').is_symlink()
+            or (root / 'lib/macos').is_dir() or (root / 'data/hub.sqlite3').is_file()):
+        return configured_providers(root)
+    return detected_providers(root=root)
+
+
 def detected_providers(*, home=None, application_dirs=None, binary_dirs=None, root=None):
     """Installation hints only: never launch an agent or inspect credentials."""
     home = home or Path.home()
     application_dirs = application_dirs or (Path('/Applications'), home / 'Applications')
     from service.codex_limits import codex_binary
-    result = ['codex'] if codex_binary(application_dirs=application_dirs) else []
+    editors = ('.vscode', '.vscode-insiders', '.cursor', '.windsurf')
+    result = ['codex'] if (codex_binary(application_dirs=application_dirs) or
+        any(any((home / editor / 'extensions').glob('openai.chatgpt-*')) for editor in editors)) else []
     binary_dirs = binary_dirs if binary_dirs is not None else (
         home / '.local/bin', home / '.claude/local', Path('/opt/homebrew/bin'), Path('/usr/local/bin'))
     binaries = [directory / 'claude' for directory in binary_dirs]
-    editors = ('.vscode', '.vscode-insiders', '.cursor', '.windsurf')
     if (shutil.which('claude') or any(p.is_file() and os.access(p, os.X_OK) for p in binaries)
             or any((directory / 'Claude.app').is_dir() for directory in application_dirs)
-            or claude_config_dir(root, home=home).is_dir()
             or any(any((home / editor / 'extensions').glob('anthropic.claude-code-*'))
                    for editor in editors)):
         result.append('claude')

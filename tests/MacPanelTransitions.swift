@@ -304,22 +304,29 @@ private struct MacPanelTransitions {
             assert(!finished.shouldPresentSetup)
             phone.endPairing()
         }
-        // Discovery never selects Claude. An empty choice cannot launch installation.
+        // Fresh setup selects detected providers; user edits survive subsequent discovery.
         do {
             let c = ControlledCommands(); let install = ControlledCommands()
             let m = PanelModel(command: { c.execute($0) }, installer: { providers in
                 _ = install.execute(["install"] + (providers ?? [])); return (0, "")
             }, needsSetup: { true }, progressURL: nil)
             m.refresh(); await until("setup discovery") { c.count == 1 }
-            c.reply(0, true, #"{"running":false,"sharingEnabled":false,"configuredProviders":["codex"],"detectedProviders":["claude"]}"#)
+            c.reply(0, true, #"{"running":false,"sharingEnabled":false,"configuredProviders":["codex"],"detectedProviders":["claude"],"setupProviders":["claude"]}"#)
             await until("discovery read") { m.hasReadStatus }
-            assert(m.setupProviders == ["codex"])
+            assert(m.setupProviders == ["claude"])
             assert(m.status.providerLabel("claude") == "Claude Code (detected)")
-            m.selectSetupProvider("codex", enabled: false)
+            m.selectSetupProvider("claude", enabled: false)
             m.installBundled()
             assert(!m.busy && install.count == 0)
             m.selectSetupProvider("claude", enabled: true)
             assert(m.setupProviders == ["claude"])
+            m.refresh(); await until("new discovery") { c.count == 2 }
+            c.reply(1, true, #"{"running":false,"sharingEnabled":false,"setupProviders":["codex","claude"]}"#)
+            await until("new discovery read") { !m.busy }
+            assert(m.setupProviders == ["claude"])
+            m.installBundled(); await until("selected installer") { install.count == 1 }
+            assert(install.args(0) == ["install", "claude"])
+            install.reply(0); await until("selected install complete") { !m.busy }
         }
         // Notification repair preserves an all-off selection and remains retryable.
         do {
@@ -346,16 +353,19 @@ private struct MacPanelTransitions {
             let m = PanelModel(command: { c.execute($0) }, installer: { providers in
                 _ = install.execute(["install"] + (providers ?? [])); return (code, "setup failed")
             }, needsSetup: { install.count == 0 || code != 0 }, progressURL: nil)
+            m.installBundled(); assert(install.count == 0) // Wait for setup detection.
+            m.refresh(); await until("setup status") { c.count == 1 }; c.reply(0, true, live)
+            await until("setup status read") { m.hasReadStatus }
             m.installBundled(); m.installBundled()
             await until("single installer") { install.count == 1 }
-            assert(install.args(0) == ["install"]) // Preserve saved choices unless explicitly changed.
+            assert(install.args(0) == ["install", "codex"]) // Install the displayed selection.
             assert(m.operation == .installing)
             install.reply(0)
             await until("installer complete") { !m.busy }
             assert(m.needsInstallation == (code != 0))
             if code == 0 {
                 assert(m.hookReviewStartedAt > 0 && !m.connectingPhone)
-                await until("installed status") { c.count == 1 }; c.reply(0, true, live)
+                await until("installed status") { c.count == 2 }; c.reply(1, true, live)
             } else {
                 assert(code == 2 ? m.message == nil : m.message == "setup failed")
                 m.installBundled(); await until("installer retry") { install.count == 2 }

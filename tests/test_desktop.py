@@ -263,10 +263,22 @@ class DesktopInstallTests(unittest.TestCase):
                 install.main()
             self.assertNotIn(("/usr/bin/systemctl", "--user", "enable", "--now", "paceman-source.service"), calls)
             self.assertIn(("/usr/bin/systemctl", "--user", "disable", "--now", "paceman-source.service"), calls)
+            with patch("sys.argv", ["install.py", "install", "--agents", "codex", "claude"]):
+                install.main()
+            claude = home / ".claude/settings.json"
+            enabled = claude.read_bytes()
+            self.assertEqual(json.loads((home / ".local/state/paceman/agents.json").read_text())["providers"],
+                             ["codex", "claude"])
+            with patch("sys.argv", ["install.py", "install"]):
+                install.main()
+            self.assertEqual(claude.read_bytes(), enabled)
             with patch("sys.argv", ["install.py", "uninstall"]):
                 install.main()
             self.assertIn(("/usr/bin/systemctl", "--user", "disable", "--now", "paceman-push.service"), calls)
             self.assertTrue(Store(installed.path).authorized(client["credential"]))
+            self.assertFalse(any(install.owns_hook(item, home / ".local/lib/paceman", "claude")
+                for groups in json.loads(claude.read_text())["hooks"].values()
+                for group in groups for item in group["hooks"]))
             self.assertFalse((home / ".local/bin/pacemanctl").exists())
             self.assertFalse((home / ".local/lib/paceman").exists())
             self.assertFalse((home / ".config/systemd/user/paceman-push.service").exists())

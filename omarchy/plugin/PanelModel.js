@@ -10,7 +10,9 @@ function relativeTime(value, now) {
 
 function activitySummary(state, available) {
   var labels = {working: "Working", needs_input: "Needs input", failed: "Failed", finished: "Finished", idle: "No active work"}
-  var result = {title: "Codex", label: labels[state.activity] || "Waiting for activity", breakdown: ""}
+  var providers = state.configuredProviders || state.providers || ["codex"]
+  var title = providers.length === 1 ? (providers[0] === "claude" ? "Claude Code" : "Codex") : "Agents"
+  var result = {title: title, label: labels[state.activity] || "Waiting for activity", breakdown: ""}
   if (!available) return result
   var counts = state.sessionCounts || {}
   var verified = state.sessionLiveness === "process"
@@ -25,7 +27,7 @@ function activitySummary(state, available) {
   // Older sources retained completions without proving they were still open.
   var visibleCount = verified ? total : counts.needs_input + counts.working
   if (visibleCount < 2) return result
-  result.title = "Codex · " + visibleCount + (verified ? " sessions" : " active")
+  result.title = title + " · " + visibleCount + (verified ? " sessions" : " active")
   var parts = (verified ? order : ["needs_input", "failed", "working"]).filter(function(key) { return counts[key] > 0 }).map(function(key) {
     return counts[key] + (key === "needs_input" ? (counts[key] === 1 ? " needs input" : " need input")
       : " " + key)
@@ -37,6 +39,40 @@ function activitySummary(state, available) {
     result.breakdown = parts.join(" · ")
   }
   return result
+}
+
+function agentRows(state, running, sharing) {
+  if (!Array.isArray(state.configuredProviders)) return []
+  var labels = {working: "Working", needs_input: "Needs input", failed: "Failed", finished: "Finished", idle: "No active work"}
+  return ["codex", "claude"].map(function(provider) {
+    var enabled = state.configuredProviders.indexOf(provider) >= 0
+    var counts = (state.providerCounts || {})[provider] || {}
+    var activity = ["needs_input", "failed", "working", "finished"].filter(function(key) { return counts[key] > 0 })[0] || "idle"
+    var seen = Number((state.lastAgentEventByProvider || {})[provider] || 0) > 0
+    var total = Object.keys(labels).reduce(function(sum, key) { return sum + (counts[key] || 0) }, 0)
+    seen = seen || total > 0
+    var available = enabled && running && sharing
+    var summary = activitySummary({configuredProviders: [provider], activity: activity,
+      sessions: total, sessionCounts: Object.assign({needs_input: 0, failed: 0, working: 0, finished: 0, idle: 0}, counts),
+      sessionLiveness: state.sessionLiveness}, available)
+    var detected = (state.detectedProviders || []).indexOf(provider) >= 0
+    var hooks = (state.hookStatusByProvider || {})[provider]
+    var setupNeeded = available && ["missing", "disabled", "invalid", "unavailable"].indexOf(hooks) >= 0
+    var review = available && Number((state.hookReviewAfterByProvider || {})[provider] || 0)
+      > Number((state.lastAgentEventByProvider || {})[provider] || 0)
+    var guidance = setupNeeded ? (hooks === "missing" ? "Restore Paceman’s hooks, then review them with /hooks and start a new local task."
+      : hooks === "disabled" ? "Hooks are disabled in Claude Code settings. Enable them there, then start a new session."
+      : hooks === "invalid" ? "Agent settings could not be read. Fix the settings before restoring Paceman’s hooks."
+      : "Paceman’s hook script is missing. Run the installer again.")
+      : available && (!seen || review) ? "Review Paceman's hooks with /hooks, then start a new local task." : ""
+    return {id: provider, title: provider === "claude" ? "Claude Code" : "Codex", enabled: enabled,
+      activity: available && !setupNeeded && !review ? activity : "idle",
+      label: !enabled ? (detected ? "Available" : "Off") : !sharing ? "Paused" : !running ? "Unavailable"
+        : setupNeeded ? "Setup needed" : !seen || review ? "Waiting for activity" : summary.label,
+      detail: available && !setupNeeded && !review && total > 1 ? (summary.breakdown || total + " sessions") : "",
+      repairAction: setupNeeded ? (hooks === "missing" ? "restore" : "guide") : "",
+      guidance: guidance}
+  })
 }
 
 function present(state, now) {
@@ -64,7 +100,12 @@ function present(state, now) {
         : phone ? "Open Paceman on your phone to check for updates."
         : "Open the paired app on this device to check for updates."}
   })
+  var agents = agentRows(state, running, sharing)
+  var setupCount = agents.filter(function(agent) { return agent.guidance !== "" && !agent.repairAction }).length
+  var hasProblem = agents.some(function(agent) { return !!agent.repairAction })
   return {
+    agents: agents,
+    agentGuidance: setupCount > 1 && !hasProblem ? "Review hooks with /hooks in each enabled agent, then start a new local task." : "",
     connections: connections,
     connectionHeading: connections.some(function(client) { return !client.phone }) ? "CONNECTIONS"
       : connections.length > 1 ? "PHONES" : "PHONE",

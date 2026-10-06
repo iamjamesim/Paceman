@@ -182,3 +182,71 @@ test('new installations explain how to start receiving Codex activity', () => {
   const paused = present({ needs_input: 0, working: 0, finished: 0 }, {clients: phone, sharingEnabled: false});
   assert.equal(paused.activityGuidance, '');
 });
+
+test('agent selection and status stay independent, including first use and stale sources', () => {
+  const state = {configuredProviders: ['codex', 'claude'], detectedProviders: ['claude'],
+    lastAgentEventByProvider: {codex: now}, providerCounts: {codex: {working: 1}}};
+  const value = present({working: 1, needs_input: 0, finished: 0}, state);
+  assert.equal(value.agents[0].label, 'Working');
+  assert.equal(value.agents[1].label, 'Waiting for activity');
+  assert.match(value.agents[1].guidance, /hooks/);
+  const paused = present({}, {...state, sharingEnabled: false});
+  assert.equal(paused.agents[0].label, 'Paused');
+  assert.equal(paused.agents[1].guidance, '');
+  const stale = present({}, {...state, updatedAt: now - 21});
+  assert.equal(stale.agents[0].label, 'Unavailable');
+  const disabled = present({}, {...state, configuredProviders: ['codex']});
+  assert.equal(disabled.agents[1].enabled, false);
+  assert.equal(disabled.agents[1].label, 'Available');
+  const empty = present({}, {...state, configuredProviders: []});
+  assert.equal(empty.agents[0].enabled, false);
+  assert.equal(empty.agents[1].enabled, false);
+});
+
+test('setup guidance is shared only when both agents have never been observed', () => {
+  const state = {configuredProviders: ['codex', 'claude'], sessionLiveness: 'process'};
+  assert.match(present({}, state).agentGuidance, /each enabled agent/);
+  const upgraded = present({}, {...state, providerCounts: {codex: {working: 1}}});
+  assert.equal(upgraded.agents[0].label, 'Working');
+  assert.equal(upgraded.agents[0].guidance, '');
+  assert.equal(upgraded.agentGuidance, '');
+  assert.match(upgraded.agents[1].guidance, /hooks/);
+});
+
+
+test('missing hooks offer scoped repair even after previously received activity', () => {
+  const state = {configuredProviders: ['codex', 'claude'],
+    lastAgentEventByProvider: {codex: now, claude: now},
+    providerCounts: {codex: {working: 1}}, hookStatusByProvider: {codex: 'ready', claude: 'missing'}};
+  const value = present({working: 1}, state);
+  assert.equal(value.agents[0].label, 'Working');
+  assert.equal(value.agents[1].label, 'Setup needed');
+  assert.equal(value.agents[1].repairAction, 'restore');
+  assert.match(value.agents[1].guidance, /review/);
+  assert.equal(value.agentGuidance, '');
+  for (const overrides of [{sharingEnabled: false}, {updatedAt: now - 21}, {configuredProviders: ['codex']}]) {
+    assert.equal(present({}, {...state, ...overrides}).agents[1].repairAction, '');
+  }
+});
+
+test('disabled settings and broken installations point to a guide without offering a rewrite', () => {
+  for (const status of ['disabled', 'invalid', 'unavailable']) {
+    const value = present({}, {configuredProviders: ['claude'], hookStatusByProvider: {claude: status}});
+    assert.equal(value.agents[1].label, 'Setup needed');
+    assert.equal(value.agents[1].repairAction, 'guide');
+    assert.notEqual(value.agents[1].guidance, '');
+    assert.equal(value.agentGuidance, '');
+  }
+});
+
+test('restored hooks wait for a fresh event rather than accepting historical activity as verification', () => {
+  const state = {configuredProviders: ['claude'], hookStatusByProvider: {claude: 'ready'},
+    hookReviewAfterByProvider: {claude: now - 2}, lastAgentEventByProvider: {claude: now - 3}};
+  const before = present({}, state).agents[1];
+  assert.equal(before.label, 'Waiting for activity');
+  assert.match(before.guidance, /hooks/);
+  assert.equal(before.repairAction, '');
+  const after = present({}, {...state, lastAgentEventByProvider: {claude: now}}).agents[1];
+  assert.equal(after.label, 'No active work');
+  assert.equal(after.guidance, '');
+});

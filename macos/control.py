@@ -15,7 +15,7 @@ import sys
 import time
 import uuid
 
-from macos.agents import CLAUDE_PURPOSES, PROVIDERS, configured_providers, detected_providers, provider_config, hook_path, installed_hook_command
+from macos.agents import CLAUDE_PURPOSES, PROVIDERS, configured_providers, detected_providers, setup_providers, provider_config, hook_path, installed_hook_command
 from service.network import ensure_private_route
 from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint
@@ -92,6 +92,7 @@ def status():
     providers = configured_providers(ROOT)
     value["configuredProviders"] = providers
     value["detectedProviders"] = detected_providers(root=ROOT)
+    value["setupProviders"] = setup_providers(ROOT)
     value["missingHooksByProvider"] = {p: missing_hooks(provider=p) for p in providers}
     value["missingHooks"] = [event for missing in value["missingHooksByProvider"].values() for event in missing]
     try:

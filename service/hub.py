@@ -620,9 +620,12 @@ def main():
                                                 relay_credential_hash=relay_credential_hash))
             if args.source == "omarchy":
                 from service.omarchy import OmarchySource
+                from omarchy.agents import configured_providers
                 try:
                     server.adapter = stack.enter_context(OmarchySource(
-                        store, socket_path=args.agent_socket, state_dir=args.omarchy_state))
+                        store, socket_path=args.agent_socket, state_dir=args.omarchy_state,
+                        providers=configured_providers(args.data_dir),
+                        settings_reader=lambda: configured_providers(args.data_dir)))
                 except (OSError, ValueError) as error:
                     parser.error(str(error))
             elif args.source == "macos":

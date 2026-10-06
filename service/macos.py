@@ -20,7 +20,7 @@ import time
 import unicodedata
 
 from service.claude import ClaudeSession
-from macos.claude_hook import EVENTS as CLAUDE_EVENTS
+from service.claude_hooks import EVENTS as CLAUDE_EVENTS, validate_message
 from service.codex_limits import read_codex_allowances
 from service.usage import selected_reading, valid_reading
 from service.codex_turns import read_codex_turn_statuses
@@ -282,20 +282,8 @@ class MacSource:
                    ("mac_last_event_" + provider, str(self.last_event_at)))
 
     def _receive_claude(self, command):
-        hook, event, turn = (command.get(k) for k in ("hook", "event", "turn"))
-        if (not isinstance(hook, str) or hook not in CLAUDE_EVENTS
-                or (not turn and hook not in ("SessionStart", "SessionEnd"))
-                or (event != CLAUDE_EVENTS[hook] and (hook, event) not in
-                    (("PreToolUse", "question-opened"), ("PostToolUseFailure", "interrupted")))):
-            raise ValueError("Invalid Claude lifecycle")
-        for field in ("tool", "toolUse", "inputID"):
-            value = command.get(field)
-            if value is not None and (not isinstance(value, str) or not IDENTIFIER.fullmatch(value)):
-                raise ValueError("Invalid Claude scope")
-        if hook in ("PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure") and not command.get("tool"):
-            raise ValueError("Missing tool scope")
-        if hook in ("Elicitation", "ElicitationResult") and not command.get("inputID"):
-            raise ValueError("Missing input scope")
+        validate_message(command)
+        event = command["event"]
         key = hashlib.sha256(("claude:" + command["session"]).encode()).hexdigest()
         with self.lock, self.store.connect() as db:
             if "claude" not in self.providers:

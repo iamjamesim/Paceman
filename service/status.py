@@ -42,6 +42,7 @@ class DesktopStatus:
             "providerCounts": {p: {state: sum(s["provider"] == p and s["state"] == state
                 for s in snapshot["sessions"]) for state in session_counts}
                 for p in sorted({s["provider"] for s in snapshot["sessions"]})},
+            **({"configuredProviders": list(adapter.providers)} if local_mode == "omarchy" and adapter is not None else {}),
             "providers": sorted({s["provider"] for s in snapshot["sessions"]}),
             "lastAgentEventByProvider": getattr(adapter, "last_event_by_provider", {}),
             "sessionLiveness": local_liveness,

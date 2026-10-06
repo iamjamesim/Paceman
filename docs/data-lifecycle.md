@@ -21,7 +21,7 @@ cache. See the [source protocol](protocol.md) for freshness fields.
 | Live Activity | Expiring ActivityKit display copy | New event, stale date or lifecycle end |
 
 The watch keeps activity in RAM, so reboot clears old alerts. The phone keeps
-no durable queue of BLE writes. Omarchy verifies living Codex owners after a
+no durable queue of BLE writes. Omarchy verifies living agent owners after a
 source restart; Mac clears hook-only sessions until another hook arrives.
 
 Storage errors do not erase ownership, replace the watch ID or reopen pairing.
@@ -46,7 +46,7 @@ Phone-side Remove watch removes access; it does not reset watch ownership.
 - The phone and ESP32 watch may be reachable while a computer is not, or vice
   versa. Each surface reports its own link without inferring the other.
 
-On Mac, Working does not time out; finished and failed rows retire after ten
+Working does not time out; finished and failed rows retire after ten
 minutes. Disabling an agent clears its sessions; disabling Codex also clears usage.
 Other agents continue without restarting the source.
 

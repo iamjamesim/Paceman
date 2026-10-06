@@ -8,9 +8,9 @@ the gear you take with you, so you can stay in touch without being tied to your
 desk.
 
 Paceman shows agent activity in Live Activities on the iPhone Lock Screen,
-Apple Watch Smart Stack, and Mac menu bar. The current Mac source supports
-Codex and Claude Code; Omarchy supports Codex. Apple Watch usage complications
-remain Codex-only. New development focuses on agent activity and interaction.
+Apple Watch Smart Stack, and Mac menu bar. Mac and Omarchy support Codex and
+Claude Code. Apple Watch usage complications remain Codex-only. New development
+focuses on agent activity and interaction.
 
 Paceman is in **alpha**. Desktop installers are available, and the iPhone app
 is available through TestFlight.
@@ -33,20 +33,14 @@ still need custom firmware and iPhone pairing support today.
   <a href="docs/images/esp32-watch.jpg"><img src="docs/images/esp32-watch.jpg" alt="Paceman on an experimental ESP32-S3 watch" width="300"></a>
 </p>
 
-Mac Codex desktop and CLI hooks and the Omarchy Codex CLI companion have been
-exercised on development devices. Omarchy Codex desktop and broader background
-delivery remain unverified.
-
 ## Get started
 
 1. **[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**. Open the link on your iPhone; iOS 18 or later is required.
-2. **[Download the desktop client](https://github.com/iamjamesim/Paceman/releases/tag/desktop-v0.1.0)** and follow the [Mac setup](macos/README.md) or [Omarchy setup](omarchy/README.md) guide.
-3. Review the agent hooks, connect [Tailscale](https://tailscale.com/download) on your computer and iPhone, and scan the pairing code. The setup guides walk through these checks; Paceman prepares the private connection when Tailscale permits it.
+2. **[Download the desktop client](https://github.com/iamjamesim/Paceman/releases)** and follow the [Mac setup](macos/README.md) or [Omarchy setup](omarchy/README.md) guide.
+3. Review the enabled agent hooks, connect [Tailscale](https://tailscale.com/download) on your computer and iPhone, and scan the pairing code. The setup guides walk through these checks; Paceman prepares the private connection when Tailscale permits it.
 
 Prefer source installation? See [Mac source setup](macos/README.md#build-and-install-from-source)
 or [Omarchy source setup](omarchy/README.md#install-from-a-git-checkout).
-Desktop 0.1.0 supports Codex only; Claude Code requires the current Mac source
-until a newer desktop release includes it.
 
 The Mac and Omarchy installers configure the [APNs relay](service/RELAY.md) for
 locked-phone notifications by default; the iPhone must still allow notifications.
@@ -70,7 +64,7 @@ Bluetooth recovery; [relay setup](service/RELAY.md) is for operators.
 | --- | --- |
 | `service/` | Local source API, pairing, persistence, push worker and APNs relay |
 | `macos/` | Menu-bar app, Codex and Claude Code hooks, per-user installer |
-| `omarchy/` | Omarchy bar panel, Codex hook, source controls and installer |
+| `omarchy/` | Omarchy bar panel, Codex and Claude Code hooks, source controls and installer |
 | `ios/` | iPhone app, Live Activities, Apple Watch app and complications |
 | `firmware/esp32-watch/` | Experimental watch firmware and simulator |
 | `tests/`, `scripts/` | Portable checks and development tools |

@@ -16,7 +16,7 @@ from service.hub import Server, Store
 from service.omarchy import FINISHED_RETENTION, OmarchySource
 from service.push import Worker
 from service.status import DesktopStatus
-from service.processes import CodexProcesses, ProcessIdentity
+from service.processes import AgentProcesses, ProcessIdentity
 from test_push import FakeSender
 
 
@@ -27,7 +27,7 @@ class OmarchyTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.store = Store(self.root / 'hub.sqlite3')
         self.owners = {}
-        self.processes = Mock(spec=CodexProcesses)
+        self.processes = Mock(spec=AgentProcesses)
         self.processes.identify.return_value = ProcessIdentity(100, '1', 'test-boot')
         self.processes.is_alive.return_value = True
         self.source = self.enterContext(OmarchySource(self.store,
