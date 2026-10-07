@@ -199,10 +199,12 @@ class Registry:
             db.execute("DELETE FROM relay_attest_sources WHERE source_id NOT IN "
                        "(SELECT id FROM relay_sources) AND source_id NOT IN "
                        "(SELECT source_id FROM relay_approvals)")
-            if db.one("SELECT 1 FROM relay_revoked_sources WHERE id=?", (source_id,)) or db.one(
+            if db.one("SELECT 1 FROM relay_revoked_sources WHERE id=?", (source_id,)):
+                raise PermissionError("Source was revoked")
+            if db.one(
                     "SELECT 1 FROM relay_revoked_clients WHERE source_id=? AND source_hash=? "
                     "AND client_id=? AND client_hash=?", (source_id, source_hash, client_id, client_hash)):
-                raise PermissionError("Pairing was revoked")
+                raise PermissionError("Client pairing was revoked")
             active = db.one("SELECT credential_hash FROM relay_sources WHERE id=?", (source_id,))
             if active and not hmac.compare_digest(active[0], source_hash):
                 raise PermissionError("Source credential mismatch")

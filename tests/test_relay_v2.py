@@ -108,6 +108,64 @@ class RelayV2Tests(unittest.TestCase):
         self.assertNotIn(self.source_secret, logs.output[0])
         self.assertNotIn(self.client_secret, logs.output[0])
 
+    def test_challenge_logs_kind_and_support_ids_without_request_data(self):
+        with self.assertLogs("paceman.relay", level="INFO") as logs:
+            approval = self.approve()
+        text = "\n".join(logs.output)
+        self.assertIn("pairing_challenge_issued kind=attest", text)
+        self.assertIn("pairing_approval_accepted kind=attest", text)
+        self.assertIn("at=100.000", text)
+        self.assertIn(f"sourceSupportID={digest(self.source_id)[:12]}", text)
+        self.assertIn(f"keySupportID={digest(approval['keyID'])[:12]}", text)
+        for private in (self.source_id, self.client_id, self.source_secret, self.client_secret,
+                        digest(self.source_secret), digest(self.client_secret), approval["keyID"],
+                        approval["challenge"], approval["proof"], self.token):
+            self.assertNotIn(private, text)
+
+    def check_denial_reason(self, revoke):
+        self.approve()
+        self.bind()
+        self.call("/v2/send", self.send, credential=self.source_secret)
+        if revoke == "source":
+            self.call("/v2/sources", {"sourceID": self.source_id},
+                      method="DELETE", credential=self.source_secret)
+        elif revoke == "client":
+            self.call("/v2/clients", {"sourceID": self.source_id, "clientID": self.client_id,
+                      "clientCredentialHash": digest(self.client_secret)},
+                      method="DELETE", credential=self.source_secret)
+        fields = {"sourceID": self.source_id,
+                  "sourceCredentialHash": digest("wrong" if revoke == "mismatch" else self.source_secret),
+                  "clientID": self.client_id, "clientCredentialHash": digest(self.client_secret),
+                  "keyID": "b" * 43, "environment": "production"}
+        _, challenge = self.call("/v2/attest/challenge", fields)
+        with self.assertLogs("paceman.relay", level="WARNING") as logs:
+            status, result = self.call("/v2/attest/approve", {**fields, **challenge, "proof": "valid-proof"})
+        self.assertEqual((status, result["error"]), (403, "PairingDenied"))
+        reason = {"mismatch": "source_credential_mismatch", "source": "source_revoked",
+                  "client": "client_revoked"}[revoke]
+        self.assertIn(f"pairing_approval_denied reason={reason} kind=attest", logs.output[0])
+        self.assertIn(f"sourceSupportID={digest(self.source_id)[:12]}", logs.output[0])
+        for private in (self.source_secret, self.client_secret, fields["sourceCredentialHash"],
+                        fields["clientCredentialHash"], fields["keyID"], challenge["challenge"], "valid-proof"):
+            self.assertNotIn(private, logs.output[0])
+        # A denied first approval currently leaves the certified key unknown to
+        # the relay. Record this mismatch; recovery must not bypass revocation.
+        with self.registry.connection() as db:
+            self.assertIsNone(db.one("SELECT 1 FROM relay_attest_keys WHERE id=?", (fields["keyID"],)))
+        fields["sourceID"] = str(uuid.uuid4())
+        fields["sourceCredentialHash"] = digest("fresh-source")
+        status, next_challenge = self.call("/v2/attest/challenge", fields)
+        self.assertEqual((status, next_challenge["kind"]), (200, "attest"))
+
+    def test_revoked_source_denial_logs_specific_reason(self):
+        self.check_denial_reason("source")
+
+    def test_revoked_client_denial_logs_specific_reason(self):
+        self.check_denial_reason("client")
+
+    def test_source_credential_mismatch_denial_logs_specific_reason(self):
+        self.check_denial_reason("mismatch")
+
     def test_exact_mac_pairing_and_token_are_required(self):
         self.approve()
         self.bind()
