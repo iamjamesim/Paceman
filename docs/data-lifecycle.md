@@ -4,7 +4,10 @@ Pairing survives a connection failure. Activity expires on its snapshot lease:
 the phone may show the last known state, but does not animate or forward it as
 current. On reconnection, it fetches the latest state rather than replaying
 missed events. Removing access revokes the credential and clears that source's
-cache. See the [source protocol](protocol.md) for freshness fields.
+cache. If removal cannot be confirmed, **Forget** explicitly clears
+the saved connection and local activity on this iPhone without claiming remote revocation.
+Relay cleanup is best-effort; notifications may continue until remote access is
+removed. See the [source protocol](protocol.md) for freshness fields.
 
 ## What each component keeps
 

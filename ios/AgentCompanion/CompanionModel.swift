@@ -16,9 +16,11 @@ final class CompanionModel: ObservableObject {
     @Published var revokedSources: Set<String> = []
     @Published var status = "Connect a work source"
     @Published var busy = false
+    private(set) var canForgetAfterRemovalFailure = false
     private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
-    private let client = SourceClient()
+    private let client: SourceClient
     private let pairedStore = PairedSourcesStore()
+    private let savePairedSources: ([PairedSource]) throws -> Void
     private var polling: Task<Void, Never>?
     private var sourceEpoch = UUID()
     private var foreground = false
@@ -32,7 +34,10 @@ final class CompanionModel: ObservableObject {
     private var weatherObservers: [String: AnyCancellable] = [:]
     private var lastWatchRelayRequested = false
 
-    init(preview: Bool = false) {
+    init(preview: Bool = false, client: SourceClient = SourceClient(),
+         savePairedSources: (([PairedSource]) throws -> Void)? = nil) {
+        self.client = client
+        self.savePairedSources = savePairedSources ?? PairedSourcesStore().save
         designPreview = preview
         accessories = WatchAccessories(preview: preview)
         lastWatchRelayRequested = accessories.relayRequested
@@ -279,7 +284,7 @@ final class CompanionModel: ObservableObject {
             }
             let paired = try await client.pair(invitation, device: ClientDevice.current(), previous: existing)
             let values = PairedSourceOrder.updating(paired, in: pairedSources)
-            try pairedStore.save(values)
+            try savePairedSources(values)
             sourceEpoch = UUID()
             pairedSources = values
             clearSnapshot(paired.sourceID)
@@ -309,30 +314,30 @@ final class CompanionModel: ObservableObject {
               pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) else { return false }
         busy = true
         defer { busy = false; schedulePendingWatchRefresh() }
+        canForgetAfterRemovalFailure = false
         var removedOnComputer = false
+        var removedFromRelay = false
         do {
             try await client.remove(paired)
             removedOnComputer = true
             try await client.removeRelayClient(paired)
-            let remaining = PairedSourceOrder.removing(paired.sourceID, from: pairedSources)
-            try pairedStore.save(remaining)
-            sourceEpoch = UUID()
-            await monitoring.removeSource(paired.sourceID)
-            clearSnapshot(paired.sourceID)
-            errors.removeValue(forKey: paired.sourceID)
-            revokedSources.remove(paired.sourceID)
-            ComputerPreferences.remove(paired.sourceID)
-            MonitoringComputerName.remove(paired.sourceID)
-            pairedSources = remaining
-            PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
-            Task { await syncWatchPush() }
-            forwardWatchAggregate()
+            removedFromRelay = true
+            try await removeLocally(paired)
             status = "Computer removed."
             return true
         } catch {
-            errors[paired.sourceID] = removedOnComputer
-                ? "Access was removed on this computer, but the phone couldn't save the change. Try removing it again."
-                : "Couldn't remove access: \(error.localizedDescription) Reconnect and try again; the pairing has been kept."
+            canForgetAfterRemovalFailure = !removedFromRelay
+            if removedFromRelay {
+                errors[paired.sourceID] = "Pairing was removed, but this iPhone couldn't save the change. Try again."
+            } else if removedOnComputer {
+                errors[paired.sourceID] = "Pairing was removed on the computer, but notification removal couldn't be confirmed. Forget on this iPhone only?"
+            } else {
+                let reason = error is URLError
+                    ? "Couldn't reach this computer to remove the pairing."
+                    : "Couldn't confirm pairing removal on this computer."
+                errors[paired.sourceID] = "\(reason) Forget on this iPhone only?"
+            }
+            Diagnostics.shared.recordError("computer_removal_failed", error: error)
             if removedOnComputer {
                 revokedSources.insert(paired.sourceID)
                 clearSnapshot(paired.sourceID)
@@ -343,6 +348,48 @@ final class CompanionModel: ObservableObject {
             status = errors[paired.sourceID] ?? "Couldn't remove access"
             return false
         }
+    }
+
+    /// Explicit local forgetting does not claim the unreachable computer revoked access.
+    @discardableResult
+    func forget(_ paired: PairedSource) async -> Bool {
+        guard !busy, !PushCoordinator.shared.busy,
+              pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) else { return false }
+        busy = true
+        defer { busy = false; schedulePendingWatchRefresh() }
+        do {
+            try await removeLocally(paired)
+            status = "Computer forgotten on this iPhone. Access removal on the computer was not confirmed."
+            // Local cleanup is complete. A best-effort, self-scoped relay
+            // revocation can stop notifications even when the computer is gone.
+            Task {
+                do { try await client.removeRelayClient(paired) }
+                catch { Diagnostics.shared.recordError("forgotten_source_relay_removal_failed", error: error) }
+            }
+            return true
+        } catch {
+            let message = "Couldn't save the change on this iPhone. Try again; the pairing has been kept."
+            errors[paired.sourceID] = message
+            status = message
+            return false
+        }
+    }
+
+    private func removeLocally(_ paired: PairedSource) async throws {
+        let remaining = PairedSourceOrder.removing(paired.sourceID, from: pairedSources)
+        // Commit credentials first. A storage failure must retain the connection.
+        try savePairedSources(remaining)
+        sourceEpoch = UUID()
+        clearSnapshot(paired.sourceID)
+        errors.removeValue(forKey: paired.sourceID)
+        revokedSources.remove(paired.sourceID)
+        ComputerPreferences.remove(paired.sourceID)
+        MonitoringComputerName.remove(paired.sourceID)
+        pairedSources = remaining
+        PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
+        forwardWatchAggregate()
+        await monitoring.removeSource(paired.sourceID)
+        Task { await syncWatchPush() }
     }
 
     private func sourceFailed(_ error: Error, sourceID: String) {
