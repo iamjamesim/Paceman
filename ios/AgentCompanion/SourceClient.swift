@@ -349,12 +349,41 @@ final class SourceClient {
     }
 }
 
+struct AppAttestDevice {
+    var isSupported: () -> Bool = { DCAppAttestService.shared.isSupported }
+    var generateKey: () async throws -> String = { try await DCAppAttestService.shared.generateKey() }
+    var attestKey: (String, Data) async throws -> Data = {
+        try await DCAppAttestService.shared.attestKey($0, clientDataHash: $1)
+    }
+    var generateAssertion: (String, Data) async throws -> Data = {
+        try await DCAppAttestService.shared.generateAssertion($0, clientDataHash: $1)
+    }
+}
+
 /// A paired phone approves its client credential before registering destination hashes.
 actor AppAttestEnrollment {
     static let shared = AppAttestEnrollment()
     private var activeTasks: [String: Task<Void, Error>] = [:]
     private var latestTask: Task<Void, Error>?
-    private let session = URLSession(configuration: .ephemeral, delegate: NoRedirect(), delegateQueue: nil)
+    private let session: URLSession
+    private let device: AppAttestDevice
+    private let environment: String?
+    private let loadKey: (String) -> String?
+    private let saveKey: (String, String) throws -> Void
+    private let removeKey: (String) throws -> Void
+
+    init(configuration: URLSessionConfiguration = .ephemeral, device: AppAttestDevice = .init(),
+         environment: String? = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
+         loadKey: @escaping (String) -> String? = { Vault.load(String.self, key: $0) },
+         saveKey: @escaping (String, String) throws -> Void = { try Vault.save($0, key: $1) },
+         removeKey: @escaping (String) throws -> Void = { try Vault.remove(key: $0) }) {
+        session = URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
+        self.device = device
+        self.environment = environment
+        self.loadKey = loadKey
+        self.saveKey = saveKey
+        self.removeKey = removeKey
+    }
 
     func activate(source: PairedSource) async throws {
         guard source.relayURL != nil, source.relayCredentialHash != nil else { return }
@@ -374,27 +403,25 @@ actor AppAttestEnrollment {
         try await task.value
     }
 
-    private func performActivation(source: PairedSource, retryInvalidKey: Bool = true) async throws {
+    private func performActivation(source: PairedSource, retryRejectedKey: Bool = true) async throws {
         guard let relay = source.relayURL, let credentialHash = source.relayCredentialHash else { return }
-        guard let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String,
+        guard let environment,
               ["development", "production"].contains(environment) else {
             throw HubError.message("Paceman is missing its notification environment.")
         }
-        let service = DCAppAttestService.shared
-        guard service.isSupported else {
+        guard device.isSupported() else {
             throw HubError.message("This iPhone cannot verify Paceman for relay notifications.")
         }
         let storageKey = "app-attest-key-id.\(environment)"
         let keyID: String
-        if let saved = Vault.load(String.self, key: storageKey) { keyID = saved }
+        if let saved = loadKey(storageKey) { keyID = saved }
         else {
-            keyID = try await withCheckedThrowingContinuation { continuation in
-                service.generateKey { value, error in
-                    if let value { continuation.resume(returning: value) }
-                    else { continuation.resume(throwing: error ?? HubError.message("App verification is unavailable")) }
-                }
+            do { keyID = try await device.generateKey() }
+            catch {
+                Diagnostics.shared.recordError("app_attest_key_generation_failed", error: error)
+                throw error
             }
-            try Vault.save(keyID, key: storageKey)
+            try saveKey(keyID, storageKey)
         }
         let normalizedKeyID = keyID.replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
@@ -413,27 +440,28 @@ actor AppAttestEnrollment {
         let proof: Data
         do {
             if challenge.kind == "attest" {
-                proof = try await withCheckedThrowingContinuation { continuation in
-                    service.attestKey(keyID, clientDataHash: hash) { value, error in
-                        if let value { continuation.resume(returning: value) }
-                        else { continuation.resume(throwing: error ?? HubError.message("App verification is unavailable")) }
-                    }
-                }
+                proof = try await device.attestKey(keyID, hash)
             } else {
-                proof = try await withCheckedThrowingContinuation { continuation in
-                    service.generateAssertion(keyID, clientDataHash: hash) { value, error in
-                        if let value { continuation.resume(returning: value) }
-                        else { continuation.resume(throwing: error ?? HubError.message("App verification is unavailable")) }
-                    }
-                }
+                proof = try await device.generateAssertion(keyID, hash)
             }
         } catch {
+            Diagnostics.shared.recordError(challenge.kind == "attest"
+                ? "app_attest_attestation_failed" : "app_attest_assertion_failed", error: error)
             let deviceError = error as NSError
-            if retryInvalidKey && deviceError.domain == DCErrorDomain &&
-                deviceError.code == DCError.Code.invalidKey.rawValue {
-                try Vault.remove(key: storageKey)
-                try await performActivation(source: source, retryInvalidKey: false)
-                return
+            // Apple requires a fresh key after non-transient attestation errors.
+            // In particular, a Keychain identifier can outlive its App Attest key
+            // after reinstalling the app. Invalid input must not strand enrollment.
+            let discardKey = deviceError.domain == DCErrorDomain &&
+                (deviceError.code == DCError.Code.invalidInput.rawValue ||
+                 deviceError.code == DCError.Code.invalidKey.rawValue ||
+                 (challenge.kind == "attest" && deviceError.code != DCError.Code.serverUnavailable.rawValue))
+            if discardKey {
+                try removeKey(storageKey)
+                Diagnostics.shared.record("app_attest_key_discarded")
+                if retryRejectedKey {
+                    try await performActivation(source: source, retryRejectedKey: false)
+                    return
+                }
             }
             throw error
         }

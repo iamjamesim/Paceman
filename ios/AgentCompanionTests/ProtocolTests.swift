@@ -5,9 +5,104 @@ import CoreLocation
 import WeatherKit
 import MapKit
 import CryptoKit
+import DeviceCheck
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    func testAppAttestRecoversRejectedCachedKeyAndApprovesPairing() async throws {
+        for kind in ["attest", "assert"] {
+            for code in [DCError.Code.invalidInput, .invalidKey] {
+                let fixture = AppAttestFixture(kind: kind)
+                fixture.proofErrors = [NSError(domain: DCErrorDomain, code: code.rawValue)]
+                let enrollment = fixture.enrollment()
+                try await enrollment.activate(source: fixture.source)
+                XCTAssertEqual(fixture.generatedKeys, 1)
+                XCTAssertEqual(fixture.removedKeys, 1)
+                XCTAssertEqual(fixture.proofKeys, [fixture.originalKey, fixture.storedKey!])
+                XCTAssertEqual(fixture.challengeKeys.count, 2)
+                XCTAssertEqual(fixture.approvedKeys, [fixture.challengeKeys.last!])
+                XCTAssertNotEqual(fixture.approvedKeys.first, fixture.normalized(fixture.originalKey))
+                XCTAssertEqual(fixture.challengeSources, [fixture.source.sourceID, fixture.source.sourceID])
+                XCTAssertTrue(fixture.proofHashes.allSatisfy { $0 == Data(SHA256.hash(data: Data("one-time-challenge".utf8))) })
+            }
+        }
+    }
+
+    func testAppAttestStopsAfterOneRecoveryAndDiscardsSecondRejectedKey() async throws {
+        let fixture = AppAttestFixture(kind: "attest")
+        fixture.proofErrors = Array(repeating: NSError(domain: DCErrorDomain,
+            code: DCError.Code.invalidInput.rawValue), count: 2)
+        do {
+            try await fixture.enrollment().activate(source: fixture.source)
+            XCTFail("Rejected verification must not approve the pairing")
+        } catch {
+            XCTAssertEqual((error as NSError).domain, DCErrorDomain)
+            XCTAssertEqual((error as NSError).code, DCError.Code.invalidInput.rawValue)
+        }
+        XCTAssertEqual(fixture.generatedKeys, 1)
+        XCTAssertEqual(fixture.removedKeys, 2)
+        XCTAssertEqual(fixture.proofKeys.count, 2)
+        XCTAssertNil(fixture.storedKey)
+        XCTAssertTrue(fixture.approvedKeys.isEmpty)
+    }
+
+    func testAppAttestPreservesKeyForTransientOrUnrelatedErrors() async throws {
+        for kind in ["attest", "assert"] {
+            for error in [NSError(domain: DCErrorDomain, code: DCError.Code.serverUnavailable.rawValue),
+                          NSError(domain: NSURLErrorDomain, code: DCError.Code.invalidInput.rawValue)] {
+                let fixture = AppAttestFixture(kind: kind)
+                fixture.proofErrors = [error]
+                do {
+                    try await fixture.enrollment().activate(source: fixture.source)
+                    XCTFail("Failed verification must not approve the pairing")
+                } catch {
+                    XCTAssertEqual((error as NSError).domain, fixture.proofFailureDomain)
+                }
+                XCTAssertEqual(fixture.generatedKeys, 0)
+                XCTAssertEqual(fixture.removedKeys, 0)
+                XCTAssertEqual(fixture.storedKey, fixture.originalKey)
+                XCTAssertTrue(fixture.approvedKeys.isEmpty)
+            }
+        }
+    }
+
+    func testAppAttestRecoversOtherNonTransientAttestationFailure() async throws {
+        let fixture = AppAttestFixture(kind: "attest")
+        fixture.proofErrors = [NSError(domain: DCErrorDomain, code: DCError.Code.unknownSystemFailure.rawValue)]
+        try await fixture.enrollment().activate(source: fixture.source)
+        XCTAssertEqual(fixture.generatedKeys, 1)
+        XCTAssertEqual(fixture.removedKeys, 1)
+        XCTAssertEqual(fixture.approvedKeys.count, 1)
+    }
+
+    func testAppAttestReusesValidKeyAcrossComputers() async throws {
+        let fixture = AppAttestFixture(kind: "assert")
+        let enrollment = fixture.enrollment()
+        let second = PairedSource(endpoint: fixture.source.endpoint, sourceID: UUID().uuidString,
+            clientID: fixture.source.clientID, credential: fixture.source.credential,
+            relayURL: fixture.source.relayURL, relayCredentialHash: fixture.source.relayCredentialHash)
+        try await enrollment.activate(source: fixture.source)
+        try await enrollment.activate(source: second)
+        XCTAssertEqual(fixture.generatedKeys, 0)
+        XCTAssertEqual(fixture.removedKeys, 0)
+        XCTAssertEqual(fixture.proofKeys, [fixture.originalKey, fixture.originalKey])
+        XCTAssertEqual(fixture.challengeSources, [fixture.source.sourceID, second.sourceID])
+        XCTAssertEqual(fixture.approvedKeys.count, 2)
+    }
+
+    func testAppAttestDoesNotRotateKeyForRelayChallengeFailure() async throws {
+        let fixture = AppAttestFixture(kind: "attest")
+        fixture.challengeStatus = 503
+        do {
+            try await fixture.enrollment().activate(source: fixture.source)
+            XCTFail("Unavailable relay must not approve the pairing")
+        } catch HubError.http(let status) { XCTAssertEqual(status, 503) }
+        XCTAssertEqual(fixture.generatedKeys, 0)
+        XCTAssertEqual(fixture.removedKeys, 0)
+        XCTAssertTrue(fixture.proofKeys.isEmpty)
+        XCTAssertEqual(fixture.storedKey, fixture.originalKey)
+    }
+
     func testSessionLinksUseRemoteIdentityInsteadOfOpaqueRowID() throws {
         let session = try JSONDecoder().decode(AgentSession.self, from: Data(
             #"{"id":"hashed-local-row","provider":"claude","state":"working","remoteSessionID":"session_remote123"}"#.utf8))
@@ -1615,5 +1710,87 @@ private final class ClientURLProtocol: URLProtocol {
             result.append(contentsOf: buffer.prefix(count))
         }
         return result
+    }
+}
+
+private final class AppAttestFixture {
+    let originalKey = Data(repeating: 255, count: 32).base64EncodedString()
+    let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
+        sourceID: UUID().uuidString, clientID: UUID().uuidString, credential: "test-credential",
+        relayURL: URL(string: "https://relay.example")!, relayCredentialHash: String(repeating: "a", count: 64))
+    let kind: String
+    var storedKey: String?
+    var generatedKeys = 0
+    var removedKeys = 0
+    var proofErrors: [NSError] = []
+    var proofFailureDomain: String?
+    var proofKeys: [String] = []
+    var proofHashes: [Data] = []
+    var challengeStatus = 200
+    var challengeKeys: [String] = []
+    var challengeSources: [String] = []
+    var approvedKeys: [String] = []
+
+    init(kind: String) {
+        self.kind = kind
+        storedKey = originalKey
+    }
+
+    func normalized(_ key: String) -> String {
+        key.replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    }
+
+    func proof(_ key: String, _ hash: Data) throws -> Data {
+        proofKeys.append(key)
+        proofHashes.append(hash)
+        if !proofErrors.isEmpty {
+            let error = proofErrors.removeFirst()
+            proofFailureDomain = error.domain
+            throw error
+        }
+        return Data([1, 2, 3])
+    }
+
+    func enrollment() -> AppAttestEnrollment {
+        ClientURLProtocol.handler = { request in
+            let fields = try JSONSerialization.jsonObject(with: ClientURLProtocol.body(request)) as! [String: String]
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(fields["environment"], "production")
+            XCTAssertEqual(fields["clientID"], self.source.clientID)
+            XCTAssertEqual(fields["clientCredentialHash"], SHA256.hash(data: Data(self.source.credential.utf8))
+                .map { String(format: "%02x", $0) }.joined())
+            if request.url?.path == "/v2/attest/challenge" {
+                self.challengeKeys.append(fields["keyID"]!)
+                self.challengeSources.append(fields["sourceID"]!)
+                // A freshly generated key always needs an attestation, even if
+                // the cached key's challenge requested an assertion.
+                let kind = fields["keyID"] == self.normalized(self.originalKey) ? self.kind : "attest"
+                return (self.challengeStatus, try JSONSerialization.data(withJSONObject:
+                    ["kind": kind, "challenge": "one-time-challenge"]))
+            }
+            XCTAssertEqual(request.url?.path, "/v2/attest/approve")
+            self.approvedKeys.append(fields["keyID"]!)
+            XCTAssertEqual(fields["proof"], "AQID")
+            return (200, Data("{}".utf8))
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ClientURLProtocol.self]
+        let device = AppAttestDevice(isSupported: { true }, generateKey: {
+            self.generatedKeys += 1
+            return Data(repeating: UInt8(self.generatedKeys), count: 32).base64EncodedString()
+        }, attestKey: { try self.proof($0, $1) }, generateAssertion: { try self.proof($0, $1) })
+        return AppAttestEnrollment(configuration: configuration, device: device, environment: "production",
+            loadKey: { key in
+                XCTAssertEqual(key, "app-attest-key-id.production")
+                return self.storedKey
+            }, saveKey: { value, key in
+                XCTAssertEqual(key, "app-attest-key-id.production")
+                self.storedKey = value
+            }, removeKey: { key in
+                XCTAssertEqual(key, "app-attest-key-id.production")
+                self.removedKeys += 1
+                self.storedKey = nil
+            })
     }
 }
