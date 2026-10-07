@@ -3,11 +3,11 @@
 Pairing survives a connection failure. Activity expires on its snapshot lease:
 the phone may show the last known state, but does not animate or forward it as
 current. On reconnection, it fetches the latest state rather than replaying
-missed events. Removing access revokes the credential and clears that source's
-cache. If removal cannot be confirmed, **Forget** explicitly clears
-the saved connection and local activity on this iPhone without claiming remote revocation.
-Relay cleanup is best-effort; notifications may continue until remote access is
-removed. See the [source protocol](protocol.md) for freshness fields.
+missed events. Removing a computer clears its saved connection and local activity
+on the iPhone first. Computer and relay revocation run independently as
+best-effort cleanup, with one retry; notifications may continue if cleanup fails.
+A local storage failure keeps the connection. See the [source protocol](protocol.md)
+for freshness fields.
 
 ## What each component keeps
 

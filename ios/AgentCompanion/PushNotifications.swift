@@ -254,7 +254,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         unregisterRemoteNotificationsIfUnused()
     }
 
-    // Clear local setup after removal or explicit forgetting. Remote revocation
+    // Clear local setup after removal. Remote revocation
     // is handled separately and is not required to reject unpaired push hints.
     func clearRemovedSource(sourceID: String) {
         registered = false

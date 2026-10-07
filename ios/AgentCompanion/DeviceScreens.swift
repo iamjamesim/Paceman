@@ -10,10 +10,8 @@ struct ComputerDetail: View {
     @Environment(\.dismiss) private var dismiss
     @State private var remove = false
     @State private var removalFailed = false
-    @State private var offerForget = false
     @State private var rename = false
     @State private var name = ""
-    @State private var removalError = ""
     @State private var removing = false
 
     private var paired: PairedSource? {
@@ -85,25 +83,22 @@ struct ComputerDetail: View {
                 Button("Remove computer", role: .destructive) {
                     removeComputer()
                 }
-            } message: { Text("Stop receiving activity from this computer and remove this phone’s access. Your agents keep running.") }
+            } message: { Text("Remove this connection from your iPhone.") }
             .alert("Couldn't remove computer", isPresented: $removalFailed) {
-                if offerForget {
-                    Button("Forget", role: .destructive) { removeComputer(locally: true) }
-                }
+                Button("Try again") { removeComputer() }
                 Button("Cancel", role: .cancel) {}
-            } message: { Text(removalError) }
+            }
             .onAppear {
                 #if DEBUG
                 if presentation.preview && ProcessInfo.processInfo.arguments.contains("--removal-failed") {
-                    removalError = "Couldn't reach this computer to remove the pairing. Forget on this iPhone only?"
-                    offerForget = true
                     removalFailed = true
                 }
+                if presentation.preview && ProcessInfo.processInfo.arguments.contains("--remove-confirmation") { remove = true }
                 #endif
             }
     }
 
-    private func removeComputer(locally: Bool = false) {
+    private func removeComputer() {
         guard let paired else { return }
         removing = true
         Task {
@@ -112,13 +107,9 @@ struct ComputerDetail: View {
             while model.busy || push.busy {
                 do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
             }
-            let removed = locally ? await model.forget(paired) : await model.remove(paired)
+            let removed = await model.remove(paired)
             if removed { dismiss() }
-            else {
-                removalError = model.errors[paired.sourceID] ?? "Couldn't remove the pairing. Try again."
-                offerForget = !locally && model.canForgetAfterRemovalFailure
-                removalFailed = true
-            }
+            else { removalFailed = true }
         }
     }
 

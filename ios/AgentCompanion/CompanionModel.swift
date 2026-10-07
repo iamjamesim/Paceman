@@ -16,7 +16,6 @@ final class CompanionModel: ObservableObject {
     @Published var revokedSources: Set<String> = []
     @Published var status = "Connect a work source"
     @Published var busy = false
-    private(set) var canForgetAfterRemovalFailure = false
     private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
     private let client: SourceClient
     private let pairedStore = PairedSourcesStore()
@@ -314,64 +313,32 @@ final class CompanionModel: ObservableObject {
               pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) else { return false }
         busy = true
         defer { busy = false; schedulePendingWatchRefresh() }
-        canForgetAfterRemovalFailure = false
-        var removedOnComputer = false
-        var removedFromRelay = false
         do {
-            try await client.remove(paired)
-            removedOnComputer = true
-            try await client.removeRelayClient(paired)
-            removedFromRelay = true
-            try await removeLocally(paired)
+            try await retryOnce { try await removeLocally(paired) }
             status = "Computer removed."
+            // The connection is already gone from the phone. Clean up both
+            // remote ends independently, even when the computer is unreachable.
+            Task {
+                do { try await retryOnce { try await client.remove(paired) } }
+                catch { Diagnostics.shared.recordError("removed_source_computer_cleanup_failed", error: error) }
+                do { try await retryOnce { try await client.removeRelayClient(paired) } }
+                catch { Diagnostics.shared.recordError("removed_source_relay_cleanup_failed", error: error) }
+            }
             return true
         } catch {
-            canForgetAfterRemovalFailure = !removedFromRelay
-            if removedFromRelay {
-                errors[paired.sourceID] = "Pairing was removed, but this iPhone couldn't save the change. Try again."
-            } else if removedOnComputer {
-                errors[paired.sourceID] = "Pairing was removed on the computer, but notification removal couldn't be confirmed. Forget on this iPhone only?"
-            } else {
-                let reason = error is URLError
-                    ? "Couldn't reach this computer to remove the pairing."
-                    : "Couldn't confirm pairing removal on this computer."
-                errors[paired.sourceID] = "\(reason) Forget on this iPhone only?"
-            }
+            status = "Couldn't remove computer."
             Diagnostics.shared.recordError("computer_removal_failed", error: error)
-            if removedOnComputer {
-                revokedSources.insert(paired.sourceID)
-                clearSnapshot(paired.sourceID)
-                await monitoring.removeSource(paired.sourceID)
-                PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
-            }
-            forwardWatchAggregate()
-            status = errors[paired.sourceID] ?? "Couldn't remove access"
             return false
         }
     }
 
-    /// Explicit local forgetting does not claim the unreachable computer revoked access.
-    @discardableResult
-    func forget(_ paired: PairedSource) async -> Bool {
-        guard !busy, !PushCoordinator.shared.busy,
-              pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) else { return false }
-        busy = true
-        defer { busy = false; schedulePendingWatchRefresh() }
-        do {
-            try await removeLocally(paired)
-            status = "Computer forgotten on this iPhone. Access removal on the computer was not confirmed."
-            // Local cleanup is complete. A best-effort, self-scoped relay
-            // revocation can stop notifications even when the computer is gone.
-            Task {
-                do { try await client.removeRelayClient(paired) }
-                catch { Diagnostics.shared.recordError("forgotten_source_relay_removal_failed", error: error) }
-            }
-            return true
-        } catch {
-            let message = "Couldn't save the change on this iPhone. Try again; the pairing has been kept."
-            errors[paired.sourceID] = message
-            status = message
-            return false
+    // Each removal step is idempotent; retry it once without replaying completed steps.
+    private func retryOnce(_ action: () async throws -> Void) async throws {
+        do { try await action() }
+        catch {
+            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled else { throw error }
+            try Task.checkCancellation()
+            try await action()
         }
     }
 
