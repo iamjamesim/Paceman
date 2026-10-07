@@ -181,23 +181,23 @@ struct PairingFlow: View {
                     .padding(.top, 20).padding(.bottom, 32)
             }
             Text("Open the Paceman panel on your computer and select the QR button.")
-                .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
+                .companionText(.body, theme: theme)
             if reconnecting {
                 Text("Scanning a fresh QR code renews this phone’s access. Your watch stays paired.")
-                    .font(.subheadline).foregroundStyle(theme.secondaryInk).padding(.top, 12)
+                    .companionText(.supporting, theme: theme).padding(.top, 12)
             }
             VStack(alignment: .leading, spacing: 18) {
                 Text("Make sure your phone and computer are on the same Tailscale network.")
-                    .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                    .companionText(.body, theme: theme)
                 DisclosureGroup("Why Tailscale?", isExpanded: $showingTailscaleInfo) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Tailscale lets your phone reach Paceman on your computer without exposing Paceman to the public internet.")
-                            .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                            .companionText(.body, theme: theme)
                         CompanionExternalLink(title: "Get Tailscale for iPhone", url: URL(string: "https://tailscale.com/download/ios")!, theme: theme)
                             .allowsHitTesting(!preview)
                     }.padding(.top, 12).padding(.bottom, 4)
                 }
-                .font(.subheadline.weight(.medium)).tint(theme.tint)
+                .companionText(.label, theme: theme).tint(theme.tint)
             }.padding(.top, 24).padding(.bottom, 8)
         }.padding(.top, typeSize.isAccessibilitySize ? 24 : 0)
     }
@@ -208,25 +208,25 @@ struct PairingFlow: View {
                 if session.connecting {
                     HStack(spacing: 12) {
                         ProgressView().tint(theme.ink).accessibilityHidden(true)
-                        Text(reconnecting ? "Reconnecting…" : "Connecting…").font(.headline)
+                        Text(reconnecting ? "Reconnecting…" : "Connecting…").companionText(.title, theme: theme)
                     }.accessibilityElement(children: .combine)
                 } else if let failure = session.failure {
-                    Text(failure.title).font(.headline)
+                    Text(failure.title).companionText(.title, theme: theme)
                 }
                 if let host = session.host {
-                    Text(host).font(.body).foregroundStyle(theme.secondaryInk)
+                    Text(host).companionText(.supporting, theme: theme)
                         .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 }
             }
             if let failure = session.failure {
-                Text(failure.message).font(.subheadline).foregroundStyle(theme.secondaryInk)
+                Text(failure.message).companionText(.body, theme: theme)
                     .fixedSize(horizontal: false, vertical: true)
                 VStack(spacing: 8) {
                     if session.canRetry {
                         CompanionButton(title: "Try again", theme: theme) { attempt = UUID() }
                             .disabled(model.busy).allowsHitTesting(!preview)
                         Button("Scan a different QR code") { scanner = true }
-                            .font(.subheadline).frame(maxWidth: .infinity, minHeight: 44)
+                            .companionText(.label, theme: theme).frame(maxWidth: .infinity, minHeight: 44)
                             .disabled(model.busy).allowsHitTesting(!preview)
                     } else {
                         CompanionButton(title: "Scan a new QR code", theme: theme, symbol: "qrcode.viewfinder") {
@@ -305,7 +305,7 @@ struct NotificationSetup: View {
             }
         } else {
             Button("Finish later", action: done)
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .companionText(.label, theme: theme).frame(maxWidth: .infinity, minHeight: 44)
                 .allowsHitTesting(!preview)
         }
     }
@@ -338,10 +338,9 @@ struct NotificationDeliveryControls: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.headline)
+            Text(title).companionText(.title, theme: theme)
             if !detail.isEmpty {
-                Text(detail).font(.subheadline)
-                    .foregroundStyle(theme.secondaryInk)
+                Text(detail).companionText(.body, theme: theme)
             }
             switch step {
             case .permission, .enable:
@@ -368,9 +367,9 @@ struct RecommendedNotificationSettings: View {
         VStack(alignment: .leading, spacing: 32) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Recommended iPhone settings")
-                    .font(.title2.weight(.semibold))
+                    .companionText(.title, theme: theme)
                 Text(guidance)
-                    .font(.subheadline).lineSpacing(2).foregroundStyle(theme.secondaryInk)
+                    .companionText(.body, theme: theme)
                     .tint(theme.tint).allowsHitTesting(!preview)
             }
             if typeSize.isAccessibilitySize {
@@ -447,16 +446,16 @@ struct WatchSharingGuidance: View {
     var body: some View {
         if !watch.supportsNotificationSync && watch.ready {
             Text("Update your watch firmware to receive notifications while the phone is locked.")
-                .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                .companionText(.body, theme: theme)
         } else if watch.notificationSharingStatus == false {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Enable notification sharing").font(.headline)
+                Text("Enable notification sharing").companionText(.label, theme: theme)
                 Text("In Settings → Bluetooth → your watch, enable Share System Notifications.")
-                    .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                    .companionText(.body, theme: theme)
             }
         } else if !watch.ready {
             Text("Reconnect your watch to check notification sharing.")
-                .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                .companionText(.body, theme: theme)
         }
     }
 }

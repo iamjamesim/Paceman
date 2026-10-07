@@ -1,5 +1,27 @@
 import SwiftUI
 
+/// Shared text roles: required guidance stays primary, regardless of setup state.
+enum CompanionTextRole {
+    case title, body, label, supporting, link, button
+    var font: Font {
+        switch self {
+        case .title: return .title2.weight(.semibold)
+        case .body: return .callout
+        case .label, .link: return .callout.weight(.medium)
+        case .supporting: return .subheadline
+        case .button: return .body.weight(.semibold)
+        }
+    }
+}
+
+extension View {
+    func companionText(_ role: CompanionTextRole, theme: CompanionTheme) -> some View {
+        font(role.font)
+            .foregroundStyle(role == .link ? theme.tint : role == .supporting ? theme.secondaryInk : theme.ink)
+            .lineSpacing(role == .body || role == .supporting ? 3 : 0)
+    }
+}
+
 struct CompanionCanvas: View {
     let theme: CompanionTheme
     var body: some View { theme.canvas.ignoresSafeArea() }
@@ -8,7 +30,7 @@ struct CompanionCanvas: View {
 struct Eyebrow: View {
     let text: String
     let theme: CompanionTheme
-    var body: some View { Text(text.uppercased()).font(.system(size: 10, weight: .semibold)).tracking(2.0).foregroundStyle(theme.secondaryInk) }
+    var body: some View { Text(text.uppercased()).font(.caption2.weight(.semibold)).tracking(2.0).foregroundStyle(theme.secondaryInk) }
 }
 
 struct CompanionButton: View {
@@ -20,7 +42,7 @@ struct CompanionButton: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 if let symbol { Image(systemName: symbol) }
-                Text(title).font(.body.weight(.semibold))
+                Text(title).font(CompanionTextRole.button.font)
             }.frame(maxWidth: .infinity).padding(.vertical, 18)
                 .foregroundStyle(theme.canvas).background(theme.ink, in: RoundedRectangle(cornerRadius: 20))
         }.buttonStyle(.plain)
@@ -33,7 +55,7 @@ struct CompanionSecondaryButton: View {
     var action: () -> Void
     var body: some View {
         Button(action: action) {
-            Text(title).font(.body.weight(.semibold))
+            Text(title).font(CompanionTextRole.button.font)
                 .frame(maxWidth: .infinity).padding(.vertical, 18)
                 .foregroundStyle(theme.ink)
                 .background(theme.ink.opacity(0.07), in: RoundedRectangle(cornerRadius: 20))
@@ -55,7 +77,7 @@ struct CompanionExternalLink: View {
                 Text(title)
                 Image(systemName: "arrow.up.right").accessibilityHidden(true)
             }
-            .font(.subheadline.weight(.medium))
+            .companionText(.link, theme: theme)
             .frame(maxWidth: .infinity, minHeight: max(minimumHeight, typeSize.isAccessibilitySize ? 44 : 28), alignment: alignment)
         }
         .foregroundStyle(theme.tint)
@@ -74,7 +96,7 @@ struct StatusPill: View {
     var body: some View {
         HStack(spacing: 6) {
             Circle().fill(active ? theme.tint : theme.ink.opacity(0.35)).frame(width: 5, height: 5)
-            Text(text).font(.system(size: 11, weight: .medium))
+            Text(text).font(.caption2.weight(.medium))
         }.padding(.horizontal, 10).padding(.vertical, 7)
             .background(theme.ink.opacity(0.05), in: Capsule())
             .overlay(Capsule().strokeBorder(theme.ink.opacity(0.08), lineWidth: 0.5))

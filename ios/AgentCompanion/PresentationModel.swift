@@ -55,7 +55,7 @@ final class PresentationModel: ObservableObject {
         case "watch-connecting": return .connecting
         case "watch-confirm": return .confirming
         case "watch-checking": return .checking
-        case "watch-error": return .failed
+        case "watch-error", "esp32-pairing-error-expanded", "compatible-pairing-error-expanded", "pebble-pairing-error", "pebble-pairing-error-expanded": return .failed
         default: return .idle
         }
     }

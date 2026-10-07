@@ -9,6 +9,7 @@
 #include <os/os_mbuf.h>
 #include <pbl/bluetooth/types.h>
 #include <pbl/bluetooth/bonding_sync.h>
+#include <pbl/services/bluetooth/bluetooth_persistent_storage.h>
 #include "kernel/events.h"
 #include <pbl/drivers/rng.h>
 #include <pbl/drivers/rtc.h>
@@ -27,6 +28,7 @@ static PacemanState s_state;
 static PacemanPeerID s_durable_peer;
 static bool s_bond_durable, s_save_queued, s_received;
 static uint16_t s_connection = BLE_HS_CONN_HANDLE_NONE, s_activity_handle, s_sync_handle;
+static uint16_t s_retired_connection = BLE_HS_CONN_HANDLE_NONE;
 static uint32_t s_notification_sequence, s_notification_uids[8];
 static size_t s_uid_count, s_uid_next;
 static struct ble_gap_event_listener s_listener;
@@ -153,6 +155,10 @@ static int prv_access(uint16_t connection, uint16_t attribute, struct ble_gatt_a
     return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
   if (pbl_mutex_lock(&s_lock, PBL_NO_WAIT) != 0)
     return BLE_ATT_ERR_INSUFFICIENT_RES;
+  if (connection == s_retired_connection) {
+    pbl_mutex_unlock(&s_lock);
+    return BLE_ATT_ERR_INSUFFICIENT_AUTHOR;
+  }
   uint8_t output[32], bytes[PACEMAN_SOURCE_FRAME_MAX];
   size_t output_size = 0;
   PacemanResult result = PacemanUnauthorized;
@@ -252,6 +258,8 @@ static const struct ble_gatt_svc_def s_services[] = {
 static int prv_gap_event(struct ble_gap_event *event, void *unused) {
   if (event->type == BLE_GAP_EVENT_DISCONNECT) {
     pbl_mutex_lock(&s_lock, PBL_FOREVER);
+    if (event->disconnect.conn.conn_handle == s_retired_connection)
+      s_retired_connection = BLE_HS_CONN_HANDLE_NONE;
     if (event->disconnect.conn.conn_handle == s_connection) {
       s_connection = BLE_HS_CONN_HANDLE_NONE;
       paceman_disconnected(&s_state);
@@ -266,6 +274,7 @@ static int prv_gap_event(struct ble_gap_event *event, void *unused) {
     if (prv_peer(event->subscribe.conn_handle, &peer)) {
       pbl_mutex_lock(&s_lock, PBL_FOREVER);
       PacemanResult result =
+          event->subscribe.conn_handle == s_retired_connection ? PacemanUnauthorized :
           paceman_subscribe(&s_state, &peer, event->subscribe.attr_handle == s_activity_handle,
                             event->subscribe.cur_notify);
       pbl_mutex_unlock(&s_lock);
@@ -352,6 +361,43 @@ void paceman_service_bond_removed(const struct pbl_bt_device_internal *device) {
   if (prv_same_peer(&peer, &s_durable_peer))
     s_bond_durable = false;
   pbl_mutex_unlock(&s_lock);
+}
+
+bool paceman_service_reset_pairing(void) {
+  pbl_mutex_lock(&s_lock, PBL_FOREVER);
+  /* Do not race a preference/ownership write already executing on KernelBG. */
+  if (!s_state.storage_ready || s_save_queued) {
+    pbl_mutex_unlock(&s_lock);
+    return false;
+  }
+  PacemanRecord old = s_state.record;
+  bool had_owner = old.owned || s_state.reserved;
+  PacemanPeerID former_owner = old.owned ? old.owner_peer : s_state.pending.owner_peer;
+  PacemanRecord reset = {.version = old.version};
+  memcpy(reset.device_id, old.device_id, sizeof(reset.device_id));
+  uint16_t connection = s_connection;
+  if (connection != BLE_HS_CONN_HANDLE_NONE)
+    s_retired_connection = connection;
+  s_connection = BLE_HS_CONN_HANDLE_NONE;
+  /* Block enrollment and discard pending profiles before touching storage. */
+  paceman_state_init(&s_state, PacemanStorageError, NULL);
+  s_bond_durable = s_received = false;
+  s_uid_count = s_uid_next = s_notification_sequence = 0;
+  pbl_mutex_unlock(&s_lock);
+  if (connection != BLE_HS_CONN_HANDLE_NONE)
+    ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
+  bool saved = paceman_storage_save(&reset, false);
+  if (saved && had_owner) {
+    struct pbl_bt_device_internal device = {.is_random_address = former_owner.type == 1};
+    memcpy(device.address.octets, former_owner.address, sizeof(device.address.octets));
+    bt_persistent_storage_delete_ble_pairing_by_addr(&device);
+  }
+  pbl_mutex_lock(&s_lock, PBL_FOREVER);
+  /* A failed or uncertain storage write never reopens enrollment. */
+  paceman_state_init(&s_state, saved ? PacemanStorageLoaded : PacemanStorageError, &reset);
+  pbl_mutex_unlock(&s_lock);
+  prv_changed();
+  return saved;
 }
 
 void paceman_service_get_view(PacemanView *view) {

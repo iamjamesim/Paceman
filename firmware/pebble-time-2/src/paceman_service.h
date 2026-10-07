@@ -23,6 +23,8 @@ bool paceman_service_pairing_allowed(void);
 bool paceman_service_bond_write_allowed(const struct pbl_bt_device_internal *device);
 void paceman_service_bond_saved(const struct pbl_bt_bonding *bonding, bool saved);
 void paceman_service_bond_removed(const struct pbl_bt_device_internal *device);
+/* Physical watch UI only; never exposed over GATT. Keeps the stable watch ID. */
+bool paceman_service_reset_pairing(void);
 void paceman_service_get_view(PacemanView *view);
 void paceman_service_notification_hint(const struct pbl_bt_device_internal *device, uint32_t uid,
                                        const uint8_t *app_id, size_t length);

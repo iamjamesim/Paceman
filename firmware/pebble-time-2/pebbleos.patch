@@ -579,3 +579,94 @@ index c8fadc2..f180541 100644
  void watchface_set_default_install_id(AppInstallId id);
 
  AppInstallId watchface_get_default_install_id(void);
+diff --git a/fw/apps/system/settings/system.c b/fw/apps/system/settings/system.c
+--- a/fw/apps/system/settings/system.c
++++ b/fw/apps/system/settings/system.c
+@@ -6,6 +6,9 @@
+ #include "option_menu.h"
+ #include "system.h"
+ #include "window.h"
++#ifdef CONFIG_PACEMAN
++#include "services/paceman/paceman_service.h"
++#endif
+
+ #include "applib/fonts/fonts.h"
+ #include "applib/ui/app_window_stack.h"
+@@ -153,6 +156,9 @@
+   SystemMenuItemStationaryToggle,
+   SystemMenuItemDebugging,
+   SystemMenuItemShutDown,
++#ifdef CONFIG_PACEMAN
++  SystemMenuItemPacemanPairingReset,
++#endif
+   SystemMenuItemFactoryReset,
+   SystemMenuItem_Count,
+ } SystemMenuItem;
+@@ -163,6 +169,9 @@
+   [SystemMenuItemStationaryToggle] = i18n_noop("Stand-By Mode"),
+   [SystemMenuItemDebugging] = i18n_noop("Debugging"),
+   [SystemMenuItemShutDown] = i18n_noop("Shut Down"),
++#ifdef CONFIG_PACEMAN
++  [SystemMenuItemPacemanPairingReset] = i18n_noop("Reset Paceman pairing"),
++#endif
+   [SystemMenuItemFactoryReset] = i18n_noop("Factory Reset"),
+ };
+
+@@ -648,6 +657,35 @@
+   app_window_stack_push(&data->window, true);
+ }
+
++#ifdef CONFIG_PACEMAN
++static void prv_paceman_reset_confirm(ClickRecognizerRef recognizer, void *context) {
++  confirmation_dialog_pop((ConfirmationDialog *)context);
++  const bool saved = paceman_service_reset_pairing();
++  ExpandableDialog *result = expandable_dialog_create_with_params(
++      "Paceman pairing reset", RESOURCE_ID_GENERIC_WARNING_SMALL,
++      saved ? "Pairing reset. Forget Pebble in your phone's Bluetooth settings. Open Bluetooth settings on this watch, then connect in Paceman."
++            : "Couldn't reset pairing. Restart the watch and try again.",
++      GColorWhite, GColorCobaltBlue, NULL, RESOURCE_ID_ACTION_BAR_ICON_CHECK,
++      expandable_dialog_close_cb);
++  expandable_dialog_show_action_bar(result, true);
++  app_expandable_dialog_push(result);
++}
++
++static void prv_paceman_reset_clicks(void *context) {
++  window_single_click_subscribe(BUTTON_ID_UP, prv_paceman_reset_confirm);
++  window_single_click_subscribe(BUTTON_ID_DOWN, prv_confirm_pop);
++  window_single_click_subscribe(BUTTON_ID_BACK, prv_confirm_pop);
++}
++
++static void prv_paceman_reset_push(void) {
++  ConfirmationDialog *dialog = prv_settings_confirm(
++      "Reset Paceman pairing", "Disconnect this phone and allow a new pairing? Apps and watch settings stay.",
++      RESOURCE_ID_GENERIC_WARNING_SMALL);
++  confirmation_dialog_set_click_config_provider(dialog, prv_paceman_reset_clicks);
++  app_confirmation_dialog_push(dialog);
++}
++#endif
++
+ // Debugging interstitial
+ /////////////////////////
+
+@@ -1297,6 +1335,9 @@
+     case SystemMenuItemInformation:
+     case SystemMenuItemCertification:
+     case SystemMenuItemDebugging:
++#ifdef CONFIG_PACEMAN
++    case SystemMenuItemPacemanPairingReset:
++#endif
+     case SystemMenuItemFactoryReset:
+     case SystemMenuItem_Count:
+       break;
+@@ -1329,6 +1370,11 @@
+     case SystemMenuItemDebugging:
+       prv_debugging_interstitial_trigger(data);
+       break;
++#ifdef CONFIG_PACEMAN
++    case SystemMenuItemPacemanPairingReset:
++      prv_paceman_reset_push();
++      break;
++#endif
+     case SystemMenuItemFactoryReset:
+       settings_factory_reset_window_push();
+       break;

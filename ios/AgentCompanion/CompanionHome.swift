@@ -77,7 +77,7 @@ struct CompanionHome: View {
                 Text("Computers").font(.headline).accessibilityAddTraits(.isHeader)
             } else {
                 Text("COMPUTERS")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .tracking(1.0)
                     .foregroundStyle(theme.secondaryInk)
                     .accessibilityAddTraits(.isHeader)
@@ -134,7 +134,7 @@ struct CompanionHome: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
-                    Text("Connect a computer").font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold)).tracking(-0.8).fixedSize(horizontal: false, vertical: true)
+                    Text("Connect a computer").companionText(.title, theme: theme).fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
                     if !typeSize.isAccessibilitySize {
                         Image(systemName: "laptopcomputer").font(.system(size: 18, weight: .medium))
@@ -142,7 +142,7 @@ struct CompanionHome: View {
                     }
                 }
                 Text("Install Paceman on the computer where you use Codex, then connect it here.")
-                    .font(.subheadline).foregroundStyle(theme.secondaryInk).fixedSize(horizontal: false, vertical: true)
+                    .companionText(.body, theme: theme).fixedSize(horizontal: false, vertical: true)
             }
             CompanionButton(title: "Connect computer", theme: theme, symbol: "plus") { open(.pairing) }
             CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
@@ -208,7 +208,7 @@ struct CompanionHome: View {
             Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5).padding(.top, 16)
             if state == .revoked {
                 Text("Reconnect to receive activity from this computer.")
-                    .font(.subheadline).foregroundStyle(theme.secondaryInk).padding(.top, 16)
+                    .companionText(.body, theme: theme).padding(.top, 16)
             } else {
                 switch content {
                 case .sessions:
