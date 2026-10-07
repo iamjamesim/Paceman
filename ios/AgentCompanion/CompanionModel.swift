@@ -16,6 +16,7 @@ final class CompanionModel: ObservableObject {
     @Published var revokedSources: Set<String> = []
     @Published var status = "Connect a work source"
     @Published var busy = false
+    private(set) var canForgetAfterRemovalFailure = false
     private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
     private let client: SourceClient
     private let pairedStore = PairedSourcesStore()
@@ -309,6 +310,41 @@ final class CompanionModel: ObservableObject {
 
     @discardableResult
     func remove(_ paired: PairedSource) async -> Bool {
+        canForgetAfterRemovalFailure = false
+        guard !busy, !PushCoordinator.shared.busy,
+              pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) else { return false }
+        busy = true
+        defer { busy = false; schedulePendingWatchRefresh() }
+        var removedOnComputer = false
+        do {
+            try await retryOnce { try await client.remove(paired) }
+            removedOnComputer = true
+            try await retryOnce { try await removeLocally(paired) }
+            cleanUpRelay(paired)
+            status = "Computer removed."
+            return true
+        } catch {
+            if !removedOnComputer, let connectionError = error as? URLError, connectionError.code != .cancelled {
+                canForgetAfterRemovalFailure = true
+            }
+            // Keep confirmed revocation even if a later step fails. A retry is
+            // safe: both remote endpoints accept an already-revoked credential.
+            if removedOnComputer {
+                revokedSources.insert(paired.sourceID)
+                clearSnapshot(paired.sourceID)
+                await monitoring.removeSource(paired.sourceID)
+                PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
+                forwardWatchAggregate()
+            }
+            status = "Couldn't finish removing computer."
+            Diagnostics.shared.recordError("computer_removal_failed", error: error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func forget(_ paired: PairedSource) async -> Bool {
+        canForgetAfterRemovalFailure = false
         guard !busy, !PushCoordinator.shared.busy,
               pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) else { return false }
         busy = true
@@ -316,19 +352,20 @@ final class CompanionModel: ObservableObject {
         do {
             try await retryOnce { try await removeLocally(paired) }
             status = "Computer removed."
-            // The connection is already gone from the phone. Clean up both
-            // remote ends independently, even when the computer is unreachable.
-            Task {
-                do { try await retryOnce { try await client.remove(paired) } }
-                catch { Diagnostics.shared.recordError("removed_source_computer_cleanup_failed", error: error) }
-                do { try await retryOnce { try await client.removeRelayClient(paired) } }
-                catch { Diagnostics.shared.recordError("removed_source_relay_cleanup_failed", error: error) }
-            }
+            // Explicit local forgetting does not claim computer-side revocation.
+            cleanUpRelay(paired)
             return true
         } catch {
-            status = "Couldn't remove computer."
-            Diagnostics.shared.recordError("computer_removal_failed", error: error)
+            status = "Couldn't finish removing computer."
+            Diagnostics.shared.recordError("computer_forgetting_failed", error: error)
             return false
+        }
+    }
+
+    private func cleanUpRelay(_ paired: PairedSource) {
+        Task {
+            do { try await retryOnce { try await client.removeRelayClient(paired) } }
+            catch { Diagnostics.shared.recordError("removed_source_relay_cleanup_failed", error: error) }
         }
     }
 

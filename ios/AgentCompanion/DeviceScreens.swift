@@ -10,6 +10,8 @@ struct ComputerDetail: View {
     @Environment(\.dismiss) private var dismiss
     @State private var remove = false
     @State private var removalFailed = false
+    @State private var offerForget = false
+    @State private var retryLocally = false
     @State private var rename = false
     @State private var name = ""
     @State private var removing = false
@@ -84,13 +86,20 @@ struct ComputerDetail: View {
                     removeComputer()
                 }
             } message: { Text("Remove this connection from your iPhone.") }
-            .alert("Couldn't remove computer", isPresented: $removalFailed) {
-                Button("Try again") { removeComputer() }
+            .alert(offerForget ? "Couldn't remove computer" : "Couldn't finish removing computer", isPresented: $removalFailed) {
+                if offerForget {
+                    Button("Forget", role: .destructive) { removeComputer(locally: true) }
+                } else {
+                    Button("Try again") { removeComputer(locally: retryLocally) }
+                }
                 Button("Cancel", role: .cancel) {}
+            } message: {
+                if offerForget { Text("Couldn't reach this computer to remove the pairing. Forget on this iPhone only?") }
             }
             .onAppear {
                 #if DEBUG
                 if presentation.preview && ProcessInfo.processInfo.arguments.contains("--removal-failed") {
+                    offerForget = ProcessInfo.processInfo.arguments.contains("--unreachable")
                     removalFailed = true
                 }
                 if presentation.preview && ProcessInfo.processInfo.arguments.contains("--remove-confirmation") { remove = true }
@@ -98,18 +107,22 @@ struct ComputerDetail: View {
             }
     }
 
-    private func removeComputer() {
+    private func removeComputer(locally: Bool = false) {
         guard let paired else { return }
         removing = true
+        retryLocally = locally
         Task {
             defer { removing = false }
             // Let an in-flight fetch complete without flickering the row.
             while model.busy || push.busy {
                 do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
             }
-            let removed = await model.remove(paired)
+            let removed = locally ? await model.forget(paired) : await model.remove(paired)
             if removed { dismiss() }
-            else { removalFailed = true }
+            else {
+                offerForget = model.canForgetAfterRemovalFailure
+                removalFailed = true
+            }
         }
     }
 
