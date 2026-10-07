@@ -84,15 +84,13 @@ struct CompanionSettings: View {
                     }
                 }
             }.listRowBackground(theme.panel)
-            if !model.watch.paired {
-                Section {
-                    NavigationLink(value: FeedDestination.watch) {
-                        Label("Paceman Watch", systemImage: "watch.analog")
-                    }
-                } header: {
-                    Text("Experimental")
-                }.listRowBackground(theme.panel)
-            }
+            Section {
+                NavigationLink(value: FeedDestination.watch) {
+                    Label("Accessories", systemImage: "watch.analog")
+                }
+            } header: {
+                Text("Experimental")
+            }.listRowBackground(theme.panel)
             Section {
                 NavigationLink(value: FeedDestination.diagnostics) {
                     Label("Diagnostics", systemImage: "doc.text.magnifyingglass")

@@ -160,64 +160,107 @@ struct ComputerReceiptLabel: View {
     }
 }
 
-struct WatchIntroduction: View {
+struct AccessoriesScreen: View {
+    @ObservedObject var model: CompanionModel
     let theme: CompanionTheme
-    let watchTheme: CompanionTheme
-    let continueSetup: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
-
+    let connect: () -> Void
+    let open: (String) -> Void
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                if !typeSize.isAccessibilitySize {
-                    WatchIllustration(theme: watchTheme, paired: true, timeFormat: .system, state: .working)
-                        .frame(width: 90, height: 133)
-                        .frame(maxWidth: .infinity).padding(.vertical, 16)
-                }
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("A purpose-built watch for agentic engineering")
-                        .font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
-                    VStack(alignment: .leading, spacing: 8) {
-                        introBullet("See agent status and Codex usage limits at a glance.")
-                        introBullet("Avoid the usual smartwatch distractions.")
-                        introBullet("Ask your agent to customize its open-source, fully hackable firmware.")
+                if model.accessories.saved.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Your agents, on your gear").font(.title2.weight(.semibold))
+                        Text("Connect a watch or accessory running compatible Paceman firmware.")
+                            .font(.body).foregroundStyle(theme.secondaryInk)
+                    }.padding(.top, 20)
+                } else {
+                    ForEach(model.accessories.saved) { link in
+                        Button { model.accessories.selectedID = link.id; open(link.id) } label: {
+                            HStack(spacing: 16) {
+                                if !typeSize.isAccessibilitySize {
+                                    AccessoryIllustration(kind: link.kind, theme: theme)
+                                        .frame(width: 42, height: 60).accessibilityHidden(true)
+                                }
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(link.displayName).font(.headline).fixedSize(horizontal: false, vertical: true)
+                                    WatchConnectionSummary(watch: link, theme: theme)
+                                }
+                                Spacer(minLength: 4)
+                                if !typeSize.isAccessibilitySize {
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.secondaryInk)
+                                }
+                            }.frame(minHeight: 72).contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                        CompanionRule(theme: theme)
                     }
-                    Text("Getting started")
-                        .font(.title3.weight(.semibold)).padding(.top, 10)
-                    Text("Get the Waveshare ESP32-S3 Touch AMOLED 2.06 board, then ask your agent to build and flash the Paceman Watch firmware.")
-                        .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
-                    VStack(alignment: .leading, spacing: 0) { boardLink; firmwareLink }
-                        .foregroundStyle(theme.tint)
-                    Text("Got a similar ESP32-S3 board? Your agent can adapt the firmware while preserving Paceman’s Bluetooth protocol.")
-                        .font(.footnote).lineSpacing(3).foregroundStyle(theme.secondaryInk)
+                }
+                CompanionButton(title: "Connect accessory", theme: theme, action: connect)
+                Text("Experimental").font(.caption).foregroundStyle(theme.secondaryInk)
+            }.padding(.horizontal, 24).padding(.vertical, 24)
+        }.foregroundStyle(theme.ink).background(theme.canvas)
+            .navigationTitle("Accessories").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct WatchIntroduction: View {
+    let theme: CompanionTheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+    let watchTheme: CompanionTheme
+    let continueSetup: (AccessoryKind) -> Void
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text("Choose your hardware").font(.title2.weight(.semibold)).padding(.top, 16)
+                Text("Install compatible Paceman firmware before connecting.")
+                    .font(.body).foregroundStyle(theme.secondaryInk)
+                ForEach(AccessoryKind.allCases, id: \.self) { kind in
+                    Button { continueSetup(kind) } label: {
+                        HStack(spacing: 16) {
+                            if !typeSize.isAccessibilitySize {
+                                AccessoryIllustration(kind: kind, theme: watchTheme)
+                                    .frame(width: 42, height: 62).accessibilityHidden(true)
+                            }
+                            Text(kind.name).font(.headline).fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right").font(.caption)
+                        }.frame(minHeight: 80).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                    CompanionRule(theme: theme)
                 }
             }.padding(.horizontal, 24).padding(.bottom, 32)
-        }.safeAreaInset(edge: .bottom) {
-            CompanionButton(title: "Connect your watch", theme: theme, action: continueSetup)
-                .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
-                .background(theme.canvas)
-        }.foregroundStyle(theme.ink).background(theme.canvas)
-            .navigationTitle("Paceman Watch").navigationBarTitleDisplayMode(.inline)
+        }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
+            .navigationTitle("Connect accessory").navigationBarTitleDisplayMode(.inline)
     }
+}
 
-    private var boardLink: some View {
-        resourceLink("ESP32-S3 board at Waveshare", url: "https://www.waveshare.com/product/esp32-s3-touch-amoled-2.06.htm")
-    }
-
-    private func introBullet(_ title: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("•").foregroundStyle(theme.tint)
-            Text(title).foregroundStyle(theme.secondaryInk)
+struct AccessoryIllustration: View {
+    let kind: AccessoryKind
+    let theme: CompanionTheme
+    var body: some View {
+        GeometryReader { geometry in
+            if kind == .esp32 {
+                WatchIllustration(theme: theme, paired: true, state: .working)
+            } else if kind == .pebble {
+                ZStack {
+                    RoundedRectangle(cornerRadius: geometry.size.width * 0.12)
+                        .fill(Color.gray.opacity(0.5)).frame(width: geometry.size.width * 0.55)
+                    RoundedRectangle(cornerRadius: geometry.size.width * 0.17)
+                        .fill(Color(white: 0.16)).frame(height: geometry.size.height * 0.75)
+                    RoundedRectangle(cornerRadius: geometry.size.width * 0.10)
+                        .fill(.white).padding(.horizontal, geometry.size.width * 0.10)
+                        .frame(height: geometry.size.height * 0.62)
+                    VStack(spacing: geometry.size.height * 0.05) {
+                        Text("10:09").font(.system(size: geometry.size.width * 0.24, weight: .bold)).foregroundStyle(Color(companionHex: "AA5500"))
+                        PacemanMark().foregroundStyle(Color(companionHex: "14723F"))
+                            .frame(width: geometry.size.width * 0.36, height: geometry.size.width * 0.36)
+                    }
+                }
+            } else {
+                Image(systemName: "cpu").resizable().scaledToFit().padding(4).foregroundStyle(theme.tint)
+            }
         }
-        .font(.body).lineSpacing(4)
-    }
-
-    private var firmwareLink: some View {
-        resourceLink("Paceman Watch firmware on GitHub", url: "https://github.com/iamjamesim/paceman/tree/main/firmware/esp32-watch")
-    }
-
-    private func resourceLink(_ title: String, url: String) -> some View {
-        CompanionExternalLink(title: title, url: URL(string: url)!, theme: theme)
     }
 }
 
@@ -228,6 +271,8 @@ struct WatchDetail: View {
     @ObservedObject var model: CompanionModel
     let theme: CompanionTheme
     let watchTheme: CompanionTheme
+    var accessory: WatchLink? = nil
+    private var watch: WatchLink { accessory ?? model.watch }
     var preview = false
     var previewConnected = false
     var previewPhase = WatchSetupPhase.idle
@@ -236,24 +281,26 @@ struct WatchDetail: View {
     let continueSetup: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.dismiss) private var dismiss
+    @State private var rename = false
+    @State private var name = ""
     @State private var remove = false
     @State private var removing = false
     @State private var removalError: String?
     @State private var startedHere = false
     @State private var justPaired = false
     private var timeFormatPicker: some View {
-        Picker("Time format", selection: Binding(get: { model.watch.timeFormat }, set: { model.watch.setTimeFormat($0) })) {
+        Picker("Time format", selection: Binding(get: { watch.timeFormat }, set: { watch.setTimeFormat($0) })) {
             ForEach(WatchTimeFormat.allCases, id: \.self) { Text($0.title).tag($0) }
         }.labelsHidden().tint(theme.tint).allowsHitTesting(!preview)
     }
-    private var paired: Bool { preview ? previewConnected : model.watch.paired }
-    private var phase: WatchSetupPhase { preview ? previewPhase : model.watch.setupPhase }
+    private var paired: Bool { preview ? previewConnected : watch.paired }
+    private var phase: WatchSetupPhase { preview ? previewPhase : watch.setupPhase }
     private var inProgress: Bool { phase.inProgress }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 if (!paired || justPaired || previewComplete) && !typeSize.isAccessibilitySize {
-                    WatchIllustration(theme: watchTheme, paired: paired, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133)
+                    AccessoryIllustration(kind: watch.kind, theme: watchTheme).frame(width: 90, height: 133)
                         .frame(maxWidth: .infinity).padding(.vertical, 16)
                 }
                 if justPaired || (preview && previewComplete) {
@@ -275,30 +322,36 @@ struct WatchDetail: View {
                     .background(theme.canvas)
             }
         }.foregroundStyle(theme.ink).background(theme.canvas)
-            .navigationTitle(paired ? "Paceman Watch" : "Connect Paceman Watch").navigationBarTitleDisplayMode(.inline)
-            .confirmationDialog("Remove Paceman Watch?", isPresented: $remove, titleVisibility: .visible) {
-                Button("Remove watch", role: .destructive) {
+            .navigationTitle(paired ? watch.displayName : "Connect accessory").navigationBarTitleDisplayMode(.inline)
+            .alert("Display name", isPresented: $rename) {
+                TextField("Name", text: $name)
+                Button("Save") { watch.rename(name) }
+                Button("Cancel", role: .cancel) {}
+            }
+            .confirmationDialog("Remove \(watch.displayName)?", isPresented: $remove, titleVisibility: .visible) {
+                Button("Remove accessory", role: .destructive) {
                     removing = true
                     removalError = nil
-                    model.watch.removeWatch { success in
+                    watch.removeWatch { success in
                         removing = false
                         if success { dismiss() }
                         else { removalError = "Couldn’t remove the watch. Try again. Your pairing is kept." }
                     }
                 }
             } message: {
-                Text("Stop sending activity to this watch and remove this phone’s access. Your computer stays connected.")
+                Text("Stop sending activity to this accessory and remove this phone’s access. Your computer stays connected.")
             }
             .task {
                 if !preview {
-                    model.watch.prepareForSetup()
+                    model.accessories.selectedID = watch.id
+                    watch.prepareForSetup()
                     await push.sync()
                 }
             }
             .onChange(of: scenePhase) { _, value in
                 if value == .active && !preview { Task { await push.sync() } }
             }
-            .onChange(of: model.watch.paired) { _, value in
+            .onChange(of: watch.paired) { _, value in
                 if value && startedHere && !preview {
                     justPaired = true
                     Task { await push.sync() }
@@ -313,16 +366,32 @@ struct WatchDetail: View {
                 Text(instructionDetail).font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
             }
             if !inProgress {
-                DisclosureGroup("Watch paired elsewhere?") {
-                    Text("Ask your agent to erase the watch’s flash and reinstall the Paceman Watch firmware. The watch will then show a new setup code.")
+                if phase == .idle || phase == .failed { preparation }
+                DisclosureGroup("Previously owned by another phone?") {
+                    Text("Removing an accessory from an app does not reset its ownership. Follow the firmware guide to reset ownership before switching phones.")
                         .font(.footnote).foregroundStyle(theme.secondaryInk).padding(.top, 8)
                 }.font(.footnote).padding(.top, 12)
             }
         }
     }
+    private var preparation: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if watch.kind == .pebble {
+                Text("Install Paceman’s Pebble firmware and select Watchfaces → Paceman on the watch.")
+                Text("For the first Paceman connection, force-close the Pebble app. Forget the old Pebble pairing in iPhone Settings → Bluetooth and in the watch’s Settings → Bluetooth. Leave the watch’s Bluetooth screen open.")
+                Text("Keep the saved pairing for future connections.")
+            } else if watch.kind == .esp32 {
+                Text("Flash Paceman firmware to your ESP32 watch. It will show a setup code when it is ready to pair.")
+            } else {
+                Text("Your accessory must advertise the Paceman service and support the secure owner-pairing protocol. A stock Bluetooth device needs compatible firmware.")
+            }
+            CompanionExternalLink(title: "Firmware and setup guide",
+                url: URL(string: "https://github.com/iamjamesim/Paceman/tree/main/firmware/" + watch.kind.firmwarePath)!, theme: theme)
+        }.font(.footnote).lineSpacing(3).foregroundStyle(theme.secondaryInk)
+    }
     private var instructionTitle: String {
         switch phase {
-        case .idle: return "Turn on your watch"
+        case .idle: return watch.kind.name
         case .selecting: return "Select your watch"
         case .connecting: return "Keep your watch nearby"
         case .confirming: return "Confirm pairing"
@@ -332,39 +401,39 @@ struct WatchDetail: View {
     }
     private var instructionDetail: String {
         switch phase {
-        case .idle: return "Keep your Paceman Watch close to your iPhone. We'll look for it over Bluetooth."
-        case .selecting: return "Choose Paceman Watch in the nearby-devices picker."
-        case .connecting: return preview ? "Connecting to your watch…" : model.watch.status
+        case .idle: return "Keep it nearby with Bluetooth on."
+        case .selecting: return "Choose your accessory in the nearby-devices picker."
+        case .connecting: return preview ? "Connecting to your watch…" : watch.status
         case .confirming: return "Enter the code shown on your watch if asked. Allow notification sharing so your watch can receive updates while the phone is locked."
         case .checking: return "Checking the connection…"
-        case .failed: return preview ? "Keep your watch nearby with Bluetooth on, then try again." : model.watch.status
+        case .failed: return preview ? "Keep your watch nearby with Bluetooth on, then try again." : watch.status
         }
     }
     private var pairingActions: some View {
         VStack(spacing: 10) {
             if inProgress {
-                Button("Cancel pairing") { model.watch.cancelPairing() }
+                Button("Cancel pairing") { watch.cancelPairing() }
                     .font(.subheadline).frame(minHeight: 44).disabled(preview)
             } else {
-                CompanionButton(title: phase == .failed ? "Try again" : model.watch.configured && !preview ? "Continue pairing" : "Find watch", theme: theme) {
+                CompanionButton(title: phase == .failed ? "Try again" : watch.configured && !preview ? "Continue pairing" : "Find accessory", theme: theme) {
                     startedHere = true
-                    if model.watch.configured { model.watch.resumePairing() }
-                    else { model.watch.addWatch() }
-                }.disabled(preview || !model.watch.pickerReady)
-                if !preview && model.watch.configured {
-                    Button("Select a different watch") { startedHere = true; model.watch.addWatch() }
-                        .font(.subheadline).frame(minHeight: 44).disabled(!model.watch.pickerReady)
+                    if watch.configured { watch.resumePairing() }
+                    else { watch.addWatch() }
+                }.disabled(preview || !watch.pickerReady)
+                if !preview && watch.configured {
+                    Button("Select a different watch") { startedHere = true; watch.addWatch() }
+                        .font(.subheadline).frame(minHeight: 44).disabled(!watch.pickerReady)
                 }
             }
         }
     }
-    private var updatesEnabled: Bool { preview ? previewState != "off" : model.watch.updatesEnabled }
+    private var updatesEnabled: Bool { preview ? previewState != "off" : watch.updatesEnabled }
     private var pairingComplete: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 10) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.title2).foregroundStyle(theme.tint).accessibilityHidden(true)
-                Text("Watch connected").font(.title2.weight(.semibold))
+                Text("Accessory connected").font(.title2.weight(.semibold))
             }
             Text("Next, set up notifications so your watch can receive updates while your iPhone is locked.")
                 .font(.body).lineSpacing(3).foregroundStyle(theme.secondaryInk)
@@ -382,12 +451,12 @@ struct WatchDetail: View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(spacing: 20) {
                 if !typeSize.isAccessibilitySize {
-                    WatchIllustration(theme: watchTheme, paired: true, timeFormat: model.watch.timeFormat, state: preview ? .working : model.currentActivityState).frame(width: 90, height: 133).accessibilityHidden(true)
+                    AccessoryIllustration(kind: watch.kind, theme: watchTheme).frame(width: 90, height: 133).accessibilityHidden(true)
                 }
                 VStack(spacing: 8) {
-                    Text("Paceman Watch")
+                    Text(watch.displayName)
                         .font(theme.monospaced ? theme.font(24, emphasis: true) : .title2.weight(.semibold))
-                    WatchConnectionSummary(watch: model.watch, theme: theme, previewState: preview ? previewState : nil, centered: true)
+                    WatchConnectionSummary(watch: watch, theme: theme, previewState: preview ? previewState : nil, centered: true)
                 }
             }.multilineTextAlignment(.center).frame(maxWidth: .infinity)
                 .padding(.top, 8).padding(.bottom, 12)
@@ -399,70 +468,84 @@ struct WatchDetail: View {
                             .font(.subheadline).frame(minHeight: 44)
                     }
                 } else if push.deliveryStep == .ready {
-                    WatchSharingGuidance(watch: model.watch, theme: theme)
+                    WatchSharingGuidance(watch: watch, theme: theme)
                 }
             }
-            if !preview, let guidance = model.watch.connectionPresentation.guidance {
+            if !preview, let guidance = watch.connectionPresentation.guidance {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(guidance).font(.footnote).foregroundStyle(theme.secondaryInk)
-                    if model.watch.connectionPresentation == .disconnected {
-                        Button("Try again") { model.watch.setEnabled(true) }
+                    if watch.connectionPresentation == .disconnected {
+                        Button("Try again") { watch.setEnabled(true) }
                             .font(.subheadline).frame(minHeight: 44)
                     }
                 }
             }
             CompanionRule(theme: theme)
+            Button { name = watch.displayName; rename = true } label: {
+                HStack {
+                    Text("Display name")
+                    Spacer()
+                    Image(systemName: "pencil").foregroundStyle(theme.secondaryInk)
+                }.frame(minHeight: 44)
+            }.buttonStyle(.plain).allowsHitTesting(!preview)
+            CompanionRule(theme: theme)
             VStack(alignment: .leading, spacing: 8) {
-                Toggle("Watch updates", isOn: Binding(get: { updatesEnabled }, set: { model.watch.setEnabled($0) }))
+                Toggle("Updates", isOn: Binding(get: { updatesEnabled }, set: { watch.setEnabled($0) }))
                     .tint(theme.tint).allowsHitTesting(!preview)
                 if !updatesEnabled {
-                    Text(!preview && model.watch.lastDelivered != nil ? "Your watch stays paired. Its last activity may remain on screen." : "Your watch stays paired.")
+                    Text(!preview && watch.lastDelivered != nil ? "Your watch stays paired. Its last activity may remain on screen." : "Your watch stays paired.")
                         .font(.footnote).foregroundStyle(theme.secondaryInk)
                 }
             }
             CompanionRule(theme: theme)
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle("Status sounds", isOn: Binding(get: { preview ? true : model.watch.soundEnabled }, set: { model.watch.setSoundEnabled($0) }))
-                    .tint(theme.tint).allowsHitTesting(!preview)
-                Text("For new work, input requests, failures, and completed turns.")
-                    .font(.footnote).foregroundStyle(theme.secondaryInk)
+            if preview || watch.supportsSound {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Status sounds", isOn: Binding(get: { preview ? watch.kind != .pebble : watch.soundEnabled }, set: { watch.setSoundEnabled($0) }))
+                        .tint(theme.tint).allowsHitTesting(!preview)
+                    Text(watch.supportsWorkingSound ? "For new work, input requests, failures, and completed turns." : "For input requests, failures, and completed turns.")
+                        .font(.footnote).foregroundStyle(theme.secondaryInk)
+                }
+                CompanionRule(theme: theme)
             }
-            CompanionRule(theme: theme)
-            if typeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) { Text("Time format"); timeFormatPicker }
-            } else {
-                HStack { Text("Time format"); Spacer(); timeFormatPicker }
+            if preview || watch.supportsTimeFormat {
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 8) { Text("Time format"); timeFormatPicker }
+                } else {
+                    HStack { Text("Time format"); Spacer(); timeFormatPicker }
+                }
             }
-            if preview || model.watch.supportsBrightness {
+            if (preview && watch.kind == .esp32) || watch.supportsBrightness {
                 CompanionRule(theme: theme)
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text("Brightness")
                         Spacer()
-                        Text("\(Int(brightnessDraft ?? Double(model.watch.brightness)))%")
+                        Text("\(Int(brightnessDraft ?? Double(watch.brightness)))%")
                             .foregroundStyle(theme.secondaryInk).monospacedDigit()
                     }
-                    Slider(value: Binding(get: { brightnessDraft ?? Double(model.watch.brightness) }, set: { brightnessDraft = $0 }),
+                    Slider(value: Binding(get: { brightnessDraft ?? Double(watch.brightness) }, set: { brightnessDraft = $0 }),
                            in: 20...100, step: 1, onEditingChanged: { editing in
                         if !editing, let value = brightnessDraft {
-                            model.watch.setBrightness(Int(value))
+                            watch.setBrightness(Int(value))
                             brightnessDraft = nil
                         }
                     }).tint(theme.tint).accessibilityLabel("Brightness").allowsHitTesting(!preview)
                 }
             }
             CompanionRule(theme: theme)
-            NavigationLink {
-                WeatherSettings(weather: model.weather, theme: theme)
-            } label: {
-                HStack {
-                    Text("Weather")
-                    Spacer()
-                    Text(model.weather.summary).foregroundStyle(theme.secondaryInk)
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.secondaryInk)
-                }
-            }.allowsHitTesting(!preview)
-            CompanionRule(theme: theme)
+            if (preview && watch.kind == .esp32) || watch.supportsWeather {
+                NavigationLink {
+                    WeatherSettings(weather: watch.phoneWeather, theme: theme)
+                } label: {
+                    HStack {
+                        Text("Weather")
+                        Spacer()
+                        Text(watch.phoneWeather.summary).foregroundStyle(theme.secondaryInk)
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(theme.secondaryInk)
+                    }
+                }.allowsHitTesting(!preview)
+                CompanionRule(theme: theme)
+            }
             NavigationLink(value: FeedDestination.watchTroubleshooting) {
                 HStack {
                     Text("Troubleshoot updates")
@@ -471,7 +554,7 @@ struct WatchDetail: View {
                 }.frame(minHeight: 44)
             }.allowsHitTesting(!preview)
             CompanionRule(theme: theme)
-            DeviceRemovalButton(title: removing ? "Removing…" : "Remove watch", theme: theme) { remove = true }
+            DeviceRemovalButton(title: removing ? "Removing…" : "Remove accessory", theme: theme) { remove = true }
                 .disabled(removing).allowsHitTesting(!preview)
             if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.secondaryInk) }
         }.padding(.top, 12)

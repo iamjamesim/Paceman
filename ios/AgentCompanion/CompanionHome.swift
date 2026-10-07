@@ -9,8 +9,7 @@ struct CompanionHome: View {
     let open: (FeedDestination) -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
     var paired: Bool { presentation.preview ? presentation.previewHasComputer : !model.pairedSources.isEmpty }
-    var hasWatch: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.paired }
-    var watchReady: Bool { presentation.preview ? presentation.previewHasWatch : model.watch.ready }
+    var hasWatch: Bool { presentation.preview ? presentation.previewHasWatch : !model.accessories.saved.isEmpty }
     private var prominentTint: Color {
         // Large marks and status text can use warmer amber; small labels keep the darker tint.
         presentation.themeFamily == .ayu && !theme.dark
@@ -107,8 +106,8 @@ struct CompanionHome: View {
                 Button { open(.watch) } label: {
                     destinationContent(
                         icon: AnyView(WatchGlyph(theme: presentation.themeFamily.glance, timeFormat: model.watch.timeFormat)),
-                        name: "Paceman Watch",
-                        state: presentation.preview ? "Connected" : model.watch.connectionPresentation.rawValue)
+                        name: "Accessories",
+                        state: presentation.preview ? "Connected" : "\(model.accessories.saved.count) \(model.accessories.saved.count == 1 ? "accessory" : "accessories")")
                 }.buttonStyle(.plain)
             }
         }

@@ -4,9 +4,10 @@ import UIKit
 
 @MainActor
 final class CompanionModel: ObservableObject {
-    let watch: WatchLink
+    let accessories: WatchAccessories
+    var watch: WatchLink { accessories.selected }
     let monitoring = MonitoringCoordinator()
-    let weather: PhoneWeather
+    var weather: PhoneWeather { watch.phoneWeather }
     let designPreview: Bool
     @Published var pairedSources: [PairedSource] = []
     @Published var snapshots: [String: Snapshot] = [:]
@@ -28,14 +29,13 @@ final class CompanionModel: ObservableObject {
     private var watchBackgroundTask = UIBackgroundTaskIdentifier.invalid
     private var fetchedUptimes: [String: TimeInterval] = [:]
     private var changeObserver: AnyCancellable?
-    private var weatherObserver: AnyCancellable?
+    private var weatherObservers: [String: AnyCancellable] = [:]
     private var lastWatchRelayRequested = false
 
     init(preview: Bool = false) {
         designPreview = preview
-        watch = WatchLink(preview: preview)
-        weather = PhoneWeather()
-        lastWatchRelayRequested = watch.relayRequested
+        accessories = WatchAccessories(preview: preview)
+        lastWatchRelayRequested = accessories.relayRequested
         if preview {
             #if DEBUG
             let args = ProcessInfo.processInfo.arguments
@@ -45,6 +45,18 @@ final class CompanionModel: ObservableObject {
                 pairedSources = [PairedSource(endpoint: URL(string: "https://omarchy.example.ts.net")!,
                     sourceID: id, clientID: id, credential: "preview")]
             }
+            if screen.hasPrefix("--screen=accessor") {
+                if screen != "--screen=accessories-empty" {
+                    watch.showPreview(kind: .pebble,
+                        name: screen.contains("long") ? "James’s Pebble Time 2 for development and agent monitoring" : nil)
+                }
+                if screen == "--screen=accessories-multiple" || screen == "--screen=accessories-stale" {
+                    watch.showPreview(kind: .esp32)
+                    accessories.beginSetup(.pebble)
+                    watch.showPreview(kind: .pebble, connected: !screen.contains("stale"))
+                }
+            }
+            if screen == "--screen=pebble-pairing" { watch.kind = .pebble }
             if screen.contains("usage"), let id = pairedSources.first?.sourceID {
                 let now = Date().timeIntervalSince1970
                 let stale = screen.contains("stale")
@@ -118,10 +130,10 @@ final class CompanionModel: ObservableObject {
             }
             if let first = pairedSources.first {
                 status = snapshots[first.sourceID] == nil ? "Paired; waiting for fresh status" : "Paired; restoring last known status"
-                if snapshots.isEmpty, watch.preferenceID != nil { watch.awaitSourceProfile() }
+                if snapshots.isEmpty { accessories.links.filter { $0.preferenceID != nil }.forEach { $0.awaitSourceProfile() } }
             }
         }
-        watch.onWatchEvent = { [weak self] in
+        accessories.onWatchEvent = { [weak self] in
             Task { @MainActor in await self?.refreshAll(fromWatch: true) }
         }
         if !preview {
@@ -137,18 +149,26 @@ final class CompanionModel: ObservableObject {
                 } catch { Diagnostics.shared.record("watch_push_token_store_failed") }
             }
         }
-        weather.onChange = { [weak self] value, fahrenheit in self?.watch.setWeather(value, fahrenheit: fahrenheit) }
-        if !preview { weather.bind(watchID: watch.preferenceID, updates: watch.paired && watch.updatesEnabled) }
+        accessories.links.forEach(configureAccessory)
+        accessories.onAdded = { [weak self] link in
+            guard let self else { return }
+            self.configureAccessory(link)
+            link.setForeground(self.foreground)
+            link.phoneWeather.setForeground(self.foreground)
+            link.setTheme(ThemePreference.current.glance)
+            self.forwardWatchAggregate()
+        }
         forwardWatchAggregate()
         if !preview { monitoring.configure(sources: pairedSources) }
-        weatherObserver = weather.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
-        changeObserver = watch.objectWillChange.sink { [weak self] _ in
+        changeObserver = accessories.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
             Task { @MainActor [weak self] in
                 guard let self, !self.designPreview else { return }
-                self.weather.bind(watchID: self.watch.preferenceID,
-                                  updates: self.watch.paired && self.watch.updatesEnabled)
-                let requested = self.watch.relayRequested
+                for link in self.accessories.links {
+                    link.phoneWeather.bind(watchID: link.preferenceID,
+                                      updates: link.paired && link.updatesEnabled && link.supportsWeather)
+                }
+                let requested = self.accessories.relayRequested
                 if requested != self.lastWatchRelayRequested {
                     self.lastWatchRelayRequested = requested
                     await PushCoordinator.shared.sync()
@@ -156,6 +176,15 @@ final class CompanionModel: ObservableObject {
             }
         }
         if !preview { Diagnostics.shared.record("app_launched") }
+    }
+
+    private func configureAccessory(_ link: WatchLink) {
+        link.phoneWeather.onChange = { [weak link] value, fahrenheit in link?.setWeather(value, fahrenheit: fahrenheit) }
+        weatherObservers[link.id] = link.phoneWeather.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        if !designPreview {
+            link.phoneWeather.bind(watchID: link.preferenceID,
+                              updates: link.paired && link.updatesEnabled && link.supportsWeather)
+        }
     }
 
     func isRevoked(_ sourceID: String) -> Bool { revokedSources.contains(sourceID) }
@@ -189,7 +218,7 @@ final class CompanionModel: ObservableObject {
     }
 
     func setTheme(_ family: ThemeFamily) {
-        watch.setTheme(family.glance)
+        accessories.links.forEach { $0.setTheme(family.glance) }
         Task { await monitoring.refreshTheme(family) }
     }
 
@@ -203,8 +232,30 @@ final class CompanionModel: ObservableObject {
             Task { await syncWatchPush() }
         }
         let value = watchAggregate
-        if let value { watch.forward(value) }
-        else { watch.clearSourceProfile() }
+        for link in accessories.links {
+            if let value { link.forward(value) }
+            else { link.clearSourceProfile() }
+        }
+        let cards = pairedSources.filter { !isRevoked($0.sourceID) }.map { source in
+            let snapshot = snapshots[source.sourceID]
+            return WatchSourceCard(sourceID: source.sourceID,
+                name: ComputerPreferences.displayName(for: source.sourceID,
+                    sourceName: snapshot?.sourceName, host: source.endpoint.host),
+                state: snapshot?.state ?? .idle,
+                availability: snapshot == nil ? 0 : isFresh(source.sourceID) ? 1 : 2,
+                expiresAt: snapshot.map { $0.observedAt + $0.freshFor } ?? 0,
+                sessions: snapshot?.sessions ?? [])
+        }
+        let priorities: [ActivityState: Int] = [.needsInput: 0, .failed: 1, .working: 2, .finished: 3, .idle: 4]
+        let sortedCards = cards.sorted {
+            if $0.availability != $1.availability { return $0.availability == 1 || ($0.availability == 2 && $1.availability == 0) }
+            let a = priorities[$0.state] ?? 4, b = priorities[$1.state] ?? 4
+            if a != b { return a < b }
+            let first = snapshots[$0.sourceID]?.changedAt ?? 0
+            let second = snapshots[$1.sourceID]?.changedAt ?? 0
+            return first == second ? $0.sourceID < $1.sourceID : first > second
+        }
+        accessories.links.forEach { $0.updateSources(sortedCards) }
         if !designPreview {
             AppleWatchAllowanceBridge.shared.update(value?.allowance,
                 readings: watchUsageSource?.usageReadings ?? [],
@@ -310,15 +361,17 @@ final class CompanionModel: ObservableObject {
 
     func setForeground(_ value: Bool) {
         foreground = value
-        weather.setForeground(value)
-        watch.setForeground(value)
+        for link in accessories.links {
+            link.phoneWeather.setForeground(value)
+            link.setForeground(value)
+        }
         polling?.cancel()
         polling = nil
         Diagnostics.shared.record(value ? "app_foreground" : "app_background")
         if value {
             polling = Task { [weak self] in
                 while !Task.isCancelled {
-                    self?.weather.refreshIfNeeded()
+                    self?.accessories.links.forEach { $0.phoneWeather.refreshIfNeeded() }
                     await self?.refreshAll()
                     do { try await Task.sleep(nanoseconds: 5_000_000_000) }
                     catch { break }
@@ -366,7 +419,7 @@ final class CompanionModel: ObservableObject {
             failed = failed || result == .failed
         }
         await monitoring.retireExpiredStaleActivities()
-        if fromWatch, let identity = watchAggregate?.identity { _ = await watch.waitForDelivery(of: identity) }
+        if fromWatch, let identity = watchAggregate?.identity { _ = await accessories.waitForDelivery(of: identity) }
         return changed ? .newData : failed ? .failed : .noData
     }
 
@@ -429,7 +482,7 @@ final class CompanionModel: ObservableObject {
             Diagnostics.shared.record("snapshot_received", event: value.identity, state: value.state)
             PushCoordinator.shared.recoverRegistrationIfNeeded()
             if fromPush, let identity = watchAggregate?.identity {
-                _ = await watch.waitForDelivery(of: identity)
+                _ = await accessories.waitForDelivery(of: identity)
             }
             return value.identity == previousIdentity ? .noData : .newData
         } catch {

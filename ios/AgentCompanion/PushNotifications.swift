@@ -76,7 +76,7 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     @Published private(set) var awaitingToken = false
     @Published private(set) var notificationCenterSetting: UNNotificationSetting?
 
-    var enabled: Bool { model?.watch.relayRequested == true }
+    var enabled: Bool { model?.accessories.relayRequested == true }
     var deliveryStep: NotificationDeliveryStep {
         .resolve(authorization: authorization, center: notificationCenterSetting, enabled: enabled)
     }

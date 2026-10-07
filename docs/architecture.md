@@ -1,12 +1,12 @@
 # Architecture
 
-Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, presents each computer separately, and sends one current view to the ESP32 watch. Prompts, replies, and tool arguments stay on the computer.
+Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, presents each computer separately, and forwards current activity to compatible Bluetooth accessories. Prompts, replies, and tool arguments stay on the computer.
 
 ```text
        Reviewed agent hooks
                  │
                  ▼
-          Source + SQLite ── private HTTPS snapshot ──► iPhone ── BLE ──► ESP32 watch
+          Source + SQLite ── private HTTPS snapshot ──► iPhone ── BLE ──► accessories
                  │                                         ▲                 ▲
                  └── authenticated relay ── APNs ──► iOS Notification Center ── ANCS ─────┘
                                        ├── ActivityKit ──► iPhone Live Activity
@@ -34,7 +34,7 @@ When configured, the source sends notifications through the relay, which holds t
 
 ## Watches
 
-The iPhone owns the ESP32 watch's Bluetooth connection and chooses activity from fresh computers. The watch retains its owner bond and profile, accepts data only from the authenticated owner, and keeps current activity in RAM. Reconnection sends current state rather than replaying missed events. See [Bluetooth lifecycle](../firmware/esp32-watch/CONNECTION.md) and [data lifecycle](data-lifecycle.md).
+The iPhone maintains independent Bluetooth connections to each paired accessory and chooses activity from fresh computers. The watch retains its owner bond and profile, accepts data only from the authenticated owner, and keeps current activity in RAM. Reconnection sends current state rather than replaying missed events. See [Bluetooth lifecycle](../firmware/esp32-watch/CONNECTION.md) and [data lifecycle](data-lifecycle.md).
 
 Usage is Codex-only and assumes one Codex account across computers. The phone
 prefers a recent reading from a connected computer, then recent cached usage,
@@ -49,6 +49,6 @@ window in Codex Limit and Codex Reset. Older or empty data from another computer
 cannot erase that reading.
 
 WatchConnectivity also supplies the paired-computer list and cached readings.
-Apple Watch delivery is independent of ESP32 Bluetooth. Exact fields and
+Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
 are in [data lifecycle](data-lifecycle.md).

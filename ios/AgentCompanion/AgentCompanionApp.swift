@@ -29,7 +29,7 @@ struct AgentCompanionApp: App {
     }
 }
 
-enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, watchPairing, pairing, notifications, watchNotifications, watchWeatherSetup, watchTroubleshooting, settings, appearance, weather, diagnostics }
+enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, connectAccessory, accessory(String), watchPairing, pairing, notifications, watchNotifications, watchWeatherSetup, watchTroubleshooting, settings, appearance, weather, diagnostics }
 
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
@@ -47,26 +47,29 @@ struct CompanionRoot: View {
                     case .otherComputer(let id): ComputerDetail(model: model, presentation: presentation, theme: theme, sourceID: id)
                     case .liveActivities: LiveActivitiesDetail(model: model, monitoring: model.monitoring,
                         presentation: presentation, theme: theme)
-                    case .watch, .watchPairing:
-                        if destination == .watch && !(presentation.preview ? presentation.previewHasWatch : model.watch.paired) {
-                            WatchIntroduction(theme: theme, watchTheme: presentation.themeFamily.glance) {
-                                path.append(.watchPairing)
-                            }
-                        } else {
-                            WatchDetail(model: model, theme: theme, watchTheme: presentation.themeFamily.glance,
-                                preview: presentation.preview, previewConnected: presentation.previewHasWatch,
-                                previewPhase: presentation.previewWatchPhase,
-                                previewComplete: presentation.previewScreen == "watch-complete",
-                                previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen)
-                                    ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") {
-                                path.append(.watchNotifications)
-                            }
+                    case .watch:
+                        AccessoriesScreen(model: model, theme: theme,
+                            connect: { path.append(.connectAccessory) }, open: { path.append(.accessory($0)) })
+                    case .connectAccessory:
+                        WatchIntroduction(theme: theme, watchTheme: presentation.themeFamily.glance) { kind in
+                            model.accessories.beginSetup(kind)
+                            path.append(.watchPairing)
+                        }
+                    case .watchPairing, .accessory:
+                        WatchDetail(model: model, theme: theme, watchTheme: presentation.themeFamily.glance,
+                            accessory: { if case .accessory(let id) = destination { return model.accessories.links.first { $0.id == id } }; return nil }(),
+                            preview: presentation.preview, previewConnected: presentation.previewHasWatch,
+                            previewPhase: presentation.previewWatchPhase,
+                            previewComplete: presentation.previewScreen == "watch-complete",
+                            previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen)
+                                ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") {
+                            path.append(.watchNotifications)
                         }
                     case .pairing: PairingFlow(model: model, theme: theme, preview: presentation.preview)
                     case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview)
                     case .watchNotifications:
                         NotificationSetup(model: model, theme: theme, preview: presentation.preview,
-                                          done: { path = [] }, continueSetup: { path.append(.watchWeatherSetup) })
+                                          done: { path = [] }, continueSetup: { if model.watch.supportsWeather { path.append(.watchWeatherSetup) } else { path = [.watch] } })
                     case .watchWeatherSetup:
                         WeatherSettings(weather: model.weather, theme: theme,
                                         finishSetup: { path = presentation.preview ? [] : [.watch] },
@@ -112,10 +115,13 @@ struct CompanionRoot: View {
                 #endif
                 path = [.watchWeatherSetup]
             case "watch-troubleshooting": path = [.watchTroubleshooting]
-            case "watch", "watch-setup": path = [.watch]
+            case "watch", "watch-setup", "accessories", "accessories-empty", "accessories-multiple", "accessories-stale", "accessories-long": path = [.watch]
+            case "connect-accessory": path = [.watch, .connectAccessory]
+            case "pebble-pairing": path = [.watchPairing]
+            case "accessory-detail", "accessory-long": path = [.accessory(model.watch.id)]
             case "watch-pairing": path = [.watch, .watchPairing]
             case "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error": path = [.watchPairing]
-            case "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off", "watch-paired", "watch-complete": path = [.watch]
+            case "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off", "watch-paired", "watch-complete": path = [.accessory(model.watch.id)]
             case "computer-usage", "computer-usage-stale", "computer-usage-empty", "computer-usage-expired", "computer-usage-claude-only", "computer", "computer-offline", "computer-revoked", "computer-stale", "computer-waiting", "computer-long": path = [.computer]
             default: break
             }

@@ -1,0 +1,581 @@
+diff --git a/fw/comm/ble/gap_le_slave_discovery.c b/fw/comm/ble/gap_le_slave_discovery.c
+index d31baf0..45a5ccf 100644
+--- a/fw/comm/ble/gap_le_slave_discovery.c
++++ b/fw/comm/ble/gap_le_slave_discovery.c
+@@ -5,6 +5,11 @@
+
+ #include "gap_le_slave_discovery.h"
+ #include "gap_le_advert.h"
++#ifdef CONFIG_PACEMAN
++#include "services/paceman/paceman_service.h"
++#include "system/passert.h"
++#endif
++
+
+ #include "applib/bluetooth/ble_ad_parse.h"
+
+@@ -74,14 +79,24 @@ static void prv_schedule_ad_job(void) {
+   service_uuids[num_uuids++] = bt_uuid_expand_16bit(PBL_BT_PPS_UUID_16BIT);
+
+   ble_ad_set_service_uuids(ad, service_uuids, num_uuids);
++#ifdef CONFIG_PACEMAN
++  // Separate widths keep flags, native services and Paceman within 31 bytes.
++  Uuid paceman_uuid = {PACEMAN_AD_UUID_BYTES};
++  PBL_ASSERTN(ble_ad_set_service_uuids(ad, &paceman_uuid, 1));
++#endif
+
++#ifndef CONFIG_PACEMAN
+   char device_name[PBL_BT_DEVICE_NAME_BUFFER_SIZE];
+   bt_local_id_copy_device_name(device_name, true);
+   ble_ad_set_local_name(ad, device_name);
+   ble_ad_set_tx_power_level(ad);
++#endif
+
+   // Scan response part:
+   ble_ad_start_scan_response(ad);
++#ifdef CONFIG_PACEMAN
++  ble_ad_set_tx_power_level(ad);
++#endif
+
+   // Add serial number in a Manufacturer Specific AD Type:
+   struct PBL_PACKED ManufacturerSpecificData {
+diff --git a/fw/comm/ble/gap_le_slave_reconnect.c b/fw/comm/ble/gap_le_slave_reconnect.c
+index 18bfd88..9651f8c 100644
+--- a/fw/comm/ble/gap_le_slave_reconnect.c
++++ b/fw/comm/ble/gap_le_slave_reconnect.c
+@@ -7,6 +7,11 @@
+
+ #include "gap_le_advert.h"
+ #include "gap_le_connect.h"
++#ifdef CONFIG_PACEMAN
++#include "services/paceman/paceman_service.h"
++#include "system/passert.h"
++#endif
++
+
+ #include <pbl/logging/logging.h>
+ #include "comm/bt_lock.h"
+@@ -100,6 +105,13 @@ static void prv_evaluate(ReconnectType prev_type) {
+ #endif
+
+     struct pbl_bt_ad_data *ad;
++#ifdef CONFIG_PACEMAN
++    ad = ble_ad_create();
++    ble_ad_set_flags(ad, PBL_BT_AD_FLAGS_GEN_DISCOVERABLE_MASK |
++                          PBL_BT_AD_FLAGS_BR_EDR_NOT_SUPPORTED_MASK);
++    Uuid uuid = {PACEMAN_AD_UUID_BYTES};
++    PBL_ASSERTN(ble_ad_set_service_uuids(ad, &uuid, 1));
++#else
+     if (use_hrm_payload) {
+       // Create adv payload with only flags + HR service UUID. This is enough for various mobile
+       // fitness apps to be able to reconnect to Pebble as BLE HRM.
+@@ -133,6 +145,7 @@ static void prv_evaluate(ReconnectType prev_type) {
+       ad = &payload;
+     }
+
++#endif
+     // Values chosen according to Apple Accessory Design Guidelines
+     const GAPLEAdvertisingJobTerm advert_terms[] = {
+       {
+@@ -158,9 +171,13 @@ static void prv_evaluate(ReconnectType prev_type) {
+         gap_le_advert_schedule(ad, terms, num_terms, prv_advert_job_unscheduled_callback, NULL,
+                                GAPLEAdvertisingJobTagReconnection);
+
++#ifdef CONFIG_PACEMAN
++    ble_ad_destroy(ad);
++#else
+     if (use_hrm_payload) {
+       ble_ad_destroy(ad);
+     }
++#endif
+   } else {
+     prv_unschedule_adv_if_needed();
+   }
+diff --git a/fw/comm/ble/kernel_le_client/ancs/ancs.c b/fw/comm/ble/kernel_le_client/ancs/ancs.c
+index f9224ae..260249e 100644
+--- a/fw/comm/ble/kernel_le_client/ancs/ancs.c
++++ b/fw/comm/ble/kernel_le_client/ancs/ancs.c
+@@ -6,6 +6,10 @@
+ #include "ancs_types.h"
+ #include "ancs_util.h"
+ #include "ancs_definition.h"
++#ifdef CONFIG_PACEMAN
++#include "services/paceman/paceman_service.h"
++#include "comm/ble/gatt_client_accessors.h"
++#endif
+
+ #include "comm/ble/gatt_client_subscriptions.h"
+ #include "comm/ble/gatt_client_operations.h"
+@@ -796,6 +800,10 @@ fail:
+ // Get Notification Attributes request
+
+ static void prv_add_attributes_to_request(struct pbl_buffer *request_buffer) {
++#ifdef CONFIG_PACEMAN
++  const uint8_t attribute = NotificationAttributeIDAppIdentifier;
++  pbl_buffer_add(request_buffer, &attribute, sizeof(attribute));
++#else
+   static const struct PBL_PACKED {
+     NotificationAttributeID positive_action : 8;
+     NotificationAttributeID negative_action : 8;
+@@ -825,6 +833,7 @@ static void prv_add_attributes_to_request(struct pbl_buffer *request_buffer) {
+
+   pbl_buffer_add(request_buffer, (const uint8_t *)&finishing_attributes,
+                  sizeof(finishing_attributes));
++#endif
+ }
+
+ static void prv_get_app_attributes(const ANCSAttribute *app_id) {
+@@ -924,6 +933,15 @@ static void prv_handle_notification_attributes_response(const uint8_t *data, siz
+   }
+
+   const ANCSAttribute *app_id = s_ancs_client->attributes[FetchedNotifAttributeIndexAppID];
++#ifdef CONFIG_PACEMAN
++  struct pbl_bt_device_internal device = gatt_client_characteristic_get_device(
++      s_ancs_client->characteristics[ANCSCharacteristicData]);
++  if (app_id)
++    paceman_service_notification_hint(&device, s_ancs_client->queue->uid,
++                                       app_id->value, app_id->length);
++  prv_reset_and_next();
++  return;
++#endif
+   ANCSAttribute *app_name = ancs_app_name_storage_get(app_id);
+   if (app_name) {
+     prv_put_ancs_message(&app_name);
+@@ -1049,6 +1067,11 @@ static void prv_handle_ns_notification(uint32_t length, const uint8_t *notificat
+
+   NSNotification *nsnotification = (NSNotification *)notification;
+   ANCSProperty properties = ANCSProperty_None;
++#ifdef CONFIG_PACEMAN
++  if (nsnotification->event_id != EventIDNotificationAdded ||
++      (nsnotification->event_flags & EventFlagPreExisting))
++    return;
++#endif
+
+   PBL_LOG_VERBOSE("NSNotification: ");
+   PBL_LOG_VERBOSE("> EventID: %d", nsnotification->event_id);
+diff --git a/fw/comm/ble/kernel_le_client/ancs/ancs_types.h b/fw/comm/ble/kernel_le_client/ancs/ancs_types.h
+index f896f2e..9f7f20f 100644
+--- a/fw/comm/ble/kernel_le_client/ancs/ancs_types.h
++++ b/fw/comm/ble/kernel_le_client/ancs/ancs_types.h
+@@ -156,6 +156,7 @@ typedef enum {
+ static const FetchedAttribute s_fetched_notif_attributes[] = {
+   [FetchedNotifAttributeIndexAppID] =
+       {.id = NotificationAttributeIDAppIdentifier, .flags = 0, .max_length = 0},
++#ifndef CONFIG_PACEMAN
+   [FetchedNotifAttributeIndexTitle] =
+       {.id = NotificationAttributeIDTitle, .flags = 0, .max_length = TITLE_MAX_LENGTH},
+   [FetchedNotifAttributeIndexSubtitle] =
+@@ -179,6 +180,7 @@ static const FetchedAttribute s_fetched_notif_attributes[] = {
+     .flags = FetchedAttributeFlagOptional,
+     .max_length = 0
+   },
++#endif
+ };
+
+ #define NUM_FETCHED_NOTIF_ATTRIBUTES (ARRAY_LENGTH(s_fetched_notif_attributes))
+diff --git a/fw/kernel/events.h b/fw/kernel/events.h
+index b4924fc..965707d 100644
+--- a/fw/kernel/events.h
++++ b/fw/kernel/events.h
+@@ -131,6 +131,7 @@ typedef enum {
+   //! Emitted when the system language changes; i18n_get() already returns the new strings
+   PEBBLE_LANGUAGE_CHANGE_EVENT,
+
++  PEBBLE_PACEMAN_EVENT,
+   PEBBLE_NUM_EVENTS
+ } PebbleEventType;
+
+diff --git a/fw/services/CMakeLists.txt b/fw/services/CMakeLists.txt
+index 76b697b..058104c 100644
+--- a/fw/services/CMakeLists.txt
++++ b/fw/services/CMakeLists.txt
+@@ -1,6 +1,7 @@
+ # SPDX-FileCopyrightText: 2026 Core Devices LLC
+ # SPDX-License-Identifier: Apache-2.0
+
++pbl_add_subdirectory_ifdef(CONFIG_PACEMAN paceman)
+ pbl_add_subdirectory_ifdef(CONFIG_SERVICE_ACCEL_MANAGER accel_manager)
+ pbl_add_subdirectory_ifdef(CONFIG_SERVICE_ACTIVITY activity)
+ pbl_add_subdirectory_ifdef(CONFIG_SERVICE_ALARMS alarms)
+diff --git a/fw/services/Kconfig b/fw/services/Kconfig
+index 044821b..80c9922 100644
+--- a/fw/services/Kconfig
++++ b/fw/services/Kconfig
+@@ -1,6 +1,8 @@
+ # SPDX-FileCopyrightText: 2026 Core Devices LLC
+ # SPDX-License-Identifier: Apache-2.0
+
++rsource "paceman/Kconfig"
++
+ menu "Services"
+
+ rsource "accel_manager/Kconfig"
+diff --git a/fw/services/bluetooth/bluetooth_persistent_storage_normal.c b/fw/services/bluetooth/bluetooth_persistent_storage_normal.c
+index cb14c36..fd7b90a 100644
+--- a/fw/services/bluetooth/bluetooth_persistent_storage_normal.c
++++ b/fw/services/bluetooth/bluetooth_persistent_storage_normal.c
+@@ -2,6 +2,10 @@
+ /* SPDX-License-Identifier: Apache-2.0 */
+
+ #include "pbl/services/bluetooth/bluetooth_persistent_storage.h"
++#ifdef CONFIG_PACEMAN
++#include "services/paceman/paceman_service.h"
++#endif
++
+ #include "pbl/services/bluetooth/bluetooth_persistent_storage_debug.h"
+
+ #include "comm/ble/gap_le_connect.h"
+@@ -706,6 +710,10 @@ pbl_bt_bonding_id_t bt_persistent_storage_store_ble_pairing(
+     return PBL_BT_BONDING_ID_INVALID;
+   }
+
++#ifdef CONFIG_PACEMAN
++  if (!paceman_service_bond_write_allowed(&new_pairing_info->identity))
++    return PBL_BT_BONDING_ID_INVALID;
++#endif
+   // Check if this is an update
+   BtPersistBondingOp op = BtPersistBondingOpDidChange;
+   pbl_bt_bonding_id_t key = prv_get_key_for_sm_pairing_info(new_pairing_info);
+diff --git a/fw/services/bluetooth/bonding.c b/fw/services/bluetooth/bonding.c
+index 5b9d32a..d61d575 100644
+--- a/fw/services/bluetooth/bonding.c
++++ b/fw/services/bluetooth/bonding.c
+@@ -4,6 +4,10 @@
+ #include "comm/ble/gap_le_connection.h"
+ #include "comm/ble/gap_le_device_name.h"
+ #include "comm/bt_lock.h"
++#ifdef CONFIG_PACEMAN
++#include "services/paceman/paceman_service.h"
++#endif
++
+
+ #include "pbl/services/bluetooth/bluetooth_persistent_storage.h"
+ #include "pbl/services/bluetooth/local_addr.h"
+@@ -61,6 +65,9 @@ void pbl_bt_cb_handle_create_bonding(const struct pbl_bt_bonding *bonding,
+   }
+   pbl_bt_bonding_id_t bonding_id = bt_persistent_storage_store_ble_pairing(
+       &bonding->pairing_info, bonding->is_gateway, NULL, should_pin_address, flags);
++#ifdef CONFIG_PACEMAN
++  paceman_service_bond_saved(bonding, bonding_id != PBL_BT_BONDING_ID_INVALID);
++#endif
+   if (bonding_id == PBL_BT_BONDING_ID_INVALID) {
+     PBL_LOG_ERR("Failed to persist new bonding");
+     return;
+diff --git a/fw/services/clock/service.c b/fw/services/clock/service.c
+index 35a0a5a..b88b814 100644
+--- a/fw/services/clock/service.c
++++ b/fw/services/clock/service.c
+@@ -704,6 +704,15 @@ void clock_set_timezone_by_region_id(uint16_t region_id) {
+   prv_update_time_info_and_generate_event(NULL, &tz_info);
+ }
+
++void clock_set_time_with_utc_offset(time_t utc_time, int16_t utc_offset_minutes) {
++  TimezoneInfo zone = {
++    .timezone_id = UNKNOWN_TIMEZONE_ID,
++    .tm_gmtoff = utc_offset_minutes * PBL_SEC_PER_MIN,
++  };
++  strncpy(zone.tm_zone, "UTC", sizeof(zone.tm_zone));
++  prv_update_time_info_and_generate_event(&utc_time, &zone);
++}
++
+ void clock_set_time(time_t utc_time) {
+   prv_update_time_info_and_generate_event(&utc_time, NULL);
+ }
+diff --git a/fw/services/services_normal/service.c b/fw/services/services_normal/service.c
+index 7bad4aa..bc4e1e2 100644
+--- a/fw/services/services_normal/service.c
++++ b/fw/services/services_normal/service.c
+@@ -2,6 +2,10 @@
+ /* SPDX-License-Identifier: Apache-2.0 */
+
+ #include "pbl/services/services_normal.h"
++#ifdef CONFIG_PACEMAN
++#include "services/paceman/paceman_service.h"
++#endif
++
+
+ #include <string.h>
+
+@@ -77,6 +81,9 @@ static bool prv_is_time_valid_for_activity_init(void) {
+
+ void services_normal_early_init(void) {
+   pfs_init(true);
++#ifdef CONFIG_PACEMAN
++  paceman_service_early_init();
++#endif
+ }
+
+ void services_normal_init(void) {
+diff --git a/fw/shell/normal/system_app_registry_list.json b/fw/shell/normal/system_app_registry_list.json
+index a2f2961..4868a63 100644
+--- a/fw/shell/normal/system_app_registry_list.json
++++ b/fw/shell/normal/system_app_registry_list.json
+@@ -23,6 +23,18 @@
+     " 2. Read the directions                                          "
+   ],
+   "system_apps": [
++    {
++      "id": -115,
++      "enum": "PACEMAN_FACE",
++      "md_fn": "paceman_face_get_app_info",
++      "ifdefs": ["CONFIG_PACEMAN"]
++    },
++    {
++      "id": -116,
++      "enum": "PACEMAN_VIEWER",
++      "md_fn": "paceman_viewer_get_app_info",
++      "ifdefs": ["CONFIG_PACEMAN"]
++    },
+     {
+       "id": -69,
+       "enum": "TICTOC",
+diff --git a/fw/shell/normal/watchface.c b/fw/shell/normal/watchface.c
+index 26f9147..e432c60 100644
+--- a/fw/shell/normal/watchface.c
++++ b/fw/shell/normal/watchface.c
+@@ -20,6 +20,14 @@
+ #include <pbl/logging/logging.h>
+ #include "system/passert.h"
+
++#if defined(CONFIG_PACEMAN) && defined(CONFIG_TOUCH)
++#include "kernel/ui/modals/modal_manager.h"
++#include "pbl/drivers/display/display.h"
++#include "pbl/services/touch/touch.h"
++#include "pbl/services/touch/touch_session.h"
++#include "services/paceman/paceman_face_layout.h"
++#endif
++
+ #define QUICK_LAUNCH_HOLD_MS (400)
+ #define BIT_SET              (1)
+ #define BIT_CLEAR            (0)
+@@ -49,6 +57,20 @@ static bool prv_should_ignore_button_click(void) {
+   return false;
+ }
+
++#if defined(CONFIG_PACEMAN) && defined(CONFIG_TOUCH)
++void watchface_handle_paceman_gesture(const GestureEvent *gesture) {
++  if ((gesture->type != GestureEvent_Tap && gesture->type != GestureEvent_DoubleTap) ||
++      app_manager_get_current_app_id() != APP_ID_PACEMAN_FACE ||
++      prv_should_ignore_button_click() || compositor_is_animating() ||
++      (modal_manager_get_enabled() && !(modal_manager_get_properties() & ModalProperty_Unfocused)) ||
++      !touch_service_is_globally_enabled() || !touch_session_is_active() ||
++      !paceman_face_card_contains(gesture->x, gesture->y, DISP_COLS))
++    return;
++  prv_launch_quick_launch_app(APP_ID_PACEMAN_VIEWER, BUTTON_ID_UP, APP_LAUNCH_SYSTEM,
++                             APP_QUICK_LAUNCH_ACTION_TAP);
++}
++#endif
++
+ static void prv_launch_app_via_button(AppLaunchEventConfig *config, ClickRecognizerRef recognizer) {
+   config->common.button = click_recognizer_get_button_id(recognizer);
+   app_manager_put_launch_app_event(config);
+@@ -223,6 +245,13 @@ static void prv_launch_up_down(ClickRecognizerRef recognizer, void *data) {
+     return;
+   }
+
++#ifdef CONFIG_PACEMAN
++  if (button == BUTTON_ID_UP && app_manager_get_current_app_id() == APP_ID_PACEMAN_FACE) {
++    prv_launch_quick_launch_app(APP_ID_PACEMAN_VIEWER, button, APP_LAUNCH_SYSTEM,
++                                APP_QUICK_LAUNCH_ACTION_TAP);
++    return;
++  }
++#endif
+   if (!quick_launch_single_click_is_enabled(button))
+     return;
+   const AppInstallId app_id = quick_launch_single_click_get_app(button);
+diff --git a/include/pbl/services/clock.h b/include/pbl/services/clock.h
+index 6db95ce..a4843ff 100644
+--- a/include/pbl/services/clock.h
++++ b/include/pbl/services/clock.h
+@@ -289,6 +289,9 @@ void clock_set_timezone_by_region_id(uint16_t region_id);
+  */
+ void clock_set_time(time_t utc_time);
+
++/** @brief Set UTC time and a fixed offset, firing the normal clock change event. */
++void clock_set_time_with_utc_offset(time_t utc_time, int16_t utc_offset_minutes);
++
+ /**
+  * @brief Converts a (day, hour, minute) specification to a UTC timestamp occurring in the future.
+  *
+diff --git a/resources/normal/base/resource_map.json b/resources/normal/base/resource_map.json
+index 79c0c61..a7c8c8b 100644
+--- a/resources/normal/base/resource_map.json
++++ b/resources/normal/base/resource_map.json
+@@ -2686,6 +2686,24 @@
+       "type": "pdc",
+       "name": "WEATHER_REPORT_PAPER",
+       "file": "normal/base/images/Pebble_80x80_Weather_report.svg"
++    },
++    {
++      "type": "font",
++      "name": "PACEMAN_DATE_14",
++      "file": "normal/base/ttf/paceman/RobotoCondensed-Medium.ttf",
++      "characterList": "normal/base/ttf/paceman/name_codepoints.json"
++    },
++    {
++      "type": "font",
++      "name": "PACEMAN_TEXT_13",
++      "file": "normal/base/ttf/Roboto-Condensed.ttf",
++      "characterList": "normal/base/ttf/basic_latin_codepoints.json"
++    },
++    {
++      "type": "font",
++      "name": "PACEMAN_STATUS_21",
++      "file": "normal/base/ttf/Roboto-Bold.ttf",
++      "characterList": "normal/base/ttf/basic_latin_codepoints.json"
+     }
+   ],
+   "timeline": [
+diff --git a/subsys/bluetooth/advert.c b/subsys/bluetooth/advert.c
+index 158b9dd..0cf7301 100644
+--- a/subsys/bluetooth/advert.c
++++ b/subsys/bluetooth/advert.c
+@@ -8,6 +8,10 @@
+ #include <pbl/bluetooth/gatt.h>
+ #include <pbl/bluetooth/pairing_confirm.h>
+ #include <host/ble_gap.h>
++#ifdef CONFIG_PACEMAN
++#include "services/paceman/paceman_service.h"
++#endif
++
+ #include <kernel/pbl_malloc.h>
+ #include <os/os_mbuf.h>
+ #include <pbl/logging/logging.h>
+@@ -316,6 +320,10 @@ static void prv_handle_notification_tx_event(struct ble_gap_event *event) {
+ }
+
+ static int prv_handle_repeat_pairing_event(struct ble_gap_event *event) {
++#ifdef CONFIG_PACEMAN
++  if (!paceman_service_pairing_allowed())
++    return BLE_GAP_REPEAT_PAIRING_IGNORE;
++#endif
+   // In recovery mode there is no UI that allows to manually delete a pairing,
+   // so we unconditionally enable repeat pairing. In main firmware, only allow
+   // repeat pairing if using secure connections and we support user confirmation.
+@@ -373,6 +381,12 @@ static int prv_handle_gap_event(struct ble_gap_event *event, void *arg) {
+       break;
+     case BLE_GAP_EVENT_PASSKEY_ACTION:
+       PBL_LOG_DBG("BLE_GAP_EVENT_PASSKEY_ACTION");
++#ifdef CONFIG_PACEMAN
++      if (!paceman_service_pairing_allowed()) {
++        ble_gap_terminate(event->passkey.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
++        break;
++      }
++#endif
+       prv_handle_passkey_event(event);
+       break;
+     case BLE_GAP_EVENT_IDENTITY_RESOLVED:
+diff --git a/subsys/bluetooth/init.c b/subsys/bluetooth/init.c
+index ef2d0bb..ff2e6b8 100644
+--- a/subsys/bluetooth/init.c
++++ b/subsys/bluetooth/init.c
+@@ -2,6 +2,10 @@
+ /* SPDX-License-Identifier: Apache-2.0 */
+
+ #include "gh3x2x_tuning_service.h"
++#ifdef CONFIG_PACEMAN
++#include "services/paceman/paceman_service.h"
++#endif
++
+
+ #include <pbl/bluetooth/id_addr.h>
+ #include <pbl/bluetooth/init.h>
+@@ -175,6 +179,9 @@ bool pbl_bt_start(struct pbl_bt_config *config) {
+   pebble_pairing_service_init();
+   ble_svc_bas_init();
+   ppog_reversed_service_init();
++#ifdef CONFIG_PACEMAN
++  paceman_service_register();
++#endif
+
+ #ifdef CONFIG_BT_GH3X2X_TUNING_SERVICE
+   gh3x2x_tuning_service_init();
+diff --git a/subsys/bluetooth/nimble_store.c b/subsys/bluetooth/nimble_store.c
+index 851e46a..d6f9127 100644
+--- a/subsys/bluetooth/nimble_store.c
++++ b/subsys/bluetooth/nimble_store.c
+@@ -2,6 +2,10 @@
+ /* SPDX-License-Identifier: Apache-2.0 */
+
+ #include <pbl/bluetooth/bonding_sync.h>
++#ifdef CONFIG_PACEMAN
++#include "services/paceman/paceman_service.h"
++#endif
++
+ #include <pbl/bluetooth/gap_le_connect.h>
+ #include <pbl/bluetooth/sm_types.h>
+ #include <host/ble_hs.h>
+@@ -248,6 +252,12 @@ static int prv_nimble_store_write_sec(const int obj_type,
+     return BLE_HS_ENOTSUP;
+   }
+
++#ifdef CONFIG_PACEMAN
++  struct pbl_bt_device_internal device;
++  nimble_addr_to_pebble_device(&value_sec->peer_addr, &device);
++  if (!paceman_service_bond_write_allowed(&device))
++    return BLE_HS_EAUTHEN;
++#endif
+   prv_nimble_store_upsert_sec(obj_type, value_sec);
+
+   NimbleStoreSecWrittenContext *ctx = kernel_malloc_check(sizeof(*ctx));
+@@ -546,6 +556,9 @@ static void prv_convert_bonding_local_to_store_val(const struct pbl_bt_bonding *
+ }
+
+ void pbl_bt_handle_host_added_bonding(const struct pbl_bt_bonding *bonding) {
++#ifdef CONFIG_PACEMAN
++  paceman_service_bond_saved(bonding, true);
++#endif
+   struct ble_store_value_sec value_sec;
+
+   PBL_LOG_INFO("Host added bonding: addr=" PBL_BT_ADDR_FMT " random=%u",
+@@ -564,6 +577,9 @@ void pbl_bt_handle_host_added_bonding(const struct pbl_bt_bonding *bonding) {
+ }
+
+ void pbl_bt_handle_host_removed_bonding(const struct pbl_bt_bonding *bonding) {
++#ifdef CONFIG_PACEMAN
++  paceman_service_bond_removed(&bonding->pairing_info.identity);
++#endif
+   BleStoreValueSec *s_sec;
+   struct ble_store_key_sec key_sec;
+
+diff --git a/subsys/bluetooth/nimble_type_conversions.c b/subsys/bluetooth/nimble_type_conversions.c
+index a69b65b..8c956d6 100644
+--- a/subsys/bluetooth/nimble_type_conversions.c
++++ b/subsys/bluetooth/nimble_type_conversions.c
+@@ -24,6 +24,6 @@ void pebble_device_to_nimble_addr(const struct pbl_bt_device_internal *device,
+ void nimble_addr_to_pebble_device(const ble_addr_t *stack_addr,
+                                   struct pbl_bt_device_internal *host_addr) {
+   nimble_addr_to_pebble_addr(stack_addr, &host_addr->address);
+-  host_addr->is_random_address = stack_addr->type == BLE_ADDR_RANDOM;
++  host_addr->is_random_address = (stack_addr->type & 1) == BLE_ADDR_RANDOM;
+   host_addr->is_classic = false;
+ }
+diff --git a/fw/kernel/event_loop.c b/fw/kernel/event_loop.c
+index f0bb36f..2a9493f 100644
+--- a/fw/kernel/event_loop.c
++++ b/fw/kernel/event_loop.c
+@@ -379,6 +379,9 @@ static PBL_NOINLINE void prv_minimal_event_handler(PebbleEvent *e) {
+           light_enable_interaction();
+         }
+       }
++#if defined(CONFIG_PACEMAN) && defined(CONFIG_TOUCH)
++      watchface_handle_paceman_gesture(&e->gesture.event);
++#endif
+       return;
+     }
+
+diff --git a/fw/shell/normal/watchface.h b/fw/shell/normal/watchface.h
+index c8fadc2..f180541 100644
+--- a/fw/shell/normal/watchface.h
++++ b/fw/shell/normal/watchface.h
+@@ -11,6 +11,10 @@ void watchface_init(void);
+
+ void watchface_handle_button_event(PebbleEvent *e);
+
++#if defined(CONFIG_PACEMAN) && defined(CONFIG_TOUCH)
++void watchface_handle_paceman_gesture(const GestureEvent *gesture);
++#endif
++
+ void watchface_set_default_install_id(AppInstallId id);
+
+ AppInstallId watchface_get_default_install_id(void);

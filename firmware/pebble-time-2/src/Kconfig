@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+config PACEMAN
+    bool "Paceman accessory prototype"
+    depends on SERVICE_SERVICES_NORMAL && BT
+    help
+      Enable the Paceman Bluetooth accessory service and built-in watchface
+      in normal PebbleOS firmware. Recovery firmware remains stock.

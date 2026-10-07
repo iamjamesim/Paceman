@@ -99,9 +99,9 @@ struct WatchPreferences: Codable, Equatable {
                   timeFormat: (try? c.decode(WatchTimeFormat.self, forKey: .timeFormat)) ?? .system)
     }
     private static func key(_ id: String) -> String { "watch-preferences." + id }
-    static func load(_ id: String, defaults: UserDefaults = .standard, migrateLegacy: Bool = false) -> Self {
+    static func load(_ id: String, defaults: UserDefaults = .standard, migrateLegacy: Bool = false, defaultSound: Bool = true) -> Self {
         if let data = defaults.data(forKey: key(id)), let value = try? JSONDecoder().decode(Self.self, from: data) { return value }
-        var value = Self()
+        var value = Self(sound: defaultSound)
         if migrateLegacy {
             if defaults.object(forKey: "watch-enabled") != nil { value.updates = defaults.bool(forKey: "watch-enabled") }
             if defaults.object(forKey: "sound-enabled") != nil { value.sound = defaults.bool(forKey: "sound-enabled") }
@@ -164,13 +164,139 @@ enum WatchConnectionPresentation: String {
     }
 }
 
-final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+enum AccessoryKind: String, CaseIterable {
+    case pebble, esp32, compatible
+    var name: String {
+        switch self { case .pebble: return "Pebble Time 2"; case .esp32: return "ESP32 watch"; case .compatible: return "Compatible accessory" }
+    }
+    var firmwarePath: String {
+        self == .pebble ? "pebble-time-2" : self == .esp32 ? "esp32-watch" : ""
+    }
+}
+
+/// One system discovery session; each approved device has its own BLE lifecycle.
+private final class AccessorySetup {
+    static let shared = AccessorySetup()
+    let session = ASAccessorySession()
+    private final class WeakLink {
+        weak var value: WatchLink?
+        init(_ value: WatchLink) { self.value = value }
+    }
+    private var links: [WeakLink] = []
+    private var active = false
+    private var activated = false
+    func register(_ link: WatchLink) {
+        links.removeAll { $0.value == nil }
+        if !links.contains(where: { $0.value === link }) { links.append(WeakLink(link)) }
+        if activated { link.setupActivated(); return }
+        guard !active else { return }
+        active = true
+        session.activate(on: .main) { [weak self] event in
+            guard let self else { return }
+            if event.eventType == .activated { self.activated = true }
+            for item in self.links { item.value?.handleSetupEvent(event) }
+        }
+    }
+    func alreadyManaged(_ identifier: UUID, except link: WatchLink) -> Bool {
+        links.contains { $0.value !== link && $0.value?.bluetoothID == identifier }
+    }
+}
+
+@MainActor
+final class WatchAccessories: ObservableObject {
+    @Published private(set) var links: [WatchLink]
+    @Published var selectedID: String
+    private var observers: [AnyCancellable] = []
+    var onWatchEvent: (() -> Void)?
+    var onAdded: ((WatchLink) -> Void)?
+    private let preview: Bool
+    var selected: WatchLink { links.first { $0.id == selectedID } ?? links[0] }
+    var paired: [WatchLink] { links.filter(\.paired) }
+    var saved: [WatchLink] { links.filter { $0.hasReceipt || $0.paired || $0.bluetoothID != nil } }
+    var relayRequested: Bool { links.contains { $0.relayRequested } }
+    init(preview: Bool = false) {
+        self.preview = preview
+        let ids = preview ? ["primary"] : UserDefaults.standard.stringArray(forKey: "accessory-slots") ?? ["primary"]
+        let initialLinks = (ids.isEmpty ? ["primary"] : ids).map { WatchLink(id: $0, preview: preview) }
+        links = initialLinks
+        selectedID = initialLinks[0].id
+        observeLinks()
+    }
+    func beginSetup(_ kind: AccessoryKind) {
+        if let unused = links.first(where: { !$0.paired && $0.bluetoothID == nil && !$0.hasReceipt && !$0.setupPhase.inProgress }) {
+            selectedID = unused.id
+        } else {
+            let link = WatchLink(id: UUID().uuidString, preview: preview)
+            links.append(link)
+            selectedID = link.id
+            if !preview { UserDefaults.standard.set(links.map(\.id), forKey: "accessory-slots") }
+            observeLinks()
+            onAdded?(link)
+        }
+        selected.kind = kind
+        selected.prepareForSetup()
+    }
+    private func observeLinks() {
+        observers = links.map { link in
+            link.onWatchEvent = { [weak self] in self?.onWatchEvent?() }
+            return link.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        }
+    }
+    @MainActor func waitForDelivery(of identity: String) async -> Bool {
+        let targets = links.filter { $0.enabled && $0.ready }
+        guard !targets.isEmpty else { return false }
+        var delivered = false
+        for link in targets { delivered = await link.waitForDelivery(of: identity) || delivered }
+        return delivered
+    }
+}
+
+final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate, Identifiable {
+    let id: String
+    private let isPreview: Bool
+    @Published private var previewName: String?
+    @MainActor let phoneWeather: PhoneWeather
+    private var receiptKey: String { id == "primary" ? "watch-pairing-receipt" : "accessory-receipt." + id }
+    private var knownKey: String { "accessory-owned-id." + id }
+    private var centralKey: String { "accessory-central-id." + id }
+    private var pendingKey: String { "accessory-pending-id." + id }
+    private func deliveryKey(_ name: String) -> String {
+        id == "primary" ? name : "accessory." + id + "." + name
+    }
+    var bluetoothID: UUID? { pairingReceipt?.bluetoothID ?? pendingIdentifier ?? UserDefaults.standard.string(forKey: pendingKey).flatMap(UUID.init(uuidString:)) }
+    var hasReceipt: Bool { pairingReceipt != nil }
+    @Published var kind: AccessoryKind = .compatible {
+        didSet { if !isPreview { UserDefaults.standard.set(kind.rawValue, forKey: "accessory-kind." + id) } }
+    }
+    var displayName: String {
+        previewName ?? UserDefaults.standard.string(forKey: "accessory-name." + id) ?? kind.name
+    }
+    func rename(_ name: String) {
+        guard !isPreview else { return }
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        objectWillChange.send()
+        if name.isEmpty { UserDefaults.standard.removeObject(forKey: "accessory-name." + id) }
+        else { UserDefaults.standard.set(String(name.prefix(80)), forKey: "accessory-name." + id) }
+    }
+    private var knownWatchID: String? {
+        UserDefaults.standard.string(forKey: knownKey) ??
+            (id == "primary" ? UserDefaults.standard.string(forKey: "owned-watch-id") : nil)
+    }
+    private func knowsOwnership(_ deviceID: String) -> Bool {
+        knownWatchID == deviceID || UserDefaults.standard.stringArray(forKey: "owned-accessory-ids")?.contains(deviceID) == true
+    }
+    private func rememberOwnership(_ deviceID: String) {
+        var ids = Set(UserDefaults.standard.stringArray(forKey: "owned-accessory-ids") ?? [])
+        if let knownWatchID { ids.insert(knownWatchID) }
+        ids.insert(deviceID)
+        UserDefaults.standard.set(Array(ids).sorted(), forKey: "owned-accessory-ids")
+        UserDefaults.standard.set(deviceID, forKey: knownKey)
+    }
     static let service = CBUUID(string: "7f510001-1b15-4f0d-b7a5-4cf3a2c98ee1")
-    @MainActor private static func pickerProductImage() -> UIImage? {
+    @MainActor private static func pickerProductImage(kind: AccessoryKind) -> UIImage? {
         // Use the same illustration as the watch screens. The system picker
         // displays the transparent image in a 180 × 120 point container.
-        let artwork = WatchIllustration(theme: ThemeFamily.ayu.phone(dark: true),
-                                         paired: true, state: .working)
+        let artwork = AccessoryIllustration(kind: kind, theme: ThemeFamily.ayu.glance)
             .frame(width: 80, height: 118)
             .frame(width: 180, height: 120)
         let renderer = ImageRenderer(content: artwork)
@@ -181,6 +307,33 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private let profileUUID = CBUUID(string: "7f510002-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private let identityUUID = CBUUID(string: "7f510003-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private let activityUUID = CBUUID(string: "7f510004-1b15-4f0d-b7a5-4cf3a2c98ee1")
+    private let sourcesUUID = CBUUID(string: "7f510006-1b15-4f0d-b7a5-4cf3a2c98ee1")
+    private var sourceFeed: CBCharacteristic?
+    private var desiredSources: [WatchSourceCard] = []
+    private var pendingSources: Data?
+    private var acceptedSources: Data?
+    private var supportsSourceCards: Bool { capabilities & (1 << 12) != 0 }
+    private var sourcePacket: Data { WatchWire.sources(desiredSources, rich: capabilities & (1 << 13) != 0) }
+
+    private func resetSourceFeed() {
+        sourceFeed = nil
+        pendingSources = nil
+        acceptedSources = nil
+    }
+
+    func updateSources(_ cards: [WatchSourceCard]) {
+        desiredSources = cards
+        writeSourcesIfNeeded()
+    }
+
+    private func writeSourcesIfNeeded() {
+        guard supportsSourceCards, enabled, ready, !profileWritePending, !writePending,
+              pendingSources == nil, let sourceFeed, let peripheral else { return }
+        let packet = sourcePacket
+        guard packet != acceptedSources else { return }
+        pendingSources = packet
+        peripheral.writeValue(packet, for: sourceFeed, type: .withResponse)
+    }
     private let notificationUUID = CBUUID(string: "7f510005-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private var notificationSync: CBCharacteristic?
     private var notificationSequence: UInt32?
@@ -188,6 +341,10 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     @Published private(set) var notificationSharingObservation: Bool?
     var notificationSharingStatus: Bool? { ready ? notificationSharingObservation : nil }
     var supportsNotificationSync: Bool { capabilities & (1 << 9) != 0 }
+    var supportsWeather: Bool { capabilities & (1 << 4) != 0 }
+    var supportsSound: Bool { capabilities & (1 << 7) != 0 }
+    var supportsTimeFormat: Bool { capabilities & (1 << 1) != 0 }
+    var supportsWorkingSound: Bool { capabilities & (1 << 11) != 0 }
     @Published var status = "No watch selected"
     @Published var ready = false
     @Published var enabled = false
@@ -204,7 +361,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     @Published var lastDelivered: Date?
     var onWatchEvent: (() -> Void)?
     private var central: CBCentralManager!
-    private let setupSession = ASAccessorySession()
+    private var setupSession: ASAccessorySession { AccessorySetup.shared.session }
     private var setupSessionActive = false
     private var accessoryWaitingForPickerDismissal: UUID?
     private var peripheral: CBPeripheral?
@@ -252,26 +409,37 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private var handshakeTimeout: DispatchWorkItem?
     private var preparing = false
     private var pairingReceipt: WatchPairingReceipt?
-    private static let receiptKey = "watch-pairing-receipt"
     private static let centralIDKey = "watch-central-restoration-id"
 
     var connectionPresentation: WatchConnectionPresentation {
-        .resolve(updates: updatesEnabled, failed: setupPhase == .failed, bluetooth: central?.state,
+        if isPreview { return !updatesEnabled ? .off : ready ? .connected : .disconnected }
+        return .resolve(updates: updatesEnabled, failed: setupPhase == .failed, bluetooth: central?.state,
                  ready: ready, preparing: preparing,
                  recovering: enabled &&
                     (peripheral?.state == .connecting || peripheral?.state == .disconnecting))
     }
     var connectionStatus: String { connectionPresentation.rawValue }
 
-    init(preview: Bool = false) {
+    @MainActor init(id: String = "primary", preview: Bool = false) {
+        self.id = id
+        self.isPreview = preview
+        self.phoneWeather = PhoneWeather()
         super.init()
+        let savedKind = UserDefaults.standard.string(forKey: "accessory-kind." + id)
+        kind = AccessoryKind(rawValue: savedKind ?? "") ?? (id == "primary" ? .esp32 : .compatible)
+        pendingIdentifier = UserDefaults.standard.string(forKey: pendingKey).flatMap(UUID.init(uuidString:))
         if preview { status = "Appearance preview"; return }
         owner = Vault.load(UUID.self, key: "watch-owner")
-        if let data = UserDefaults.standard.data(forKey: Self.receiptKey) {
+        if let data = UserDefaults.standard.data(forKey: receiptKey) {
             pairingReceipt = try? JSONDecoder().decode(WatchPairingReceipt.self, from: data)
         }
         if let receipt = pairingReceipt {
-            let preferences = WatchPreferences.load(receipt.watchID, migrateLegacy: true)
+            if knownWatchID == receipt.watchID && owner != nil { rememberOwnership(receipt.watchID) }
+            if savedKind == nil {
+                kind = (receipt.capabilities ?? 0) & (1 << 12) != 0 ? .pebble : .esp32
+            }
+            capabilities = receipt.capabilities ?? 0
+            let preferences = WatchPreferences.load(receipt.watchID, migrateLegacy: true, defaultSound: kind != .pebble)
             supportsBrightness = (receipt.profileVersion ?? 1) >= 3 && (receipt.capabilities ?? 0) & (1 << 5) != 0
             enabled = preferences.updates
             updatesEnabled = preferences.updates
@@ -284,65 +452,97 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         if pairingReceipt != nil { activateSetupSession() }
     }
 
-    func prepareForSetup() { activateSetupSession() }
+    func prepareForSetup() { if !isPreview { activateSetupSession() } }
+
+    #if DEBUG
+    @MainActor func showPreview(kind: AccessoryKind, connected: Bool = true, name: String? = nil) {
+        guard isPreview else { return }
+        self.kind = kind
+        previewName = name
+        paired = true
+        enabled = true
+        updatesEnabled = true
+        ready = connected
+        setupResolved = true
+        setupPhase = connected ? .idle : .failed
+        lastDelivered = Date().addingTimeInterval(connected ? 0 : -720)
+        capabilities = (1 << 1) | (1 << 6) | (1 << 7) | (1 << 9) | (1 << 12) | (1 << 13)
+        if kind == .esp32 { capabilities |= (1 << 4) | (1 << 5) | (1 << 11) }
+        supportsBrightness = kind == .esp32
+        soundEnabled = kind != .pebble
+    }
+    #endif
 
     private func activateSetupSession() {
         guard !setupSessionActive else { return }
         setupSessionActive = true
-        setupSession.activate(on: .main) { [weak self] event in
-            guard let self else { return }
-            switch event.eventType {
-            case .activated:
-                self.setupResolved = true
-                self.pickerReady = true
-                self.configured = !self.setupSession.accessories.isEmpty
-                self.restorePairingState()
-                if self.enabled, let identifier = self.preferredAccessoryID {
-                    self.connect(identifier)
-                }
-            case .accessoryAdded:
-                Diagnostics.shared.record("watch_picker_accessory_added")
-                self.configured = true
-                if let identifier = event.accessory?.bluetoothIdentifier {
-                    self.paired = self.pairingReceipt?.bluetoothID == identifier && self.paired
-                    self.pendingIdentifier = identifier
-                    self.accessoryWaitingForPickerDismissal = identifier
-                    self.setupPhase = .connecting
-                    self.status = "Finish setup in the iPhone sheet."
-                    self.enabled = true
-                    self.updatesEnabled = true
-                }
-            case .pickerDidDismiss:
-                Diagnostics.shared.record("watch_picker_dismissed")
-                if let identifier = self.accessoryWaitingForPickerDismissal {
-                    self.accessoryWaitingForPickerDismissal = nil
-                    self.setupPhase = .connecting
-                    if self.central?.state == .poweredOff {
-                        self.status = "Waiting for Bluetooth access. Check that Bluetooth is on in iPhone Settings."
-                    } else {
-                        self.status = "Connecting to your watch…"
-                        self.startPairingTimeout()
-                    }
-                    self.connect(identifier)
-                } else if self.setupPhase == .selecting { self.setupPhase = .idle }
-            case .pickerSetupFailed:
-                Diagnostics.shared.record("watch_picker_setup_failed")
-                self.setEnabled(false, userInitiated: true)
-                self.status = "Pairing did not finish. Keep your watch nearby and try again."
-                self.setupPhase = .failed
-            case .accessoryRemoved:
-                self.configured = !self.setupSession.accessories.isEmpty
-                if let identifier = event.accessory?.bluetoothIdentifier {
-                    self.finishRemoval(identifier)
-                }
-            case .invalidated:
-                self.accessoryWaitingForPickerDismissal = nil
-                self.setupResolved = true
-                self.pickerReady = false
-                self.status = "Watch setup is unavailable. Reopen the app and try again."
-                self.setupPhase = .failed
-            default: break
+        AccessorySetup.shared.register(self)
+    }
+
+    fileprivate func setupActivated() {
+        setupResolved = true
+        pickerReady = true
+        configured = preferredAccessoryID != nil
+        restorePairingState()
+        if hasReceipt && !configured {
+            stopForTerminalFailure("Accessory access was removed. Connect again to restore access.")
+        } else if enabled, let identifier = preferredAccessoryID { connect(identifier) }
+    }
+
+    fileprivate func handleSetupEvent(_ event: ASAccessoryEvent) {
+        switch event.eventType {
+        case .activated:
+            self.setupActivated()
+        case .accessoryAdded:
+            guard self.setupPhase == .selecting else { return }
+            if let identifier = event.accessory?.bluetoothIdentifier,
+               AccessorySetup.shared.alreadyManaged(identifier, except: self) {
+                self.stopForTerminalFailure("This accessory is already in Paceman. Choose a different device.")
+                return
             }
+            Diagnostics.shared.record("watch_picker_accessory_added")
+            self.configured = true
+            if let identifier = event.accessory?.bluetoothIdentifier {
+                self.paired = self.pairingReceipt?.bluetoothID == identifier && self.paired
+                self.pendingIdentifier = identifier
+                UserDefaults.standard.set(identifier.uuidString, forKey: self.pendingKey)
+                self.accessoryWaitingForPickerDismissal = identifier
+                self.setupPhase = .connecting
+                self.status = "Finish setup in the iPhone sheet."
+                self.enabled = true
+                self.updatesEnabled = true
+            }
+        case .pickerDidDismiss:
+            Diagnostics.shared.record("watch_picker_dismissed")
+            if let identifier = self.accessoryWaitingForPickerDismissal {
+                self.accessoryWaitingForPickerDismissal = nil
+                self.setupPhase = .connecting
+                if self.central?.state == .poweredOff {
+                    self.status = "Waiting for Bluetooth access. Check that Bluetooth is on in iPhone Settings."
+                } else {
+                    self.status = "Connecting to your watch…"
+                    self.startPairingTimeout()
+                }
+                self.connect(identifier)
+            } else if self.setupPhase == .selecting { self.setupPhase = .idle }
+        case .pickerSetupFailed:
+            guard self.setupPhase.inProgress && !self.paired else { return }
+            Diagnostics.shared.record("watch_picker_setup_failed")
+            self.setEnabled(false, userInitiated: true)
+            self.status = "Pairing did not finish. Keep your watch nearby and try again."
+            self.setupPhase = .failed
+        case .accessoryRemoved:
+            self.configured = self.preferredAccessoryID != nil
+            if let identifier = event.accessory?.bluetoothIdentifier {
+                self.finishRemoval(identifier)
+            }
+        case .invalidated:
+            self.accessoryWaitingForPickerDismissal = nil
+            self.setupResolved = true
+            self.pickerReady = false
+            self.status = "Watch setup is unavailable. Reopen the app and try again."
+            self.setupPhase = .failed
+        default: break
         }
     }
 
@@ -350,14 +550,14 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         let allowed = setupSession.accessories.compactMap(\.bluetoothIdentifier)
         if let pendingIdentifier, allowed.contains(pendingIdentifier) { return pendingIdentifier }
         if let peripheral, allowed.contains(peripheral.identifier) { return peripheral.identifier }
-        if let id = pairingReceipt?.bluetoothID, allowed.contains(id) { return id }
-        return allowed.first
+        if let id = bluetoothID, allowed.contains(id) { return id }
+        return nil
     }
 
     private func restorePairingState() {
         paired = pairingReceipt?.canRestore(
             authorizedIDs: setupSession.accessories.compactMap(\.bluetoothIdentifier),
-            ownedWatchID: UserDefaults.standard.string(forKey: "owned-watch-id"), hasOwner: owner != nil) == true
+            ownedWatchID: pairingReceipt.flatMap { knowsOwnership($0.watchID) ? $0.watchID : nil }, hasOwner: owner != nil) == true
     }
 
     private func startPairingTimeout() {
@@ -392,14 +592,12 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         status = "Select your watch in the nearby-devices picker."
         let descriptor = ASDiscoveryDescriptor()
         descriptor.bluetoothServiceUUID = Self.service
-        // The shared suffix discovers watches with either the original or current BLE name.
-        descriptor.bluetoothNameSubstring = "Watch"
-        guard let productImage = Self.pickerProductImage() else {
+        guard let productImage = Self.pickerProductImage(kind: kind) else {
             status = "Watch setup is unavailable. Try again."
             setupPhase = .failed
             return
         }
-        let item = ASPickerDisplayItem(name: "Paceman",
+        let item = ASPickerDisplayItem(name: kind.name,
             productImage: productImage, descriptor: descriptor)
         setupSession.showPicker(for: [item]) { [weak self] error in
             if error != nil {
@@ -413,9 +611,10 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     func removeWatch(completion: @escaping (Bool) -> Void) {
-        guard pickerReady, let identifier = pairingReceipt?.bluetoothID,
-              let accessory = setupSession.accessories.first(where: { $0.bluetoothIdentifier == identifier }) else {
-            completion(false)
+        guard pickerReady, let identifier = bluetoothID else { completion(false); return }
+        guard let accessory = setupSession.accessories.first(where: { $0.bluetoothIdentifier == identifier }) else {
+            finishRemoval(identifier)
+            completion(true)
             return
         }
         setupSession.removeAccessory(accessory) { [weak self] error in
@@ -429,17 +628,22 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     private func finishRemoval(_ identifier: UUID) {
-        guard let receipt = pairingReceipt, receipt.bluetoothID == identifier else { return }
+        guard bluetoothID == identifier else { return }
         setEnabled(false, userInitiated: false)
-        WatchPreferences.remove(receipt.watchID)
-        WatchDeliveryHistory.remove(receipt.watchID)
-        UserDefaults.standard.removeObject(forKey: "delivered-event-history")
-        UserDefaults.standard.removeObject(forKey: "delivered-state")
-        WeatherPreferences.remove(receipt.watchID)
+        if let receipt = pairingReceipt {
+            WatchPreferences.remove(receipt.watchID)
+            WatchDeliveryHistory.remove(receipt.watchID)
+            WeatherPreferences.remove(receipt.watchID)
+        }
+        for key in ["delivered-event-history", "delivered-state", "delivered-event", "delivered-revision"] {
+            UserDefaults.standard.removeObject(forKey: deliveryKey(key))
+        }
         weather = nil
         pairingReceipt = nil
-        UserDefaults.standard.removeObject(forKey: Self.receiptKey)
+        UserDefaults.standard.removeObject(forKey: pendingKey)
+        UserDefaults.standard.removeObject(forKey: receiptKey)
         paired = false
+        configured = false
         updatesEnabled = false
         soundEnabled = true
         brightness = 50
@@ -447,9 +651,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         supportsBrightness = false
         lastDelivered = nil
         setupPhase = .idle
-        // Retain ownership credentials so this phone can pair again. Removal of
-        // iOS accessory access is not a factory reset or an ownership transfer.
-        status = "Watch removed"
+        // Removing phone access leaves firmware ownership available for re-pairing.
+        status = "Accessory removed"
         onWatchEvent?()
     }
 
@@ -492,6 +695,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             preparing = false
             handshakeTimeout?.cancel()
             activity = nil
+            resetSourceFeed()
             profile = nil
             notificationSync = nil
             notificationSequence = nil
@@ -513,7 +717,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     private func startBluetooth() {
         guard central == nil else { return }
-        let restorationID = UserDefaults.standard.string(forKey: Self.centralIDKey) ?? "AgentCompanion.watch"
+        let restorationID = UserDefaults.standard.string(forKey: centralKey) ?? (id == "primary" ? UserDefaults.standard.string(forKey: Self.centralIDKey) ?? "AgentCompanion.watch" : "AgentCompanion.accessory." + id)
         central = CBCentralManager(delegate: self, queue: .main,
             options: [CBCentralManagerOptionRestoreIdentifierKey: restorationID])
     }
@@ -569,6 +773,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         preparing = false
         handshakeTimeout?.cancel()
         activity = nil
+        resetSourceFeed()
         profile = nil
         notificationSync = nil
         notificationSequence = nil
@@ -590,6 +795,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             ready = false
             preparing = false
             activity = nil
+            resetSourceFeed()
             profile = nil
             notificationSync = nil
             notificationSequence = nil
@@ -638,7 +844,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
         guard central === self.central else { return }
         Diagnostics.shared.record("ble_restored")
-        guard enabled, let restored = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first else { return }
+        guard enabled, let restored = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?
+            .first(where: { $0.identifier == bluetoothID }) else { return }
         peripheral = restored
         pendingIdentifier = restored.identifier
         restored.delegate = self
@@ -664,6 +871,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         notificationSharingObservation = nil
         ready = false
         activity = nil
+        resetSourceFeed()
         profile = nil
         notificationSync = nil
         notificationSequence = nil
@@ -723,6 +931,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         handshakeTimeout?.cancel()
         writePending = false
         activity = nil
+        resetSourceFeed()
         profile = nil
         notificationSync = nil
         notificationSequence = nil
@@ -761,7 +970,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             stopForTerminalFailure("Watch service unavailable"); return
         }
         Diagnostics.shared.record("ble_characteristics_requested")
-        peripheral.discoverCharacteristics([profileUUID, identityUUID, activityUUID, notificationUUID], for: service)
+        peripheral.discoverCharacteristics([profileUUID, identityUUID, activityUUID, notificationUUID, sourcesUUID], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -776,6 +985,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         }
         self.profile = profile
         self.activity = activity
+        sourceFeed = characteristics.first(where: { $0.uuid == sourcesUUID })
         notificationSync = characteristics.first(where: { $0.uuid == notificationUUID })
         notificationSequence = nil
         observeNotificationSharing(peripheral)
@@ -801,10 +1011,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         if characteristic.uuid == identityUUID {
             do {
                 let identity = try WatchWire.identity(value)
-                let known = UserDefaults.standard.string(forKey: "owned-watch-id")
                 // Never adopt an owned watch simply because a BLE connection succeeded.
-                guard !identity.owned || (known == identity.id && owner != nil) else {
-                    stopForTerminalFailure("This watch belongs to another computer. It needs an ownership transfer before you can pair it with this phone."); return
+                guard !identity.owned || (knowsOwnership(identity.id) && owner != nil) else {
+                    stopForTerminalFailure("This watch is owned by another phone. It needs an ownership transfer before you can pair it with this phone."); return
                 }
                 guard identity.capabilities & (1 << 6) != 0 else { stopForTerminalFailure("Watch lacks activity support"); return }
                 if owner == nil {
@@ -816,7 +1025,11 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 capabilities = identity.capabilities
                 profileVersion = identity.profileVersion
                 supportsBrightness = profileVersion >= 3 && capabilities & (1 << 5) != 0
-                let preferences = WatchPreferences.load(identity.id)
+                var preferences = WatchPreferences.load(identity.id, defaultSound: kind != .pebble)
+                if kind == .pebble && (pairingReceipt?.capabilities ?? 0) & (1 << 7) == 0 {
+                    preferences.sound = false
+                    preferences.save(identity.id)
+                }
                 brightness = preferences.brightness
                 timeFormat = preferences.timeFormat
                 guard owner != nil, profile != nil else { return }
@@ -852,8 +1065,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             if let deviceID {
                 let receipt = WatchPairingReceipt(bluetoothID: peripheral.identifier, watchID: deviceID, profileVersion: profileVersion, capabilities: capabilities)
                 if receipt != pairingReceipt, let data = try? JSONEncoder().encode(receipt) {
-                    UserDefaults.standard.set(data, forKey: Self.receiptKey)
+                    UserDefaults.standard.set(data, forKey: receiptKey)
                     pairingReceipt = receipt
+                    UserDefaults.standard.removeObject(forKey: pendingKey)
                     let preferences = WatchPreferences.load(receipt.watchID)
                     soundEnabled = preferences.sound
                     lastDelivered = WatchDeliveryHistory.load(receipt.watchID)
@@ -892,6 +1106,10 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 activitySubscribed: activity?.isNotifying == true,
                 notificationSyncRequired: supportsNotificationSync,
                 notificationSyncSubscribed: notificationSync?.isNotifying == true) else { return }
+        if supportsSourceCards && sourceFeed == nil {
+            stopForTerminalFailure("Watch source feed unavailable")
+            return
+        }
         pairingTimeout?.cancel()
         handshakeTimeout?.cancel()
         preparing = false
@@ -903,6 +1121,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         }
         Diagnostics.shared.record("ble_ready")
         onWatchEvent?()
+        writeSourcesIfNeeded()
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
@@ -953,7 +1172,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             profileWritePending = false
             acceptedProfileFingerprint = sentProfileFingerprint
             acceptedProfile = true
-            if let deviceID { UserDefaults.standard.set(deviceID, forKey: "owned-watch-id") }
+            if let deviceID { rememberOwnership(deviceID) }
             if enabled, initialProfile, let activity {
                 if !paired { setupPhase = .checking }
                 status = "Checking the connection…"
@@ -962,19 +1181,29 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 writeProfileIfNeeded()
                 if let desiredSnapshot { forward(desiredSnapshot) }
             }
+            writeSourcesIfNeeded()
+        } else if characteristic.uuid == sourcesUUID {
+            acceptedSources = pendingSources
+            pendingSources = nil
+            writeProfileIfNeeded()
+            if let queued {
+                self.queued = nil
+                forward(queued)
+            }
+            writeSourcesIfNeeded()
         } else if characteristic.uuid == activityUUID {
             writePending = false
             lastDelivered = Date()
             if let deviceID, let lastDelivered { WatchDeliveryHistory.save(lastDelivered, for: deviceID) }
             if let sentEvent {
                 let defaults = UserDefaults.standard
-                var history = defaults.stringArray(forKey: "delivered-event-history") ?? []
-                if let prior = defaults.string(forKey: "delivered-event"), !history.contains(prior) { history.append(prior) }
+                var history = defaults.stringArray(forKey: deliveryKey("delivered-event-history")) ?? []
+                if let prior = defaults.string(forKey: deliveryKey("delivered-event")), !history.contains(prior) { history.append(prior) }
                 if !history.contains(sentEvent) { history.append(sentEvent) }
-                defaults.set(Array(history.suffix(32)), forKey: "delivered-event-history")
-                UserDefaults.standard.set(sentEvent, forKey: "delivered-event")
-                UserDefaults.standard.set(Int(sentRevision), forKey: "delivered-revision")
-                UserDefaults.standard.set(sentState?.rawValue, forKey: "delivered-state")
+                defaults.set(Array(history.suffix(32)), forKey: deliveryKey("delivered-event-history"))
+                UserDefaults.standard.set(sentEvent, forKey: deliveryKey("delivered-event"))
+                UserDefaults.standard.set(Int(sentRevision), forKey: deliveryKey("delivered-revision"))
+                UserDefaults.standard.set(sentState?.rawValue, forKey: deliveryKey("delivered-state"))
                 Diagnostics.shared.record("ble_write_accepted", event: sentEvent, state: sentState, revision: sentRevision)
             }
             writeProfileIfNeeded()
@@ -982,6 +1211,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 self.queued = nil
                 forward(queued)
             }
+            writeSourcesIfNeeded()
         }
     }
 
@@ -1003,7 +1233,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         guard enabled, ready else { return false }
         let deadline = ProcessInfo.processInfo.systemUptime + 3
         while ProcessInfo.processInfo.systemUptime < deadline {
-            if UserDefaults.standard.string(forKey: "delivered-event") == identity { return true }
+            if UserDefaults.standard.string(forKey: deliveryKey("delivered-event")) == identity &&
+                (!supportsSourceCards || (pendingSources == nil && acceptedSources == sourcePacket)) { return true }
             guard enabled, ready, !Task.isCancelled else { return false }
             do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return false }
         }
@@ -1017,15 +1248,15 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         guard !profileWritePending else { return }
         guard enabled, ready, let activity, let peripheral else { return }
         guard Date().timeIntervalSince1970 - snapshot.observedAt < snapshot.freshFor else { return }
-        if writePending {
+        if writePending || pendingSources != nil {
             queued = snapshot
             queuedAt = Date()
             return
         }
         let defaults = UserDefaults.standard
-        let same = defaults.string(forKey: "delivered-event") == snapshot.identity
-        let deliveredBefore = defaults.stringArray(forKey: "delivered-event-history")?.contains(snapshot.identity) == true
-        let previous = UInt32(clamping: defaults.integer(forKey: "delivered-revision"))
+        let same = defaults.string(forKey: deliveryKey("delivered-event")) == snapshot.identity
+        let deliveredBefore = defaults.stringArray(forKey: deliveryKey("delivered-event-history"))?.contains(snapshot.identity) == true
+        let previous = UInt32(clamping: defaults.integer(forKey: deliveryKey("delivered-revision")))
         if same && previous <= acknowledged { return }
         // Reuse the delivered revision on reconnect; do not re-alert an old event.
         let revision = same ? previous : nextRevision()
@@ -1034,7 +1265,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         let freshNewEvent = !same && !deliveredBefore && freshEvent
         let alert = freshNewEvent &&
             (snapshot.state == .needsInput || snapshot.state == .failed || snapshot.state == .finished)
-        let previousState = defaults.string(forKey: "delivered-state").flatMap(ActivityState.init(rawValue:))
+        let previousState = defaults.string(forKey: deliveryKey("delivered-state")).flatMap(ActivityState.init(rawValue:))
         let workingSound = WatchWire.shouldPlayWorkingSound(
             state: snapshot.state, previousState: previousState,
             freshNewEvent: freshNewEvent, capabilities: capabilities)
@@ -1052,7 +1283,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     private func writeProfileIfNeeded() {
         guard sourceProfileResolved, enabled, preparing || ready, deviceID != nil,
-              !profileWritePending, !writePending,
+              !profileWritePending, !writePending, pendingSources == nil,
               let owner, let profile, let peripheral, peripheral.state == .connected else { return }
         let now = Date()
         let packet = WatchWire.profile(owner: owner, revision: 1, now: now,
@@ -1077,11 +1308,11 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     private func nextRevision() -> UInt32 {
-        let saved = UInt32(clamping: UserDefaults.standard.integer(forKey: "watch-revision"))
+        let saved = UInt32(clamping: UserDefaults.standard.integer(forKey: deliveryKey("watch-revision")))
         let clock = UInt32(clamping: Int(Date().timeIntervalSince1970))
         let maximum = max(saved, max(currentWatchRevision, acknowledged))
         let next = max(clock, maximum == UInt32.max ? maximum : maximum + 1)
-        UserDefaults.standard.set(Int(next), forKey: "watch-revision")
+        UserDefaults.standard.set(Int(next), forKey: deliveryKey("watch-revision"))
         return next
     }
 

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 enum ActivityState: String, Codable, CaseIterable {
     case idle, working, needsInput = "needs_input", finished, failed
@@ -181,6 +182,15 @@ enum HubError: LocalizedError {
     }
 }
 
+struct WatchSourceCard {
+    let sourceID: String
+    let name: String
+    let state: ActivityState
+    let availability: UInt8 // 0 no activity, 1 current, 2 history
+    let expiresAt: Double
+    var sessions: [AgentSession] = []
+}
+
 enum WatchWire {
     static func shouldPlayWorkingSound(state: ActivityState, previousState: ActivityState?,
                                        freshNewEvent: Bool, capabilities: UInt32) -> Bool {
@@ -221,6 +231,40 @@ enum WatchWire {
         var data = Data([79, 65, 1, state.wire, (alert ? 1 : 0) | (soundFlag ? 2 : 0), 0])
         data.appendLE(revision)
         data.appendLE(acknowledged)
+        return data
+    }
+
+    // A complete replacement frame: four-byte OS/v1/count header, 48 bytes per source.
+    static func sources(_ cards: [WatchSourceCard], now: Date = Date(), rich: Bool = false) -> Data {
+        let cards = Array(cards.prefix(8))
+        var data = Data([79, 83, rich ? 2 : 1, UInt8(cards.count)])
+        for card in cards {
+            data.append(contentsOf: SHA256.hash(data: Data(card.sourceID.utf8)).prefix(16))
+            let expiry = UInt32(clamping: Int64(max(0, card.expiresAt)))
+            data.appendLE(expiry)
+            data.append(card.state.wire)
+            data.append(card.availability == 1 && card.expiresAt <= now.timeIntervalSince1970 ? 2 : card.availability)
+            var name = Data()
+            for character in card.name {
+                let bytes = Data(String(character).utf8)
+                if bytes.contains(where: { $0 < 32 || $0 == 127 }) { continue }
+                if name.count + bytes.count > 25 { break }
+                name.append(bytes)
+            }
+            if name.isEmpty { name = Data("Computer".utf8) }
+            data.append(name)
+            data.append(Data(repeating: 0, count: 26 - name.count))
+            if rich {
+                for state in [ActivityState.working, .needsInput, .finished, .failed] {
+                    data.appendLE(UInt16(clamping: card.sessions.filter { $0.state == state }.count))
+                }
+                let providers = card.sessions.reduce(UInt8(0)) { mask, session in
+                    mask | (session.provider == "codex" ? 1 : session.provider == "claude" ? 2 : 4)
+                }
+                data.append(providers)
+                data.append(contentsOf: [0, 0, 0])
+            }
+        }
         return data
     }
 
