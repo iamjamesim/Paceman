@@ -536,7 +536,7 @@ private struct PairingView: View {
             PacemanMark().frame(width: 38, height: 38)
                 .foregroundStyle(Color(nsColor: .labelColor))
             Text("Connect your iPhone").font(.title2.weight(.semibold))
-            Text("On your iPhone, open Paceman → Connect computer → Scan QR code.")
+            Text("On your iPhone, open Paceman → Connect computer → Scan QR code to connect.")
                 .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Link("Get Paceman for iPhone", destination: SetupGuide.testFlightURL)

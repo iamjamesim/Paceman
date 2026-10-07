@@ -45,6 +45,8 @@ struct CompanionExternalLink: View {
     let title: String
     let url: URL
     let theme: CompanionTheme
+    var alignment: Alignment = .leading
+    var minimumHeight: CGFloat = 28
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -54,7 +56,7 @@ struct CompanionExternalLink: View {
                 Image(systemName: "arrow.up.right").accessibilityHidden(true)
             }
             .font(.subheadline.weight(.medium))
-            .frame(maxWidth: .infinity, minHeight: typeSize.isAccessibilitySize ? 44 : 28, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: max(minimumHeight, typeSize.isAccessibilitySize ? 44 : 28), alignment: alignment)
         }
         .foregroundStyle(theme.tint)
     }

@@ -47,7 +47,7 @@ final class CompanionModel: ObservableObject {
             #if DEBUG
             let args = ProcessInfo.processInfo.arguments
             let screen = args.first(where: { $0.hasPrefix("--screen=") }) ?? ""
-            if !["--screen=setup", "--screen=pairing", "--screen=watch-only", "--screen=live-activities-setup"].contains(screen) {
+            if !screen.hasPrefix("--screen=pairing") && !["--screen=setup", "--screen=watch-only", "--screen=live-activities-setup"].contains(screen) {
                 let id = "aaaaaaaa-2222-4333-8444-555555555555"
                 pairedSources = [PairedSource(endpoint: URL(string: "https://omarchy.example.ts.net")!,
                     sourceID: id, clientID: id, credential: "preview")]
@@ -273,8 +273,8 @@ final class CompanionModel: ObservableObject {
     }
 
     @discardableResult
-    func pair(text: String) async -> Bool {
-        guard !busy else { return false }
+    func pair(text: String) async throws -> PairedSource {
+        guard !busy else { throw HubError.message("Another connection change is in progress. Try again.") }
         busy = true
         defer { busy = false; schedulePendingWatchRefresh() }
         do {
@@ -298,8 +298,8 @@ final class CompanionModel: ObservableObject {
             monitoring.configure(sources: values)
             Task { await push.sync() }
             Task { await syncWatchPush() }
-            return true
-        } catch { status = error.localizedDescription; return false }
+            return paired
+        } catch { status = error.localizedDescription; throw error }
     }
 
     private func clearSnapshot(_ sourceID: String) {

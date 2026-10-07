@@ -118,7 +118,7 @@ Apple Watch delivery](../docs/architecture.md#watches).
 
 2. **Connect Tailscale** on your Mac and iPhone to the same Tailscale network. [Get Tailscale](https://tailscale.com/download) if needed.
 3. In Mac setup, choose **Connect iPhone**. You can also use the QR button in Paceman’s menu-bar panel.
-4. On your iPhone, open **Paceman → Connect computer → Scan QR code** and scan the code on your Mac.
+4. On your iPhone, open **Paceman → Connect computer → Scan QR code to connect** and scan the code on your Mac. Paceman connects automatically and opens that computer.
 
 Codes expire after five minutes; choose **New code** if needed. Keep the pairing code private.
 

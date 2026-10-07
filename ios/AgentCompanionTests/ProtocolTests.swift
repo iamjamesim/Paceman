@@ -798,6 +798,133 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(store.load().map(\.sourceID), [second.sourceID])
     }
 
+    @MainActor
+    func testScanningConnectsImmediatelyAndPreservesOtherComputers() async throws {
+        for reconnecting in [false, true] {
+            let id = UUID().uuidString
+            let other = PairedSource(endpoint: URL(string: "https://other.example")!,
+                sourceID: UUID().uuidString, clientID: "other", credential: "other-secret")
+            let existing = PairedSource(endpoint: URL(string: "https://test.example")!,
+                sourceID: id, clientID: "client", credential: "old-secret")
+            var requests = 0
+            var saved: [PairedSource] = []
+            let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { request in
+                requests += 1
+                XCTAssertEqual(request.url?.path, "/v1/pair")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), reconnecting ? "Bearer old-secret" : nil)
+                return (200, try JSONSerialization.data(withJSONObject: ["schema": 1, "sourceID": id,
+                    "clientID": "client", "credential": "new-secret"]))
+            }, savePairedSources: { saved = $0 })
+            model.pairedSources = reconnecting ? [existing, other] : [other]
+            let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: id,
+                invitation: String(repeating: "x", count: 43), expiresAt: Date().timeIntervalSince1970 + 300)
+            let session = ComputerPairingSession()
+            let invalid = await session.scan("unrelated QR code", model: model)
+            XCTAssertNil(invalid)
+            let connected = await session.scan(String(decoding: try JSONEncoder().encode(invitation), as: UTF8.self), model: model)
+            XCTAssertEqual(connected, id, "A scan returns the exact computer to open without a confirmation action")
+            XCTAssertEqual(requests, 1)
+            XCTAssertEqual(saved.map(\.sourceID), reconnecting ? [id, other.sourceID] : [other.sourceID, id])
+            XCTAssertEqual(saved.first { $0.sourceID == other.sourceID }?.credential, "other-secret")
+            XCTAssertEqual(saved.first { $0.sourceID == id }?.credential, "new-secret")
+            XCTAssertFalse(session.connecting)
+            XCTAssertFalse(model.busy)
+            XCTAssertNil(session.failure)
+        }
+    }
+
+    @MainActor
+    func testScanningInvalidOrExpiredCodesNeverContactsComputer() async throws {
+        var requests = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            requests += 1; return (200, Data())
+        }, savePairedSources: { _ in XCTFail("Invalid scans must not change saved computers") })
+        model.pairedSources = []
+        let expired = Invitation(schema: 1, endpoint: "https://test.example", sourceID: UUID().uuidString,
+            invitation: String(repeating: "x", count: 43), expiresAt: Date().timeIntervalSince1970 - 1)
+        for text in ["unrelated QR code", String(decoding: try JSONEncoder().encode(expired), as: UTF8.self)] {
+            let session = ComputerPairingSession()
+            let connected = await session.scan(text, model: model)
+            XCTAssertNil(connected)
+            XCTAssertNil(session.invitation)
+            XCTAssertNotNil(session.failure)
+            XCTAssertFalse(session.canRetry)
+            XCTAssertFalse(session.connecting)
+        }
+        XCTAssertEqual(requests, 0)
+        XCTAssertTrue(model.pairedSources.isEmpty)
+    }
+
+    @MainActor
+    func testConnectionFailureOffersRetryAndRetainsScannedDestination() async throws {
+        let id = UUID().uuidString
+        var requests = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { request in
+            requests += 1
+            XCTAssertEqual(request.url?.host, "test.example")
+            if requests == 1 { throw URLError(.notConnectedToInternet) }
+            return (200, try JSONSerialization.data(withJSONObject: ["schema": 1, "sourceID": id,
+                "clientID": "client", "credential": "secret"]))
+        }, savePairedSources: { _ in })
+        model.pairedSources = []
+        let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: id,
+            invitation: String(repeating: "x", count: 43), expiresAt: Date().timeIntervalSince1970 + 300)
+        let session = ComputerPairingSession()
+        let first = await session.scan(String(decoding: try JSONEncoder().encode(invitation), as: UTF8.self), model: model)
+        XCTAssertNil(first)
+        XCTAssertEqual(session.host, "test.example")
+        XCTAssertTrue(session.canRetry)
+        XCTAssertTrue(session.failure?.message.contains("Tailscale") == true)
+        XCTAssertFalse(model.busy)
+        let retried = await session.connect(model: model)
+        XCTAssertEqual(retried, id)
+        XCTAssertEqual(requests, 2)
+        XCTAssertNil(session.failure)
+        XCTAssertFalse(session.connecting)
+    }
+
+    @MainActor
+    func testRejectedInvitationRequiresFreshScanInsteadOfRetry() async throws {
+        var requests = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            requests += 1
+            return (401, Data())
+        }, savePairedSources: { _ in XCTFail("Rejected invitations must not change saved computers") })
+        model.pairedSources = []
+        let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: UUID().uuidString,
+            invitation: String(repeating: "x", count: 43), expiresAt: Date().timeIntervalSince1970 + 300)
+        let session = ComputerPairingSession()
+        let connected = await session.scan(String(decoding: try JSONEncoder().encode(invitation), as: UTF8.self), model: model)
+        XCTAssertNil(connected)
+        XCTAssertFalse(session.canRetry)
+        XCTAssertTrue(session.failure?.message.contains("fresh QR code") == true)
+        XCTAssertTrue(model.pairedSources.isEmpty)
+        XCTAssertFalse(model.busy)
+        let retried = await session.connect(model: model)
+        XCTAssertNil(retried)
+        XCTAssertEqual(requests, 1, "A rejected single-use code must not be redeemed again")
+    }
+
+    @MainActor
+    func testScanningChangedAddressKeepsExistingConnectionWithoutSendingCredential() async throws {
+        let id = UUID().uuidString
+        let source = PairedSource(endpoint: URL(string: "https://old.example")!, sourceID: id,
+            clientID: "client", credential: "secret")
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            XCTFail("A changed address must not receive the existing credential"); return (200, Data())
+        }, savePairedSources: { _ in XCTFail("A changed address must preserve the existing connection") })
+        model.pairedSources = [source]
+        let invitation = Invitation(schema: 1, endpoint: "https://new.example", sourceID: id,
+            invitation: String(repeating: "x", count: 43), expiresAt: Date().timeIntervalSince1970 + 300)
+        let session = ComputerPairingSession()
+        let connected = await session.scan(String(decoding: try JSONEncoder().encode(invitation), as: UTF8.self), model: model)
+        XCTAssertNil(connected)
+        XCTAssertFalse(session.canRetry)
+        XCTAssertTrue(session.failure?.message.contains("address changed") == true)
+        XCTAssertEqual(model.pairedSources.first?.endpoint, source.endpoint)
+        XCTAssertEqual(model.pairedSources.first?.credential, source.credential)
+    }
+
     func testPairingSendsIdentityAndOnlyUsesCredentialAtTheSameOrigin() async throws {
         let id = UUID().uuidString
         let device = ClientDevice(installationID: UUID().uuidString, name: "Phone", platform: "ios")
