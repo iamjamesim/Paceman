@@ -477,14 +477,20 @@ actor AppAttestEnrollment {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: fields)
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw HubError.message("Paceman could not verify this iPhone for relay notifications.")
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                throw HubError.message("Paceman could not verify this iPhone for relay notifications.")
+            }
+            guard http.statusCode == 200 else { throw HubError.http(http.statusCode) }
+            guard data.count <= 4096 else {
+                throw HubError.message("Paceman returned too much verification data.")
+            }
+            return data
+        } catch {
+            Diagnostics.shared.recordError(path == "v2/attest/challenge"
+                ? "app_attest_relay_challenge_failed" : "app_attest_relay_approval_failed", error: error)
+            throw error
         }
-        guard http.statusCode == 200 else { throw HubError.http(http.statusCode) }
-        guard data.count <= 4096 else {
-            throw HubError.message("Paceman returned too much verification data.")
-        }
-        return data
     }
 }

@@ -16,7 +16,7 @@ from wsgiref.simple_server import make_server, WSGIServer
 
 from service.app_attest import AppAttestVerifier
 from service.push import APNs, Config
-from service.relay_registry import EnrollmentLimited, Registry, valid_uuid
+from service.relay_registry import EnrollmentLimited, Registry, digest, valid_uuid
 
 
 LOG = logging.getLogger("paceman.relay")
@@ -260,24 +260,39 @@ class RelayApp:
                     or value["environment"] not in self.sender.environments):
                 return answer("503 Service Unavailable", {"error": "EnvironmentUnavailable"})
             args = [value[key] for key in fields]
+            # Match phone support reports without logging identifiers, credential
+            # hashes, challenges, proofs, or tokens. Only fixed kind labels escape.
+            def fingerprint(field):
+                item = value.get(field)
+                return digest(item)[:12] if isinstance(item, str) else "invalid"
+            kind = value.get("kind")
+            kind = kind if kind in ("attest", "assert") else "unknown"
+            context = (f"at={self.now():.3f} sourceSupportID={fingerprint('sourceID')} "
+                       f"clientSupportID={fingerprint('clientID')} keySupportID={fingerprint('keyID')} "
+                       f"environment={value['environment']}")
             try:
                 if path.endswith("challenge"):
                     kind, challenge = self.sources.pairing_challenge(*args, self.now())
+                    LOG.info("pairing_challenge_issued kind=%s %s", kind, context)
                     return answer("200 OK", {"kind": kind, "challenge": challenge})
                 self.sources.approve_pairing(*args, value["kind"], value["challenge"],
                                              value["proof"], self.verifier, self.now())
             except EnrollmentLimited:
-                LOG.warning("pairing_approval_limited")
+                LOG.warning("pairing_approval_limited kind=%s %s", kind, context)
                 return answer("429 Too Many Requests", {"error": "EnrollmentLimited"})
-            except PermissionError:
-                LOG.warning("pairing_approval_denied")
+            except PermissionError as error:
+                reason = {"Source was revoked": "source_revoked",
+                          "Client pairing was revoked": "client_revoked",
+                          "Source credential mismatch": "source_credential_mismatch"}.get(
+                              str(error), "permission_denied")
+                LOG.warning("pairing_approval_denied reason=%s kind=%s %s", reason, kind, context)
                 return answer("403 Forbidden", {"error": "PairingDenied"})
             except ValueError as error:
                 # The verifier and registry raise fixed, data-free reasons here.
                 # Keep credentials, challenges, and proof bytes out of logs.
-                LOG.warning("pairing_approval_rejected reason=%s", error)
+                LOG.warning("pairing_approval_rejected reason=%s kind=%s %s", error, kind, context)
                 return answer("403 Forbidden", {"error": "InvalidAttestation"})
-            LOG.info("pairing_approval_accepted")
+            LOG.info("pairing_approval_accepted kind=%s %s", kind, context)
             return answer("200 OK", {"approved": True})
         source_id, client_id = value.get("sourceID"), value.get("clientID")
         auth = environ.get("HTTP_AUTHORIZATION", "")
