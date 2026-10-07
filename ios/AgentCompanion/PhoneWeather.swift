@@ -173,7 +173,12 @@ final class PhoneWeather: NSObject, ObservableObject, @preconcurrency CLLocation
     private var failures = 0
     private var retryAfter: Date?
     private var monitoring = false
-    private var scheduledRefresh: Date?
+    private final class WeakWeather {
+        weak var value: PhoneWeather?
+        init(_ value: PhoneWeather) { self.value = value }
+    }
+    private static var clients: [WeakWeather] = []
+    private static var scheduledRefresh: Date?
     private var locationPriority = false
     private var pendingPriority = false
     private var backgroundWork = UIBackgroundTaskIdentifier.invalid
@@ -197,6 +202,8 @@ final class PhoneWeather: NSObject, ObservableObject, @preconcurrency CLLocation
 
     override init() {
         super.init()
+        Self.clients.removeAll { $0.value == nil }
+        Self.clients.append(WeakWeather(self))
         authorization = locationManager.authorizationStatus
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
@@ -296,34 +303,39 @@ final class PhoneWeather: NSObject, ObservableObject, @preconcurrency CLLocation
     static func registerBackgroundRefresh() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: backgroundIdentifier, using: .main) { task in
             Task { @MainActor in
-                guard let weather = PushCoordinator.shared.model?.weather else { task.setTaskCompleted(success: false); return }
+                let clients = Self.clients.compactMap(\.value).filter(\.enabled)
+                Self.scheduledRefresh = nil
                 let work = Task { @MainActor in
-                    weather.scheduledRefresh = nil
-                    weather.refreshIfNeeded()
-                    while weather.task != nil || weather.waitingForLocation {
+                    for weather in clients { weather.refreshIfNeeded() }
+                    while clients.contains(where: { $0.task != nil || $0.waitingForLocation }) {
                         do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
                     }
-                    weather.scheduleBackgroundRefresh()
-                    task.setTaskCompleted(success: weather.message == nil && !weather.locationUnavailable)
+                    clients.first?.scheduleBackgroundRefresh()
+                    task.setTaskCompleted(success: clients.allSatisfy { $0.message == nil && !$0.locationUnavailable })
                 }
                 task.expirationHandler = {
                     work.cancel()
-                    Task { @MainActor in weather.cancel(); task.setTaskCompleted(success: false) }
+                    Task { @MainActor in
+                        for weather in clients { weather.cancel() }
+                        task.setTaskCompleted(success: false)
+                    }
                 }
             }
         }
     }
 
     private func scheduleBackgroundRefresh() {
-        guard enabled else {
-            scheduledRefresh = nil
+        let clients = Self.clients.compactMap(\.value).filter(\.enabled)
+        guard !clients.isEmpty else {
+            Self.scheduledRefresh = nil
             BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backgroundIdentifier)
             return
         }
-        if let scheduledRefresh, scheduledRefresh > Date() { return }
+        let next = max(Date().addingTimeInterval(900), clients.compactMap { $0.cache?.expiresAt }.min() ?? Date())
+        if let scheduled = Self.scheduledRefresh, scheduled > Date(), scheduled <= next { return }
         let request = BGAppRefreshTaskRequest(identifier: Self.backgroundIdentifier)
-        request.earliestBeginDate = max(Date().addingTimeInterval(900), cache?.expiresAt ?? Date())
-        do { try BGTaskScheduler.shared.submit(request); scheduledRefresh = request.earliestBeginDate }
+        request.earliestBeginDate = next
+        do { try BGTaskScheduler.shared.submit(request); Self.scheduledRefresh = next }
         catch { /* Existing foreground, Bluetooth and push opportunities remain available. */ }
     }
 

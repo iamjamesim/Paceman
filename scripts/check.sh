@@ -26,7 +26,8 @@ done
   "$watch/simulator/test_storage.c" "$watch/firmware/main/watch_storage.c" -o "$check_dir/test-storage"
 "$check_dir/test-storage"
 "$python" "$watch/simulator/check_gatt.py"
-for helper in scripts/*.sh "$watch"/tools/*.sh "$watch"/firmware/release/flash.sh; do
+bash firmware/pebble-time-2/tools/check.sh
+for helper in scripts/*.sh "$watch"/tools/*.sh "$watch"/firmware/release/flash.sh firmware/pebble-time-2/tools/*.sh; do
   bash -n "$helper"
 done
 git diff --check

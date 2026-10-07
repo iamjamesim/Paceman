@@ -102,8 +102,11 @@ struct NotificationSetup: View {
             VStack(alignment: .leading, spacing: 24) {
                 if deliveryStep == .ready {
                     if watchNeedsGuidance {
-                        WatchSharingGuidance(watch: model.watch, theme: theme)
-                        CompanionRule(theme: theme)
+                        ForEach(model.accessories.paired.filter { !$0.ready || !$0.supportsNotificationSync || $0.notificationSharingStatus == false }) { link in
+                            if model.accessories.paired.count > 1 { Text(link.displayName).font(.headline) }
+                            WatchSharingGuidance(watch: link, theme: theme)
+                            CompanionRule(theme: theme)
+                        }
                     }
                     RecommendedNotificationSettings(theme: theme, preview: preview)
                 } else {
@@ -130,7 +133,7 @@ struct NotificationSetup: View {
     }
     private var watchNeedsGuidance: Bool {
         if preview { return false }
-        return !model.watch.ready || !model.watch.supportsNotificationSync || model.watch.notificationSharingStatus == false
+        return model.accessories.paired.contains { !$0.ready || !$0.supportsNotificationSync || $0.notificationSharingStatus == false }
     }
     @ViewBuilder private func completionActions(_ done: @escaping () -> Void) -> some View {
         if deliveryStep == .ready && !watchNeedsGuidance {

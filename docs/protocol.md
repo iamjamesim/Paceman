@@ -338,6 +338,26 @@ activity and resends current state on reconnect. The watch packet has no local
 source-freshness lease, so a watch without its phone link cannot expire upstream
 activity.
 
+## Accessory source cards
+
+Capability bit 12 enables the optional write characteristic
+`7f510006-1b15-4f0d-b7a5-4cf3a2c98ee1`; devices without it retain aggregate activity.
+Each authenticated write replaces the feed, including an empty frame. Cards do
+not trigger alerts and stay in RAM.
+
+The frame is `OS`, version `1`, count `0–8`, followed by 48 bytes per computer.
+Integers are little endian. Each record contains a 16-byte opaque source ID
+(the phone uses the first 16 SHA-256 bytes of its source ID), a 32-bit Unix expiry,
+a one-byte activity state, a one-byte availability (`0` no activity, `1` current,
+`2` history), and a 26-byte null-terminated UTF-8 name. Current cards become history
+at expiry or when the watch loses its update channel.
+
+Capability bit 13 adds version `2`: the same header and 48-byte record prefix,
+followed by four 16-bit session counts (working, needs input, finished, failed),
+a provider bitmask (`1` Codex, `2` Claude, `4` other), and three reserved zero bytes.
+Version 2 records are 60 bytes; the largest frame is 484 bytes. Devices advertising
+both capabilities accept both versions; the phone sends version 2 only to them.
+
 ## Accessory authorization baseline
 
 Discovery and owner UUIDs are not credentials. After enrollment, protected reads,

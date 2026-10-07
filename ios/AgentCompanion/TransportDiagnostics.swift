@@ -36,15 +36,18 @@ struct TransportDiagnostics: View {
             Section("Push delivery") {
                 Text(push.status)
             }
-            Section("Watch") {
-                Text(model.watch.status)
-                if model.watch.supportsNotificationSync {
-                    LabeledContent("Notification sharing", value: model.watch.notificationSharingStatus.map {
-                        $0 ? "Allowed" : "Not allowed"
-                    } ?? "Unknown")
-                }
-                if let date = model.watch.lastDelivered {
-                    Text("Last BLE write accepted \(date.formatted(date: .omitted, time: .standard))").font(.caption)
+            Section("Accessories") {
+                ForEach(model.accessories.links.filter { $0.hasReceipt }) { link in
+                    Text(link.displayName).font(.headline)
+                    Text(link.status)
+                    if link.supportsNotificationSync {
+                        LabeledContent("Notification sharing", value: link.notificationSharingStatus.map {
+                            $0 ? "Allowed" : "Not allowed"
+                        } ?? "Unknown")
+                    }
+                    if let date = link.lastDelivered {
+                        Text("Last BLE write accepted \(date.formatted(date: .omitted, time: .standard))").font(.caption)
+                    }
                 }
             }
             #endif
@@ -62,7 +65,7 @@ struct TransportDiagnostics: View {
                 (id: source.sourceID, connection: model.connectionState(source.sourceID).rawValue,
                  lastContact: model.lastContacts[source.sourceID],
                  activity: model.snapshots[source.sourceID]?.state)
-            }, watchPaired: model.watch.paired, lastBLEWriteAccepted: model.watch.lastDelivered,
+            }, watchPaired: !model.accessories.paired.isEmpty, lastBLEWriteAccepted: model.accessories.links.compactMap(\.lastDelivered).max(),
                pushStep: PushCoordinator.shared.deliveryStep.rawValue,
                pushRegistered: PushCoordinator.shared.registered,
                awaitingPushToken: PushCoordinator.shared.awaitingToken)

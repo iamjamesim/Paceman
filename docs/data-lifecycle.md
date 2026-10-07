@@ -13,10 +13,11 @@ cache. See the [source protocol](protocol.md) for freshness fields.
 | Desktop source | Source ID, hashed client credentials, paired-client metadata, push destinations/cursors and current event in owner-only SQLite | Explicit client removal or source-data reset |
 | Source push config | Source-specific relay credential in plaintext JSON at `~/Library/Application Support/Paceman/private/apns.json` on Mac or `~/.local/state/paceman/private/apns.json` on Omarchy (`0700` directories, `0600` file; not Keychain). Advanced direct APNs setups instead store a private signing key. | Source uninstall or credential rotation |
 | APNs relay | APNs key in host-managed secret files; hashed source and client credentials, hashed token bindings, App Attest public keys and counters, pairing approvals, and revocation tombstones in managed PostgreSQL | Phone/source revocation, token replacement, or key rotation; attested keys remain available for later approvals |
-| iPhone Keychain | Source endpoints and credentials, installation ID, ESP32 watch owner identity; device-only, available after first unlock | Explicit removal or confirmed revocation |
+| iPhone Keychain | Source endpoints and credentials, installation ID, accessory owner identity; device-only, available after first unlock | Explicit removal or confirmed revocation |
 | iPhone protected Application Support | One last-known snapshot per source, weather cache and bounded transport diagnostics | Source removal, relevant setting change or replacement data |
-| iPhone preferences | Phone theme, source names, per-watch settings, watch usage source/revision and delivery bookkeeping | User change or corresponding device removal |
+| iPhone preferences | Phone theme, source names, per-watch settings, watch usage source and per-accessory revision/delivery bookkeeping | User change or corresponding device removal |
 | ESP32 watch NVS | Owner bond, stable device ID, saved profile and wearer acknowledgement | Deliberate factory reset or owner transfer |
+| Pebble settings/PFS | Owner bond, stable device ID and saved profile | Watch factory reset or destructive PebbleOS storage recovery |
 | Apple Watch shared preferences | Per-computer Codex usage caches, observation times, phone revision and allowed source IDs | Phone removal of a source or newer accepted data from that source; expired readings remain unavailable |
 | Live Activity | Expiring ActivityKit display copy | New event, stale date or lifecycle end |
 
@@ -25,7 +26,7 @@ no durable queue of BLE writes. Omarchy verifies living agent owners after a
 source restart; Mac clears hook-only sessions until another hook arrives.
 
 Storage errors do not erase ownership, replace the watch ID or reopen pairing.
-Phone-side Remove watch removes access; it does not reset watch ownership.
+Phone-side Remove accessory removes access; it does not reset watch ownership.
 
 ## Freshness and recovery
 

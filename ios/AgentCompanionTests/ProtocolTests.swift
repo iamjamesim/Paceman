@@ -43,6 +43,70 @@ final class ProtocolTests: XCTestCase {
                        ["claude://code/session_a", "claude://code/session_b"])
     }
 
+    func testSourceCardsPreserveMachinesAndExpireIndependently() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let cards = [
+            WatchSourceCard(sourceID: "mac", name: "MacBook Pro", state: .needsInput, availability: 1, expiresAt: 1_800_000_030),
+            WatchSourceCard(sourceID: "linux", name: "Omarchy", state: .working, availability: 1, expiresAt: 1_799_999_990)]
+        let bytes = Array(WatchWire.sources(cards, now: now))
+        XCTAssertEqual(bytes.count, 100)
+        XCTAssertEqual(Array(bytes.prefix(4)), [79, 83, 1, 2])
+        XCTAssertNotEqual(Array(bytes[4..<20]), Array(bytes[52..<68]))
+        XCTAssertEqual(WatchWire.read32(bytes, at: 20), 1_800_000_030)
+        XCTAssertEqual(bytes[24], 2)
+        XCTAssertEqual(bytes[25], 1)
+        XCTAssertEqual(bytes[72], 1)
+        XCTAssertEqual(bytes[73], 2)
+        XCTAssertEqual(String(bytes: bytes[26..<37], encoding: .utf8), "MacBook Pro")
+        XCTAssertEqual(WatchWire.sources([], now: now), Data([79, 83, 1, 0]))
+    }
+
+    @MainActor func testAccessoriesRemainIndependentWhenAddingAndPausingAnotherDevice() {
+        let accessories = WatchAccessories(preview: true)
+        let first = accessories.selected
+        first.showPreview(kind: .esp32)
+        accessories.beginSetup(.pebble)
+        let second = accessories.selected
+        second.showPreview(kind: .pebble)
+        XCTAssertEqual(accessories.paired.count, 2)
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertFalse(first.phoneWeather === second.phoneWeather)
+        first.setEnabled(false)
+        XCTAssertTrue(accessories.relayRequested)
+        XCTAssertTrue(second.updatesEnabled)
+        XCTAssertTrue(second.ready)
+        accessories.selectedID = first.id
+        XCTAssertTrue(accessories.selected === first)
+        XCTAssertEqual(accessories.links.count, 2)
+    }
+
+    func testRichSourceCardsAreAnOptionalExtension() {
+        let card = WatchSourceCard(sourceID: "mac", name: "Mac", state: .needsInput,
+            availability: 1, expiresAt: 1_800_000_030,
+            sessions: [AgentSession(id: "a", provider: "codex", state: .working),
+                       AgentSession(id: "b", provider: "claude", state: .needsInput)])
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let old = Array(WatchWire.sources([card], now: now))
+        let rich = Array(WatchWire.sources([card], now: now, rich: true))
+        XCTAssertEqual(old.count, 52)
+        XCTAssertEqual(rich.count, 64)
+        XCTAssertEqual(rich[2], 2)
+        XCTAssertEqual(Array(rich[4..<52]), Array(old[4..<52]))
+        XCTAssertEqual(Array(rich[52..<64]), [1, 0, 1, 0, 0, 0, 0, 0, 3, 0, 0, 0])
+        XCTAssertEqual(WatchWire.sources([], rich: true), Data([79, 83, 2, 0]))
+    }
+
+    func testSourceCardNamesAreBoundedAndNullTerminated() {
+        let card = WatchSourceCard(sourceID: "mac", name: String(repeating: "é", count: 40),
+            state: .idle, availability: 0, expiresAt: 0)
+        let bytes = Array(WatchWire.sources((0..<12).map { WatchSourceCard(sourceID: "mac-\($0)", name: card.name,
+            state: card.state, availability: card.availability, expiresAt: card.expiresAt) }))
+        XCTAssertEqual(bytes.count, 388)
+        XCTAssertEqual(bytes[3], 8)
+        XCTAssertEqual(bytes[51], 0)
+        XCTAssertNotNil(String(bytes: bytes[26..<50], encoding: .utf8))
+    }
+
     func testWatchAllowancePrefersFreshConnectedSourceThenCachedHistory() {
         let now = 1_790_000_000.0
         func source(_ id: String, updated: Int64, reset: Int64, remaining: Int) -> Snapshot {
