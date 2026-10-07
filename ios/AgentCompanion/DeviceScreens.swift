@@ -45,10 +45,10 @@ struct ComputerDetail: View {
                         }
                     }
                 }.multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.top, 20).padding(.bottom, 12)
-                if connection == .revoked {
+                if connection == .revoked, let paired {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Scan a new pairing code from this computer.").font(.footnote).foregroundStyle(theme.secondaryInk)
-                        NavigationLink { PairingFlow(model: model, theme: theme) } label: {
+                        NavigationLink(value: FeedDestination.reconnect(paired.sourceID)) {
                             Label("Scan QR code", systemImage: "qrcode.viewfinder").font(.subheadline)
                                 .frame(minHeight: 44)
                         }.disabled(removing || presentation.preview)

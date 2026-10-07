@@ -29,7 +29,7 @@ struct AgentCompanionApp: App {
     }
 }
 
-enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, connectAccessory, accessory(String), watchPairing, pairing, notifications, watchNotifications, watchWeatherSetup, watchTroubleshooting, settings, appearance, weather, diagnostics }
+enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, connectAccessory, accessory(String), watchPairing, pairing, reconnect(String), notifications, watchNotifications, watchWeatherSetup, watchTroubleshooting, settings, appearance, weather, diagnostics }
 
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
@@ -65,7 +65,12 @@ struct CompanionRoot: View {
                                 ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") {
                             path.append(.watchNotifications)
                         }
-                    case .pairing: PairingFlow(model: model, theme: theme, preview: presentation.preview)
+                    case .pairing, .reconnect:
+                        PairingFlow(model: model, theme: theme, preview: presentation.preview,
+                            reconnectingSourceID: { if case .reconnect(let id) = destination { return id }; return nil }()) { sourceID in
+                            path = [.otherComputer(sourceID)]
+                            Task { await model.refresh(sourceID: sourceID) }
+                        }
                     case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview)
                     case .watchNotifications:
                         NotificationSetup(model: model, theme: theme, preview: presentation.preview,
@@ -106,7 +111,7 @@ struct CompanionRoot: View {
             case "settings", "settings-usage", "settings-usage-esp32": path = [.settings]
             case "appearance": path = [.settings, .appearance]
             case "live-activities", "multi-live-activities", "live-activities-setup", "live-activities-off": path = [.liveActivities]
-            case "pairing", "reconnect": path = [.pairing]
+            case let screen where screen.hasPrefix("pairing") || screen.hasPrefix("reconnect"): path = [.pairing]
             case "watch-notifications": path = [.watchNotifications]
             case "watch-weather-setup": path = [.watchWeatherSetup]
             case "watch-weather-setup-current", "watch-weather-setup-place", "watch-weather-setup-denied":
@@ -126,10 +131,9 @@ struct CompanionRoot: View {
             default: break
             }
         }
-        .onChange(of: model.pairedSources.first?.sourceID) { old, new in
+        .onChange(of: model.pairedSources.first?.sourceID) { _, new in
             guard !presentation.preview else { return }
-            if old == nil && new != nil { path = [] }
-            else if new == nil { path = [] }
+            if new == nil { path = [] }
         }
         .onChange(of: model.pairedSources.map(\.sourceID)) { _, _ in
             presentation.syncComputerNames(model.pairedSources, snapshots: model.snapshots)

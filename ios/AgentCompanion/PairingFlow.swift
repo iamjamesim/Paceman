@@ -4,88 +4,245 @@ enum SetupGuide {
     static let url = URL(string: "https://github.com/iamjamesim/paceman#get-started")!
 }
 
+struct ComputerPairingFailure {
+    let title: String
+    let message: String
+    let canRetry: Bool
+
+    static let invalidCode = Self(title: "Can’t use this QR code",
+        message: "That QR code is invalid or has expired. Show a fresh QR code in Paceman on your computer and scan it again.",
+        canRetry: false)
+
+    init(error: Error) {
+        title = "Couldn’t connect"
+        if let network = error as? URLError,
+           [.timedOut, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
+            .networkConnectionLost, .notConnectedToInternet, .internationalRoamingOff,
+            .dataNotAllowed, .callIsActive].contains(network.code) {
+            message = "Couldn’t reach this computer. Connect your phone and computer to the same Tailscale network, then try again."
+            canRetry = true
+        } else if let hub = error as? HubError, case .http(let code) = hub {
+            if code == 401 {
+                message = "This pairing code has expired or is no longer available. Show a fresh QR code in Paceman on your computer and scan it again."
+                canRetry = false
+            } else if code == 429 || (500...599).contains(code) {
+                message = "The computer couldn’t complete the connection. Try again."
+                canRetry = true
+            } else if code == 404 || code == 409 {
+                message = error.localizedDescription
+                canRetry = false
+            } else {
+                message = "The computer couldn’t complete the connection. Open Paceman on your computer and scan a fresh QR code."
+                canRetry = false
+            }
+        } else {
+            message = error.localizedDescription
+            canRetry = false
+        }
+    }
+
+    private init(title: String, message: String, canRetry: Bool) {
+        self.title = title; self.message = message; self.canRetry = canRetry
+    }
+}
+
+@MainActor
+final class ComputerPairingSession: ObservableObject {
+    @Published private(set) var invitation: Invitation?
+    @Published private(set) var failure: ComputerPairingFailure?
+    @Published private(set) var connecting = false
+    private var text = ""
+
+    var host: String? { invitation.flatMap { URLComponents(string: $0.endpoint)?.host } }
+    var canRetry: Bool {
+        failure?.canRetry == true && (invitation?.expiresAt ?? 0) > Date().timeIntervalSince1970
+    }
+
+    func scan(_ text: String, model: CompanionModel) async -> String? {
+        guard !connecting, !model.busy else { return nil }
+        do {
+            let value = try JSONDecoder().decode(Invitation.self, from: Data(text.utf8))
+            _ = try value.validatedURL()
+            invitation = value; self.text = text; failure = nil
+        } catch {
+            invitation = nil; self.text = ""; failure = .invalidCode
+            return nil
+        }
+        return await connect(model: model)
+    }
+
+    func connect(model: CompanionModel) async -> String? {
+        guard !connecting, !model.busy, let invitation, failure == nil || failure?.canRetry == true else { return nil }
+        do { _ = try invitation.validatedURL() }
+        catch { failure = .invalidCode; return nil }
+        connecting = true; failure = nil
+        defer { connecting = false }
+        do {
+            return try await model.pair(text: text).sourceID
+        } catch {
+            failure = invitation.expiresAt <= Date().timeIntervalSince1970
+                ? .invalidCode : ComputerPairingFailure(error: error)
+            return nil
+        }
+    }
+
+    #if DEBUG
+    func showPreview(_ screen: String) {
+        guard screen.contains("connecting") || screen.contains("network") || screen.contains("expired")
+                || screen.contains("invalid") || screen.contains("error") else { return }
+        invitation = Invitation(schema: 1,
+            endpoint: screen.contains("long")
+                ? "https://james-development-computer-with-a-long-hostname.tail123456789.ts.net"
+                : "https://omarchy.tail2fb6c4.ts.net",
+            sourceID: "aaaaaaaa-2222-4333-8444-555555555555", invitation: String(repeating: "x", count: 43),
+            expiresAt: Date().timeIntervalSince1970 + (screen.contains("expired") ? -1 : 300))
+        connecting = screen.contains("connecting")
+        if screen.contains("network") { failure = ComputerPairingFailure(error: URLError(.cannotConnectToHost)) }
+        if screen.contains("expired") || screen.contains("invalid") { failure = .invalidCode }
+        if screen.contains("invalid") { invitation = nil }
+        if screen.contains("error") { failure = ComputerPairingFailure(error: HubError.http(409)) }
+    }
+    #endif
+}
+
 struct PairingFlow: View {
     @ObservedObject var model: CompanionModel
     let theme: CompanionTheme
     var preview = false
-    @Environment(\.dismiss) private var dismiss
+    var reconnectingSourceID: String? = nil
+    let connected: (String) -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
+    @StateObject private var session = ComputerPairingSession()
     @State private var scanner = false
-    @State private var invitation = ""
-    @State private var parsed: Invitation?
-    @State private var error: String?
+    @State private var scanResult: String?
+    @State private var attempt: UUID?
+    @State private var visible = false
     @State private var showingTailscaleInfo = false
+    private var previewScreen: String {
+        preview ? ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--screen=") }.map { String($0.dropFirst(9)) } ?? "" : ""
+    }
     private var reconnecting: Bool {
-        parsed.map { value in model.pairedSources.contains { $0.sourceID == value.sourceID } }
-            ?? (preview && ProcessInfo.processInfo.arguments.contains("--screen=reconnect"))
+        session.invitation.map { value in model.pairedSources.contains { $0.sourceID == value.sourceID } }
+            ?? (reconnectingSourceID != nil || previewScreen.hasPrefix("reconnect"))
     }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                if !typeSize.isAccessibilitySize {
-                    ComputerIllustration(theme: theme).frame(width: 210).frame(maxWidth: .infinity)
-                        .padding(.top, 20).padding(.bottom, 12)
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Open the Paceman panel on your computer and select the QR button.")
-                        .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
-                    if reconnecting {
-                        Text("Scanning a fresh QR code renews this phone’s access. Your watch stays paired.")
-                            .font(.subheadline).foregroundStyle(theme.secondaryInk).padding(.top, 12)
-                    }
-                    VStack(alignment: .leading, spacing: 18) {
-                        Text("Make sure your phone and computer are on the same Tailscale network.")
-                            .font(.subheadline).foregroundStyle(theme.secondaryInk)
-                        DisclosureGroup("Why Tailscale?", isExpanded: $showingTailscaleInfo) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Tailscale lets your phone reach Paceman on your computer without exposing Paceman to the public internet.")
-                                    .font(.subheadline).foregroundStyle(theme.secondaryInk)
-                                CompanionExternalLink(title: "Get Tailscale for iPhone", url: URL(string: "https://tailscale.com/download/ios")!, theme: theme)
-                                    .allowsHitTesting(!preview)
-                            }.padding(.top, 12).padding(.bottom, 4)
-                        }
-                        .font(.subheadline.weight(.medium)).tint(theme.tint)
-                    }.padding(.top, 24).padding(.bottom, 8)
-                }
-                if let parsed {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text(reconnecting ? "Reconnect to this computer?" : "Connect to this computer?").font(.headline)
-                        Text((try? parsed.validatedURL())?.host ?? parsed.endpoint)
-                            .font(.footnote.monospaced()).textSelection(.enabled)
-                        CompanionButton(title: model.busy ? "Connecting…" : reconnecting ? "Reconnect computer" : "Connect computer", theme: theme) {
-                            Task {
-                                if await model.pair(text: invitation) {
-                                    await model.refreshAll()
-                                    dismiss()
-                                } else { error = model.status }
-                            }
-                        }.disabled(model.busy || preview)
-                        Button("Scan a different QR code") { self.parsed = nil; error = nil; scanner = true }
-                            .font(.subheadline).disabled(model.busy || preview)
-                    }
+                if session.connecting || session.failure != nil {
+                    connectionState.padding(.top, 32)
                 } else {
-                    CompanionButton(title: "Scan QR code", theme: theme, symbol: "qrcode.viewfinder") { scanner = true }.disabled(preview)
+                    preparation
+                    VStack(spacing: 8) {
+                        CompanionButton(title: "Scan QR code to connect", theme: theme, symbol: "qrcode.viewfinder") {
+                            scanner = true
+                        }.disabled(model.busy).allowsHitTesting(!preview)
+                        setupGuide
+                    }
                 }
-                if let error { Label(error, systemImage: "exclamationmark.circle").font(.subheadline).foregroundStyle(theme.ink) }
-                CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
-                    .allowsHitTesting(!preview)
-            }.padding(.horizontal, 24).padding(.bottom, 32)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24).padding(.bottom, 32)
         }.background(CompanionCanvas(theme: theme)).foregroundStyle(theme.ink)
             .navigationTitle(reconnecting ? "Reconnect computer" : "Connect computer").navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $scanner) {
                 NavigationStack {
-                    QRScanner { text in scanner = false; accept(text) }
-                        .navigationTitle("Scan QR code").navigationBarTitleDisplayMode(.inline)
+                    QRScanner { text in scanner = false; scanResult = text; attempt = UUID() }
+                        .navigationTitle("Scan to connect").navigationBarTitleDisplayMode(.inline)
                         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { scanner = false } } }
                 }
             }
+            .onChange(of: attempt) { _, value in
+                guard value != nil, !preview else { return }
+                let scannedText = scanResult
+                scanResult = nil
+                // Finish the single-use redemption even if the screen is left.
+                // Only navigation belongs to the visible screen.
+                Task {
+                    let sourceID: String?
+                    if let scannedText { sourceID = await session.scan(scannedText, model: model) }
+                    else { sourceID = await session.connect(model: model) }
+                    if let sourceID, visible { connected(sourceID) }
+                }
+            }
+            .onAppear {
+                visible = true
+                #if DEBUG
+                guard preview else { return }
+                session.showPreview(previewScreen)
+                showingTailscaleInfo = previewScreen.contains("expanded")
+                #endif
+            }
+            .onDisappear { visible = false }
     }
-    private func accept(_ text: String) {
-        do {
-            let value = try JSONDecoder().decode(Invitation.self, from: Data(text.utf8))
-            _ = try value.validatedURL()
-            invitation = text; parsed = value; error = nil
-        } catch { parsed = nil; self.error = "That QR code is invalid or has expired. Show a fresh QR code in Paceman on your computer and scan it again." }
+
+    private var preparation: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !typeSize.isAccessibilitySize {
+                ComputerIllustration(theme: theme).frame(width: 210).frame(maxWidth: .infinity)
+                    .padding(.top, 20).padding(.bottom, 32)
+            }
+            Text("Open the Paceman panel on your computer and select the QR button.")
+                .font(.body).lineSpacing(4).foregroundStyle(theme.secondaryInk)
+            if reconnecting {
+                Text("Scanning a fresh QR code renews this phone’s access. Your watch stays paired.")
+                    .font(.subheadline).foregroundStyle(theme.secondaryInk).padding(.top, 12)
+            }
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Make sure your phone and computer are on the same Tailscale network.")
+                    .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                DisclosureGroup("Why Tailscale?", isExpanded: $showingTailscaleInfo) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Tailscale lets your phone reach Paceman on your computer without exposing Paceman to the public internet.")
+                            .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                        CompanionExternalLink(title: "Get Tailscale for iPhone", url: URL(string: "https://tailscale.com/download/ios")!, theme: theme)
+                            .allowsHitTesting(!preview)
+                    }.padding(.top, 12).padding(.bottom, 4)
+                }
+                .font(.subheadline.weight(.medium)).tint(theme.tint)
+            }.padding(.top, 24).padding(.bottom, 8)
+        }.padding(.top, typeSize.isAccessibilitySize ? 24 : 0)
+    }
+
+    private var connectionState: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 8) {
+                if session.connecting {
+                    HStack(spacing: 12) {
+                        ProgressView().tint(theme.ink).accessibilityHidden(true)
+                        Text(reconnecting ? "Reconnecting…" : "Connecting…").font(.headline)
+                    }.accessibilityElement(children: .combine)
+                } else if let failure = session.failure {
+                    Text(failure.title).font(.headline)
+                }
+                if let host = session.host {
+                    Text(host).font(.body).foregroundStyle(theme.secondaryInk)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
+            }
+            if let failure = session.failure {
+                Text(failure.message).font(.subheadline).foregroundStyle(theme.secondaryInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                VStack(spacing: 8) {
+                    if session.canRetry {
+                        CompanionButton(title: "Try again", theme: theme) { attempt = UUID() }
+                            .disabled(model.busy).allowsHitTesting(!preview)
+                        Button("Scan a different QR code") { scanner = true }
+                            .font(.subheadline).frame(maxWidth: .infinity, minHeight: 44)
+                            .disabled(model.busy).allowsHitTesting(!preview)
+                    } else {
+                        CompanionButton(title: "Scan a new QR code", theme: theme, symbol: "qrcode.viewfinder") {
+                            scanner = true
+                        }.disabled(model.busy).allowsHitTesting(!preview)
+                    }
+                    setupGuide
+                }
+            }
+        }
+    }
+
+    private var setupGuide: some View {
+        CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme,
+                              alignment: .center, minimumHeight: 44)
+            .allowsHitTesting(!preview)
     }
 }
 
