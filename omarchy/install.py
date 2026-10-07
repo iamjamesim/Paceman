@@ -65,9 +65,14 @@ def main():
             directory(path)
         if args.action == "uninstall":
             from service.network import remove_owned_route
+            from service.push import revoke_relay_source
             documents = prepare(state, app, [], home=home)
-            run("/usr/bin/systemctl", "--user", "disable", "--now", SERVICE, check=False)
-            run("/usr/bin/systemctl", "--user", "disable", "--now", PUSH_SERVICE, check=False)
+            for service in (SERVICE, PUSH_SERVICE):
+                run("/usr/bin/systemctl", "--user", "disable", "--now", service, check=False)
+                active = run("/usr/bin/systemctl", "--user", "show", service,
+                             "--property=ActiveState", "--value").stdout.strip()
+                if active not in ("inactive", "failed"):
+                    raise ValueError(f"Could not stop {service}; retry uninstall before removing its data")
             if plugin.exists():
                 directory(plugin)
                 run("/usr/bin/omarchy", "plugin", "disable", PLUGIN, check=False)
@@ -78,13 +83,20 @@ def main():
             unit.unlink(missing_ok=True)
             push_unit.unlink(missing_ok=True)
             run("/usr/bin/systemctl", "--user", "daemon-reload")
+            relay_revocation_pending = revoke_relay_source(state / "private/apns.json")
             route_removed = remove_owned_route(state)
+            route_pending = (state / "tailscale-route.json").exists()
+            shutil.rmtree(state)
             if Path("/usr/bin/omarchy").exists():
                 run("/usr/bin/omarchy", "shell", "shell", "rescanPlugins", check=False)
-            print("Paceman Omarchy source and its agent hooks removed. Pairings, data, and unrelated hooks preserved.")
+            print("Removed Paceman's Omarchy app, services, panel, agent hooks, local pairings, "
+                  "and notification credentials. Unrelated hooks and plugins preserved.")
+            if relay_revocation_pending:
+                print("Relay revocation could not be confirmed for source " + relay_revocation_pending
+                      + "; ask the project owner to revoke it in the relay database.")
             if route_removed:
                 print("Paceman's private Tailscale route removed.")
-            elif (state / "tailscale-route.json").exists():
+            elif route_pending:
                 print("Paceman's private Tailscale route could not be removed; check Tailscale Serve settings.")
             return
         if sys.version_info < (3, 11):

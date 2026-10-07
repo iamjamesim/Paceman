@@ -177,7 +177,7 @@ class DesktopInstallTests(unittest.TestCase):
             install.write(link / "file", b"must not be written")
         self.assertFalse((target / "file").exists())
 
-    def test_install_upgrade_uninstall_preserve_data_with_mocked_system_services(self):
+    def test_updates_preserve_state_and_uninstall_removes_it(self):
         source = self.root / "source"
         for directory in ("omarchy", "service", "systemd"):
             shutil.copytree(install.ROOT / directory, source / directory,
@@ -197,6 +197,7 @@ class DesktopInstallTests(unittest.TestCase):
         def fake_run(*args, **kwargs):
             calls.append(args)
             output = (json.dumps({"running": True, "startedAt": time.time()}) if args[-1] == "status"
+                      else "inactive" if "--property=ActiveState" in args
                       else "active" if args[-2:] == ("is-active", "paceman-push.service") and push_running["value"]
                       else "inactive" if args[-2:] == ("is-active", "paceman-push.service") else "ok")
             return subprocess.CompletedProcess(args, 0, output, "")
@@ -210,6 +211,7 @@ class DesktopInstallTests(unittest.TestCase):
              patch.object(install, "run", side_effect=fake_run), \
              patch.object(install_push.subprocess, "run", side_effect=fake_push_run), \
              patch("service.network.ensure_private_route", return_value="https://test.ts.net:8443"), \
+             patch("service.push.revoke_relay_source", return_value=None) as revoke_relay, \
              patch.dict(os.environ, {"XDG_STATE_HOME": str(home / ".local/state"), "XDG_CONFIG_HOME": str(home / ".config")}), \
              patch.object(install.socket, "socket"):
             with patch("sys.argv", ["install.py", "install"]):
@@ -275,7 +277,12 @@ class DesktopInstallTests(unittest.TestCase):
             with patch("sys.argv", ["install.py", "uninstall"]):
                 install.main()
             self.assertIn(("/usr/bin/systemctl", "--user", "disable", "--now", "paceman-push.service"), calls)
-            self.assertTrue(Store(installed.path).authorized(client["credential"]))
+            self.assertFalse(installed.path.parent.exists())
+            revoke_relay.assert_called_once_with(push_config)
+            fresh = Store(installed.path)
+            self.assertFalse(fresh.authorized(client["credential"]))
+            self.assertNotEqual(fresh.metadata("source_id"), client["sourceID"])
+            self.assertFalse(push_config.exists())
             self.assertFalse(any(install.owns_hook(item, home / ".local/lib/paceman", "claude")
                 for groups in json.loads(claude.read_text())["hooks"].values()
                 for group in groups for item in group["hooks"]))
