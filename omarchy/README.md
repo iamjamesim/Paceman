@@ -100,4 +100,4 @@ From the extracted release folder or repository root, run:
 bash scripts/uninstall-omarchy.sh
 ```
 
-This removes the installed app, command, services, panel, Paceman's agent hooks, and any unchanged Tailscale Serve route that Paceman created. It retains source data, phone pairings, unrelated agent hooks, the separate Omarchy Watch Codex plugin if installed, and routes created by someone else.
+This removes the installed app, command, services, panel, Paceman's agent hooks, all local source data, phone pairings, notification credentials, and any unchanged Tailscale Serve route that Paceman created. It attempts relay revocation and reports any unconfirmed cleanup. Unrelated agent hooks, the separate Omarchy Watch Codex plugin if installed, and routes created by someone else remain. Reinstalling requires a new phone pairing.

@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import macos.install_push as mac_push
 import macos.uninstall as mac_uninstall
+import service.push as push
 
 from service.hub import Store
 from service.push import RelayConfig
@@ -148,7 +149,7 @@ class RelaySetupTests(unittest.TestCase):
                 assert request.full_url == "https://relay.example/v2/sources"
                 assert request.get_method() == "DELETE"
                 assert timeout == 5
-        with patch.object(mac_uninstall, "build_opener", return_value=Opener()):
+        with patch.object(push, "build_opener", return_value=Opener()):
             self.assertIsNone(mac_uninstall.revoke_relay_source(config))
 
 
