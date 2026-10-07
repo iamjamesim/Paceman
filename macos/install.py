@@ -596,15 +596,18 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
 
 def print_claude_review_steps(wrapper: Path):
     print("NEXT: Review Paceman's Claude hooks before checking activity.")
-    print("  Claude CLI: /hooks. VS Code/desktop Code: inspect the local user settings.")
+    print("  Claude CLI: /hooks lists configured hooks. VS Code: / > Customize > Hooks (Claude Code 2.1.269+).")
+    print("  Local desktop Code: inspect the same Claude user settings.")
+    print("  Configured hooks run in trusted workspaces; Claude has no separate per-hook acceptance step.")
     print(f"  Claude settings: {hook_path('claude', root=ROOT)}")
     print("  Check the user-settings entries and this exact command:")
     print("     " + (installed_hook_command("claude", ROOT) or f"{shlex.quote(PYTHON)} -B {shlex.quote(str(ROOT / 'lib/macos/claude_hook.py'))}"))
     for event, purpose in CLAUDE_PURPOSES:
         print(f"     {event}: {purpose}")
-    print("  Only event names, opaque IDs and an optional short project label leave the hook.")
+    print("  Only lifecycle metadata, an optional project label and Remote Control session ID leave the hook.")
     print("  No prompts, replies, transcript contents or tool arguments are sent.")
-    print("  Requires Claude Code 2.1.196 or later; restart existing sessions after setup.")
+    print("  Activity requires Claude Code 2.1.196+; specific session links require 2.1.199+ with Remote Control.")
+    print("  Hook reference: https://code.claude.com/docs/en/hooks#the-hooks-menu")
     print("  Send a prompt in a fresh local Claude session and verify lastAgentEventByProvider.claude.")
     print("  Claude Code activity is supported; usage limits are not supported.")
     print(f"  Status: {shlex.quote(str(wrapper))} status")

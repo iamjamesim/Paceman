@@ -1,5 +1,6 @@
 """Shared Claude hook normalization and validation; conversation content is discarded."""
 import hashlib
+import os
 import re
 
 EVENTS = {
@@ -48,6 +49,9 @@ def message_for(data, workspace_label=None):
         if not isinstance(scope, str) or not 1 <= len(scope) <= 256:
             return None
         message["inputID"] = hashlib.sha256(scope.encode()).hexdigest()
+    # Local session IDs differ from the Remote Control ID exposed to hook subprocesses.
+    remote_id = os.environ.get("CLAUDE_CODE_BRIDGE_SESSION_ID", "")
+    message["remoteSessionID"] = remote_id if REMOTE_IDENTIFIER.fullmatch(remote_id) else None
     if workspace_label is not None and (label := workspace_label(data.get("cwd"))):
         message["workspaceLabel"] = label
     return message
