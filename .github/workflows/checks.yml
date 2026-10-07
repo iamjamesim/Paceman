@@ -66,8 +66,9 @@ jobs:
               raise SystemExit("No available iPhone simulator")
           print(phones[0])
           ')
+          # Preserve test failures without waiting for simulator sysdiagnose collection.
           xcodebuild -project ios/AgentCompanion.xcodeproj -scheme AgentCompanion \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$RUNNER_TEMP/PacemanDerivedData" \
-            -parallel-testing-enabled NO \
+            -parallel-testing-enabled NO -collect-test-diagnostics never \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= test

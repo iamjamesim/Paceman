@@ -1019,6 +1019,36 @@ final class ProtocolTests: XCTestCase {
     }
 
     @MainActor
+    func testRemovalWaitsForItsOwnPushCoordinator() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret")
+        let push = PushCoordinator()
+        var requests = 0
+        var saves = 0
+        let model = CompanionModel(preview: true, push: push, client: stubClient { _ in
+            requests += 1
+            return (200, Data(#"{"revoked":true}"#.utf8))
+        }, savePairedSources: { _ in saves += 1 })
+        model.pairedSources = [source]
+
+        push.busy = true
+        let removedWhileBusy = await model.remove(source)
+        let forgottenWhileBusy = await model.forget(source)
+        XCTAssertFalse(removedWhileBusy)
+        XCTAssertFalse(forgottenWhileBusy)
+        XCTAssertEqual(requests, 0)
+        XCTAssertEqual(saves, 0)
+        XCTAssertEqual(model.pairedSources.first?.credential, source.credential)
+
+        push.busy = false
+        let removed = await model.remove(source)
+        XCTAssertTrue(removed)
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(saves, 1)
+        XCTAssertTrue(model.pairedSources.isEmpty)
+    }
+
+    @MainActor
     func testUnreachableRemovalRequiresForgettingAndPreservesOtherComputers() async throws {
         let first = PairedSource(endpoint: URL(string: "https://gone.example")!,
             sourceID: UUID().uuidString, clientID: "first", credential: "secret")
@@ -1028,7 +1058,7 @@ final class ProtocolTests: XCTestCase {
         defer { for key in [store.key, store.oldPrimaryKey, store.oldAdditionalKey] { try? Vault.remove(key: key) } }
         try store.save([first, second])
         var requests = 0
-        let model = CompanionModel(preview: true, client: stubClient { _ in
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
             requests += 1
             throw URLError(.cannotFindHost)
         }, savePairedSources: store.save)
@@ -1079,7 +1109,7 @@ final class ProtocolTests: XCTestCase {
         var saved = false
         var hostRequests = 0
         var relayRequests = 0
-        let model = CompanionModel(preview: true, client: stubClient { request in
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { request in
             if request.url?.host == "computer.example" {
                 XCTAssertFalse(saved)
                 hostRequests += 1
@@ -1110,7 +1140,7 @@ final class ProtocolTests: XCTestCase {
         defer { for key in [store.key, store.oldPrimaryKey, store.oldAdditionalKey] { try? Vault.remove(key: key) } }
         try store.save([source])
         var saves = 0
-        let model = CompanionModel(preview: true, client: stubClient { _ in
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
             XCTFail("A failed local save must not revoke remote access")
             return (200, Data())
         }, savePairedSources: { _ in saves += 1; throw HubError.message("Storage unavailable") })
@@ -1141,7 +1171,7 @@ final class ProtocolTests: XCTestCase {
         var hostRequests = 0
         var relayRequests = 0
         var saves = 0
-        let model = CompanionModel(preview: true, client: stubClient { request in
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { request in
             if request.url?.host == "computer.example" {
                 XCTAssertEqual(saves, 0)
                 hostRequests += 1
@@ -1172,7 +1202,7 @@ final class ProtocolTests: XCTestCase {
         let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
             sourceID: UUID().uuidString, clientID: "client", credential: "secret")
         var requests = 0
-        let model = CompanionModel(preview: true, client: stubClient { _ in
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
             requests += 1
             throw URLError(.cancelled)
         }, savePairedSources: { _ in XCTFail("Cancelled removal must retain pairing") })
@@ -1189,7 +1219,7 @@ final class ProtocolTests: XCTestCase {
         let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
             sourceID: UUID().uuidString, clientID: "client", credential: "secret")
         var requests = 0
-        let model = CompanionModel(preview: true, client: stubClient { _ in
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
             requests += 1
             return (200, Data(#"{"revoked":false}"#.utf8))
         }, savePairedSources: { _ in XCTFail("Unconfirmed removal must retain pairing") })
@@ -1206,7 +1236,7 @@ final class ProtocolTests: XCTestCase {
     func testLocalFailureAfterRemoteRemovalKeepsConfirmedRevocationForRetry() async throws {
         let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
             sourceID: UUID().uuidString, clientID: "client", credential: "secret")
-        let model = CompanionModel(preview: true, client: stubClient { _ in
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
             (200, Data(#"{"revoked":true}"#.utf8))
         }, savePairedSources: { _ in throw HubError.message("Storage unavailable") })
         model.pairedSources = [source]
