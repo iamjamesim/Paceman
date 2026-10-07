@@ -63,7 +63,8 @@ final class CompanionModel: ObservableObject {
                     watch.showPreview(kind: .pebble, connected: !screen.contains("stale"))
                 }
             }
-            if screen == "--screen=pebble-pairing" { watch.kind = .pebble }
+            if screen.hasPrefix("--screen=pebble-pairing") { watch.kind = .pebble }
+            if screen.hasPrefix("--screen=compatible-pairing") { watch.kind = .compatible }
             if screen.contains("usage"), let id = pairedSources.first?.sourceID {
                 let now = Date().timeIntervalSince1970
                 let stale = screen.contains("stale")

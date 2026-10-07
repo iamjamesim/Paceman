@@ -46,6 +46,7 @@ enum WatchChannelReadiness {
 }
 
 enum WatchSetupRecovery {
+    static let pebblePairingRecovery = "Couldn’t connect securely. If this watch was previously connected to Paceman, follow the reset steps below."
     static func ownershipSavePending(error: Error?, activityRead: Bool,
                                      paired: Bool, profileAccepted: Bool) -> Bool {
         guard !paired, profileAccepted, activityRead, let error else { return false }
@@ -651,7 +652,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         supportsBrightness = false
         lastDelivered = nil
         setupPhase = .idle
-        // Removing phone access leaves firmware ownership available for re-pairing.
+        // Watch ownership remains; deleting the Bluetooth bond needs a watch-side reset.
         status = "Accessory removed"
         onWatchEvent?()
     }
@@ -967,7 +968,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
               self.peripheral?.identifier == peripheral.identifier else { return }
         guard error == nil else { recoverConnection("Couldn’t read watch services."); return }
         guard let service = peripheral.services?.first(where: { $0.uuid == Self.service }) else {
-            stopForTerminalFailure("Watch service unavailable"); return
+            stopForTerminalFailure("This accessory’s firmware isn’t compatible with Paceman. Install compatible firmware, then try again."); return
         }
         Diagnostics.shared.record("ble_characteristics_requested")
         peripheral.discoverCharacteristics([profileUUID, identityUUID, activityUUID, notificationUUID, sourcesUUID], for: service)
@@ -981,7 +982,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
               let identity = characteristics.first(where: { $0.uuid == identityUUID }),
               let profile = characteristics.first(where: { $0.uuid == profileUUID }),
               let activity = characteristics.first(where: { $0.uuid == activityUUID }) else {
-            stopForTerminalFailure("Watch characteristics unavailable"); return
+            stopForTerminalFailure("This accessory’s firmware isn’t compatible with Paceman. Install compatible firmware, then try again."); return
         }
         self.profile = profile
         self.activity = activity
@@ -1007,15 +1008,22 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             recoverConnection("Checking the connection…", ownershipSavePending: true)
             return
         }
-        guard error == nil, let value = characteristic.value else { recoverConnection("Couldn’t read encrypted watch data."); return }
+        guard error == nil, let value = characteristic.value else {
+            let message = paired ? "Couldn’t read encrypted watch data."
+                : kind == .pebble ? WatchSetupRecovery.pebblePairingRecovery
+                : "Couldn’t connect securely. If this accessory was previously connected to Paceman, follow the reset steps below."
+            recoverConnection(message); return
+        }
         if characteristic.uuid == identityUUID {
             do {
                 let identity = try WatchWire.identity(value)
                 // Never adopt an owned watch simply because a BLE connection succeeded.
                 guard !identity.owned || (knowsOwnership(identity.id) && owner != nil) else {
-                    stopForTerminalFailure("This watch is owned by another phone. It needs an ownership transfer before you can pair it with this phone."); return
+                    stopForTerminalFailure(kind == .pebble
+                        ? "This watch needs to be reset before pairing with this phone. Open the recovery steps below."
+                        : "This accessory needs to be reset before pairing with this phone. Follow the recovery steps below."); return
                 }
-                guard identity.capabilities & (1 << 6) != 0 else { stopForTerminalFailure("Watch lacks activity support"); return }
+                guard identity.capabilities & (1 << 6) != 0 else { stopForTerminalFailure("This accessory’s firmware doesn’t support agent activity. Install compatible firmware, then try again."); return }
                 if owner == nil {
                     let generated = UUID()
                     try Vault.save(generated, key: "watch-owner")
@@ -1051,7 +1059,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             guard acceptedProfile else { return }
             let bytes = Array(value)
             guard bytes.count == 14, bytes[0] == 79, bytes[1] == 65, bytes[2] == 1 else {
-                stopForTerminalFailure("Unsupported watch activity packet"); return
+                stopForTerminalFailure("This accessory’s firmware isn’t compatible with Paceman. Install compatible firmware, then try again."); return
             }
             currentWatchRevision = WatchWire.read32(bytes, at: 6)
             let newAck = WatchWire.read32(bytes, at: 10)
@@ -1086,7 +1094,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         }
         if supportsNotificationSync {
             guard let notificationSync else {
-                stopForTerminalFailure("Watch notification sync is unavailable")
+                stopForTerminalFailure("Update your accessory’s firmware to support background updates, then try again.")
                 return
             }
             if !notificationSync.isNotifying {
@@ -1103,7 +1111,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 notificationSyncRequired: supportsNotificationSync,
                 notificationSyncSubscribed: notificationSync?.isNotifying == true) else { return }
         if supportsSourceCards && sourceFeed == nil {
-            stopForTerminalFailure("Watch source feed unavailable")
+            stopForTerminalFailure("Update your accessory’s firmware to support multiple computers, then try again.")
             return
         }
         pairingTimeout?.cancel()

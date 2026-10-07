@@ -88,17 +88,31 @@ idf.py -p /dev/ttyACM0 flash monitor
 
 Exit the monitor with `Ctrl+]`.
 
-`erase-flash` is a factory reset, not a routine development step. It deletes
-ownership and bonding state on the watch. If the watch was previously connected,
-remove it from the old device as well: use **Remove watch** in the Paceman iPhone
-app, or forget it in the old device's Bluetooth settings. Disconnecting alone
-does not remove the old bond.
+## Reset pairing
+
+To pair a previously owned watch again or with a different phone, connect its
+USB-C programming port to your computer and run from this firmware directory:
+
+```bash
+idf.py -p /dev/ttyACM0 erase-flash
+idf.py -p /dev/ttyACM0 flash
+```
+
+This removes the watch’s pairing and saved preferences, then reinstalls the
+firmware. Use your watch’s actual serial port. For a prebuilt bundle, erase with
+`esptool --port /dev/ttyACM0 erase-flash`, then run the bundle’s `flash.sh` helper.
+
+On the iPhone, open **Settings → Bluetooth → Paceman Watch → Forget This Device**.
+Turn on the watch; it shows a six-digit code. In Paceman, open **Settings →
+Experimental → Accessories → Connect accessory** and choose **ESP32 watch**.
+Erasing flash is only needed to reset ownership; routine firmware updates keep
+pairing and preferences.
 
 ## Boot behavior
 
 | Ownership | RTC | Initial screen | Recovery |
 | --- | --- | --- | --- |
-| none | any | six-digit pairing code | connect from Settings → Experimental → Paceman Watch in the iPhone app |
+| none | any | six-digit pairing code | connect from Settings → Experimental → Accessories in the iPhone app |
 | owned | valid | watch face immediately | background sync refreshes it |
 | owned | invalid/unavailable | `TIME NOT SET` | bonded phone reconnects and syncs |
 

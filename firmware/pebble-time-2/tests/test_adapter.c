@@ -18,6 +18,8 @@ static struct {
 } jobs[64];
 static size_t job_count;
 static int terminated, notified, sync_notified, haptics, changes, clocks, sounds;
+static int bonds_deleted;
+static struct pbl_bt_device_internal deleted_peer;
 static struct ble_gap_conn_desc links[2] = {
   {.conn_handle = 1,
    .peer_id_addr = {.type = 3, .val = {1, 2, 3, 4, 5, 6}},
@@ -144,6 +146,11 @@ int ble_gap_terminate(uint16_t connection, uint8_t reason) {
   terminated++;
   return 0;
 }
+void bt_persistent_storage_delete_ble_pairing_by_addr(const struct pbl_bt_device_internal *device) {
+  deleted_peer = *device;
+  ++bonds_deleted;
+  paceman_service_bond_removed(device);
+}
 int ble_gap_event_listener_register(struct ble_gap_event_listener *l,
                                     int (*cb)(struct ble_gap_event *, void *), void *ctx) {
   (void)l;
@@ -250,6 +257,7 @@ static void boot(void) {
   s_state = (PacemanState){0};
   s_bond_durable = s_save_queued = s_received = false;
   s_connection = BLE_HS_CONN_HANDLE_NONE;
+  s_retired_connection = BLE_HS_CONN_HANDLE_NONE;
   job_count = 0;
   s_uid_count = s_uid_next = 0;
   s_notification_sequence = 0;
@@ -259,6 +267,94 @@ static void boot(void) {
 static void fresh(void) {
   id_exists = owner_exists = record_exists = corrupt_owner = io_failure = save_failure =
       queue_full = false;
+  boot();
+  assert(paceman_service_pairing_allowed());
+}
+static void test_pairing_reset(const omarchy_profile_v5_t *profile) {
+  fresh();
+  uint8_t original_id[20];
+  memcpy(original_id, id_bytes, sizeof(original_id));
+  struct pbl_bt_bonding b = bond();
+  paceman_service_bond_saved(&b, true);
+  assert(att_access(1, 2, false, profile, sizeof(*profile), NULL) == 0);
+  assert(!paceman_service_reset_pairing()); /* Queued owner save cannot overwrite a reset. */
+  assert(s_save_queued && !paceman_service_pairing_allowed());
+  run_jobs();
+  paceman_service_bond_removed(&b.pairing_info.identity);
+  assert(!paceman_service_pairing_allowed()); /* Bond loss alone is not physical consent. */
+  s_received = true;
+  s_state.activity.revision = 42;
+  s_state.sources_received = true;
+  s_state.source_count = 1;
+  assert(paceman_service_reset_pairing()); /* Works when the native bond is already gone. */
+  assert(bonds_deleted == 1 && memcmp(&deleted_peer, &b.pairing_info.identity,
+                                     sizeof(deleted_peer)) == 0);
+  assert(paceman_service_pairing_allowed() && !s_state.record.owned &&
+         s_state.record.profile_size == 0 && !s_received && !s_bond_durable &&
+         s_state.activity.revision == 0 && s_state.source_count == 0);
+  assert(memcmp(original_id, id_bytes, sizeof(original_id)) == 0);
+  assert(att_access(1, 2, false, profile, sizeof(*profile), NULL) == 8);
+  assert(att_access(1, 3, true, NULL, 0, NULL) == 8); /* Retiring link cannot reclaim. */
+  struct os_mbuf response;
+  assert(att_access(2, 3, true, NULL, 0, &response) == 0 && response.bytes[4] == 0);
+
+  /* A new phone can enroll while the old disconnect callback is still pending. */
+  omarchy_profile_v5_t new_profile = *profile;
+  new_profile.base.base.owner_id[0] = 99;
+  memcpy(b.pairing_info.identity.address.octets, links[1].peer_id_addr.val, 6);
+  paceman_service_bond_saved(&b, true);
+  assert(att_access(2, 2, false, &new_profile, sizeof(new_profile), NULL) == 0);
+  run_jobs();
+  assert(s_state.record.owned && att_access(2, 4, true, NULL, 0, NULL) == 0);
+  struct ble_gap_event disconnected = {
+    .type = BLE_GAP_EVENT_DISCONNECT, .disconnect.conn = links[0]
+  };
+  prv_gap_event(&disconnected, NULL);
+  assert(s_state.session_profile && s_connection == 2);
+  assert(att_access(1, 3, true, NULL, 0, NULL) == 8);
+  boot();
+  assert(s_state.record.owned && !paceman_service_pairing_allowed() &&
+         memcmp(original_id, s_state.record.device_id, 16) == 0);
+  /* Normal reconnects still need the saved owner, without reopening enrollment. */
+  assert(att_access(2, 2, false, &new_profile, sizeof(new_profile), NULL) == 0);
+  assert(att_access(2, 4, true, NULL, 0, NULL) == 0);
+  paceman_service_bond_saved(&b, true);
+  run_jobs();
+
+  save_failure = true;
+  assert(!paceman_service_reset_pairing());
+  assert(!s_state.storage_ready && !paceman_service_pairing_allowed() && bonds_deleted == 1);
+  save_failure = false;
+  boot();
+  assert(s_state.record.owned && !paceman_service_pairing_allowed()); /* Owner survived failed save. */
+  assert(paceman_service_reset_pairing());
+  boot();
+  assert(paceman_service_pairing_allowed() && bonds_deleted == 2);
+  assert(memcmp(original_id, id_bytes, sizeof(original_id)) == 0);
+  assert(paceman_service_reset_pairing() && bonds_deleted == 2); /* Already unowned. */
+
+  /* Re-pairing the original phone also works, after its new Bluetooth pairing. */
+  b = bond();
+  paceman_service_bond_saved(&b, true);
+  assert(att_access(1, 2, false, profile, sizeof(*profile), NULL) == 0);
+  run_jobs();
+  assert(s_state.record.owned && att_access(1, 4, true, NULL, 0, NULL) == 0);
+  io_failure = true;
+  assert(!paceman_service_reset_pairing() && !paceman_service_pairing_allowed());
+  io_failure = false;
+  boot();
+  owner_bytes[21] ^= 1;
+  boot();
+  assert(!paceman_service_reset_pairing() && !paceman_service_pairing_allowed());
+
+  /* An enrollment waiting for its bond save can be reset without a stale commit. */
+  fresh();
+  assert(att_access(1, 2, false, profile, sizeof(*profile), NULL) == 0);
+  assert(s_state.reserved && !s_save_queued);
+  assert(paceman_service_reset_pairing() && bonds_deleted == 3);
+  paceman_service_bond_saved(&b, true);
+  run_jobs();
+  assert(!s_state.record.owned && paceman_service_pairing_allowed());
   boot();
   assert(paceman_service_pairing_allowed());
 }
@@ -447,6 +543,7 @@ int main(void) {
   queue_full = true;
   assert(att_access(1, 2, false, &profile, sizeof(profile), NULL) == 17);
   assert(!paceman_service_pairing_allowed() && !s_state.profile_pending && s_state.reserved);
+  test_pairing_reset(&profile);
   puts(
-      "Pebble adapter: ATT authorization, deferred bond/owner saves, reconnects, storage faults and cues passed");
+      "Pebble adapter: ATT authorization, saves, reconnects, storage faults, cues and physical pairing reset passed");
 }

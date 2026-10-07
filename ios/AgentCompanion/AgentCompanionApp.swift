@@ -61,6 +61,7 @@ struct CompanionRoot: View {
                             preview: presentation.preview, previewConnected: presentation.previewHasWatch,
                             previewPhase: presentation.previewWatchPhase,
                             previewComplete: presentation.previewScreen == "watch-complete",
+                            previewResuming: presentation.previewScreen == "watch-resume",
                             previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen)
                                 ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") {
                             path.append(.watchNotifications)
@@ -122,10 +123,10 @@ struct CompanionRoot: View {
             case "watch-troubleshooting": path = [.watchTroubleshooting]
             case "watch", "watch-setup", "accessories", "accessories-empty", "accessories-multiple", "accessories-stale", "accessories-long": path = [.watch]
             case "connect-accessory": path = [.watch, .connectAccessory]
-            case "pebble-pairing": path = [.watchPairing]
+            case "pebble-pairing", "pebble-pairing-error", "pebble-pairing-error-expanded", "esp32-pairing", "esp32-pairing-error-expanded", "compatible-pairing", "compatible-pairing-error-expanded": path = [.watchPairing]
             case "accessory-detail", "accessory-long": path = [.accessory(model.watch.id)]
             case "watch-pairing": path = [.watch, .watchPairing]
-            case "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error": path = [.watchPairing]
+            case "watch-select", "watch-connecting", "watch-confirm", "watch-checking", "watch-error", "watch-resume": path = [.watchPairing]
             case "watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off", "watch-paired", "watch-complete": path = [.accessory(model.watch.id)]
             case "computer-usage", "computer-usage-stale", "computer-usage-empty", "computer-usage-expired", "computer-usage-claude-only", "computer", "computer-offline", "computer-revoked", "computer-stale", "computer-waiting", "computer-long": path = [.computer]
             default: break

@@ -6,9 +6,10 @@ the BLE protocol and pairing identity remain compatible with that firmware.
 
 This experimental watch shows agent activity, with additional Codex usage monitoring.
 
-For a new unowned watch, open **Settings → Experimental → Paceman Watch** on the
-iPhone and choose **Connect your watch**. Follow the Bluetooth and pairing-code
-prompts. A watch owned by another phone needs a deliberate factory reset first.
+Install the firmware, then open **Settings → Experimental → Accessories →
+Connect accessory** on the iPhone and choose **ESP32 watch**. Follow the Bluetooth
+and pairing-code prompts. If it was previously connected to Paceman, follow the
+[reset pairing steps](firmware/README.md#reset-pairing) first.
 
 - `firmware/`: ESP-IDF 5.5.x project; see its [build and flash guide](firmware/README.md).
 - [Connection lifecycle](CONNECTION.md): iPhone Bluetooth recovery and watch state after reconnection.

@@ -32,26 +32,32 @@ python3 firmware/pebble-time-2/tools/bundle.py --pebbleos /path/to/PebbleOS \
   --output paceman-obelix-pvt.pbz slot0.pbz slot1.pbz
 ```
 
-## Connect
+## First Paceman connection
 
-1. Install through the Pebble app's debug firmware updater. Select
-   **Watchfaces → Paceman** on the watch, then force-close the Pebble app.
-   Keep its saved watch entry for future firmware updates.
-2. Before first Paceman pairing, forget the old Bluetooth pairing on both ends:
+1. Install through the Pebble app's debug firmware updater.
+2. Forget the Bluetooth pairing used by the Pebble app on both devices:
    **iPhone Settings → Bluetooth → Pebble → Forget This Device** and
    **watch Settings → Bluetooth → your iPhone → Forget**. Leave the watch's
-   Bluetooth screen open. Subsequent connections keep the bond.
+   Bluetooth screen open.
 3. In Paceman, open **Settings → Experimental → Accessories → Connect accessory
    → Pebble Time 2 → Find accessory**. Confirm pairing and allow notification sharing.
+
+After connecting, select **Watchfaces → Paceman** on the watch to view activity.
 
 ## Update or transfer
 
 For firmware updates, turn the accessory's Updates off in Paceman, reconnect the
 Pebble app on the same iPhone and install the new `.pbz`. Keep the Bluetooth and
-Paceman pairings. Force-close Pebble afterward and turn Updates back on in Paceman.
+Paceman pairings and the Pebble app's saved watch entry. Return to Paceman afterward
+and turn Updates back on.
 
-To transfer ownership, use watch **Settings → System → Factory Reset**, then forget
-the old phone-side pairing and connect again. This also clears watch apps/settings.
+To reconnect a watch previously used with Paceman, including after removing it
+from Paceman or switching phones, use watch **Settings → System →
+Reset Paceman pairing** and confirm. This clears Paceman ownership, its profile and
+the old owner’s Bluetooth bond, preserving firmware, watch apps/settings and the
+watch ID. Forget Pebble in the old phone’s **Settings → Bluetooth**, then connect
+in Paceman with the watch’s Bluetooth screen open. Removing the accessory from
+the phone alone does not reset ownership.
 
 Run `bash firmware/pebble-time-2/tools/check.sh` for the state and adapter checks.
 

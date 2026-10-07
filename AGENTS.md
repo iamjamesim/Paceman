@@ -29,6 +29,13 @@ Use `docs/architecture.md` and `docs/data-lifecycle.md` for current system
 semantics. Cross-surface consistency means consistent meanings; layout differences
 need a user-facing reason.
 
+For iPhone typography, use native Dynamic Type roles through `CompanionTextRole`
+for custom screen content. Required instructions and error/recovery guidance use
+primary body text; secondary text is for supporting context. Keep native settings
+controls and compact activity metadata in their standard system roles. Fixed-size
+text is reserved for branding and illustration artwork. Check accessibility
+layouts without capping readable text sizes.
+
 # Documentation
 
 Keep permanent documentation concise and limited to critical current behavior.

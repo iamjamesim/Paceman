@@ -20,15 +20,15 @@ struct LiveActivitiesDetail: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if !systemEnabled {
                     Text("Live Activities are off in iPhone Settings.")
-                        .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                        .companionText(.body, theme: theme)
                     CompanionButton(title: "Open iPhone Settings", theme: theme, symbol: "gearshape") {
                         UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
                     }
                 } else if model.pairedSources.isEmpty {
                     Text("Connect a computer to use Live Activities.")
-                        .font(.subheadline).foregroundStyle(theme.secondaryInk)
+                        .companionText(.body, theme: theme)
                     NavigationLink(value: FeedDestination.pairing) {
-                        Label("Connect computer", systemImage: "plus").font(.subheadline).frame(minHeight: 44)
+                        Label("Connect computer", systemImage: "plus").companionText(.label, theme: theme).frame(minHeight: 44)
                     }
                 } else {
                     VStack(spacing: 0) {
@@ -44,7 +44,7 @@ struct LiveActivitiesDetail: View {
                                 .disabled(!presentation.preview && monitoring.changingSourceIDs.contains(source.sourceID))
                                 .padding(.vertical, 16)
                                 if !presentation.preview, let error = monitoring.settingErrors[source.sourceID] {
-                                    Text(error).font(.caption).foregroundStyle(theme.secondaryInk)
+                                    Text(error).companionText(.body, theme: theme)
                                         .padding(.bottom, 16)
                                 }
                             }
