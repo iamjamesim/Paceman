@@ -574,11 +574,6 @@ private struct InstallationView: View {
                             set: { model.selectSetupProvider(provider, enabled: $0) }))
                             .disabled(model.busy || !model.hasReadStatus)
                     }
-                    if model.setupProviders.contains("claude") {
-                        Text("Claude Code activity is supported; Claude usage limits are not.")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
                     Text("During setup, you’ll:")
                     BulletList(items: [
                         "**Start Paceman at login** to track agent activity in the background and send updates automatically.",
@@ -940,10 +935,6 @@ private struct ManagementView: View {
                             get: { model.status.selectedProviders.contains(provider) },
                             set: { model.setAgent(provider, enabled: $0) }))
                             .disabled(model.busy)
-                        if provider == "claude" {
-                            Text("Activity only. Claude usage limits are not supported.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
                     }
                     Text(model.status.selectedProviders.isEmpty ? "Turn on an agent to monitor this Mac." : "Review Paceman’s hooks after enabling an agent.")
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
