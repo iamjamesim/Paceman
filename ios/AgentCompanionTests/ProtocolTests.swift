@@ -46,7 +46,7 @@ final class ProtocolTests: XCTestCase {
         XCTAssertTrue(fixture.approvedKeys.isEmpty)
     }
 
-    func testAppAttestPreservesKeyForTransientOrUnrelatedErrors() async throws {
+    func testAppAttestStopsWithoutRetryingTransientOrUnrelatedErrors() async throws {
         for kind in ["attest", "assert"] {
             for error in [NSError(domain: DCErrorDomain, code: DCError.Code.serverUnavailable.rawValue),
                           NSError(domain: NSURLErrorDomain, code: DCError.Code.invalidInput.rawValue)] {
@@ -59,8 +59,9 @@ final class ProtocolTests: XCTestCase {
                     XCTAssertEqual((error as NSError).domain, fixture.proofFailureDomain)
                 }
                 XCTAssertEqual(fixture.generatedKeys, 0)
-                XCTAssertEqual(fixture.removedKeys, 0)
-                XCTAssertEqual(fixture.storedKey, fixture.originalKey)
+                let discard = kind == "attest" && error.domain != DCErrorDomain
+                XCTAssertEqual(fixture.removedKeys, discard ? 1 : 0)
+                XCTAssertEqual(fixture.storedKey, discard ? nil : fixture.originalKey)
                 XCTAssertTrue(fixture.approvedKeys.isEmpty)
             }
         }
