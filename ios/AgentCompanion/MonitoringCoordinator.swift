@@ -233,8 +233,9 @@ final class MonitoringCoordinator: ObservableObject {
     }
 
     func removeSource(_ sourceID: String) async {
-        if let activity = activities[sourceID] { await end(activity, sourceID: sourceID) }
-        if let source = sources[sourceID] { try? await client.removeLiveActivityStart(source) }
+        // Revocation is handled by the caller. Forget local state before ending
+        // ActivityKit content, so late callbacks cannot register it again and
+        // an unreachable source cannot delay local removal.
         sources.removeValue(forKey: sourceID)
         registeredStartTokens.removeValue(forKey: sourceID)
         readySourceIDs.remove(sourceID)
@@ -242,9 +243,12 @@ final class MonitoringCoordinator: ObservableObject {
         turningOffSourceIDs.remove(sourceID)
         settingErrors.removeValue(forKey: sourceID)
         dismissedRevisions.removeValue(forKey: sourceID)
+        lastStartAttempts.removeValue(forKey: sourceID)
+        lastOrphanCleanupAttempts.removeValue(forKey: sourceID)
         LiveActivityPreferences.remove(sourceID)
         UserDefaults.standard.removeObject(forKey: Self.registrationKey(sourceID))
         MonitoringProviderCache.remove(sourceID)
+        if let activity = activities[sourceID] { await end(activity, sourceID: sourceID) }
         updateStatus()
     }
 

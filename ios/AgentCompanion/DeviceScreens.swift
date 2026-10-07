@@ -9,9 +9,11 @@ struct ComputerDetail: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.dismiss) private var dismiss
     @State private var remove = false
+    @State private var removalFailed = false
+    @State private var offerForget = false
+    @State private var retryLocally = false
     @State private var rename = false
     @State private var name = ""
-    @State private var removalError: String?
     @State private var removing = false
 
     private var paired: PairedSource? {
@@ -51,37 +53,6 @@ struct ComputerDetail: View {
                                 .frame(minHeight: 44)
                         }.disabled(removing || presentation.preview)
                     }
-                } else if connection == .reconnecting {
-                    Text("It will reconnect when this computer is awake and online.")
-                        .font(.footnote).foregroundStyle(theme.secondaryInk)
-                }
-                if connection != .revoked,
-                   paired.flatMap({ model.snapshots[$0.sourceID]?.configuredProviders })?.contains("claude") == true {
-                    Text("Claude Code activity is supported; Claude usage limits are not.")
-                        .font(.footnote).foregroundStyle(theme.secondaryInk)
-                }
-                if connection != .revoked, let snapshot = paired.flatMap({ model.snapshots[$0.sourceID] }),
-                   !snapshot.usageReadings.isEmpty {
-                    CompanionRule(theme: theme)
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Usage").font(.headline)
-                        ForEach(snapshot.usageReadings, id: \.usageID) { reading in
-                            VStack(alignment: .leading, spacing: 5) {
-                                ViewThatFits(in: .horizontal) {
-                                    HStack { Text("\(reading.providerName) · \(reading.limitTitle)"); Spacer(); usageValue(reading) }
-                                    VStack(alignment: .leading, spacing: 5) { Text("\(reading.providerName) · \(reading.limitTitle)"); usageValue(reading) }
-                                }.font(.subheadline)
-                                Text(Date().timeIntervalSince1970 >= Double(reading.resetsAt)
-                                    ? "Waiting for usage after reset"
-                                    : "Resets \(Date(timeIntervalSince1970: Double(reading.resetsAt)).formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.caption).foregroundStyle(theme.secondaryInk)
-                                if Date().timeIntervalSince1970 - Double(reading.updatedAt) > 1800 {
-                                    Text("Last checked \(Date(timeIntervalSince1970: Double(reading.updatedAt)).formatted(date: .abbreviated, time: .shortened))")
-                                        .font(.caption).foregroundStyle(theme.secondaryInk)
-                                }
-                            }
-                        }
-                    }
                 }
                 CompanionRule(theme: theme)
                 Button { name = presentation.displayName(source: paired, snapshot: paired.flatMap { model.snapshots[$0.sourceID] }); rename = true } label: {
@@ -93,7 +64,6 @@ struct ComputerDetail: View {
                 CompanionRule(theme: theme)
                 DeviceRemovalButton(title: removing ? "Removing…" : "Remove computer", theme: theme) { remove = true }
                     .disabled(removing || paired == nil).allowsHitTesting(!presentation.preview)
-                if let removalError { Text(removalError).font(.footnote).foregroundStyle(theme.secondaryInk) }
             }.padding(.horizontal, 24).padding(.bottom, 32)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
@@ -113,25 +83,47 @@ struct ComputerDetail: View {
             } message: { Text("Shown in Paceman. Doesn’t rename your computer.") }
             .confirmationDialog("Remove \(presentation.displayName(source: paired, snapshot: paired.flatMap { model.snapshots[$0.sourceID] }))?", isPresented: $remove, titleVisibility: .visible) {
                 Button("Remove computer", role: .destructive) {
-                    guard let paired else { return }
-                    removing = true
-                    removalError = nil
-                    Task {
-                        defer { removing = false }
-                        // Let an in-flight fetch complete without flickering the row.
-                        while model.busy || push.busy {
-                            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
-                        }
-                        if await model.remove(paired) { dismiss() }
-                        else { removalError = model.errors[paired.sourceID] ?? "Couldn’t remove access. Reconnect and try again." }
-                    }
+                    removeComputer()
                 }
-            } message: { Text("Stop receiving activity from this computer and remove this phone’s access. Your agents keep running.") }
+            } message: { Text("Remove this connection from your iPhone.") }
+            .alert(offerForget ? "Couldn't remove computer" : "Couldn't finish removing computer", isPresented: $removalFailed) {
+                if offerForget {
+                    Button("Forget", role: .destructive) { removeComputer(locally: true) }
+                } else {
+                    Button("Try again") { removeComputer(locally: retryLocally) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                if offerForget { Text("Couldn't reach this computer to remove the pairing. Forget on this iPhone only?") }
+            }
+            .onAppear {
+                #if DEBUG
+                if presentation.preview && ProcessInfo.processInfo.arguments.contains("--removal-failed") {
+                    offerForget = ProcessInfo.processInfo.arguments.contains("--unreachable")
+                    removalFailed = true
+                }
+                if presentation.preview && ProcessInfo.processInfo.arguments.contains("--remove-confirmation") { remove = true }
+                #endif
+            }
     }
 
-    private func usageValue(_ reading: CodexAllowance) -> some View {
-        Text(Date().timeIntervalSince1970 < Double(reading.resetsAt) ? "\(reading.remaining)% left" : "Unavailable")
-            .monospacedDigit().foregroundStyle(theme.secondaryInk)
+    private func removeComputer(locally: Bool = false) {
+        guard let paired else { return }
+        removing = true
+        retryLocally = locally
+        Task {
+            defer { removing = false }
+            // Let an in-flight fetch complete without flickering the row.
+            while model.busy || push.busy {
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+            }
+            let removed = locally ? await model.forget(paired) : await model.remove(paired)
+            if removed { dismiss() }
+            else {
+                offerForget = model.canForgetAfterRemovalFailure
+                removalFailed = true
+            }
+        }
     }
 
     private var nameValue: some View {

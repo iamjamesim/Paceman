@@ -1018,6 +1018,245 @@ final class ProtocolTests: XCTestCase {
         catch { XCTAssertTrue(error is HubError) }
     }
 
+    @MainActor
+    func testRemovalWaitsForItsOwnPushCoordinator() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret")
+        let push = PushCoordinator()
+        var requests = 0
+        var saves = 0
+        let model = CompanionModel(preview: true, push: push, client: stubClient { _ in
+            requests += 1
+            return (200, Data(#"{"revoked":true}"#.utf8))
+        }, savePairedSources: { _ in saves += 1 })
+        model.pairedSources = [source]
+
+        push.busy = true
+        let removedWhileBusy = await model.remove(source)
+        let forgottenWhileBusy = await model.forget(source)
+        XCTAssertFalse(removedWhileBusy)
+        XCTAssertFalse(forgottenWhileBusy)
+        XCTAssertEqual(requests, 0)
+        XCTAssertEqual(saves, 0)
+        XCTAssertEqual(model.pairedSources.first?.credential, source.credential)
+
+        push.busy = false
+        let removed = await model.remove(source)
+        XCTAssertTrue(removed)
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(saves, 1)
+        XCTAssertTrue(model.pairedSources.isEmpty)
+    }
+
+    @MainActor
+    func testUnreachableRemovalRequiresForgettingAndPreservesOtherComputers() async throws {
+        let first = PairedSource(endpoint: URL(string: "https://gone.example")!,
+            sourceID: UUID().uuidString, clientID: "first", credential: "secret")
+        let second = PairedSource(endpoint: URL(string: "https://online.example")!,
+            sourceID: UUID().uuidString, clientID: "second", credential: "other-secret")
+        let store = removalStore()
+        defer { for key in [store.key, store.oldPrimaryKey, store.oldAdditionalKey] { try? Vault.remove(key: key) } }
+        try store.save([first, second])
+        var requests = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            requests += 1
+            throw URLError(.cannotFindHost)
+        }, savePairedSources: store.save)
+        model.pairedSources = [first, second]
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(["sourceID": first.sourceID]))
+        let secondSnapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(["sourceID": second.sourceID]))
+        model.snapshots = [first.sourceID: snapshot, second.sourceID: secondSnapshot]
+        try SourceSnapshotCache.save(snapshot, receivedAt: Date(), to: SourceSnapshotCache.url(for: first.sourceID))
+        ComputerPreferences.setName("Old computer", for: first.sourceID)
+        MonitoringComputerName.save("Old computer", for: first.sourceID)
+        LiveActivityPreferences.setEnabled(false, for: first.sourceID)
+        try Vault.save(PushRegistrationReceipt(sourceID: first.sourceID, clientID: first.clientID,
+            token: "token", environment: "development"), key: "push-registration-receipt.\(first.sourceID)")
+
+        let removed = await model.remove(first)
+        XCTAssertFalse(removed)
+        XCTAssertTrue(model.canForgetAfterRemovalFailure)
+        XCTAssertEqual(requests, 2)
+        XCTAssertEqual(store.load().map(\.sourceID), [first.sourceID, second.sourceID])
+        XCTAssertNotNil(model.snapshots[first.sourceID])
+        XCTAssertNotNil(SourceSnapshotCache.load(sourceID: first.sourceID, from: SourceSnapshotCache.url(for: first.sourceID)))
+        let forgotten = await model.forget(first)
+        XCTAssertTrue(forgotten)
+        XCTAssertEqual(store.load().map(\.sourceID), [second.sourceID])
+        XCTAssertEqual(model.pairedSources.map(\.sourceID), [second.sourceID])
+        XCTAssertNil(model.snapshots[first.sourceID])
+        XCTAssertNotNil(model.snapshots[second.sourceID])
+        XCTAssertNil(SourceSnapshotCache.load(sourceID: first.sourceID, from: SourceSnapshotCache.url(for: first.sourceID)))
+        XCTAssertNil(ComputerPreferences.name(for: first.sourceID))
+        XCTAssertNil(MonitoringComputerName.storedName(sourceID: first.sourceID))
+        XCTAssertTrue(LiveActivityPreferences.enabled(for: first.sourceID))
+        XCTAssertNil(Vault.load(PushRegistrationReceipt.self, key: "push-registration-receipt.\(first.sourceID)"))
+        let result = await model.refresh(sourceID: first.sourceID, fromPush: true)
+        XCTAssertEqual(result, .noData)
+        XCTAssertEqual(requests, 2, "Forgetting and a late push must not fetch the old computer")
+        let hint: [AnyHashable: Any] = ["companion": ["schema": 1, "sourceID": first.sourceID,
+            "generation": UUID().uuidString, "eventID": "late", "revision": 2]]
+        XCTAssertFalse(model.pairedSources.contains { PushHint.decode(hint, for: $0) != nil })
+    }
+
+    @MainActor
+    func testConfirmedRemovalFinishesEvenWhenRelayCleanupFails() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret",
+            relayURL: URL(string: "https://relay.example")!, relayCredentialHash: String(repeating: "a", count: 64))
+        let cleanup = expectation(description: "Bounded relay cleanup")
+        cleanup.expectedFulfillmentCount = 2
+        var saved = false
+        var hostRequests = 0
+        var relayRequests = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { request in
+            if request.url?.host == "computer.example" {
+                XCTAssertFalse(saved)
+                hostRequests += 1
+                return (200, Data(#"{"revoked":true}"#.utf8))
+            }
+            XCTAssertTrue(saved)
+            relayRequests += 1
+            cleanup.fulfill()
+            return (503, Data())
+        }, savePairedSources: { sources in XCTAssertTrue(sources.isEmpty); saved = true })
+        model.pairedSources = [source]
+        let removed = await model.remove(source)
+        XCTAssertTrue(removed)
+        XCTAssertTrue(model.pairedSources.isEmpty)
+        XCTAssertFalse(model.busy)
+        await fulfillment(of: [cleanup], timeout: 2)
+        XCTAssertEqual(hostRequests, 1)
+        XCTAssertEqual(relayRequests, 2)
+        XCTAssertTrue(model.pairedSources.isEmpty)
+        XCTAssertEqual(model.status, "Computer removed.")
+    }
+
+    @MainActor
+    func testForgettingStorageFailureKeepsPairingAndCacheWithoutRevokingAccess() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://gone.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret")
+        let store = removalStore()
+        defer { for key in [store.key, store.oldPrimaryKey, store.oldAdditionalKey] { try? Vault.remove(key: key) } }
+        try store.save([source])
+        var saves = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            XCTFail("A failed local save must not revoke remote access")
+            return (200, Data())
+        }, savePairedSources: { _ in saves += 1; throw HubError.message("Storage unavailable") })
+        model.pairedSources = [source]
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(["sourceID": source.sourceID]))
+        model.snapshots = [source.sourceID: snapshot]
+        try SourceSnapshotCache.save(snapshot, receivedAt: Date(), to: SourceSnapshotCache.url(for: source.sourceID))
+        defer { SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID)) }
+        let forgotten = await model.forget(source)
+        XCTAssertFalse(forgotten)
+        XCTAssertFalse(model.canForgetAfterRemovalFailure, "A local failure offers retry, not another forget confirmation")
+        XCTAssertEqual(saves, 2)
+        XCTAssertEqual(store.load().first?.credential, source.credential)
+        XCTAssertEqual(model.pairedSources.first?.credential, source.credential)
+        XCTAssertNotNil(model.snapshots[source.sourceID])
+        XCTAssertNotNil(SourceSnapshotCache.load(sourceID: source.sourceID, from: SourceSnapshotCache.url(for: source.sourceID)))
+        XCTAssertEqual(model.status, "Couldn't finish removing computer.")
+        XCTAssertNil(model.errors[source.sourceID], "Removal failure must not imply loss of computer connectivity")
+    }
+
+    @MainActor
+    func testRemovalRetriesEachStepWithoutRepeatingCompletedSteps() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret",
+            relayURL: URL(string: "https://relay.example")!, relayCredentialHash: String(repeating: "a", count: 64))
+        let cleanup = expectation(description: "Relay cleanup recovers")
+        cleanup.expectedFulfillmentCount = 2
+        var hostRequests = 0
+        var relayRequests = 0
+        var saves = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { request in
+            if request.url?.host == "computer.example" {
+                XCTAssertEqual(saves, 0)
+                hostRequests += 1
+                if hostRequests == 1 { throw URLError(.networkConnectionLost) }
+                return (401, Data())
+            }
+            XCTAssertEqual(saves, 2)
+            relayRequests += 1
+            cleanup.fulfill()
+            if relayRequests == 1 { return (503, Data()) }
+            return (200, Data(#"{"revoked":true}"#.utf8))
+        }, savePairedSources: { _ in
+            saves += 1
+            if saves == 1 { throw HubError.message("Storage temporarily unavailable") }
+        })
+        model.pairedSources = [source]
+        let removed = await model.remove(source)
+        XCTAssertTrue(removed)
+        XCTAssertTrue(model.pairedSources.isEmpty)
+        await fulfillment(of: [cleanup], timeout: 2)
+        XCTAssertEqual(hostRequests, 2)
+        XCTAssertEqual(relayRequests, 2)
+        XCTAssertEqual(saves, 2)
+    }
+
+    @MainActor
+    func testCancelledRemovalDoesNotRetryOrOfferForgetting() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret")
+        var requests = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            requests += 1
+            throw URLError(.cancelled)
+        }, savePairedSources: { _ in XCTFail("Cancelled removal must retain pairing") })
+        model.pairedSources = [source]
+        let removed = await model.remove(source)
+        XCTAssertFalse(removed)
+        XCTAssertEqual(requests, 1)
+        XCTAssertFalse(model.canForgetAfterRemovalFailure)
+        XCTAssertEqual(model.pairedSources.first?.credential, source.credential)
+    }
+
+    @MainActor
+    func testUnconfirmedRemovalOffersGenericRetryWithoutClearingPairing() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret")
+        var requests = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            requests += 1
+            return (200, Data(#"{"revoked":false}"#.utf8))
+        }, savePairedSources: { _ in XCTFail("Unconfirmed removal must retain pairing") })
+        model.pairedSources = [source]
+        let removed = await model.remove(source)
+        XCTAssertFalse(removed)
+        XCTAssertEqual(requests, 2)
+        XCTAssertFalse(model.canForgetAfterRemovalFailure)
+        XCTAssertEqual(model.pairedSources.first?.credential, source.credential)
+        XCTAssertFalse(model.isRevoked(source.sourceID))
+    }
+
+    @MainActor
+    func testLocalFailureAfterRemoteRemovalKeepsConfirmedRevocationForRetry() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret")
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            (200, Data(#"{"revoked":true}"#.utf8))
+        }, savePairedSources: { _ in throw HubError.message("Storage unavailable") })
+        model.pairedSources = [source]
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(["sourceID": source.sourceID]))
+        model.snapshots = [source.sourceID: snapshot]
+        let removed = await model.remove(source)
+        XCTAssertFalse(removed)
+        XCTAssertFalse(model.canForgetAfterRemovalFailure)
+        XCTAssertTrue(model.isRevoked(source.sourceID))
+        XCTAssertNil(model.snapshots[source.sourceID])
+        XCTAssertEqual(model.pairedSources.first?.credential, source.credential)
+        XCTAssertEqual(model.status, "Couldn't finish removing computer.")
+    }
+
+    private func removalStore() -> PairedSourcesStore {
+        let prefix = "removal-test-\(UUID().uuidString)"
+        return PairedSourcesStore(key: prefix, oldPrimaryKey: prefix + "-primary",
+                                  oldAdditionalKey: prefix + "-additional")
+    }
+
     func testComputerConnectionStatesDistinguishRecoveryFromStaleActivity() {
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: true, failed: true, hasSnapshot: true, fresh: true), .revoked)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: true, hasSnapshot: true, fresh: true), .reconnecting)

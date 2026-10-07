@@ -16,9 +16,12 @@ final class CompanionModel: ObservableObject {
     @Published var revokedSources: Set<String> = []
     @Published var status = "Connect a work source"
     @Published var busy = false
+    private(set) var canForgetAfterRemovalFailure = false
     private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
-    private let client = SourceClient()
+    private let client: SourceClient
+    private let push: PushCoordinator
     private let pairedStore = PairedSourcesStore()
+    private let savePairedSources: ([PairedSource]) throws -> Void
     private var polling: Task<Void, Never>?
     private var sourceEpoch = UUID()
     private var foreground = false
@@ -32,7 +35,11 @@ final class CompanionModel: ObservableObject {
     private var weatherObservers: [String: AnyCancellable] = [:]
     private var lastWatchRelayRequested = false
 
-    init(preview: Bool = false) {
+    init(preview: Bool = false, push: PushCoordinator? = nil, client: SourceClient = SourceClient(),
+         savePairedSources: (([PairedSource]) throws -> Void)? = nil) {
+        self.client = client
+        self.push = push ?? .shared
+        self.savePairedSources = savePairedSources ?? PairedSourcesStore().save
         designPreview = preview
         accessories = WatchAccessories(preview: preview)
         lastWatchRelayRequested = accessories.relayRequested
@@ -171,7 +178,7 @@ final class CompanionModel: ObservableObject {
                 let requested = self.accessories.relayRequested
                 if requested != self.lastWatchRelayRequested {
                     self.lastWatchRelayRequested = requested
-                    await PushCoordinator.shared.sync()
+                    await self.push.sync()
                 }
             }
         }
@@ -279,7 +286,7 @@ final class CompanionModel: ObservableObject {
             }
             let paired = try await client.pair(invitation, device: ClientDevice.current(), previous: existing)
             let values = PairedSourceOrder.updating(paired, in: pairedSources)
-            try pairedStore.save(values)
+            try savePairedSources(values)
             sourceEpoch = UUID()
             pairedSources = values
             clearSnapshot(paired.sourceID)
@@ -289,7 +296,7 @@ final class CompanionModel: ObservableObject {
             status = "Paired. Waiting for first snapshot."
             Diagnostics.shared.record("source_paired")
             monitoring.configure(sources: values)
-            Task { await PushCoordinator.shared.sync() }
+            Task { await push.sync() }
             Task { await syncWatchPush() }
             return true
         } catch { status = error.localizedDescription; return false }
@@ -305,44 +312,90 @@ final class CompanionModel: ObservableObject {
 
     @discardableResult
     func remove(_ paired: PairedSource) async -> Bool {
-        guard !busy, !PushCoordinator.shared.busy,
+        canForgetAfterRemovalFailure = false
+        guard !busy, !push.busy,
               pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) else { return false }
         busy = true
         defer { busy = false; schedulePendingWatchRefresh() }
         var removedOnComputer = false
         do {
-            try await client.remove(paired)
+            try await retryOnce { try await client.remove(paired) }
             removedOnComputer = true
-            try await client.removeRelayClient(paired)
-            let remaining = PairedSourceOrder.removing(paired.sourceID, from: pairedSources)
-            try pairedStore.save(remaining)
-            sourceEpoch = UUID()
-            await monitoring.removeSource(paired.sourceID)
-            clearSnapshot(paired.sourceID)
-            errors.removeValue(forKey: paired.sourceID)
-            revokedSources.remove(paired.sourceID)
-            ComputerPreferences.remove(paired.sourceID)
-            MonitoringComputerName.remove(paired.sourceID)
-            pairedSources = remaining
-            PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
-            Task { await syncWatchPush() }
-            forwardWatchAggregate()
+            try await retryOnce { try await removeLocally(paired) }
+            cleanUpRelay(paired)
             status = "Computer removed."
             return true
         } catch {
-            errors[paired.sourceID] = removedOnComputer
-                ? "Access was removed on this computer, but the phone couldn't save the change. Try removing it again."
-                : "Couldn't remove access: \(error.localizedDescription) Reconnect and try again; the pairing has been kept."
+            if !removedOnComputer, let connectionError = error as? URLError, connectionError.code != .cancelled {
+                canForgetAfterRemovalFailure = true
+            }
+            // Keep confirmed revocation even if a later step fails. A retry is
+            // safe: both remote endpoints accept an already-revoked credential.
             if removedOnComputer {
                 revokedSources.insert(paired.sourceID)
                 clearSnapshot(paired.sourceID)
                 await monitoring.removeSource(paired.sourceID)
-                PushCoordinator.shared.clearRemovedSource(sourceID: paired.sourceID)
+                push.clearRemovedSource(sourceID: paired.sourceID)
+                forwardWatchAggregate()
             }
-            forwardWatchAggregate()
-            status = errors[paired.sourceID] ?? "Couldn't remove access"
+            status = "Couldn't finish removing computer."
+            Diagnostics.shared.recordError("computer_removal_failed", error: error)
             return false
         }
+    }
+
+    @discardableResult
+    func forget(_ paired: PairedSource) async -> Bool {
+        canForgetAfterRemovalFailure = false
+        guard !busy, !push.busy,
+              pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) else { return false }
+        busy = true
+        defer { busy = false; schedulePendingWatchRefresh() }
+        do {
+            try await retryOnce { try await removeLocally(paired) }
+            status = "Computer removed."
+            // Explicit local forgetting does not claim computer-side revocation.
+            cleanUpRelay(paired)
+            return true
+        } catch {
+            status = "Couldn't finish removing computer."
+            Diagnostics.shared.recordError("computer_forgetting_failed", error: error)
+            return false
+        }
+    }
+
+    private func cleanUpRelay(_ paired: PairedSource) {
+        Task {
+            do { try await retryOnce { try await client.removeRelayClient(paired) } }
+            catch { Diagnostics.shared.recordError("removed_source_relay_cleanup_failed", error: error) }
+        }
+    }
+
+    // Each removal step is idempotent; retry it once without replaying completed steps.
+    private func retryOnce(_ action: () async throws -> Void) async throws {
+        do { try await action() }
+        catch {
+            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled else { throw error }
+            try Task.checkCancellation()
+            try await action()
+        }
+    }
+
+    private func removeLocally(_ paired: PairedSource) async throws {
+        let remaining = PairedSourceOrder.removing(paired.sourceID, from: pairedSources)
+        // Commit credentials first. A storage failure must retain the connection.
+        try savePairedSources(remaining)
+        sourceEpoch = UUID()
+        clearSnapshot(paired.sourceID)
+        errors.removeValue(forKey: paired.sourceID)
+        revokedSources.remove(paired.sourceID)
+        ComputerPreferences.remove(paired.sourceID)
+        MonitoringComputerName.remove(paired.sourceID)
+        pairedSources = remaining
+        push.clearRemovedSource(sourceID: paired.sourceID)
+        forwardWatchAggregate()
+        await monitoring.removeSource(paired.sourceID)
+        Task { await syncWatchPush() }
     }
 
     private func sourceFailed(_ error: Error, sourceID: String) {
@@ -353,7 +406,7 @@ final class CompanionModel: ObservableObject {
         if revoked {
             revokedSources.insert(sourceID)
             clearSnapshot(sourceID)
-            PushCoordinator.shared.clearRemovedSource(sourceID: sourceID)
+            push.clearRemovedSource(sourceID: sourceID)
             Task { await monitoring.removeSource(sourceID) }
         }
         forwardWatchAggregate()
@@ -480,7 +533,7 @@ final class CompanionModel: ObservableObject {
                 snapshots: snapshots, fresh: Set(pairedSources.filter { isFresh($0.sourceID) }.map(\.sourceID)))
             if nameChanged { await monitoring.refreshComputerName(sourceID) }
             Diagnostics.shared.record("snapshot_received", event: value.identity, state: value.state)
-            PushCoordinator.shared.recoverRegistrationIfNeeded()
+            push.recoverRegistrationIfNeeded()
             if fromPush, let identity = watchAggregate?.identity {
                 _ = await accessories.waitForDelivery(of: identity)
             }

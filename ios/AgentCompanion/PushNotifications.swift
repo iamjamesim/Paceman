@@ -254,8 +254,8 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         unregisterRemoteNotificationsIfUnused()
     }
 
-    // Server-side client revocation has already removed the push destination.
-    // Clear local setup without issuing another request with an invalid token.
+    // Clear local setup after removal. Remote revocation
+    // is handled separately and is not required to reject unpaired push hints.
     func clearRemovedSource(sourceID: String) {
         registered = false
         awaitingToken = false
