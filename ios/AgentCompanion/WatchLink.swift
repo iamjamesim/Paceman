@@ -99,9 +99,9 @@ struct WatchPreferences: Codable, Equatable {
                   timeFormat: (try? c.decode(WatchTimeFormat.self, forKey: .timeFormat)) ?? .system)
     }
     private static func key(_ id: String) -> String { "watch-preferences." + id }
-    static func load(_ id: String, defaults: UserDefaults = .standard, migrateLegacy: Bool = false, defaultSound: Bool = true) -> Self {
+    static func load(_ id: String, defaults: UserDefaults = .standard, migrateLegacy: Bool = false) -> Self {
         if let data = defaults.data(forKey: key(id)), let value = try? JSONDecoder().decode(Self.self, from: data) { return value }
-        var value = Self(sound: defaultSound)
+        var value = Self()
         if migrateLegacy {
             if defaults.object(forKey: "watch-enabled") != nil { value.updates = defaults.bool(forKey: "watch-enabled") }
             if defaults.object(forKey: "sound-enabled") != nil { value.sound = defaults.bool(forKey: "sound-enabled") }
@@ -439,7 +439,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 kind = (receipt.capabilities ?? 0) & (1 << 12) != 0 ? .pebble : .esp32
             }
             capabilities = receipt.capabilities ?? 0
-            let preferences = WatchPreferences.load(receipt.watchID, migrateLegacy: true, defaultSound: kind != .pebble)
+            let preferences = WatchPreferences.load(receipt.watchID, migrateLegacy: true)
             supportsBrightness = (receipt.profileVersion ?? 1) >= 3 && (receipt.capabilities ?? 0) & (1 << 5) != 0
             enabled = preferences.updates
             updatesEnabled = preferences.updates
@@ -469,7 +469,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         capabilities = (1 << 1) | (1 << 6) | (1 << 7) | (1 << 9) | (1 << 12) | (1 << 13)
         if kind == .esp32 { capabilities |= (1 << 4) | (1 << 5) | (1 << 11) }
         supportsBrightness = kind == .esp32
-        soundEnabled = kind != .pebble
+        soundEnabled = true
     }
     #endif
 
@@ -1025,11 +1025,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 capabilities = identity.capabilities
                 profileVersion = identity.profileVersion
                 supportsBrightness = profileVersion >= 3 && capabilities & (1 << 5) != 0
-                var preferences = WatchPreferences.load(identity.id, defaultSound: kind != .pebble)
-                if kind == .pebble && (pairingReceipt?.capabilities ?? 0) & (1 << 7) == 0 {
-                    preferences.sound = false
-                    preferences.save(identity.id)
-                }
+                let preferences = WatchPreferences.load(identity.id)
                 brightness = preferences.brightness
                 timeFormat = preferences.timeFormat
                 guard owner != nil, profile != nil else { return }
@@ -1271,7 +1267,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             freshNewEvent: freshNewEvent, capabilities: capabilities)
         let state = WatchWire.compatibleActivityState(snapshot.state, capabilities: capabilities)
         let packet = WatchWire.activity(state: state, revision: revision, alert: alert,
-            sound: soundEnabled && capabilities & (1 << 7) != 0 && (alert || workingSound),
+            sound: (kind == .pebble || soundEnabled) && capabilities & (1 << 7) != 0 && (alert || workingSound),
             acknowledged: acknowledged)
         writePending = true
         sentEvent = snapshot.identity

@@ -251,16 +251,44 @@ struct AccessoryIllustration: View {
                     RoundedRectangle(cornerRadius: geometry.size.width * 0.10)
                         .fill(.white).padding(.horizontal, geometry.size.width * 0.10)
                         .frame(height: geometry.size.height * 0.62)
-                    VStack(spacing: geometry.size.height * 0.05) {
-                        Text("10:09").font(.system(size: geometry.size.width * 0.24, weight: .bold)).foregroundStyle(Color(companionHex: "AA5500"))
-                        PacemanMark().foregroundStyle(Color(companionHex: "14723F"))
-                            .frame(width: geometry.size.width * 0.36, height: geometry.size.width * 0.36)
+                    VStack(spacing: geometry.size.width * 0.07) {
+                        VStack(spacing: geometry.size.width * 0.025) {
+                            Text("Tue, Oct 6")
+                                .font(.system(size: geometry.size.width * 0.056, weight: .medium))
+                                .foregroundStyle(Color(white: 0.25))
+                            Text("10:09")
+                                .font(.system(size: geometry.size.width * 0.196, weight: .bold))
+                                .monospacedDigit()
+                                .foregroundStyle(theme.tint)
+                                .colorMultiply(Color(white: 0.6))
+                        }
+                        VStack(alignment: .leading, spacing: geometry.size.width * 0.015) {
+                            Text("MacBook Pro")
+                                .font(.system(size: geometry.size.width * 0.056, weight: .medium))
+                                .foregroundStyle(Color(white: 0.25))
+                            HStack(spacing: geometry.size.width * 0.025) {
+                                PacemanMark()
+                                    .frame(width: geometry.size.width * 0.12, height: geometry.size.width * 0.12)
+                                Text("Working")
+                                    .font(.system(size: geometry.size.width * 0.084, weight: .semibold))
+                            }.foregroundStyle(PhoneMonitoringStatusColor.working(onDark: false))
+                            Text("Codex · 3 sessions")
+                                .font(.system(size: geometry.size.width * 0.052))
+                                .foregroundStyle(Color(white: 0.4))
+                        }
+                        .padding(.horizontal, geometry.size.width * 0.036)
+                        .padding(.vertical, geometry.size.width * 0.024)
+                        .frame(width: geometry.size.width * 0.72, alignment: .leading)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: geometry.size.width * 0.028)
+                                .stroke(Color(white: 0.77), lineWidth: geometry.size.width * 0.004)
+                        }
                     }
                 }
             } else {
                 Image(systemName: "cpu").resizable().scaledToFit().padding(4).foregroundStyle(theme.tint)
             }
-        }
+        }.dynamicTypeSize(.medium).accessibilityHidden(true)
     }
 }
 
@@ -498,9 +526,9 @@ struct WatchDetail: View {
                 }
             }
             CompanionRule(theme: theme)
-            if preview || watch.supportsSound {
+            if watch.kind != .pebble && (preview || watch.supportsSound) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Toggle("Status sounds", isOn: Binding(get: { preview ? watch.kind != .pebble : watch.soundEnabled }, set: { watch.setSoundEnabled($0) }))
+                    Toggle("Status sounds", isOn: Binding(get: { watch.soundEnabled }, set: { watch.setSoundEnabled($0) }))
                         .tint(theme.tint).allowsHitTesting(!preview)
                     Text(watch.supportsWorkingSound ? "For new work, input requests, failures, and completed turns." : "For input requests, failures, and completed turns.")
                         .font(.footnote).foregroundStyle(theme.secondaryInk)

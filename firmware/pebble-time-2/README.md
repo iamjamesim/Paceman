@@ -6,8 +6,8 @@ Keeps native watchfaces, Timeline, the launcher, alarms and backlight settings.
 Up opens the agent cards; Up/Down browse and Back returns to the face. Down on
 the face opens Timeline; Select opens the launcher. With Touch on, tap the card
 after waking the watch, or use the default Double Tap wake gesture directly.
-Fresh input, failure and completion updates vibrate. Optional tones are off by
-default and respect Quiet Time and speaker mute.
+Fresh input, failure and completion alerts use the watch’s vibration and sound
+settings. Quiet Time suppresses both; speaker mute keeps vibration enabled.
 
 ## Build
 
