@@ -24,6 +24,18 @@ file. Its [original license](omarchy/OMARCHY_WATCH_CODEX_LICENSE)
 and [source provenance](omarchy/CODEX_HOOK_UPSTREAM.md) are retained beside the
 hook and copied into Paceman's Linux installation.
 
+## Pebble Time 2
+
+`firmware/pebble-time-2/` contains Paceman's integration with
+[Core Devices PebbleOS](https://github.com/coredevices/PebbleOS). The
+[setup guide](firmware/pebble-time-2/README.md) records the pinned upstream revision;
+the build uses a separate upstream checkout with its own license notices.
+
+The build copies `watch_profile.h` from the ESP32 package under MIT, retaining
+the [original license](firmware/esp32-watch/UPSTREAM_LICENSE) beside that source.
+The bundled Roboto Condensed font retains its
+[SIL Open Font License](firmware/pebble-time-2/resources/LICENSE.Roboto.txt).
+
 ## iOS typography and symbols
 
 The bundled JetBrains Mono fonts in `ios/Resources/` are covered by the included

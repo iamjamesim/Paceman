@@ -2,75 +2,92 @@
 
 **Take your agents for a walk.**
 
-Paceman is an open gear system for agentic engineering. Agents keep working
-while your attention is elsewhere. Paceman gives that work a quiet presence in
-the gear you take with you, so you can stay in touch without being tied to your
-desk.
+Paceman is an open personal gear system for agentic engineering on the go.
+Agents often perform long-running tasks in parallel, async, and in the
+background. Paceman gives that work a quiet presence in the gear you take with
+you, so you can keep things moving wherever you are without waiting around at
+your desk.
 
-Paceman shows agent activity in Live Activities on the iPhone Lock Screen,
-Apple Watch Smart Stack, and Mac menu bar. Mac and Omarchy support Codex and
-Claude Code. Apple Watch usage complications remain Codex-only. New development
-focuses on agent activity and interaction.
-
-Paceman is in **alpha**. Desktop installers are available, and the iPhone app
-is available through TestFlight.
+To start, install Paceman on your computer and iPhone to see which agents are
+working, need help, or are done wherever you go. Paceman uses Live Activities to
+stream Codex and Claude Code activity from your Mac or Omarchy computer to your
+iPhone and Apple Watch.
 
 <p align="center">
   <a href="docs/images/iphone-live-activity.png"><img src="docs/images/iphone-live-activity.png" alt="Paceman Live Activity on an iPhone Lock Screen" width="320"></a>
   <a href="docs/images/apple-watch-smart-stack.jpg"><img src="docs/images/apple-watch-smart-stack.jpg" alt="Paceman in the Apple Watch Smart Stack" width="320"></a>
 </p>
 
-<p align="center">
-  <a href="docs/images/mac-menu-bar-live-activity.png"><img src="docs/images/mac-menu-bar-live-activity.png" alt="Paceman Live Activity in the Mac menu bar with its expanded status panel" width="640"></a>
-</p>
+Beyond that, you can further extend your system by connecting any hackable
+accessory to Paceman on your iPhone. See [Experimental accessories](#experimental-accessories)
+for examples.
 
-You can also try [Paceman Watch](firmware/esp32-watch/README.md), an experimental
-ESP32-S3 watch for agent activity, with additional Codex usage monitoring. It
-demonstrates how Paceman can extend to gear you choose or build. New devices
-still need custom firmware and iPhone pairing support today.
-
-<p align="center">
-  <a href="docs/images/esp32-watch.jpg"><img src="docs/images/esp32-watch.jpg" alt="Paceman on an experimental ESP32-S3 watch" width="300"></a>
-</p>
+Paceman is in **alpha**. macOS and Omarchy installers are available via GitHub
+releases, and Paceman iOS is available through TestFlight.
 
 ## Get started
 
-1. **[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**. Open the link on your iPhone; iOS 18 or later is required.
+1. **[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**.
 2. **[Download the desktop client](https://github.com/iamjamesim/Paceman/releases)** and follow the [Mac setup](macos/README.md) or [Omarchy setup](omarchy/README.md) guide.
-3. Review the enabled agent hooks, connect [Tailscale](https://tailscale.com/download) on your computer and iPhone, and scan the pairing code. The setup guides walk through these checks; Paceman prepares the private connection when Tailscale permits it.
 
-Prefer source installation? See [Mac source setup](macos/README.md#build-and-install-from-source)
-or [Omarchy source setup](omarchy/README.md#install-from-a-git-checkout).
+### Minimum requirements
 
-The Mac and Omarchy installers configure the [APNs relay](service/RELAY.md) for
-locked-phone notifications by default; the iPhone must still allow notifications.
-The Apple Watch app requires watchOS 26 or later.
+- **iPhone:** iOS 18+.
+- **Computer:** Apple Silicon Mac with macOS 15+, or Omarchy 4.0+ with Python 3.11+ and user systemd.
+- **Agent:** Codex or Claude Code 2.1.196+ installed on your computer.
+- **Connection:** [Tailscale](https://tailscale.com/download) on your computer and iPhone.
+- **Apple Watch (optional):** watchOS 26+.
 
-Developers can [build the iPhone app with Xcode](docs/development.md#iphone-and-live-activities-mac).
+### Manual installation
 
-## Understand the system
+- **Mac:** [Build and install from source](macos/README.md#build-and-install-from-source).
+- **Omarchy:** [Install from a Git checkout](omarchy/README.md#install-from-a-git-checkout).
+- **iPhone:** [Build with Xcode](docs/development.md#iphone-and-live-activities-mac).
 
-Start with [architecture](docs/architecture.md) for the end-to-end flow. Then read
-[data and lifecycle](docs/data-lifecycle.md) for what survives outages and
-[push delivery](docs/push-delivery.md) for updates while the phone is asleep.
+## Experimental accessories
 
-For exact formats, use the [protocol](docs/protocol.md). The
-[ESP32 watch connection](firmware/esp32-watch/CONNECTION.md) covers its
-Bluetooth recovery; [relay setup](service/RELAY.md) is for operators.
+Paceman can extend to gear you choose or build:
+
+- [Pebble Time 2](firmware/pebble-time-2/README.md) running modified PebbleOS
+  firmware to work as a Paceman accessory.
+- [ESP32-S3 watch](firmware/esp32-watch/README.md) with custom firmware focused
+  on agent activity.
+
+[Accessory setup guide](firmware/README.md).
+
+## Privacy
+
+- Paceman doesn't transmit prompts, replies or tool arguments.
+- Paceman shares activity status and limited metadata. Optional project labels
+  can appear on your Lock Screen.
+- Activity travels over private HTTPS through Tailscale. Notifications use
+  Paceman's hosted relay and Apple's push service.
+
+## Documentation
+
+- [Architecture](docs/architecture.md): how the system fits together.
+- [Data and lifecycle](docs/data-lifecycle.md): privacy, storage and recovery.
+- [Push delivery](docs/push-delivery.md): notifications and background updates.
+- [Protocol](docs/protocol.md): source and accessory interfaces.
 
 ## Repository
 
 | Path | Purpose |
 | --- | --- |
-| `service/` | Local source API, pairing, persistence, push worker and APNs relay |
-| `macos/` | Menu-bar app, Codex and Claude Code hooks, per-user installer |
-| `omarchy/` | Omarchy bar panel, Codex and Claude Code hooks, source controls and installer |
-| `ios/` | iPhone app, Live Activities, Apple Watch app and complications |
-| `firmware/esp32-watch/` | Experimental watch firmware and simulator |
-| `tests/`, `scripts/` | Portable checks and development tools |
+| `service/` | Source service and notification relay |
+| `macos/` | Mac client and agent hooks |
+| `omarchy/` | Omarchy client and agent hooks |
+| `ios/` | iPhone and Apple Watch apps |
+| `firmware/pebble-time-2/` | PebbleOS integration |
+| `firmware/esp32-watch/` | ESP32-S3 firmware and simulator |
+| `tests/`, `scripts/` | Checks and development tools |
 
-The ESP32 package derives from [Omarchy Watch](https://github.com/iamjamesim/omarchy-watch).
-Its [provenance](firmware/esp32-watch/UPSTREAM.md) is retained. New Paceman code
-uses [Apache 2.0](LICENSE); imported code and assets have
-[third-party notices](THIRD_PARTY_NOTICES.md). Contributors can start with the
-[development guide](docs/development.md) for builds and tests.
+## Contributing
+
+- [GitHub Issues](https://github.com/iamjamesim/Paceman/issues) for bugs and suggestions.
+- [Development guide](docs/development.md) for builds and tests.
+
+## License
+
+- [Apache 2.0](LICENSE) for original Paceman code, documentation and artwork.
+- [Third-party notices](THIRD_PARTY_NOTICES.md) for imported code and assets.
