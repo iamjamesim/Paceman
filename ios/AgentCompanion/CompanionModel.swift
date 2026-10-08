@@ -252,7 +252,7 @@ final class CompanionModel: ObservableObject {
                 state: snapshot?.state ?? .idle,
                 availability: snapshot == nil ? 0 : isFresh(source.sourceID) ? 1 : 2,
                 expiresAt: snapshot.map { $0.observedAt + $0.freshFor } ?? 0,
-                sessions: snapshot?.sessions ?? [])
+                sessions: snapshot?.sessions ?? [], sessionsKnown: snapshot?.sessions != nil)
         }
         let priorities: [ActivityState: Int] = [.needsInput: 0, .failed: 1, .working: 2, .finished: 3, .idle: 4]
         let sortedCards = cards.sorted {

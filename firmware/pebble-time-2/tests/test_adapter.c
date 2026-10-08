@@ -436,6 +436,36 @@ int main(void) {
   paceman_service_get_view(&view);
   assert(view.sources_received && view.source_count == 0);
 
+  // GATT pages commit once; a partial feed must not redraw or expose mixed rows.
+  uint8_t page[500] = {'O', 'S', 3, 2, 42};
+  page[21] = 8; page[22] = 1;
+  page[24] = 1; page[40] = 100; page[44] = 1; page[45] = 1;
+  memcpy(page + 46, "Mac", 4); page[72] = 8; page[80] = 1;
+  for (unsigned i = 0; i < 8; ++i) {
+    page[84 + i * 52] = i + 1;
+    page[100 + i * 52] = 1; page[101 + i * 52] = 1;
+    memcpy(page + 104 + i * 52, "paceman", 8);
+  }
+  const int before_changes = changes, before_haptics = haptics;
+  assert(att_access(2, 6, false, page, sizeof(page), NULL) == 8);
+  assert(att_access(1, 6, false, page, sizeof(page), NULL) == 0);
+  run_jobs();
+  assert(changes == before_changes && s_state.source_count == 0);
+  page[20] = 1; page[24] = 2;
+  assert(att_access(1, 6, false, page, sizeof(page), NULL) == 0);
+  run_jobs();
+  assert(changes == before_changes + 1 && haptics == before_haptics);
+  PacemanSessionView sessions;
+  uint8_t source_id[16] = {2};
+  paceman_service_get_sessions(source_id, &sessions);
+  assert(sessions.found && sessions.connected && sessions.source.session_count == 8);
+  assert(sessions.sessions[7].id[0] == 8 && !strcmp(sessions.sessions[7].workspace, "paceman"));
+  source_id[0] = 99;
+  paceman_service_get_sessions(source_id, &sessions);
+  assert(!sessions.found && !sessions.source.session_count && !sessions.sessions[0].id[0]);
+  assert(att_access(1, 6, false, empty_sources, 4, NULL) == 0);
+  run_jobs();
+
   paceman_service_notification_hint(&b.pairing_info.identity, 100,
                                     (const uint8_t *)"ai.paceman.app", 14);
   assert(sync_notified == 1 && s_notification_sequence == 1);
