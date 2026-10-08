@@ -47,11 +47,3 @@ static inline void paceman_navigation_move_source(PacemanNavigation *nav,
   memcpy(nav->source_id, sources[nav->source_index].id, 16);
   nav->selected = true;
 }
-
-static inline void paceman_navigation_move_session(PacemanNavigation *nav,
-    const PacemanSession *sessions, uint8_t count, int step) {
-  if (!count) return;
-  nav->session_index = (nav->session_index + count + step) % count;
-  memcpy(nav->session_id, sessions[nav->session_index].id, 16);
-  nav->session_selected = true;
-}

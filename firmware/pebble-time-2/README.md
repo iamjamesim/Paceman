@@ -4,8 +4,10 @@ Custom PebbleOS firmware for Paceman's [accessory protocol](../../docs/protocol.
 Keeps native watchfaces, Timeline, the launcher, alarms and backlight settings.
 
 Up opens the computer cards. Select opens that computer’s session list; Up/Down
-browse and Back returns one level. Session rows follow the iPhone list: agent,
-status, and optional workspace label, with historical activity marked Last known.
+browse with native animated scrolling (hold to repeat), and Back returns one level.
+The session list stops at its ends and keeps the computer heading fixed. Session
+rows follow the iPhone list: agent, status, and optional workspace label, with
+historical activity marked Last known.
 Up to eight sessions per computer are shown, attention states first. Session
 detail requires an updated companion; older phones retain computer summaries. Down on
 the face opens Timeline; Select opens the launcher. With Touch on, tap the card

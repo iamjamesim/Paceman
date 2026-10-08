@@ -196,8 +196,9 @@ static void check_navigation(void) {
   paceman_navigation_sources(&nav, swapped, 2, true, true, 99);
   assert(nav.source_index == 0 && nav.sessions_open);
   PacemanSession sessions[3] = {{.id = {1}}, {.id = {2}}, {.id = {3}}};
+  // The native menu owns movement; retain its selection across feed changes.
+  nav.session_index = 2;
   paceman_navigation_sessions(&nav, sessions, 3);
-  paceman_navigation_move_session(&nav, sessions, 3, -1);
   assert(nav.session_index == 2 && nav.session_id[0] == 3);
   PacemanSession reordered[3] = {sessions[2], sessions[0], sessions[1]};
   paceman_navigation_sessions(&nav, reordered, 3);
