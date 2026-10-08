@@ -2,6 +2,9 @@
 
 **Take your agents for a walk.**
 
+[![Checks](https://github.com/iamjamesim/Paceman/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/iamjamesim/Paceman/actions/workflows/checks.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 Paceman is an open personal gear system for agentic engineering on the go.
 Agents often perform long-running tasks in parallel, async, and in the
 background. Paceman gives that work a quiet presence in the gear you take with
