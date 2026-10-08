@@ -311,15 +311,13 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private let sourcesUUID = CBUUID(string: "7f510006-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private var sourceFeed: CBCharacteristic?
     private var desiredSources: [WatchSourceCard] = []
-    private var pendingSources: Data?
-    private var acceptedSources: Data?
+    private var sourceTransfer = WatchSourceTransfer()
     private var supportsSourceCards: Bool { capabilities & (1 << 12) != 0 }
-    private var sourcePacket: Data { WatchWire.sources(desiredSources, rich: capabilities & (1 << 13) != 0) }
+    private var sourcePackets: [Data] { WatchWire.sourcePackets(desiredSources, capabilities: capabilities) }
 
     private func resetSourceFeed() {
         sourceFeed = nil
-        pendingSources = nil
-        acceptedSources = nil
+        sourceTransfer = WatchSourceTransfer()
     }
 
     func updateSources(_ cards: [WatchSourceCard]) {
@@ -329,10 +327,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     private func writeSourcesIfNeeded() {
         guard supportsSourceCards, enabled, ready, !profileWritePending, !writePending,
-              pendingSources == nil, let sourceFeed, let peripheral else { return }
-        let packet = sourcePacket
-        guard packet != acceptedSources else { return }
-        pendingSources = packet
+              sourceTransfer.pending == nil, let sourceFeed, let peripheral else { return }
+        guard let packet = sourceTransfer.next(sourcePackets) else { return }
         peripheral.writeValue(packet, for: sourceFeed, type: .withResponse)
     }
     private let notificationUUID = CBUUID(string: "7f510005-1b15-4f0d-b7a5-4cf3a2c98ee1")
@@ -1187,8 +1183,11 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             }
             writeSourcesIfNeeded()
         } else if characteristic.uuid == sourcesUUID {
-            acceptedSources = pendingSources
-            pendingSources = nil
+            sourceTransfer.acknowledge()
+            if sourceTransfer.active {
+                writeSourcesIfNeeded()
+                return
+            }
             writeProfileIfNeeded()
             if let queued {
                 self.queued = nil
@@ -1238,7 +1237,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         let deadline = ProcessInfo.processInfo.systemUptime + 3
         while ProcessInfo.processInfo.systemUptime < deadline {
             if UserDefaults.standard.string(forKey: deliveryKey("delivered-event")) == identity &&
-                (!supportsSourceCards || (pendingSources == nil && acceptedSources == sourcePacket)) { return true }
+                (!supportsSourceCards || sourceTransfer.contains(sourcePackets)) { return true }
             guard enabled, ready, !Task.isCancelled else { return false }
             do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return false }
         }
@@ -1252,7 +1251,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         guard !profileWritePending else { return }
         guard enabled, ready, let activity, let peripheral else { return }
         guard Date().timeIntervalSince1970 - snapshot.observedAt < snapshot.freshFor else { return }
-        if writePending || pendingSources != nil {
+        if writePending || sourceTransfer.active {
             queued = snapshot
             queuedAt = Date()
             return
@@ -1287,7 +1286,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     private func writeProfileIfNeeded() {
         guard sourceProfileResolved, enabled, preparing || ready, deviceID != nil,
-              !profileWritePending, !writePending, pendingSources == nil,
+              !profileWritePending, !writePending, !sourceTransfer.active,
               let owner, let profile, let peripheral, peripheral.state == .connected else { return }
         let now = Date()
         let packet = WatchWire.profile(owner: owner, revision: 1, now: now,

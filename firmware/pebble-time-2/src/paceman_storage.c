@@ -53,9 +53,7 @@ PacemanStorage paceman_storage_load(PacemanRecord *record) {
   memcpy(record->device_id, bytes + 5, 16);
   memcpy(record->owner_peer.address, bytes + 23, 6);
   memcpy(record->profile, bytes + 30, PACEMAN_PROFILE_MAX);
-  PacemanState check;
-  paceman_state_init(&check, PacemanStorageLoaded, record);
-  return check.storage_ready ? PacemanStorageLoaded : PacemanStorageError;
+  return paceman_record_valid(record) ? PacemanStorageLoaded : PacemanStorageError;
 }
 
 bool paceman_storage_save(const PacemanRecord *record, bool create) {

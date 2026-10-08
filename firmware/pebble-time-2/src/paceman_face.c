@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include "paceman_service.h"
 #include "paceman_face_layout.h"
+#include "paceman_navigation.h"
 
 #include "applib/app.h"
 #include "applib/app_timer.h"
@@ -21,8 +22,8 @@ typedef struct {
   Window window;
   Layer canvas;
   EventServiceInfo updates;
-  bool expanded, selected;
-  uint8_t index, source_id[16];
+  bool expanded;
+  PacemanNavigation navigation;
   AppTimer *expiry, *motion;
   uint32_t revision;
   uint8_t motion_frames;
@@ -169,7 +170,13 @@ static void prv_card(GContext *ctx, GRect card, const PacemanView *view,
   graphics_draw_round_rect(ctx, &card, 7);
   graphics_context_set_text_color(ctx, GColorBlack);
   prv_text(ctx, title, FONT_KEY_PACEMAN_DATE_14,
-           GRect(card.origin.x + 9, card.origin.y + 3, card.size.w - 18, 18), GTextAlignmentLeft);
+           GRect(card.origin.x + 9, card.origin.y + 3, card.size.w - (selected ? 32 : 18), 18), GTextAlignmentLeft);
+  if (selected && source) {
+    const int x = card.origin.x + card.size.w - 12, y = card.origin.y + 12;
+    graphics_context_set_stroke_color(ctx, accent);
+    graphics_draw_line(ctx, GPoint(x - 3, y - 3), GPoint(x, y));
+    graphics_draw_line(ctx, GPoint(x, y), GPoint(x - 3, y + 3));
+  }
   const GColor color = current ? prv_state_color(activity) : GColorDarkGray;
   Face *face = app_state_get_user_data();
   if (robot) prv_robot(ctx, GPoint(card.origin.x + 8,
@@ -183,27 +190,85 @@ static void prv_card(GContext *ctx, GRect card, const PacemanView *view,
            GRect(card.origin.x + 9, card.origin.y + 51, card.size.w - 18, 19), GTextAlignmentLeft);
 }
 
+static void prv_sessions(GContext *ctx, Face *face, uint32_t now, GColor accent) {
+  PacemanSessionView view;
+  paceman_service_get_sessions(face->navigation.source_id, &view);
+  if (!view.found) {
+    face->navigation.sessions_open = false;
+    layer_mark_dirty(&face->canvas);
+    return;
+  }
+  const PacemanSource *source = &view.source;
+  const bool current = paceman_source_is_current(source, view.connected, now);
+  const int width = face->canvas.bounds.size.w, height = face->canvas.bounds.size.h;
+  graphics_context_set_text_color(ctx, GColorBlack);
+  prv_text(ctx, source->name, FONT_KEY_PACEMAN_DATE_14,
+           GRect(10, 5, width - 20, 20), GTextAlignmentLeft);
+  char heading[48];
+  const unsigned total = source->working + source->attention + source->finished + source->failed;
+  paceman_navigation_sessions(&face->navigation, view.sessions, source->session_count);
+  if (source->session_count)
+    snprintf(heading, sizeof(heading), "%s · %u/%u", current ? "Sessions" : "Last known",
+             face->navigation.session_index + 1, source->session_count);
+  else
+    snprintf(heading, sizeof(heading), "%s", current ?
+             (source->state == OMARCHY_ACTIVITY_NONE ? "Sessions" : "Activity") : "Last known activity");
+  if (source->availability == PacemanSourceEmpty) heading[0] = 0;
+  graphics_context_set_text_color(ctx, GColorDarkGray);
+  prv_text(ctx, heading, FONT_KEY_PACEMAN_TEXT_13,
+           GRect(10, 25, width - 20, 19), GTextAlignmentLeft);
+  if (!source->session_count) {
+    const char *message = source->availability == PacemanSourceEmpty ? "No activity yet" :
+                          source->state != OMARCHY_ACTIVITY_NONE ? prv_status(source->state) : "No active sessions";
+    prv_text(ctx, message, FONT_KEY_PACEMAN_STATUS_21,
+             GRect(10, 70, width - 20, 58), GTextAlignmentLeft);
+    return;
+  }
+  const unsigned top = face->navigation.session_index ? face->navigation.session_index - 1 : 0;
+  const bool truncated = total > source->session_count;
+  for (unsigned i = top; i < source->session_count; ++i) {
+    const int y = 47 + (i - top) * 65;
+    if (y + 61 > height - (truncated ? 23 : 0)) break;
+    const PacemanSession *session = &view.sessions[i];
+    const char *provider = session->provider == 1 ? "Codex" : session->provider == 2 ? "Claude" : "Agent";
+    const GRect card = GRect(10, y, width - 20, 61);
+    graphics_context_set_fill_color(ctx, GColorWhite);
+    graphics_fill_round_rect(ctx, &card, 7, GCornersAll);
+    if (i == face->navigation.session_index) {
+      graphics_context_set_stroke_color(ctx, accent);
+      graphics_draw_round_rect(ctx, &card, 7);
+    }
+    const GColor color = current ? prv_state_color(session->state) : GColorDarkGray;
+    prv_robot(ctx, GPoint(18, y + 14), session->state, color);
+    graphics_context_set_text_color(ctx, current ? GColorBlack : GColorDarkGray);
+    prv_text(ctx, provider, FONT_KEY_PACEMAN_DATE_14,
+             GRect(56, y + 3, width - 75, 18), GTextAlignmentLeft);
+    graphics_context_set_text_color(ctx, color);
+    prv_text(ctx, prv_status(session->state), FONT_KEY_PACEMAN_TEXT_13,
+             GRect(56, y + 23, width - 75, 18), GTextAlignmentLeft);
+    graphics_context_set_text_color(ctx, GColorDarkGray);
+    prv_text(ctx, session->workspace, FONT_KEY_PACEMAN_TEXT_13,
+             GRect(56, y + 40, width - 75, 18), GTextAlignmentLeft);
+  }
+  if (truncated) {
+    graphics_context_set_fill_color(ctx, GColorWhite);
+    const GRect footer = GRect(0, height - 23, width, 23);
+    graphics_fill_rect(ctx, &footer);
+    graphics_context_set_text_color(ctx, GColorDarkGray);
+    snprintf(heading, sizeof(heading), "Showing %u of %u sessions", source->session_count, total);
+    prv_text(ctx, heading, FONT_KEY_PACEMAN_TEXT_13,
+             GRect(10, height - 21, width - 20, 19), GTextAlignmentLeft);
+  }
+}
+
 static void prv_draw(Layer *layer, GContext *ctx) {
   Face *face = app_state_get_user_data();
   PacemanView view;
   paceman_service_get_view(&view);
   const uint32_t now_seconds = rtc_get_time();
   prv_schedule_expiry(face, &view, now_seconds);
-  if (!face->expanded || !face->selected) {
-    face->index = 0;
-    for (size_t i = 0; i < view.source_count; ++i)
-      if (paceman_source_is_current(&view.sources[i], view.connected, now_seconds)) {
-        face->index = i; break;
-      }
-  } else {
-    for (size_t i = 0; i < view.source_count; ++i)
-      if (!memcmp(face->source_id, view.sources[i].id, 16)) { face->index = i; break; }
-  }
-  if (face->index >= view.source_count) face->index = 0;
-  if (view.source_count) {
-    memcpy(face->source_id, view.sources[face->index].id, 16);
-    face->selected = true;
-  }
+  paceman_navigation_sources(&face->navigation, view.sources, view.source_count,
+                             face->expanded, view.connected, now_seconds);
   omarchy_profile_v3_t colors = {0};
   memcpy(&colors, view.record.profile, MIN(view.record.profile_size, sizeof(colors)));
   GColor accent = GColorWindsorTan;
@@ -223,6 +288,10 @@ static void prv_draw(Layer *layer, GContext *ctx) {
   graphics_fill_rect(ctx, &layer->bounds);
   graphics_context_set_text_color(ctx, GColorBlack);
   const int width = layer->bounds.size.w;
+  if (face->expanded && face->navigation.sessions_open) {
+    prv_sessions(ctx, face, now_seconds, accent);
+    return;
+  }
   if (!face->expanded) {
     struct tm now;
     clock_get_time_tm(&now);
@@ -240,21 +309,21 @@ static void prv_draw(Layer *layer, GContext *ctx) {
       GRect behind = GRect(card.origin.x + 3 * i, card.origin.y + 4 * i, card.size.w - 6 * i, card.size.h);
       graphics_draw_round_rect(ctx, &behind, 7);
     }
-    prv_card(ctx, card, &view, view.source_count ? &view.sources[face->index] : NULL,
+    prv_card(ctx, card, &view, view.source_count ? &view.sources[face->navigation.source_index] : NULL,
              now_seconds, accent, false);
   } else {
     char heading[24];
-    snprintf(heading, sizeof(heading), view.source_count > 1 ? "Agents · %u/%u" : "Agents",
-             face->index + 1, view.source_count);
+    snprintf(heading, sizeof(heading), view.source_count > 1 ? "Computers · %u/%u" : "Computers",
+             face->navigation.source_index + 1, view.source_count);
     prv_text(ctx, heading, FONT_KEY_PACEMAN_DATE_14, GRect(10, 6, width - 20, 20), GTextAlignmentLeft);
     /* Keep the face's card dimensions; scroll through the complete computer list. */
-    const unsigned top = face->index ? face->index - 1 : 0;
+    const unsigned top = face->navigation.source_index ? face->navigation.source_index - 1 : 0;
     const unsigned count = MAX(1, view.source_count);
     for (unsigned i = top; i < count; ++i) {
       const int y = 35 + ((int)i - (int)top) * 85;
       if (y >= layer->bounds.size.h) break;
       prv_card(ctx, GRect(10, y, width - 20, 75), &view,
-               view.source_count ? &view.sources[i] : NULL, now_seconds, accent, i == face->index);
+               view.source_count ? &view.sources[i] : NULL, now_seconds, accent, i == face->navigation.source_index);
     }
   }
 }
@@ -297,20 +366,50 @@ static void prv_focus(bool focused) {
 
 static void prv_navigate(ClickRecognizerRef recognizer, void *context) {
   Face *face = context;
+  const int step = click_recognizer_get_button_id(recognizer) == BUTTON_ID_DOWN ? 1 : -1;
+  if (face->navigation.sessions_open) {
+    PacemanSessionView view;
+    paceman_service_get_sessions(face->navigation.source_id, &view);
+    paceman_navigation_sessions(&face->navigation, view.sessions, view.source.session_count);
+    paceman_navigation_move_session(&face->navigation, view.sessions, view.source.session_count, step);
+    layer_mark_dirty(&face->canvas);
+    return;
+  }
   PacemanView view;
   paceman_service_get_view(&view);
-  if (view.source_count > 1) {
-    int step = click_recognizer_get_button_id(recognizer) == BUTTON_ID_DOWN ? 1 : -1;
-    face->index = (face->index + view.source_count + step) % view.source_count;
-    memcpy(face->source_id, view.sources[face->index].id, 16);
-    face->selected = true;
+  paceman_navigation_sources(&face->navigation, view.sources, view.source_count, true, view.connected, rtc_get_time());
+  paceman_navigation_move_source(&face->navigation, view.sources, view.source_count, step);
+  layer_mark_dirty(&face->canvas);
+}
+
+static void prv_select(ClickRecognizerRef recognizer, void *context) {
+  Face *face = context;
+  if (face->navigation.sessions_open) return;
+  PacemanView view;
+  paceman_service_get_view(&view);
+  paceman_navigation_sources(&face->navigation, view.sources, view.source_count, true, view.connected, rtc_get_time());
+  if (!view.source_count) return;
+  face->navigation.sessions_open = true;
+  face->navigation.session_selected = false;
+  face->navigation.session_index = 0;
+  layer_mark_dirty(&face->canvas);
+}
+
+static void prv_back(ClickRecognizerRef recognizer, void *context) {
+  Face *face = context;
+  if (face->navigation.sessions_open) {
+    face->navigation.sessions_open = false;
     layer_mark_dirty(&face->canvas);
+  } else {
+    app_window_stack_pop(true);
   }
 }
 
 static void prv_clicks(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, prv_navigate);
   window_single_click_subscribe(BUTTON_ID_DOWN, prv_navigate);
+  window_single_click_subscribe(BUTTON_ID_SELECT, prv_select);
+  window_single_click_subscribe(BUTTON_ID_BACK, prv_back);
 }
 
 static void prv_run(bool expanded) {

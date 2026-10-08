@@ -342,8 +342,8 @@ activity.
 
 Capability bit 12 enables the optional write characteristic
 `7f510006-1b15-4f0d-b7a5-4cf3a2c98ee1`; devices without it retain aggregate activity.
-Each authenticated write replaces the feed, including an empty frame. Cards do
-not trigger alerts and stay in RAM.
+A complete authenticated feed replaces the previous feed, including an empty
+feed. Cards do not trigger alerts and stay in RAM.
 
 The frame is `OS`, version `1`, count `0–8`, followed by 48 bytes per computer.
 Integers are little endian. Each record contains a 16-byte opaque source ID
@@ -356,7 +356,36 @@ Capability bit 13 adds version `2`: the same header and 48-byte record prefix,
 followed by four 16-bit session counts (working, needs input, finished, failed),
 a provider bitmask (`1` Codex, `2` Claude, `4` other), and three reserved zero bytes.
 Version 2 records are 60 bytes; the largest frame is 484 bytes. Devices advertising
-both capabilities accept both versions; the phone sends version 2 only to them.
+both capabilities accept both versions; the phone uses the highest supported version.
+
+Capability bit 14 adds version `3`, an atomic batch with one page per computer.
+Each page starts with `OS`, version `3`, computer count `0–8`, a 16-byte batch ID,
+zero-based computer index, included session count `0–8`, a session-list-known
+flag (`0` or `1`), and one reserved zero byte. A nonempty page then carries the
+60-byte version-2 computer record and 52 bytes per session:
+
+| Bytes | Field |
+| --- | --- |
+| 0–15 | Opaque session ID (SHA-256 prefix of source ID, NUL, provider, NUL, session ID) |
+| 16 | Provider: `1` Codex, `2` Claude, `4` other |
+| 17 | Activity: working, needs input, finished, or failed |
+| 18–19 | Reserved zero bytes |
+| 20–51 | Null-terminated, path-free UTF-8 workspace label, at most 31 bytes |
+
+The phone sends up to eight sessions per computer, attention/failure first,
+then working and finished; computer counts retain the full totals. Only the
+explicit workspace label is eligible, never task titles, project paths, remote
+thread IDs, prompts or replies. An unknown list has zero included rows; a known
+empty list has zero rows and zero counts. A zero-computer feed is header only.
+The maximum page is 500 bytes.
+
+Pages arrive in order under one batch ID. The phone finishes its captured batch
+before sending a newer snapshot. The watch validates and stages all pages before
+replacing the visible feed; disconnect discards the incomplete batch. Reconnect
+starts at page zero. The batch ID is the first 16 SHA-256 bytes of computer count
+followed, for each page, by its included count, known flag and body. Version 1/2
+writes remain accepted and clear session detail. Session freshness follows its
+computer; neither source nor session history is persisted.
 
 ## Accessory authorization baseline
 

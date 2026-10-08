@@ -189,6 +189,41 @@ struct WatchSourceCard {
     let availability: UInt8 // 0 no activity, 1 current, 2 history
     let expiresAt: Double
     var sessions: [AgentSession] = []
+    var sessionsKnown: Bool = true
+}
+
+/// Finish one immutable feed before accepting a newer snapshot. A reconnect
+/// discards the transaction, so its next write always starts with page zero.
+struct WatchSourceTransfer {
+    private(set) var accepted: [Data]?
+    private(set) var pages: [Data]?
+    private(set) var pending: Data?
+    private var index = 0
+    var active: Bool { pages != nil }
+
+    mutating func next(_ desired: [Data]) -> Data? {
+        guard pending == nil else { return nil }
+        if pages == nil {
+            guard !desired.isEmpty, desired != accepted else { return nil }
+            pages = desired
+            index = 0
+        }
+        pending = pages![index]
+        return pending
+    }
+
+    mutating func acknowledge() {
+        guard pending != nil, let pages else { return }
+        pending = nil
+        index += 1
+        if index == pages.count {
+            accepted = pages
+            self.pages = nil
+            index = 0
+        }
+    }
+
+    func contains(_ desired: [Data]) -> Bool { !active && accepted == desired }
 }
 
 enum WatchWire {
@@ -266,6 +301,59 @@ enum WatchWire {
             }
         }
         return data
+    }
+
+    static func sourcePackets(_ cards: [WatchSourceCard], capabilities: UInt32,
+                              now: Date = Date()) -> [Data] {
+        guard capabilities & (1 << 14) != 0 else {
+            return [sources(cards, now: now, rich: capabilities & (1 << 13) != 0)]
+        }
+        let cards = Array(cards.prefix(8))
+        let priority: [ActivityState: Int] = [.needsInput: 0, .failed: 1, .working: 2, .finished: 3]
+        var bodies: [Data] = []
+        var counts: [UInt8] = []
+        for card in cards {
+            var body = Data(sources([card], now: now, rich: true).dropFirst(4))
+            let sessions = card.sessionsKnown ? card.sessions.filter { $0.state != .idle }.sorted {
+                let a = priority[$0.state] ?? 4, b = priority[$1.state] ?? 4
+                if a != b { return a < b }
+                return $0.id < $1.id
+            } : []
+            let visible = sessions.prefix(8)
+            counts.append(UInt8(visible.count))
+            for session in visible {
+                // Include the computer and provider to keep identities scoped.
+                let identity = [card.sourceID, session.provider, session.id].joined(separator: "\u{0}")
+                body.append(contentsOf: SHA256.hash(data: Data(identity.utf8)).prefix(16))
+                body.append(session.provider == "codex" ? 1 : session.provider == "claude" ? 2 : 4)
+                body.append(session.state.wire)
+                body.append(contentsOf: [0, 0])
+                // Only the explicit path-free workspace label is eligible.
+                // Task names, project paths, remote IDs and conversation text never enter this feed.
+                let label = MonitoringActivity.ContentState.sharedWorkspaceLabel([session.workspaceLabel]) ?? ""
+                var workspace = Data()
+                for character in label {
+                    let bytes = Data(String(character).utf8)
+                    if workspace.count + bytes.count > 31 { break }
+                    workspace.append(bytes)
+                }
+                body.append(workspace)
+                body.append(Data(repeating: 0, count: 32 - workspace.count))
+            }
+            bodies.append(body)
+        }
+        // Bind every page's flags and content into one stable transaction ID.
+        var fingerprint = Data([UInt8(cards.count)])
+        for (index, body) in bodies.enumerated() {
+            fingerprint.append(contentsOf: [counts[index], cards[index].sessionsKnown ? 1 : 0])
+            fingerprint.append(body)
+        }
+        let batch = Data(SHA256.hash(data: fingerprint).prefix(16))
+        if cards.isEmpty { return [Data([79, 83, 3, 0]) + batch + Data(repeating: 0, count: 4)] }
+        return bodies.enumerated().map { index, body in
+            Data([79, 83, 3, UInt8(cards.count)]) + batch +
+                Data([UInt8(index), counts[index], cards[index].sessionsKnown ? 1 : 0, 0]) + body
+        }
     }
 
     static func profile(owner: UUID, revision: UInt32, now: Date = Date(), offset: Int,

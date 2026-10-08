@@ -169,7 +169,8 @@ static int prv_access(uint16_t connection, uint16_t attribute, struct ble_gatt_a
       const uint32_t capabilities =
           OMARCHY_CAP_TIME_SYNC | OMARCHY_CAP_HOUR_CYCLE | OMARCHY_CAP_RTC | OMARCHY_CAP_THEME |
           OMARCHY_CAP_AGENT_ACTIVITY | OMARCHY_CAP_ACTIVITY_FINISHED | OMARCHY_CAP_ACTIVITY_FAILED |
-          OMARCHY_CAP_NOTIFICATION_SYNC | PACEMAN_CAP_SOURCE_CARDS | PACEMAN_CAP_RICH_SOURCE_CARDS
+          OMARCHY_CAP_NOTIFICATION_SYNC | PACEMAN_CAP_SOURCE_CARDS | PACEMAN_CAP_RICH_SOURCE_CARDS |
+          PACEMAN_CAP_SESSION_CARDS
 #ifdef CONFIG_SPEAKER
           | OMARCHY_CAP_COMPLETION_SOUND
 #endif
@@ -198,8 +199,9 @@ static int prv_access(uint16_t connection, uint16_t attribute, struct ble_gatt_a
           result = PacemanBusy;
       }
     } else if (kind == 6) {
+      const uint32_t revision = s_state.sources_revision;
       result = paceman_receive_sources(&s_state, &peer, bytes, copied);
-      changed = result == PacemanOK;
+      changed = result == PacemanOK && revision != s_state.sources_revision;
     } else {
       result = paceman_receive_activity(&s_state, &peer, bytes, copied, &haptic);
       if (result == PacemanOK) {
@@ -412,6 +414,20 @@ void paceman_service_get_view(PacemanView *view) {
     .source_count = s_state.source_count
   };
   memcpy(view->sources, s_state.sources, sizeof(view->sources));
+  pbl_mutex_unlock(&s_lock);
+}
+
+void paceman_service_get_sessions(const uint8_t source_id[16], PacemanSessionView *view) {
+  pbl_mutex_lock(&s_lock, PBL_FOREVER);
+  memset(view, 0, sizeof(*view));
+  view->connected = paceman_channel_ready(&s_state, true);
+  for (size_t i = 0; i < s_state.source_count; ++i) {
+    if (memcmp(source_id, s_state.sources[i].id, 16)) continue;
+    view->found = true;
+    view->source = s_state.sources[i];
+    memcpy(view->sessions, s_state.sessions[i], sizeof(view->sessions));
+    break;
+  }
   pbl_mutex_unlock(&s_lock);
 }
 

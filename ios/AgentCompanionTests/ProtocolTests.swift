@@ -192,6 +192,108 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(WatchWire.sources([], rich: true), Data([79, 83, 2, 0]))
     }
 
+
+    func testSessionPagesContainOnlyAllowedMetadataAndPreserveLegacyFeeds() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let card = WatchSourceCard(sourceID: "mac", name: "MacBook Pro", state: .needsInput,
+            availability: 1, expiresAt: 1_800_000_030,
+            sessions: [AgentSession(id: "secret-session-id", provider: "claude", state: .needsInput,
+                name: "secret task title", project: "/private/secret-project",
+                workspaceLabel: "paceman", remoteSessionID: "session_secretRemote")])
+        let packets = WatchWire.sourcePackets([card], capabilities: 1 << 14, now: now)
+        let bytes = Array(packets[0])
+        XCTAssertEqual(bytes.count, 136)
+        XCTAssertEqual(Array(bytes.prefix(4)), [79, 83, 3, 1])
+        XCTAssertEqual(Array(bytes[20..<24]), [0, 1, 1, 0])
+        XCTAssertEqual(Array(bytes[24..<84]), Array(WatchWire.sources([card], now: now, rich: true).dropFirst(4)))
+        XCTAssertEqual(Array(bytes[100..<104]), [2, 2, 0, 0])
+        XCTAssertEqual(String(bytes: bytes[104..<111], encoding: .utf8), "paceman")
+        for forbidden in ["secret-session-id", "secret task title", "/private/secret-project", "session_secretRemote"] {
+            XCTAssertNil(packets[0].range(of: Data(forbidden.utf8)))
+        }
+        XCTAssertEqual(packets, WatchWire.sourcePackets([card], capabilities: 1 << 14, now: now))
+        XCTAssertEqual(WatchWire.sourcePackets([card], capabilities: 1 << 12, now: now),
+                       [WatchWire.sources([card], now: now)])
+        XCTAssertEqual(WatchWire.sourcePackets([card], capabilities: 1 << 13, now: now),
+                       [WatchWire.sources([card], now: now, rich: true)])
+        let other = WatchSourceCard(sourceID: "other", name: card.name, state: card.state,
+            availability: card.availability, expiresAt: card.expiresAt, sessions: card.sessions)
+        let otherBytes = Array(WatchWire.sourcePackets([other], capabilities: 1 << 14, now: now)[0])
+        XCTAssertNotEqual(Array(bytes[84..<100]), Array(otherBytes[84..<100]))
+    }
+
+    func testSessionPagesBoundLabelsAndPrioritizeAttention() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var sessions = (0..<9).map { AgentSession(id: "\($0)", provider: "codex", state: .working) }
+        sessions.append(AgentSession(id: "z", provider: "claude", state: .needsInput,
+                                     workspaceLabel: String(repeating: "é", count: 30)))
+        var card = WatchSourceCard(sourceID: "mac", name: "Mac", state: .needsInput,
+            availability: 1, expiresAt: 1_800_000_030, sessions: sessions)
+        let bytes = Array(WatchWire.sourcePackets([card], capabilities: 1 << 14, now: now)[0])
+        XCTAssertEqual(bytes.count, 500)
+        XCTAssertEqual(bytes[21], 8)
+        XCTAssertEqual(bytes[72], 9) // Complete computer counts survive row truncation.
+        XCTAssertEqual(bytes[74], 1)
+        XCTAssertEqual(bytes[101], 2) // Needs input is the first row.
+        XCTAssertEqual(String(bytes: bytes[104..<134], encoding: .utf8), String(repeating: "é", count: 15))
+        XCTAssertEqual(bytes[134], 0)
+        XCTAssertEqual(bytes[135], 0)
+        card.sessions = [AgentSession(id: "a", provider: "codex", state: .working,
+                                     workspaceLabel: "/Users/private")]
+        let sanitized = Array(WatchWire.sourcePackets([card], capabilities: 1 << 14, now: now)[0])
+        XCTAssertEqual(Array(sanitized[104..<136]), Array(repeating: 0, count: 32))
+    }
+
+    func testSessionPagesAreOneAtomicBatchAndDistinguishUnknownFromEmpty() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let cards = (0..<10).map { WatchSourceCard(sourceID: "mac-\($0)", name: "Mac \($0)",
+            state: .idle, availability: 1, expiresAt: 1_800_000_030, sessionsKnown: $0 != 1) }
+        let packets = WatchWire.sourcePackets(cards, capabilities: 1 << 14, now: now)
+        XCTAssertEqual(packets.count, 8)
+        for (index, packet) in packets.enumerated() {
+            let bytes = Array(packet)
+            XCTAssertEqual(bytes.count, 84)
+            XCTAssertEqual(bytes[3], 8)
+            XCTAssertEqual(bytes[20], UInt8(index))
+            XCTAssertEqual(bytes[21], 0)
+            XCTAssertEqual(bytes[22], index == 1 ? 0 : 1)
+            XCTAssertEqual(Array(bytes[4..<20]), Array(packets[0])[4..<20].map { $0 })
+        }
+        var updated = cards
+        updated[0].sessionsKnown = false
+        XCTAssertNotEqual(Array(packets[0])[4..<20], Array(WatchWire.sourcePackets(updated, capabilities: 1 << 14, now: now)[0])[4..<20])
+        let empty = Array(WatchWire.sourcePackets([], capabilities: 1 << 14, now: now)[0])
+        XCTAssertEqual(empty.count, 24)
+        XCTAssertEqual(Array(empty.prefix(4)), [79, 83, 3, 0])
+        XCTAssertEqual(Array(empty.suffix(4)), [0, 0, 0, 0])
+    }
+
+    func testSourceTransferFinishesCapturedBatchBeforeSendingNewSnapshot() {
+        let original = [Data([0]), Data([1]), Data([2])]
+        let newer = [Data([3]), Data([4])]
+        var transfer = WatchSourceTransfer()
+        XCTAssertEqual(transfer.next(original), original[0])
+        XCTAssertNil(transfer.next(newer))
+        XCTAssertFalse(transfer.contains(original))
+        transfer.acknowledge()
+        XCTAssertEqual(transfer.next(newer), original[1])
+        transfer.acknowledge()
+        XCTAssertEqual(transfer.next(newer), original[2])
+        transfer.acknowledge()
+        XCTAssertTrue(transfer.contains(original))
+        XCTAssertFalse(transfer.contains(newer))
+        XCTAssertNil(transfer.next(original))
+        XCTAssertEqual(transfer.next(newer), newer[0])
+        transfer.acknowledge()
+        // A reconnect discards partial delivery and restarts from page zero.
+        transfer = WatchSourceTransfer()
+        XCTAssertEqual(transfer.next(newer), newer[0])
+        transfer.acknowledge()
+        XCTAssertEqual(transfer.next(newer), newer[1])
+        transfer.acknowledge()
+        XCTAssertTrue(transfer.contains(newer))
+    }
+
     func testSourceCardNamesAreBoundedAndNullTerminated() {
         let card = WatchSourceCard(sourceID: "mac", name: String(repeating: "é", count: 40),
             state: .idle, availability: 0, expiresAt: 0)
