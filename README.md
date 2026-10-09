@@ -28,6 +28,9 @@ for examples.
 Paceman is in **alpha**. macOS and Omarchy installers are available via GitHub
 releases, and Paceman iOS is available through TestFlight.
 
+Future versions may support lightweight replies and other agent interactions
+from your devices.
+
 ## Get started
 
 1. **[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**.
@@ -60,11 +63,12 @@ Paceman can extend to gear you choose or build:
 
 ## Privacy
 
-- Paceman doesn't transmit prompts, replies or tool arguments.
-- Paceman shares activity status and limited metadata. Optional project labels
-  can appear on your Lock Screen.
-- Activity travels over private HTTPS through Tailscale. Notifications use
-  Paceman's hosted relay and Apple's push service.
+- Current activity monitoring shares status, Codex usage, and limited metadata.
+  It does not include prompts, agent replies, or tool arguments.
+- Optional project labels can appear on your Lock Screen.
+- Computer-to-phone snapshots travel over private HTTPS through Tailscale.
+  Notification and Live Activity payloads pass through Paceman's hosted relay
+  and Apple's push service.
 
 ## Documentation
 
