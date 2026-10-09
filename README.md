@@ -28,9 +28,6 @@ for examples.
 Paceman is in **alpha**. macOS and Omarchy installers are available via GitHub
 releases, and Paceman iOS is available through TestFlight.
 
-Future versions may support lightweight replies and other agent interactions
-from your devices.
-
 ## Get started
 
 1. **[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**.
