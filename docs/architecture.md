@@ -1,6 +1,6 @@
 # Architecture
 
-Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, presents each computer separately, and forwards current activity to compatible Bluetooth accessories. Prompts, replies, and tool arguments stay on the computer.
+Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, presents each computer separately, and forwards current activity to compatible Bluetooth accessories. Current activity monitoring does not transmit prompts, agent replies, or tool arguments.
 
 ```text
        Reviewed agent hooks
