@@ -63,6 +63,9 @@ above.
   Notification and Live Activity payloads pass through Paceman's hosted relay
   and Apple's push service.
 
+See the [privacy policy](https://paceman.ai/privacy) for service providers,
+diagnostics, retention and privacy requests.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md): how the system fits together.
@@ -85,6 +88,7 @@ above.
 ## Contributing
 
 - [GitHub Issues](https://github.com/iamjamesim/Paceman/issues) for bugs and suggestions.
+- [Private security reports](SECURITY.md) for vulnerabilities.
 - [Development guide](docs/development.md) for builds and tests.
 
 ## License

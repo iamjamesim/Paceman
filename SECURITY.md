@@ -2,7 +2,7 @@
 
 Please report vulnerabilities privately, not in a public issue. Email james@jamesim.me with "Paceman security" in the subject.
 
-Include what's affected, how to reproduce it, and what an attacker could do. You'll get a reply within a few days. Please give a fix time to ship before publishing details.
+Include what's affected, how to reproduce it, and what an attacker could do. We aim to acknowledge reports promptly, but response and fix times are not guaranteed. Please give a fix time to ship before publishing details.
 
 ## In scope
 
