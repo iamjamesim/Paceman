@@ -200,7 +200,7 @@ bool paceman_channel_ready(const PacemanState *s, bool notification_sync_require
 
 void paceman_disconnected(PacemanState *s) {
   s->session_profile = s->activity_read = s->activity_subscribed = s->sync_subscribed = false;
-  s->staged_count = s->staged_total = 0;
+  s->staged_count = s->staged_total = s->staged_chunk = 0;
   memset(s->staged_sources, 0, sizeof(s->staged_sources));
   memset(s->staged_sessions, 0, sizeof(s->staged_sessions));
   ++s->session;
@@ -235,12 +235,12 @@ static bool prv_source(const uint8_t *record, bool rich, PacemanSource *source) 
 }
 
 /* A bounded UTF-8 label, never a path or control sequence. */
-static bool prv_workspace(const uint8_t *text) {
-  if (text[31]) return false;
+static bool prv_label(const uint8_t *text, size_t capacity, bool path_free) {
+  if (text[capacity - 1]) return false;
   size_t i = 0;
-  while (i < 31 && text[i]) {
+  while (i < capacity - 1 && text[i]) {
     const uint8_t first = text[i++];
-    if (first < 32 || first == 127 || first == '/' || first == '\\') return false;
+    if (first < 32 || first == 127 || (path_free && (first == '/' || first == '\\'))) return false;
     if (first < 128) continue;
     unsigned left;
     uint32_t scalar, minimum;
@@ -248,7 +248,7 @@ static bool prv_workspace(const uint8_t *text) {
     else if (first >= 0xe0 && first <= 0xef) { left = 2; scalar = first & 15; minimum = 0x800; }
     else if (first >= 0xf0 && first <= 0xf4) { left = 3; scalar = first & 7; minimum = 0x10000; }
     else return false;
-    if (i + left > 31) return false;
+    if (i + left > capacity - 1) return false;
     while (left--) {
       if ((text[i] & 0xc0) != 0x80) return false;
       scalar = (scalar << 6) | (text[i++] & 63);
@@ -261,20 +261,27 @@ static bool prv_workspace(const uint8_t *text) {
 
 static PacemanResult prv_source_page(PacemanState *s, const uint8_t *bytes, size_t size) {
   if (size < PACEMAN_SOURCE_PAGE_HEADER) return PacemanInvalid;
+  const bool titled = bytes[2] == 4;
   const uint8_t total = bytes[3], index = bytes[20], count = bytes[21], known = bytes[22];
-  if (known > 1 || bytes[23] || count > PACEMAN_SESSION_MAX || (!known && count))
+  const uint8_t chunk = bytes[23];
+  if (known > 1 || count > PACEMAN_SESSION_MAX || (!known && count) ||
+      (titled ? (chunk > 1 || (chunk && count <= PACEMAN_SESSION_CHUNK_MAX)) : chunk != 0))
     return PacemanInvalid;
+  const size_t offset = titled ? chunk * PACEMAN_SESSION_CHUNK_MAX : 0;
+  const size_t included = titled && count > PACEMAN_SESSION_CHUNK_MAX ?
+      (chunk ? count - PACEMAN_SESSION_CHUNK_MAX : PACEMAN_SESSION_CHUNK_MAX) : count;
+  const size_t stride = titled ? PACEMAN_SESSION_TITLED_RECORD_SIZE : PACEMAN_SESSION_RECORD_SIZE;
   if (!total) {
-    if (size != PACEMAN_SOURCE_PAGE_HEADER || index || count || known) return PacemanInvalid;
+    if (size != PACEMAN_SOURCE_PAGE_HEADER || index || count || known || chunk) return PacemanInvalid;
     memset(s->sources, 0, sizeof(s->sources));
     memset(s->sessions, 0, sizeof(s->sessions));
-    s->source_count = s->staged_count = s->staged_total = 0;
+    s->source_count = s->staged_count = s->staged_total = s->staged_chunk = 0;
     s->sources_received = true;
     ++s->sources_revision;
     return PacemanOK;
   }
   if (index >= total || size != PACEMAN_SOURCE_PAGE_HEADER + PACEMAN_SOURCE_RICH_RECORD_SIZE +
-                                (size_t)count * PACEMAN_SESSION_RECORD_SIZE)
+                                included * stride)
     return PacemanInvalid;
   PacemanSource source;
   if (!prv_source(bytes + PACEMAN_SOURCE_PAGE_HEADER, true, &source)) return PacemanInvalid;
@@ -286,41 +293,64 @@ static PacemanResult prv_source_page(PacemanState *s, const uint8_t *bytes, size
     return PacemanInvalid;
   PacemanSession sessions[PACEMAN_SESSION_MAX] = {0};
   unsigned counts[5] = {0};
-  for (size_t i = 0; i < count; ++i) {
+  for (size_t i = 0; i < included; ++i) {
     const uint8_t *row = bytes + PACEMAN_SOURCE_PAGE_HEADER + PACEMAN_SOURCE_RICH_RECORD_SIZE +
-                         i * PACEMAN_SESSION_RECORD_SIZE;
+                         i * stride;
     PacemanSession *session = &sessions[i];
     memcpy(session->id, row, 16);
     session->provider = row[16]; session->state = row[17];
     if (!prv_nonzero(session->id, 16) ||
         (session->provider != 1 && session->provider != 2 && session->provider != 4) ||
         session->state < OMARCHY_ACTIVITY_WORKING || session->state > OMARCHY_ACTIVITY_FAILED ||
-        row[18] || row[19] || !prv_workspace(row + 20)) return PacemanInvalid;
+        row[18] || row[19] || !prv_label(row + 20, 32, true) ||
+        (titled && !prv_label(row + 52, 48, false))) return PacemanInvalid;
     if (!(source.providers & session->provider)) return PacemanInvalid;
     ++counts[session->state];
     memcpy(session->workspace, row + 20, sizeof(session->workspace));
+    if (titled) memcpy(session->title, row + 52, sizeof(session->title));
     for (size_t j = 0; j < i; ++j)
       if (!memcmp(session->id, sessions[j].id, 16)) return PacemanInvalid;
   }
   if (counts[1] > source.working || counts[2] > source.attention ||
       counts[3] > source.finished || counts[4] > source.failed) return PacemanInvalid;
-  const bool same_batch = s->staged_total == total && !memcmp(s->source_batch, bytes + 4, 16);
-  if (same_batch && index < s->staged_count) {
+  const bool same_batch = s->staged_total == total && s->staged_version == bytes[2] &&
+                          !memcmp(s->source_batch, bytes + 4, 16);
+  if (same_batch && (index < s->staged_count ||
+                    (index == s->staged_count && chunk < s->staged_chunk))) {
     return !memcmp(&source, &s->staged_sources[index], sizeof(source)) &&
-           !memcmp(sessions, s->staged_sessions[index], sizeof(sessions)) ? PacemanOK : PacemanInvalid;
+           !memcmp(sessions, s->staged_sessions[index] + offset, included * sizeof(*sessions)) ?
+           PacemanOK : PacemanInvalid;
   }
-  if (index && (!same_batch || index != s->staged_count)) return PacemanInvalid;
-  for (size_t i = 0; i < index; ++i)
-    if (!memcmp(source.id, s->staged_sources[i].id, 16)) return PacemanInvalid;
-  if (!index) {
+  if ((index || chunk) && (!same_batch || index != s->staged_count || chunk != s->staged_chunk))
+    return PacemanInvalid;
+  if (chunk) {
+    if (memcmp(&source, &s->staged_sources[index], sizeof(source))) return PacemanInvalid;
+    for (size_t i = 0; i < included; ++i) {
+      for (size_t j = 0; j < offset; ++j)
+        if (!memcmp(sessions[i].id, s->staged_sessions[index][j].id, 16)) return PacemanInvalid;
+    }
+    for (size_t i = 0; i < offset; ++i) ++counts[s->staged_sessions[index][i].state];
+    if (counts[1] > source.working || counts[2] > source.attention ||
+        counts[3] > source.finished || counts[4] > source.failed) return PacemanInvalid;
+  } else {
+    for (size_t i = 0; i < index; ++i)
+      if (!memcmp(source.id, s->staged_sources[i].id, 16)) return PacemanInvalid;
+  }
+  if (!index && !chunk) {
     memset(s->staged_sources, 0, sizeof(s->staged_sources));
     memset(s->staged_sessions, 0, sizeof(s->staged_sessions));
     memcpy(s->source_batch, bytes + 4, 16);
-    s->staged_count = 0;
+    s->staged_count = s->staged_chunk = 0;
     s->staged_total = total;
+    s->staged_version = bytes[2];
   }
   s->staged_sources[index] = source;
-  memcpy(s->staged_sessions[index], sessions, sizeof(sessions));
+  memcpy(s->staged_sessions[index] + offset, sessions, included * sizeof(*sessions));
+  if (offset + included < count) {
+    s->staged_chunk = 1;
+    return PacemanOK;
+  }
+  s->staged_chunk = 0;
   if (++s->staged_count == total) {
     memcpy(s->sources, s->staged_sources, sizeof(s->sources));
     memcpy(s->sessions, s->staged_sessions, sizeof(s->sessions));
@@ -338,9 +368,9 @@ PacemanResult paceman_receive_sources(PacemanState *s, const PacemanPeer *peer,
   if (access != PacemanOK)
     return access;
   if (!bytes || size < 4 || memcmp(bytes, "OS", 2) ||
-      (bytes[2] < 1 || bytes[2] > 3) || bytes[3] > PACEMAN_SOURCE_MAX)
+      (bytes[2] < 1 || bytes[2] > 4) || bytes[3] > PACEMAN_SOURCE_MAX)
     return PacemanInvalid;
-  if (bytes[2] == 3) return prv_source_page(s, bytes, size);
+  if (bytes[2] >= 3) return prv_source_page(s, bytes, size);
   const size_t stride = bytes[2] == 2 ? PACEMAN_SOURCE_RICH_RECORD_SIZE : PACEMAN_SOURCE_RECORD_SIZE;
   if (size != 4 + (size_t)bytes[3] * stride)
     return PacemanInvalid;
@@ -355,7 +385,7 @@ PacemanResult paceman_receive_sources(PacemanState *s, const PacemanPeer *peer,
   }
   memcpy(s->sources, sources, sizeof(s->sources));
   memset(s->sessions, 0, sizeof(s->sessions));
-  s->staged_count = s->staged_total = 0;
+  s->staged_count = s->staged_total = s->staged_chunk = 0;
   s->source_count = bytes[3];
   s->sources_received = true;
   ++s->sources_revision;

@@ -327,50 +327,57 @@ enum WatchWire {
             return [sources(cards, now: now, rich: capabilities & (1 << 13) != 0)]
         }
         let cards = Array(cards.prefix(8))
+        let titled = capabilities & (1 << 16) != 0
+        let version: UInt8 = titled ? 4 : 3
         let priority: [ActivityState: Int] = [.needsInput: 0, .failed: 1, .working: 2, .finished: 3]
-        var bodies: [Data] = []
-        var counts: [UInt8] = []
-        for card in cards {
-            var body = Data(sources([card], now: now, rich: true).dropFirst(4))
+        var pages: [(index: UInt8, count: UInt8, known: UInt8, chunk: UInt8, body: Data)] = []
+        for (index, card) in cards.enumerated() {
+            let source = Data(sources([card], now: now, rich: true).dropFirst(4))
             let sessions = card.sessionsKnown ? card.sessions.filter { $0.state != .idle }.sorted {
                 let a = priority[$0.state] ?? 4, b = priority[$1.state] ?? 4
                 if a != b { return a < b }
                 return $0.id < $1.id
             } : []
-            let visible = sessions.prefix(8)
-            counts.append(UInt8(visible.count))
-            for session in visible {
-                // Include the computer and provider to keep identities scoped.
-                body.append(sessionIdentifier(sourceID: card.sourceID, session: session))
-                body.append(session.provider == "codex" ? 1 : session.provider == "claude" ? 2 : 4)
-                body.append(session.state.wire)
-                body.append(contentsOf: [0, 0])
-                // Only the explicit path-free workspace label is eligible.
-                // Task names, project paths, remote IDs and conversation text never enter this feed.
-                let label = MonitoringActivity.ContentState.sharedWorkspaceLabel([session.workspaceLabel]) ?? ""
-                var workspace = Data()
-                for character in label {
-                    let bytes = Data(String(character).utf8)
-                    if workspace.count + bytes.count > 31 { break }
-                    workspace.append(bytes)
+            let visible = Array(sessions.prefix(8))
+            let chunkSize = titled ? 4 : 8
+            for start in stride(from: 0, to: max(1, visible.count), by: chunkSize) {
+                var body = source
+                for session in visible.dropFirst(start).prefix(chunkSize) {
+                    body.append(sessionIdentifier(sourceID: card.sourceID, session: session))
+                    body.append(session.provider == "codex" ? 1 : session.provider == "claude" ? 2 : 4)
+                    body.append(session.state.wire)
+                    body.append(contentsOf: [0, 0])
+                    let label = MonitoringActivity.ContentState.sharedWorkspaceLabel([session.workspaceLabel]) ?? ""
+                    body.append(wireText(label, capacity: 32))
+                    if titled { body.append(wireText(session.title ?? "", capacity: 48)) }
                 }
-                body.append(workspace)
-                body.append(Data(repeating: 0, count: 32 - workspace.count))
+                pages.append((UInt8(index), UInt8(visible.count), card.sessionsKnown ? 1 : 0,
+                              UInt8(start / chunkSize), body))
             }
-            bodies.append(body)
         }
-        // Bind every page's flags and content into one stable transaction ID.
         var fingerprint = Data([UInt8(cards.count)])
-        for (index, body) in bodies.enumerated() {
-            fingerprint.append(contentsOf: [counts[index], cards[index].sessionsKnown ? 1 : 0])
-            fingerprint.append(body)
+        if titled { fingerprint.append(version) }
+        for page in pages {
+            fingerprint.append(contentsOf: [page.count, page.known])
+            if titled { fingerprint.append(page.chunk) }
+            fingerprint.append(page.body)
         }
         let batch = Data(SHA256.hash(data: fingerprint).prefix(16))
-        if cards.isEmpty { return [Data([79, 83, 3, 0]) + batch + Data(repeating: 0, count: 4)] }
-        return bodies.enumerated().map { index, body in
-            Data([79, 83, 3, UInt8(cards.count)]) + batch +
-                Data([UInt8(index), counts[index], cards[index].sessionsKnown ? 1 : 0, 0]) + body
+        if cards.isEmpty { return [Data([79, 83, version, 0]) + batch + Data(repeating: 0, count: 4)] }
+        return pages.map { page in
+            Data([79, 83, version, UInt8(cards.count)]) + batch +
+                Data([page.index, page.count, page.known, page.chunk]) + page.body
         }
+    }
+
+    private static func wireText(_ text: String, capacity: Int) -> Data {
+        var bytes = Data()
+        for character in text {
+            let encoded = Data(String(character).utf8)
+            if bytes.count + encoded.count >= capacity { break }
+            bytes.append(encoded)
+        }
+        return bytes + Data(repeating: 0, count: capacity - bytes.count)
     }
 
     static func profile(owner: UUID, revision: UInt32, now: Date = Date(), offset: Int,

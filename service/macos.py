@@ -24,6 +24,7 @@ from service.claude import ClaudeSession
 from service.claude_hooks import EVENTS as CLAUDE_EVENTS, validate_message
 from service.codex_limits import read_codex_allowances
 from service.usage import selected_reading, valid_reading
+from service.session_titles import SessionTitles, read_session_titles
 from service.codex_turns import read_codex_turn_metadata, read_codex_turn_statuses
 
 
@@ -60,7 +61,7 @@ class MacSource:
                  allowance_reader=read_codex_allowances,
                  turn_status_reader=read_codex_turn_statuses, monotonic=time.monotonic,
                  providers=("codex", "claude"), settings_reader=None,
-                 turn_metadata_reader=read_codex_turn_metadata):
+                 turn_metadata_reader=read_codex_turn_metadata, title_reader=read_session_titles):
         self.store = store
         self.providers = tuple(p for p in providers if p in ("codex", "claude"))
         self.settings_reader = settings_reader
@@ -88,6 +89,7 @@ class MacSource:
         self.turn_ids = {}
         self.confirmed_turns = {}
         self.closed = False
+        self.titles = SessionTitles(self._titles_changed, reader=title_reader, monotonic=monotonic)
         self.monotonic = monotonic
         self.pending_attention = {}
         self.claude_sessions = {}
@@ -98,6 +100,8 @@ class MacSource:
         self.published_questions = set()
 
     def __enter__(self):
+        self.closed = False
+        self.titles.start()
         self.socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         parent = self.socket_path.parent.stat()
         if parent.st_uid != os.getuid() or parent.st_mode & 0o077:
@@ -173,6 +177,7 @@ class MacSource:
     def __exit__(self, *_):
         with self.lock:
             self.closed = True
+            self.titles.close()
         if self.thread is not None:
             self.server.shutdown()
             self.thread.join(timeout=2)
@@ -219,6 +224,8 @@ class MacSource:
             if "codex" not in self.providers:
                 return False
             db.execute("BEGIN IMMEDIATE")
+            if event != "ended":
+                self.titles.track(key, "codex", session)
             previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
             if event == "ended":
                 self.pending_turn_events.pop(key, None)
@@ -312,6 +319,8 @@ class MacSource:
             if "claude" not in self.providers:
                 return False
             db.execute("BEGIN IMMEDIATE")
+            if event != "ended":
+                self.titles.track(key, "claude", command["session"])
             previous = self.claude_sessions.get(key)
             if event == "ended":
                 self.claude_sessions.pop(key, None)
@@ -364,6 +373,7 @@ class MacSource:
                 return
             self._apply_settings()
             now = self.monotonic()
+            self.titles.refresh()
             if self.claude_sessions:
                 retired_claude = [key for key, session in self.claude_sessions.items()
                                   if session.base_state in ("finished", "failed")
@@ -540,6 +550,11 @@ class MacSource:
             if changed:
                 self._publish(db)
 
+    def _titles_changed(self):
+        with self.lock:
+            if not self.closed:
+                self.publish_current()
+
     def publish_current(self):
         with self.lock, self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -553,6 +568,7 @@ class MacSource:
                         "workspace_label": item.workspace_label, "remote_session_id": item.remote_session_id, "provider": "claude"}
                        for key, item in self.claude_sessions.items())
         records.sort(key=lambda row: row["id"])
+        self.titles.retain(row["id"] for row in records)
         sessions = []
         for row in records:
             question = self.pending_questions.get(row["id"])
@@ -562,6 +578,8 @@ class MacSource:
                      and question and question[0] == row["turn"] and question[1] <= now_monotonic
                      else row["state"])
             session = {"id": row["id"], "provider": row["provider"], "state": state}
+            if title := self.titles.name(row["id"]):
+                session["name"] = title
             if row["workspace_label"]:
                 session["workspaceLabel"] = row["workspace_label"]
             if row.get("remote_session_id"):

@@ -672,13 +672,14 @@ extension CompanionModel {
         let session = AgentSession(id: "handoff-preview",
             provider: screen.contains("no-link") ? "fixture" : screen.contains("codex") ? "codex" : "claude",
             state: state,
-            name: screen.contains("long") ? "Investigate multi-machine source recovery after a long disconnect" : nil,
+            name: screen.contains("long") ? "Investigate multi-machine source recovery after a long disconnect"
+                : screen.contains("titled") ? "Improve Pebble session browsing" : nil,
             workspaceLabel: screen.contains("long") ? "launch-creative-direction-and-visual-assets" : "paceman",
             remoteSessionID: "session_previewHandoff")
         var sessions = [session]
         if screen.contains("multiple") {
-            sessions += [AgentSession(id: "other-codex", provider: "codex", state: .working, workspaceLabel: "website"),
-                         AgentSession(id: "other-claude", provider: "claude", state: .finished, workspaceLabel: "assets")]
+            sessions += [AgentSession(id: "other-codex", provider: "codex", state: .working, name: "Update the launch website", workspaceLabel: "website"),
+                         AgentSession(id: "other-claude", provider: "claude", state: .finished, name: "Explore launch visual directions", workspaceLabel: "assets")]
         }
         snapshots[sourceID] = Snapshot(schema: 1, sourceID: sourceID, generation: UUID().uuidString,
             revision: 1, sourceName: screen.contains("long") ? "James’s MacBook Pro for design and development" : "Jamess-MacBook-Pro",

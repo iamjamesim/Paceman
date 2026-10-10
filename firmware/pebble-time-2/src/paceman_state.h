@@ -54,7 +54,7 @@ typedef struct {
   PacemanSession sessions[PACEMAN_SOURCE_MAX][PACEMAN_SESSION_MAX];
   uint32_t sources_revision;
   /* Pages stay private until every computer in this replacement has arrived. */
-  uint8_t source_batch[16], staged_count, staged_total;
+  uint8_t source_batch[16], staged_count, staged_total, staged_version, staged_chunk;
   PacemanSource staged_sources[PACEMAN_SOURCE_MAX];
   PacemanSession staged_sessions[PACEMAN_SOURCE_MAX][PACEMAN_SESSION_MAX];
 } PacemanState;

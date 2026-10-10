@@ -9,6 +9,48 @@ import DeviceCheck
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    func testTitledSessionPacketsAreBoundedAtomicAndCapabilityGated() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let sessions = (0..<8).map { AgentSession(id: "session-\($0)", provider: "codex", state: .working,
+            name: "Fix session scrolling and handoff \(String(repeating: "é", count: 40))", workspaceLabel: "paceman") }
+        let card = WatchSourceCard(sourceID: "mac", name: "MacBook", state: .working,
+            availability: 1, expiresAt: now.timeIntervalSince1970 + 300, sessions: sessions)
+        let pages = WatchWire.sourcePackets([card], capabilities: (1 << 14) | (1 << 16), now: now)
+        XCTAssertEqual(pages.count, 2)
+        for (chunk, page) in pages.enumerated() {
+            XCTAssertEqual(page.count, 484)
+            XCTAssertEqual(Array(page.prefix(4)), [79, 83, 4, 1])
+            XCTAssertEqual(Array(page[20..<24]), [0, 8, 1, UInt8(chunk)])
+            let title = page[136..<184].prefix { $0 != 0 }
+            XCTAssertNotNil(String(data: Data(title), encoding: .utf8))
+            XCTAssertTrue(String(data: Data(title), encoding: .utf8)!.hasPrefix("Fix session scrolling"))
+        }
+        XCTAssertEqual(pages[0][4..<20], pages[1][4..<20])
+        var renamed = card
+        renamed.sessions[0].name = "New name"
+        let newPages = WatchWire.sourcePackets([renamed], capabilities: (1 << 14) | (1 << 16), now: now)
+        XCTAssertNotEqual(pages[0][4..<20], newPages[0][4..<20])
+        XCTAssertEqual(pages[0][84..<100], newPages[0][84..<100])
+        let legacy = WatchWire.sourcePackets([card], capabilities: 1 << 14, now: now)
+        XCTAssertEqual(legacy.count, 1)
+        XCTAssertEqual(legacy[0].count, 500)
+        XCTAssertEqual(legacy[0][2], 3)
+        XCTAssertFalse(String(decoding: legacy[0], as: UTF8.self).contains("Fix session"))
+        let empty = WatchWire.sourcePackets([], capabilities: (1 << 14) | (1 << 16), now: now)
+        XCTAssertEqual(empty[0].count, 24)
+        XCTAssertEqual(empty[0][2], 4)
+    }
+
+    func testSessionTitleNormalizationAndGrouping() {
+        let titled = AgentSession(id: "one", provider: "codex", state: .working, name: "  Fix\n scrolling\u{0}  ")
+        XCTAssertEqual(titled.displayName, "Fix scrolling")
+        let unnamed = AgentSession(id: "two", provider: "codex", state: .working, name: " \n")
+        XCTAssertEqual(unnamed.displayName, "Codex")
+        let rows = AgentDisplayRow.rows([titled, unnamed])
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertTrue(rows.contains { $0.session.id == titled.id })
+    }
+
     func testHandoffWireRejectsMalformedRequestsAndEchoesSequence() throws {
         var bytes = Data([79, 72, 1, 0, 7, 0, 0, 0])
         bytes.append(Data(repeating: 1, count: 16)); bytes.append(Data(repeating: 2, count: 16))
@@ -66,9 +108,10 @@ final class ProtocolTests: XCTestCase {
                 generation: "latest", revision: 2, sourceName: "Current computer name",
                 observedAt: now, changedAt: now, freshFor: 30, state: state, eventID: "latest",
                 sessions: [AgentSession(id: original.session.id, provider: original.session.provider,
-                    state: state, workspaceLabel: "current-workspace")])
+                    state: state, name: "Current title \(state.title)", workspaceLabel: "current-workspace")])
             let current = try XCTUnwrap(model.handoffTarget(pending))
             XCTAssertEqual(current.session.state, state)
+            XCTAssertEqual(current.session.displayName, "Current title \(state.title)")
             XCTAssertEqual(current.session.detail, "current-workspace")
             XCTAssertEqual(current.computer, "Current computer name")
             XCTAssertEqual(model.handoff, pending)

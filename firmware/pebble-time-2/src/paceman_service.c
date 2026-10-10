@@ -177,7 +177,7 @@ static int prv_access(uint16_t connection, uint16_t attribute, struct ble_gatt_a
           OMARCHY_CAP_TIME_SYNC | OMARCHY_CAP_HOUR_CYCLE | OMARCHY_CAP_RTC | OMARCHY_CAP_THEME |
           OMARCHY_CAP_AGENT_ACTIVITY | OMARCHY_CAP_ACTIVITY_FINISHED | OMARCHY_CAP_ACTIVITY_FAILED |
           OMARCHY_CAP_NOTIFICATION_SYNC | PACEMAN_CAP_SOURCE_CARDS | PACEMAN_CAP_RICH_SOURCE_CARDS |
-          PACEMAN_CAP_SESSION_CARDS | PACEMAN_CAP_SESSION_HANDOFF
+          PACEMAN_CAP_SESSION_CARDS | PACEMAN_CAP_SESSION_HANDOFF | PACEMAN_CAP_SESSION_TITLES
 #ifdef CONFIG_SPEAKER
           | OMARCHY_CAP_COMPLETION_SOUND
 #endif
@@ -451,7 +451,7 @@ void paceman_service_get_view(PacemanView *view) {
   pbl_mutex_unlock(&s_lock);
 }
 
-void paceman_service_get_sessions(const uint8_t source_id[16], PacemanSessionView *view) {
+uint32_t paceman_service_get_sessions(const uint8_t source_id[16], PacemanSessionView *view) {
   pbl_mutex_lock(&s_lock, PBL_FOREVER);
   memset(view, 0, sizeof(*view));
   view->connected = paceman_channel_ready(&s_state, true);
@@ -462,7 +462,9 @@ void paceman_service_get_sessions(const uint8_t source_id[16], PacemanSessionVie
     memcpy(view->sessions, s_state.sessions[i], sizeof(view->sessions));
     break;
   }
+  const uint32_t revision = s_state.sources_revision;
   pbl_mutex_unlock(&s_lock);
+  return revision;
 }
 
 void paceman_service_notification_hint(const struct pbl_bt_device_internal *device, uint32_t uid,

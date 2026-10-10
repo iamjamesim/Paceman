@@ -132,7 +132,13 @@ struct AgentSession: Codable, Identifiable, Equatable {
         if provider == "codex" { return "Open Codex" }
         return appURL?.path.isEmpty == false ? "Open in Claude" : "Open Claude"
     }
-    var displayName: String { String((name ?? (provider == "fixture" ? "Test agent" : provider.capitalized)).prefix(80)) }
+    var title: String? {
+        guard let name else { return nil }
+        let text = name.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+        let clean = String(text.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) })
+        return clean.isEmpty ? nil : String(clean.prefix(80))
+    }
+    var displayName: String { title ?? (provider == "fixture" ? "Test agent" : provider.capitalized) }
     var detail: String {
         if provider == "fixture" { return "Local test source" }
         return project ?? workspaceLabel ?? ""
@@ -205,7 +211,7 @@ struct AgentDisplayRow: Identifiable {
         var rows: [Self] = []
         var unnamed: [String: [AgentSession]] = [:]
         for session in sessions {
-            let identifiable = [session.name, session.project].compactMap { $0 }
+            let identifiable = [session.title, session.project].compactMap { $0 }
                 .contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             if identifiable || (session.provider == "claude" && session.remoteSessionID != nil) {
                 rows.append(Self(id: "session:" + session.id, session: session, detail: session.detail))

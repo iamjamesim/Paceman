@@ -108,7 +108,7 @@ example, an allowance change raised `revision` to 12 without changing activity
 | `freshFor` | Contact freshness and eligibility to forward new activity; greater than 0 and at most 60 seconds. Display freshness uses its separate observation lease. |
 | `state` | `idle`, `working`, `needs_input`, `finished`, or `failed`. |
 | `eventID` | Opaque activity identity, 1–128 UTF-8 bytes without control characters; stable across presentation-only revisions. |
-| `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded workspace labels and Claude `remoteSessionID` (the Remote Control ID, distinct from the opaque row ID); no prompts or transcripts. |
+| `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded session `name` titles, workspace labels and Claude `remoteSessionID` (the Remote Control ID, distinct from the opaque row ID); no prompts or transcripts. |
 | `allowance` | Optional selected Codex reading; may advance `revision` without a new activity event. |
 | `allowances` | Optional array of up to two Codex usage windows, each with its own observation and reset time. |
 | `configuredProviders` | Optional enabled activity providers (`codex`, `claude`), including providers without a received event. |
@@ -373,8 +373,8 @@ flag (`0` or `1`), and one reserved zero byte. A nonempty page then carries the
 | 20–51 | Null-terminated, path-free UTF-8 workspace label, at most 31 bytes |
 
 The phone sends up to eight sessions per computer, attention/failure first,
-then working and finished; computer counts retain the full totals. Only the
-explicit workspace label is eligible, never task titles, project paths, remote
+then working and finished; computer counts retain the full totals. Version 3
+contains only the explicit workspace label, never titles, project paths, remote
 thread IDs, prompts or replies. Computer expiry is the five-minute display lease
 from source observation, independent of the Bluetooth connection; a new fetch
 renews it, delivery or reconnection alone does not. An unknown list has zero
@@ -388,6 +388,24 @@ starts at page zero. The batch ID is the first 16 SHA-256 bytes of computer coun
 followed, for each page, by its included count, known flag and body. Version 1/2
 writes remain accepted and clear session detail. Session freshness follows its
 computer; neither source nor session history is persisted.
+
+Capability bit 16 adds version `4` with explicit session titles. The same
+24-byte page header is used, but byte 21 is the computer's total included row
+count and byte 23 is chunk index `0` or `1`. Each chunk repeats the identical
+60-byte computer record and carries up to four 100-byte session records:
+the version-3 row followed by a 48-byte null-terminated UTF-8 title (at most
+47 bytes). Truncation preserves whole characters. Titles may include punctuation;
+workspace labels retain their path-free validation. No prompt preview, reply,
+project path or remote thread ID is added.
+
+Computers with more than four included sessions use two consecutive chunks;
+other computers use one, including known empty or unknown lists. The largest
+chunk is 484 bytes. The whole batch remains atomic across all computers and
+chunks, with duplicate-ID and combined state-count validation. Its fingerprint
+is computer count, version, then each chunk's total row count, known flag,
+chunk index and body. A title change replaces the feed while preserving selection
+by opaque identity. New firmware accepts versions 1–4; old firmware receives
+its existing highest supported version.
 
 ## Accessory session handoff
 

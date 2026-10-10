@@ -31,7 +31,7 @@ typedef struct {
   AppTimer *handoff_timeout;
   PacemanNavigation navigation;
   AppTimer *expiry, *motion;
-  uint32_t revision;
+  uint32_t revision, session_revision;
   uint8_t motion_frames;
 } Face;
 
@@ -201,7 +201,8 @@ static uint16_t prv_session_count(MenuLayer *menu, uint16_t section, void *conte
 }
 
 static int16_t prv_session_height(MenuLayer *menu, MenuIndex *index, void *context) {
-  return 65;
+  Face *face = context;
+  return face->session_view.sessions[index->row].title[0] ? 84 : 65;
 }
 
 static void prv_session_row(GContext *ctx, const Layer *cell, MenuIndex *index, void *context) {
@@ -209,7 +210,8 @@ static void prv_session_row(GContext *ctx, const Layer *cell, MenuIndex *index, 
   const int width = cell->bounds.size.w, y = 2;
   const PacemanSession *session = &face->session_view.sessions[index->row];
   const char *provider = session->provider == 1 ? "Codex" : session->provider == 2 ? "Claude" : "Agent";
-  const GRect card = GRect(10, y, width - 20, 61);
+  const bool titled = session->title[0];
+  const GRect card = GRect(10, y, width - 20, titled ? 80 : 61);
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_round_rect(ctx, &card, 7, GCornersAll);
   if (index->row == face->navigation.session_index) {
@@ -219,14 +221,17 @@ static void prv_session_row(GContext *ctx, const Layer *cell, MenuIndex *index, 
   const GColor color = face->session_current ? prv_state_color(session->state) : GColorDarkGray;
   prv_robot(ctx, GPoint(18, y + 14), session->state, color);
   graphics_context_set_text_color(ctx, face->session_current ? GColorBlack : GColorDarkGray);
-  prv_text(ctx, provider, FONT_KEY_PACEMAN_DATE_14,
-           GRect(56, y + 3, width - 75, 18), GTextAlignmentLeft);
+  prv_text(ctx, titled ? session->title : provider, FONT_KEY_PACEMAN_DATE_14,
+           GRect(56, y + 3, width - 75, titled ? 36 : 18), GTextAlignmentLeft);
   graphics_context_set_text_color(ctx, color);
-  prv_text(ctx, prv_status(session->state), FONT_KEY_PACEMAN_TEXT_13,
-           GRect(56, y + 23, width - 75, 18), GTextAlignmentLeft);
+  char status[40];
+  snprintf(status, sizeof(status), titled ? "%s · %s" : "%s",
+           titled ? provider : prv_status(session->state), prv_status(session->state));
+  prv_text(ctx, status, FONT_KEY_PACEMAN_TEXT_13,
+           GRect(56, y + (titled ? 41 : 23), width - 75, 18), GTextAlignmentLeft);
   graphics_context_set_text_color(ctx, GColorDarkGray);
   prv_text(ctx, session->workspace, FONT_KEY_PACEMAN_TEXT_13,
-           GRect(56, y + 40, width - 75, 18), GTextAlignmentLeft);
+           GRect(56, y + (titled ? 59 : 40), width - 75, 18), GTextAlignmentLeft);
 }
 
 static void prv_handoff_expired(void *context) {
@@ -265,15 +270,15 @@ static const MenuLayerCallbacks s_session_callbacks = {
 };
 
 static void prv_sessions(GContext *ctx, Face *face, uint32_t now, GColor accent) {
-  PacemanSessionView view;
-  paceman_service_get_sessions(face->navigation.source_id, &view);
-  if (!view.found) {
+  const uint32_t revision = paceman_service_get_sessions(face->navigation.source_id, &face->session_view);
+  const PacemanSessionView *view = &face->session_view;
+  if (!view->found) {
     layer_set_hidden(menu_layer_get_layer(&face->sessions), true);
     face->navigation.sessions_open = false;
     layer_mark_dirty(&face->canvas);
     return;
   }
-  const PacemanSource *source = &view.source;
+  const PacemanSource *source = &view->source;
   const bool current = paceman_source_has_current_activity(source, now);
   const int width = face->canvas.bounds.size.w, height = face->canvas.bounds.size.h;
   graphics_context_set_text_color(ctx, GColorBlack);
@@ -281,7 +286,7 @@ static void prv_sessions(GContext *ctx, Face *face, uint32_t now, GColor accent)
            GRect(10, 5, width - 20, 20), GTextAlignmentLeft);
   char heading[48];
   const unsigned total = source->working + source->attention + source->finished + source->failed;
-  paceman_navigation_sessions(&face->navigation, view.sessions, source->session_count);
+  paceman_navigation_sessions(&face->navigation, view->sessions, source->session_count);
   if (source->session_count)
     snprintf(heading, sizeof(heading), "%s · %u/%u", current ? "Sessions" : "Last known",
              face->navigation.session_index + 1, source->session_count);
@@ -304,10 +309,9 @@ static void prv_sessions(GContext *ctx, Face *face, uint32_t now, GColor accent)
   const bool truncated = total > source->session_count;
   const int footer_height = 20 + (truncated ? 23 : 0);
   const GRect frame = GRect(0, 45, width, height - 45 - footer_height);
-  const bool reload = face->session_reload ||
-      memcmp(&view, &face->session_view, sizeof(view)) != 0;
+  const bool reload = face->session_reload || revision != face->session_revision;
   const uint8_t selected = face->navigation.session_index;
-  face->session_view = view;
+  face->session_revision = revision;
   face->session_accent = accent;
   face->session_current = current;
   layer_set_hidden(menu_layer_get_layer(&face->sessions), false);
