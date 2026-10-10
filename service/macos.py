@@ -5,6 +5,7 @@ payloads are reduced to session/turn IDs and lifecycle states before storage.
 """
 from __future__ import annotations
 
+from collections import deque
 import errno
 import hashlib
 import json
@@ -23,7 +24,7 @@ from service.claude import ClaudeSession
 from service.claude_hooks import EVENTS as CLAUDE_EVENTS, validate_message
 from service.codex_limits import read_codex_allowances
 from service.usage import selected_reading, valid_reading
-from service.codex_turns import read_codex_turn_statuses
+from service.codex_turns import read_codex_turn_metadata, read_codex_turn_statuses
 
 
 EVENT_STATES = {
@@ -58,7 +59,8 @@ class MacSource:
     def __init__(self, store, *, socket_path: Path, computer_name: str | None = None,
                  allowance_reader=read_codex_allowances,
                  turn_status_reader=read_codex_turn_statuses, monotonic=time.monotonic,
-                 providers=("codex", "claude"), settings_reader=None):
+                 providers=("codex", "claude"), settings_reader=None,
+                 turn_metadata_reader=read_codex_turn_metadata):
         self.store = store
         self.providers = tuple(p for p in providers if p in ("codex", "claude"))
         self.settings_reader = settings_reader
@@ -78,6 +80,10 @@ class MacSource:
         self.turn_status_reader = turn_status_reader
         self.turn_status_thread = None
         self.next_turn_status_at = 0.0
+        self.turn_metadata_reader = turn_metadata_reader
+        self.turn_recovery_thread = None
+        self.next_turn_recovery_at = 0.0
+        self.pending_turn_events = {}
         # Raw Codex IDs are retained in memory only; published IDs stay hashed.
         self.turn_ids = {}
         self.confirmed_turns = {}
@@ -174,6 +180,8 @@ class MacSource:
             self.allowance_thread.join(timeout=2)
         if self.turn_status_thread is not None:
             self.turn_status_thread.join(timeout=2)
+        if self.turn_recovery_thread is not None:
+            self.turn_recovery_thread.join(timeout=2)
         if self.server is not None:
             self.server.server_close()
         try:
@@ -213,6 +221,7 @@ class MacSource:
             db.execute("BEGIN IMMEDIATE")
             previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
             if event == "ended":
+                self.pending_turn_events.pop(key, None)
                 pending = self.pending_attention.pop(key, None)
                 question = self.pending_questions.pop(key, None)
                 self.published_questions.discard(key)
@@ -229,7 +238,20 @@ class MacSource:
                     return False
                 if (previous and previous["turn"] and turn and previous["turn"] != turn
                         and command.get("hook") != "UserPromptSubmit"):
+                    batch = self.pending_turn_events.get(key)
+                    if batch is None:
+                        batch = {"session": session, "previous": previous["turn"],
+                                 "events": deque(maxlen=64)}
+                        self.pending_turn_events[key] = batch
+                        self.next_turn_recovery_at = 0.0
+                    reduced = {"command": "agent-event", "session": session, "turn": turn,
+                               "event": event, "hook": command.get("hook"),
+                               "workspaceLabel": workspace_label}
+                    if not batch["events"] or batch["events"][-1] != reduced:
+                        batch["events"].append(reduced)
                     return False
+                if command.get("hook") == "UserPromptSubmit":
+                    self.pending_turn_events.pop(key, None)
                 if turn:
                     self.turn_ids[key] = (session, turn)
                     if self.confirmed_turns.get(key) != turn:
@@ -326,6 +348,7 @@ class MacSource:
                 self.published_questions.clear()
                 self.turn_ids.clear()
                 self.confirmed_turns.clear()
+                self.pending_turn_events.clear()
                 with self.store.connect() as db:
                     db.execute("DELETE FROM mac_sessions")
         if "claude" not in providers:
@@ -374,6 +397,12 @@ class MacSource:
             if newly_due:
                 self.published_questions.update(newly_due)
                 self.publish_current()
+            if (self.pending_turn_events and now >= self.next_turn_recovery_at
+                    and (self.turn_recovery_thread is None or not self.turn_recovery_thread.is_alive())):
+                self.next_turn_recovery_at = now + TURN_STATUS_INTERVAL
+                self.turn_recovery_thread = threading.Thread(
+                    target=self._recover_turns, args=(list(self.pending_turn_events.items()),), daemon=True)
+                self.turn_recovery_thread.start()
             if (now >= self.next_turn_status_at
                     and (self.turn_status_thread is None or not self.turn_status_thread.is_alive())):
                 with self.store.connect() as db:
@@ -399,6 +428,7 @@ class MacSource:
                     self.published_questions.discard(row["id"])
                     self.turn_ids.pop(row["id"], None)
                     self.confirmed_turns.pop(row["id"], None)
+                    self.pending_turn_events.pop(row["id"], None)
                 if retired:
                     self._publish(db, lifecycle_only=True)
             if now >= self.next_allowance_at and "codex" in self.providers:
@@ -422,11 +452,66 @@ class MacSource:
             self.allowance = selected_reading(self.allowances)
             self.publish_current()
 
-    def _refresh_turn_statuses(self, tracked):
+    def _recover_turns(self, tracked):
+        """Promote only the newest saved turn; replay hooks in arrival order."""
         try:
-            outcomes = self.turn_status_reader([pair for _, pair in tracked])
+            metadata = self.turn_metadata_reader([batch["session"] for _, batch in tracked])
         except Exception:
             return
+        if not isinstance(metadata, dict):
+            return
+        with self.lock:
+            if self.closed or "codex" not in self.providers:
+                return
+            for key, batch in tracked:
+                if self.pending_turn_events.get(key) is not batch:
+                    continue  # A prompt, session end or disable invalidated this read.
+                rows = metadata.get(batch["session"])
+                if not isinstance(rows, list) or not rows or not all(
+                        isinstance(row, dict) and isinstance(row.get("id"), str) for row in rows):
+                    continue
+                latest = rows[0]["id"]
+                events = [event for event in batch["events"] if event["turn"] == latest]
+                if not events:
+                    historical = {row["id"] for row in rows[1:]}
+                    batch["events"] = deque((event for event in batch["events"]
+                                              if event["turn"] not in historical), maxlen=64)
+                    if not batch["events"]:
+                        self.pending_turn_events.pop(key, None)
+                    continue  # Unknown IDs may not have reached saved history yet.
+                with self.store.connect() as db:
+                    previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
+                    if previous is None or previous["turn"] != batch["previous"]:
+                        self.pending_turn_events.pop(key, None)
+                        continue
+                    label = events[0].get("workspaceLabel") or previous["workspace_label"]
+                    db.execute("UPDATE mac_sessions SET turn=?,state='working',updated=?,workspace_label=? WHERE id=?",
+                               (latest, time.time(), label, key))
+                self.pending_turn_events.pop(key, None)
+                self.pending_attention.pop(key, None)
+                self.pending_questions.pop(key, None)
+                self.published_questions.discard(key)
+                self.confirmed_turns.pop(key, None)
+                self.turn_ids[key] = (batch["session"], latest)
+                known = {row["id"] for row in rows}
+                remaining = deque((event for event in batch["events"]
+                                   if event["turn"] not in known), maxlen=64)
+                for event in events:
+                    self.receive(event)
+                self._refresh_turn_statuses([(key, (batch["session"], latest))],
+                    outcomes={(batch["session"], latest): rows[0].get("status")})
+                if remaining:
+                    self.pending_turn_events[key] = {"session": batch["session"],
+                                                     "previous": latest, "events": remaining}
+                    self.next_turn_recovery_at = 0.0
+                self.publish_current()
+
+    def _refresh_turn_statuses(self, tracked, *, outcomes=None):
+        if outcomes is None:
+            try:
+                outcomes = self.turn_status_reader([pair for _, pair in tracked])
+            except Exception:
+                return
         if not isinstance(outcomes, dict):
             return
         with self.lock, self.store.connect() as db:

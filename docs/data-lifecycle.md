@@ -29,6 +29,9 @@ See the [source protocol](protocol.md) for freshness fields.
 The watch keeps activity in RAM, so reboot clears old alerts. The phone keeps
 no durable queue of BLE writes. Omarchy verifies living agent owners after a
 source restart; Mac clears hook-only sessions until another hook arrives.
+Mac verifies unfamiliar Codex turn IDs against newest-first saved turn metadata
+before applying their hooks. Unavailable metadata is retried; it does not prove
+that a callback belongs to the current turn.
 
 Storage errors do not erase ownership, replace the watch ID or reopen pairing.
 Phone-side Remove accessory removes access; it does not reset watch ownership.
