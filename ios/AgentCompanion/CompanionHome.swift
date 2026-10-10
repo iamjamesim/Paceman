@@ -156,7 +156,7 @@ struct CompanionHome: View {
         let firstPreview = presentation.preview && id == model.pairedSources.first?.sourceID
         let value = model.snapshots[id]
         let state = presentation.computerState(model: model, sourceID: id)
-        let historical = state == .reconnecting || state == .checking
+        let historical = !model.isActivityCurrent(id)
         let content: AgentFeedContent = firstPreview
             ? (["waiting", "offline-empty"].contains(presentation.previewScreen) ? .waiting
                 : presentation.previewSessions.isEmpty ? .empty : .sessions(presentation.previewSessions))

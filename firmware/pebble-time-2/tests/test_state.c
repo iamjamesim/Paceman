@@ -64,6 +64,12 @@ static void check_sources(void) {
   assert(paceman_source_is_current(&s.sources[0], true, 99));
   assert(!paceman_source_is_current(&s.sources[0], true, 100));
   assert(!paceman_source_is_current(&s.sources[0], false, 99));
+  /* A disconnected display retains its lease, but cannot initiate an action. */
+  assert(paceman_source_has_current_activity(&s.sources[0], 99));
+  PacemanState disconnected = s;
+  paceman_disconnected(&disconnected);
+  assert(paceman_source_has_current_activity(&disconnected.sources[0], 99));
+  assert(!paceman_source_has_current_activity(&disconnected.sources[0], 100));
   frame[3] = 9;
   assert(paceman_receive_sources(&s, &owner, frame, sizeof(frame)) == PacemanInvalid);
   frame[3] = 8;
@@ -79,6 +85,7 @@ static void check_sources(void) {
   frame[4 + 21] = PacemanSourceHistory;
   assert(paceman_receive_sources(&s, &owner, frame, 52) == PacemanOK);
   assert(s.source_count == 1 && !paceman_source_is_current(&s.sources[0], true, 99));
+  assert(!paceman_source_has_current_activity(&s.sources[0], 99));
   frame[3] = 0;
   assert(paceman_receive_sources(&s, &owner, frame, 4) == PacemanOK);
   assert(s.source_count == 0 && s.sources_received);

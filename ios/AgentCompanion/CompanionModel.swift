@@ -116,7 +116,8 @@ final class CompanionModel: ObservableObject {
                     : screen.hasPrefix("--screen=claude-") ? ["claude"]
                     : screen.hasPrefix("--screen=single-") || screen == "--screen=grouped" ? ["codex"]
                     : ["codex", "claude"]
-                let observed = Date().timeIntervalSince1970
+                let age = screen == "--screen=computer-stale" ? 301.0 : screen == "--screen=computer-checking" ? 45.0 : 0
+                let observed = Date().timeIntervalSince1970 - age
                 snapshots[id] = Snapshot(schema: 1, sourceID: id, generation: id, revision: 1,
                     sourceName: "MacBook Pro", observedAt: observed, changedAt: observed,
                     freshFor: 30, state: .idle, eventID: "1", allowance: nil,
@@ -212,6 +213,13 @@ final class CompanionModel: ObservableObject {
         return ProcessInfo.processInfo.systemUptime - uptime < value.freshFor
     }
 
+    /// Display freshness is independent of the shorter transport lease and link recovery.
+    func isActivityCurrent(_ sourceID: String, now: Date = Date()) -> Bool {
+        guard !isRevoked(sourceID), pairedSources.contains(where: { $0.sourceID == sourceID }),
+              let value = snapshots[sourceID] else { return false }
+        return now.timeIntervalSince1970 < value.activityFreshUntil
+    }
+
     func connectionState(_ sourceID: String) -> ComputerConnectionState {
         .resolve(revoked: isRevoked(sourceID), failed: errors[sourceID] != nil,
                  hasSnapshot: snapshots[sourceID] != nil, fresh: isFresh(sourceID))
@@ -259,8 +267,8 @@ final class CompanionModel: ObservableObject {
                 name: ComputerPreferences.displayName(for: source.sourceID,
                     sourceName: snapshot?.sourceName, host: source.endpoint.host),
                 state: snapshot?.state ?? .idle,
-                availability: snapshot == nil ? 0 : isFresh(source.sourceID) ? 1 : 2,
-                expiresAt: snapshot.map { $0.observedAt + $0.freshFor } ?? 0,
+                availability: snapshot == nil ? 0 : isActivityCurrent(source.sourceID) ? 1 : 2,
+                expiresAt: snapshot?.activityFreshUntil ?? 0,
                 sessions: snapshot?.sessions ?? [], sessionsKnown: snapshot?.sessions != nil)
         }
         let priorities: [ActivityState: Int] = [.needsInput: 0, .failed: 1, .working: 2, .finished: 3, .idle: 4]
@@ -664,7 +672,7 @@ extension CompanionModel {
             remoteSessionID: "session_previewHandoff")
         snapshots[sourceID] = Snapshot(schema: 1, sourceID: sourceID, generation: UUID().uuidString,
             revision: 1, sourceName: screen.contains("long") ? "James’s MacBook Pro for design and development" : "MacBook Pro",
-            observedAt: now, changedAt: now, freshFor: 120, state: .needsInput, eventID: "preview",
+            observedAt: now - (screen.contains("stale") ? 301 : 0), changedAt: now, freshFor: 30, state: .needsInput, eventID: "preview",
             sessions: screen.contains("unavailable") ? [] : [session])
         if !screen.contains("stale") { fetchedUptimes[sourceID] = ProcessInfo.processInfo.systemUptime }
         var data = Data([79, 72, 1, 0, 1, 0, 0, 0])

@@ -269,7 +269,7 @@ extension PresentationModel {
             if previewScreen == "computer-revoked" { return .revoked }
             if previewOffline { return .reconnecting }
             if ["computer-waiting", "waiting"].contains(previewScreen) { return .connecting }
-            if previewScreen == "computer-stale" { return .checking }
+            if ["computer-stale", "computer-checking"].contains(previewScreen) { return .checking }
             return .current
         }
         guard let id else { return .connecting }

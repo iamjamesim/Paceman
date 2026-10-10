@@ -375,8 +375,10 @@ flag (`0` or `1`), and one reserved zero byte. A nonempty page then carries the
 The phone sends up to eight sessions per computer, attention/failure first,
 then working and finished; computer counts retain the full totals. Only the
 explicit workspace label is eligible, never task titles, project paths, remote
-thread IDs, prompts or replies. An unknown list has zero included rows; a known
-empty list has zero rows and zero counts. A zero-computer feed is header only.
+thread IDs, prompts or replies. Computer expiry is the five-minute display lease
+from source observation, independent of the Bluetooth connection; a new fetch
+renews it, delivery or reconnection alone does not. An unknown list has zero
+included rows; a known empty list has zero rows and zero counts. A zero-computer feed is header only.
 The maximum page is 500 bytes.
 
 Pages arrive in order under one batch ID. The phone finishes its captured batch

@@ -45,7 +45,12 @@ typedef struct {
   bool found, connected;
 } PacemanSessionView;
 
+/* Display leases survive a link gap; actions still require a ready owner channel. */
+static inline bool paceman_source_has_current_activity(const PacemanSource *source, uint32_t now) {
+  return source->availability == PacemanSourceCurrent && now < source->expires_at;
+}
+
 static inline bool paceman_source_is_current(const PacemanSource *source, bool connected,
                                              uint32_t now) {
-  return connected && source->availability == PacemanSourceCurrent && now < source->expires_at;
+  return connected && paceman_source_has_current_activity(source, now);
 }

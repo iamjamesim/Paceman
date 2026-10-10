@@ -43,6 +43,7 @@ struct Snapshot: Codable {
     }
     enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, observedAt, changedAt, freshFor, state, eventID, sessions, allowance, allowances, configuredProviders }
     var identity: String { "\(sourceID)/\(generation)/\(eventID)" }
+    var activityFreshUntil: Double { observedAt + MonitoringActivity.displayLeaseDuration }
 }
 
 enum WatchAggregate {

@@ -187,7 +187,7 @@ private struct SessionHandoffSheet: View {
                         if let label = MonitoringActivity.ContentState.sharedWorkspaceLabel([target.session.workspaceLabel]) {
                             Text(label).companionText(.body, theme: theme)
                         }
-                        Text((model.isFresh(target.sourceID) ? "" : "Last known: ") + target.session.state.title)
+                        Text((model.isActivityCurrent(target.sourceID) ? "" : "Last known: ") + target.session.state.title)
                             .companionText(.body, theme: theme)
                         if let url = target.session.appURL {
                             Button {

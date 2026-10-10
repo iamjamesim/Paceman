@@ -1,9 +1,12 @@
 # Data and lifecycle
 
-Pairing survives a connection failure. Activity expires on its snapshot lease:
-the phone may show the last known state, but does not animate or forward it as
-current. On reconnection, it fetches the latest state rather than replaying
-missed events. Normal computer removal confirms computer-side revocation before
+Pairing survives a connection failure. The iPhone session list, Live Activities
+and Pebble computer/session cards share a five-minute lease from the source
+observation; a temporary link failure does not shorten it.
+After expiry, activity is Last known and stops animating. The shorter snapshot
+lease governs connection status and forwarding new activity alerts, not display
+color. Reconnection fetches the latest state rather than replaying missed events.
+Normal computer removal confirms computer-side revocation before
 clearing the saved connection. An unreachable computer offers **Forget** to clear
 the iPhone connection without claiming remote revocation. Relay cleanup is
 best-effort and does not block removal. Each failed step is retried once. A local

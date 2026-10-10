@@ -68,11 +68,10 @@ static void prv_schedule_expiry(Face *face, const PacemanView *view, uint32_t no
     face->expiry = NULL;
   }
   uint32_t next = UINT32_MAX;
-  if (view->connected)
-    for (size_t i = 0; i < view->source_count; ++i)
-      if (view->sources[i].availability == PacemanSourceCurrent &&
-          view->sources[i].expires_at > now && view->sources[i].expires_at < next)
-        next = view->sources[i].expires_at;
+  for (size_t i = 0; i < view->source_count; ++i)
+    if (view->sources[i].availability == PacemanSourceCurrent &&
+        view->sources[i].expires_at > now && view->sources[i].expires_at < next)
+      next = view->sources[i].expires_at;
   if (next != UINT32_MAX)
     face->expiry = app_timer_register((uint32_t)MIN((uint64_t)(next - now + 1) * 1000, UINT32_MAX),
                                       prv_expired, face);
@@ -151,7 +150,7 @@ static void prv_card(GContext *ctx, GRect card, const PacemanView *view,
   const char *state = activity == OMARCHY_ACTIVITY_NONE ? "Idle" : prv_status(activity);
   char context[64] = "";
   const char *detail = context;
-  bool current = source ? paceman_source_is_current(source, view->connected, now)
+  bool current = source ? paceman_source_has_current_activity(source, now)
                         : view->received && view->connected;
   bool robot = view->received || source;
   if (current && source) prv_detail(source, context, sizeof(context));
@@ -275,7 +274,7 @@ static void prv_sessions(GContext *ctx, Face *face, uint32_t now, GColor accent)
     return;
   }
   const PacemanSource *source = &view.source;
-  const bool current = paceman_source_is_current(source, view.connected, now);
+  const bool current = paceman_source_has_current_activity(source, now);
   const int width = face->canvas.bounds.size.w, height = face->canvas.bounds.size.h;
   graphics_context_set_text_color(ctx, GColorBlack);
   prv_text(ctx, source->name, FONT_KEY_PACEMAN_DATE_14,

@@ -1663,6 +1663,51 @@ final class ProtocolTests: XCTestCase {
                                   oldAdditionalKey: prefix + "-additional")
     }
 
+    @MainActor
+    func testActivityDisplayLeaseSurvivesRecoveryWithoutExtendingObservation() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://lease.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret")
+        let observed = Date().timeIntervalSince1970 - 45
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            (200, try self.sourceFixture(["sourceID": source.sourceID, "observedAt": observed]))
+        })
+        model.pairedSources = [source]
+        defer { try? FileManager.default.removeItem(at: SourceSnapshotCache.url(for: source.sourceID)) }
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertFalse(model.isFresh(source.sourceID), "The transport lease remains thirty seconds")
+        XCTAssertEqual(model.connectionState(source.sourceID), .checking)
+        XCTAssertTrue(model.isActivityCurrent(source.sourceID))
+        model.errors[source.sourceID] = "Connection unavailable"
+        XCTAssertEqual(model.connectionState(source.sourceID), .reconnecting)
+        XCTAssertTrue(model.isActivityCurrent(source.sourceID))
+        XCTAssertTrue(model.isActivityCurrent(source.sourceID, now: Date(timeIntervalSince1970: observed + 299)))
+        XCTAssertFalse(model.isActivityCurrent(source.sourceID, now: Date(timeIntervalSince1970: observed + 300)))
+        let snapshot = try XCTUnwrap(model.snapshots[source.sourceID])
+        XCTAssertEqual(snapshot.activityFreshUntil, observed + 300)
+        XCTAssertEqual(MonitoringActivity.ContentState(snapshot: snapshot).freshUntil, snapshot.activityFreshUntil)
+        model.revokedSources.insert(source.sourceID)
+        XCTAssertFalse(model.isActivityCurrent(source.sourceID))
+        model.revokedSources.remove(source.sourceID)
+        model.pairedSources = []
+        XCTAssertFalse(model.isActivityCurrent(source.sourceID))
+    }
+
+    @MainActor
+    func testFreshObservationRenewsUnchangedLiveActivityWithoutRollingBackState() {
+        let original = MonitoringActivity.ContentState(generation: "source", revision: 7,
+            state: "working", working: 1, needsInput: 0, finished: 0, observedAt: 100, freshUntil: 400)
+        var refreshed = original
+        refreshed.observedAt = 249; refreshed.freshUntil = 549
+        XCTAssertFalse(MonitoringCoordinator.shouldUpdate(refreshed, over: original))
+        refreshed.observedAt = 250; refreshed.freshUntil = 550
+        XCTAssertTrue(MonitoringCoordinator.shouldUpdate(refreshed, over: original))
+        XCTAssertFalse(MonitoringCoordinator.shouldUpdate(original, over: refreshed))
+        refreshed.revision = 6
+        XCTAssertFalse(MonitoringCoordinator.shouldUpdate(refreshed, over: original))
+        refreshed.revision = 8; refreshed.observedAt = 110; refreshed.freshUntil = 410
+        XCTAssertTrue(MonitoringCoordinator.shouldUpdate(refreshed, over: original))
+    }
+
     func testComputerConnectionStatesDistinguishRecoveryFromStaleActivity() {
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: true, failed: true, hasSnapshot: true, fresh: true), .revoked)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: true, hasSnapshot: true, fresh: true), .reconnecting)
