@@ -59,7 +59,9 @@ Phone-side Remove accessory removes access; it does not reset watch ownership.
   versa. Each surface reports its own link without inferring the other.
 
 Working does not time out; finished and failed rows retire after ten
-minutes. Disabling an agent clears its sessions; disabling Codex also clears usage.
+minutes. Live Activities end when idle, or after a 90-second terminal grace when
+no session is working or needs input. New observations do not restart that grace.
+Disabling an agent clears its sessions; disabling Codex also clears usage.
 Other agents continue without restarting the source.
 
 The source prunes old untracked sessions after 24 hours. Its events table keeps

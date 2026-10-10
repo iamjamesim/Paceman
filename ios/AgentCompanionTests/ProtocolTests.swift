@@ -1708,6 +1708,34 @@ final class ProtocolTests: XCTestCase {
         XCTAssertTrue(MonitoringCoordinator.shouldUpdate(refreshed, over: original))
     }
 
+    func testLiveActivityTerminalGraceDoesNotResetOnFreshObservation() throws {
+        for state in ["finished", "failed"] {
+            for sessions in [nil, [], [["id": "turn", "provider": "codex", "state": state]]] as [[[String: String]]?] {
+                var fixture: [String: Any] = ["state": state, "changedAt": 100, "observedAt": 189]
+                if let sessions { fixture["sessions"] = sessions }
+                let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(fixture))
+                XCTAssertFalse(snapshot.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 189)))
+                fixture["observedAt"] = 190
+                let renewed = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(fixture))
+                XCTAssertTrue(renewed.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 190)))
+            }
+        }
+        let idle = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(["state": "idle", "changedAt": 190]))
+        XCTAssertTrue(idle.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 190)))
+    }
+
+    func testLiveActivityFailurePreservesOtherWorkingOrWaitingSessions() throws {
+        for active in ["working", "needs_input"] {
+            let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture([
+                "state": "failed", "changedAt": 100, "observedAt": 700,
+                "sessions": [["id": "failed", "provider": "codex", "state": "failed"],
+                             ["id": "active", "provider": "claude", "state": active]]
+            ]))
+            XCTAssertEqual(snapshot.sessions?.count, 2)
+            XCTAssertFalse(snapshot.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 700)))
+        }
+    }
+
     func testComputerConnectionStatesDistinguishRecoveryFromStaleActivity() {
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: true, failed: true, hasSnapshot: true, fresh: true), .revoked)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: true, hasSnapshot: true, fresh: true), .reconnecting)

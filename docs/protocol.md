@@ -105,7 +105,7 @@ example, an allowance change raised `revision` to 12 without changing activity
 | `sourceName` | Source-reported name; the phone may show its own name. |
 | `observedAt` | Source response time in Unix seconds, not proof of a live agent. |
 | `changedAt` | Latest activity event time; presentation-only changes leave it alone. |
-| `freshFor` | Seconds the observation may count as current; the phone accepts greater than 0 and at most 60. |
+| `freshFor` | Contact freshness and eligibility to forward new activity; greater than 0 and at most 60 seconds. Display freshness uses its separate observation lease. |
 | `state` | `idle`, `working`, `needs_input`, `finished`, or `failed`. |
 | `eventID` | Opaque activity identity, 1–128 UTF-8 bytes without control characters; stable across presentation-only revisions. |
 | `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded workspace labels and Claude `remoteSessionID` (the Remote Control ID, distinct from the opaque row ID); no prompts or transcripts. |
@@ -350,7 +350,7 @@ Integers are little endian. Each record contains a 16-byte opaque source ID
 (the phone uses the first 16 SHA-256 bytes of its source ID), a 32-bit Unix expiry,
 a one-byte activity state, a one-byte availability (`0` no activity, `1` current,
 `2` history), and a 26-byte null-terminated UTF-8 name. Current cards become history
-at expiry or when the watch loses its update channel.
+at the transmitted expiry; temporary update-channel loss does not shorten it.
 
 Capability bit 13 adds version `2`: the same header and 48-byte record prefix,
 followed by four 16-bit session counts (working, needs input, finished, failed),

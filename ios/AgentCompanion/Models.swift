@@ -44,6 +44,15 @@ struct Snapshot: Codable {
     enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, observedAt, changedAt, freshFor, state, eventID, sessions, allowance, allowances, configuredProviders }
     var identity: String { "\(sourceID)/\(generation)/\(eventID)" }
     var activityFreshUntil: Double { observedAt + MonitoringActivity.displayLeaseDuration }
+
+    func shouldEndLiveActivity(at now: Date) -> Bool {
+        // A failed turn does not make the whole computer's activity terminal.
+        guard !(sessions ?? []).contains(where: { $0.state == .working || $0.state == .needsInput }) else {
+            return false
+        }
+        return state == .idle || ((state == .finished || state == .failed)
+            && now.timeIntervalSince1970 - changedAt >= MonitoringActivity.terminalGraceDuration)
+    }
 }
 
 enum WatchAggregate {

@@ -223,7 +223,7 @@ final class MonitoringCoordinator: ObservableObject {
             guard let snapshot = snapshots[source.sourceID], fresh.contains(source.sourceID) else { continue }
             let state = MonitoringActivity.ContentState(snapshot: snapshot)
             MonitoringProviderCache.save(state, sourceID: source.sourceID)
-            if snapshot.state == .idle {
+            if snapshot.shouldEndLiveActivity(at: Date()) {
                 if let activity = activities[source.sourceID] { await end(activity, sourceID: source.sourceID) }
                 continue
             }

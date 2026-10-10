@@ -18,6 +18,10 @@ from service.hub import Store
 from service.usage import readings, selected_reading
 
 DEFAULT_RELAY_URL = "https://relay.paceman.ai"
+LIVE_ACTIVITY_DISPLAY_LEASE = 5 * 60
+LIVE_ACTIVITY_TERMINAL_GRACE = 90
+LIVE_ACTIVITY_RENEWAL_INTERVAL = 4 * 60
+LIVE_ACTIVITY_UPDATE_INTERVAL = 15
 
 
 @dataclass(frozen=True)
@@ -284,6 +288,16 @@ def live_alert(event: dict, phone_name: str | None = None) -> dict:
     return {**notification_copy(event, phone_name), "sound": LIVE_ALERT_SOUNDS[event["state"]]}
 
 
+def should_end_live_activity(snapshot: dict, now: float) -> bool:
+    # An aggregate failure can coexist with work in another session.
+    if any(session.get("state") in ("working", "needs_input")
+           for session in snapshot.get("sessions") or []):
+        return False
+    return (snapshot["state"] == "idle"
+            or (snapshot["state"] in ("finished", "failed")
+                and now - snapshot["changedAt"] >= LIVE_ACTIVITY_TERMINAL_GRACE))
+
+
 def live_notification(snapshot: dict, now: float, ending=False,
                       alert: dict | None = None) -> tuple[dict, dict]:
     """Display-only envelope shared with MonitoringActivity.ContentState."""
@@ -294,7 +308,7 @@ def live_notification(snapshot: dict, now: float, ending=False,
     observed = min(now, snapshot["observedAt"])
     # A source-side renewal every four minutes keeps an unchanged active state
     # current. If its worker disappears, ActivityKit marks it stale after five.
-    fresh_until = observed + 300
+    fresh_until = observed + LIVE_ACTIVITY_DISPLAY_LEASE
     content = {"schema": 1, "generation": snapshot["generation"], "revision": snapshot["revision"],
                "state": snapshot["state"], "working": counts["working"], "needsInput": counts["needs_input"],
                "finished": counts["finished"], "failed": counts["failed"],
@@ -548,8 +562,7 @@ class Worker:
             devices = [dict(row) for row in db.execute(
                 "SELECT l.* FROM live_activities l JOIN clients c ON l.client_id=c.id")]
         for device in devices:
-            ending = (now >= device["expires"] or snapshot["state"] == "idle"
-                      or (snapshot["state"] in ("finished", "failed") and now - snapshot["changedAt"] >= 90))
+            ending = now >= device["expires"] or should_end_live_activity(snapshot, now)
             changed = device["cursor"] < snapshot["revision"]
             # A new attention event must not wait behind the ordinary update
             # cadence. Otherwise the Notification Center fallback can arrive
@@ -561,7 +574,8 @@ class Worker:
                              and device["alert_cursor"] < event["seq"]
                              and now - event["at"] <= 300)
             due = now >= device["next_attempt"] or attention_due
-            heartbeat = not changed and due and now >= device["next_attempt"] + 225
+            heartbeat = (not changed and due and now >= device["next_attempt"]
+                         + LIVE_ACTIVITY_RENEWAL_INTERVAL - LIVE_ACTIVITY_UPDATE_INTERVAL)
             if not ending and not (due and (changed or heartbeat)):
                 continue
             if ending and not due:
@@ -595,7 +609,8 @@ class Worker:
                         db.execute("UPDATE live_activity_starts SET cursor=?,next_attempt=0 WHERE client_id=?",
                                    (snapshot["revision"], device["client_id"]))
                 else:
-                    delay = 15 if accepted else min(300, 15 * 2 ** min(device["attempts"], 5))
+                    delay = (LIVE_ACTIVITY_UPDATE_INTERVAL if accepted else
+                             min(300, LIVE_ACTIVITY_UPDATE_INTERVAL * 2 ** min(device["attempts"], 5)))
                     retry_cursor = min(device["cursor"], snapshot["revision"] - 1)
                     db.execute("UPDATE live_activities SET cursor=?,next_attempt=?,attempts=?,alert_cursor=? WHERE client_id=? AND token=? AND activity_id=?",
                                (snapshot["revision"] if accepted else retry_cursor, now + delay,
@@ -609,8 +624,7 @@ class Worker:
                       "status": result.status, "reason": result.reason, "apnsID": result.apns_id})
 
     def step_live_starts(self, snapshot, now, event):
-        if snapshot["state"] == "idle" or (snapshot["state"] in ("finished", "failed")
-                and now - snapshot["changedAt"] >= 90):
+        if should_end_live_activity(snapshot, now):
             # A successful remote start reserves this source for one active run.
             # The update token may arrive later; revisions must not start copies.
             with self.store.connect() as db:

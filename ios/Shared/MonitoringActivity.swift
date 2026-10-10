@@ -4,6 +4,7 @@ import Foundation
 /// Minimal APNs display contract. Unix timestamps avoid platform-specific Date encoding.
 struct MonitoringActivity: ActivityAttributes {
     static let displayLeaseDuration: TimeInterval = 5 * 60
+    static let terminalGraceDuration: TimeInterval = 90
 
     struct ContentState: Codable, Hashable {
         var schema = 1
