@@ -5,25 +5,18 @@
 [![Checks](https://github.com/iamjamesim/Paceman/actions/workflows/checks.yml/badge.svg?branch=main)](https://github.com/iamjamesim/Paceman/actions/workflows/checks.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-Paceman is an open personal gear system for agentic engineering on the go.
-Agents often perform long-running tasks in parallel, async, and in the
-background. Paceman gives that work a quiet presence in the gear you take with
-you, so you can keep things moving wherever you are without waiting around at
-your desk.
-
-To start, install Paceman on your computer and iPhone to see which agents are
-working, need help, or are done wherever you go. Paceman uses Live Activities to
-stream Codex and Claude Code activity from your Mac or Omarchy computer to your
-iPhone and Apple Watch.
+Paceman brings Codex and Claude Code activity from your Mac or Omarchy computer
+to your iPhone Lock Screen and Apple Watch, so you can step away while your
+agents build.
 
 <p align="center">
   <a href="docs/images/iphone-live-activity.png"><img src="docs/images/iphone-live-activity.png" alt="Paceman Live Activity on an iPhone Lock Screen" width="320"></a>
   <a href="docs/images/apple-watch-smart-stack.jpg"><img src="docs/images/apple-watch-smart-stack.jpg" alt="Paceman in the Apple Watch Smart Stack" width="320"></a>
 </p>
 
-Beyond that, you can further extend your system by connecting any hackable
-accessory to Paceman on your iPhone. See [Experimental accessories](#experimental-accessories)
-for examples.
+Your phone and Apple Watch are just the start. Paceman is an open personal gear
+system for agentic engineering on the go, which you can extend to hardware you
+choose, hack, or build.
 
 Paceman is in **alpha**. macOS and Omarchy installers are available via GitHub
 releases, and Paceman iOS is available through TestFlight.
@@ -56,7 +49,10 @@ Paceman can extend to gear you choose or build:
 - [ESP32-S3 watch](firmware/esp32-watch/README.md) with custom firmware focused
   on agent activity.
 
-[Accessory setup guide](firmware/README.md).
+To connect an accessory, follow the [setup guide](firmware/README.md).
+To adapt or build your own, start with the
+[accessory protocol](docs/protocol.md#iphone-and-esp32-watch-ble) and the firmware
+above.
 
 ## Privacy
 
