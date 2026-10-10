@@ -387,6 +387,31 @@ followed, for each page, by its included count, known flag and body. Version 1/2
 writes remain accepted and clear session detail. Session freshness follows its
 computer; neither source nor session history is persisted.
 
+## Accessory session handoff
+
+Capability bit 15 adds optional encrypted notification/write characteristic
+`7f510007-1b15-4f0d-b7a5-4cf3a2c98ee1`. A watch selection emits 40 bytes:
+`OH`, version `1`, reserved `0`, little-endian nonzero request sequence (4 bytes),
+source identifier (16 bytes), and session identifier (16 bytes), using the same
+opaque identifiers as the session feed. Only the authenticated owner subscribes
+or acknowledges; the selected session must be current. Requests are not replayed
+on reconnect.
+
+The phone writes an 8-byte acknowledgment: `OH`, version `1`, result byte, and
+matching request sequence. Results are `1` ready in foreground, `2` local
+notification scheduled, `3` saved for opening Paceman, and `4` unavailable. A
+result of `2` confirms scheduling, not notification display. The watch accepts
+only the outstanding request's acknowledgment within ten monotonic seconds.
+Older companions retain browsing without handoff.
+
+The phone resolves destinations from its own paired-source snapshots. The watch
+never supplies a URL. One pending selection (opaque IDs, watch identity, timestamp)
+is kept in phone preferences for up to ten minutes and cleared on dismissal;
+expired or removed-watch selections are discarded on access. Local notifications
+contain a request token and generic copy, not session content. Selecting a
+notification or foregrounding Paceman presents the handoff; opening the agent
+app remains an explicit phone action.
+
 ## Accessory authorization baseline
 
 Discovery and owner UUIDs are not credentials. After enrollment, protected reads,

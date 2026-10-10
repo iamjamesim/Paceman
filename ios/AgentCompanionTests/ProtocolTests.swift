@@ -9,6 +9,87 @@ import DeviceCheck
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    func testHandoffWireRejectsMalformedRequestsAndEchoesSequence() throws {
+        var bytes = Data([79, 72, 1, 0, 7, 0, 0, 0])
+        bytes.append(Data(repeating: 1, count: 16)); bytes.append(Data(repeating: 2, count: 16))
+        let request = try XCTUnwrap(WatchHandoffRequest(bytes))
+        XCTAssertEqual(request.sequence, 7)
+        XCTAssertEqual(request.response(.notification), Data([79, 72, 1, 2, 7, 0, 0, 0]))
+        XCTAssertNil(WatchHandoffRequest(bytes.dropLast()))
+        for index in [0, 2, 3, 4] {
+            var invalid = bytes; invalid[index] = index == 3 ? 1 : 0
+            XCTAssertNil(WatchHandoffRequest(invalid))
+        }
+        var zero = bytes; zero.replaceSubrange(8..<24, with: Data(repeating: 0, count: 16))
+        XCTAssertNil(WatchHandoffRequest(zero))
+        let now = Date()
+        let pending = PendingWatchHandoff(watchID: "watch", request: request, now: now)
+        XCTAssertTrue(pending.isCurrent(now: now.addingTimeInterval(599)))
+        XCTAssertFalse(pending.isCurrent(now: now.addingTimeInterval(600)))
+        XCTAssertFalse(pending.isCurrent(now: now.addingTimeInterval(-1)))
+    }
+
+    @MainActor
+    func testHandoffResolvesOnlyCurrentPairedSourceAndExactSession() throws {
+        let model = CompanionModel(preview: true)
+        model.showHandoffPreview("handoff")
+        let pending = try XCTUnwrap(model.handoff)
+        let target = try XCTUnwrap(model.handoffTarget(pending))
+        XCTAssertEqual(target.session.appURL?.absoluteString, "claude://code/session_previewHandoff")
+        let card = WatchSourceCard(sourceID: target.sourceID, name: target.computer,
+            state: .needsInput, availability: 1, expiresAt: Date().timeIntervalSince1970 + 120,
+            sessions: [target.session])
+        let page = try XCTUnwrap(WatchWire.sourcePackets([card], capabilities: 1 << 14).first)
+        XCTAssertEqual(Data(page[24..<40]), pending.source)
+        XCTAssertEqual(Data(page[84..<100]), pending.session)
+        model.revokedSources.insert(target.sourceID)
+        XCTAssertNil(model.handoffTarget(pending))
+        model.revokedSources.remove(target.sourceID)
+        model.snapshots[target.sourceID]?.sessions = []
+        XCTAssertNil(model.handoffTarget(pending))
+        model.showHandoffPreview("handoff")
+        let renewed = try XCTUnwrap(model.handoff)
+        model.pairedSources = []
+        XCTAssertNil(model.handoffTarget(renewed))
+    }
+
+    @MainActor
+    func testHandoffNotificationUsesLatestValidSelectionAndScopedDismissal() throws {
+        let key = "pending-watch-handoff-v1"
+        let defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        defer {
+            if let original { defaults.set(original, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        let model = CompanionModel(preview: true)
+        model.showHandoffPreview("handoff")
+        let first = try XCTUnwrap(model.handoff)
+        let target = try XCTUnwrap(model.handoffTarget(first))
+        defaults.set(try JSONEncoder().encode(first), forKey: key)
+        XCTAssertTrue(model.handoffNotificationIsCurrent(first.id))
+
+        var bytes = Data([79, 72, 1, 0, 2, 0, 0, 0])
+        bytes.append(first.source); bytes.append(first.session)
+        let request = try XCTUnwrap(WatchHandoffRequest(bytes))
+        let second = PendingWatchHandoff(watchID: first.watchID, request: request)
+        defaults.set(try JSONEncoder().encode(second), forKey: key)
+        XCTAssertFalse(model.handoffNotificationIsCurrent(first.id))
+        XCTAssertTrue(model.handoffNotificationIsCurrent(second.id))
+
+        // Dismissing the older visible sheet must preserve the newer pending selection.
+        model.dismissHandoff()
+        let saved = try JSONDecoder().decode(PendingWatchHandoff.self,
+            from: XCTUnwrap(defaults.data(forKey: key)))
+        XCTAssertEqual(saved.id, second.id)
+        XCTAssertNil(model.handoff)
+        model.revokedSources.insert(target.sourceID)
+        XCTAssertFalse(model.handoffNotificationIsCurrent(second.id))
+        model.revokedSources.remove(target.sourceID)
+        model.snapshots[target.sourceID]?.sessions = []
+        XCTAssertFalse(model.handoffNotificationIsCurrent(second.id))
+    }
+
     func testAppAttestRecoversRejectedCachedKeyAndApprovesPairing() async throws {
         for kind in ["attest", "assert"] {
             for code in [DCError.Code.invalidInput, .invalidKey] {

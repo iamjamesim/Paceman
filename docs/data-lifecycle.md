@@ -20,7 +20,7 @@ See the [source protocol](protocol.md) for freshness fields.
 | iPhone Keychain | Source endpoints and credentials, installation ID, accessory owner identity; device-only, available after first unlock | Explicit removal or confirmed revocation |
 | iPhone verification Keychain state | App Attest key ID; pending challenge/proof and hashed pairing bindings, device-only | Key replacement; pending work completes, is rejected, or is discarded on expired retry |
 | iPhone protected Application Support | One last-known snapshot per source, weather cache and bounded transport diagnostics | Source removal, relevant setting change or replacement data |
-| iPhone preferences | Phone theme, source names, per-watch settings, watch usage source and per-accessory revision/delivery bookkeeping | User change or corresponding device removal |
+| iPhone preferences | Phone theme, source names, per-watch settings, watch usage source, per-accessory revision/delivery bookkeeping, and one opaque pending watch handoff | User change or corresponding device removal; pending handoff is cleared on dismissal or discarded on access after ten minutes |
 | ESP32 watch NVS | Owner bond, stable device ID, saved profile and wearer acknowledgement | Deliberate factory reset or owner transfer |
 | Pebble settings/PFS | Owner bond, stable device ID and saved profile | Confirmed watch-side Reset Paceman pairing clears ownership/profile and the owner bond, keeping the ID; factory reset clears all |
 | Apple Watch shared preferences | Per-computer Codex usage caches, observation times, phone revision and allowed source IDs | Phone removal of a source or newer accepted data from that source; expired readings remain unavailable |

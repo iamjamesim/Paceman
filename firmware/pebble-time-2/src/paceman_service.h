@@ -29,3 +29,12 @@ void paceman_service_get_view(PacemanView *view);
 void paceman_service_get_sessions(const uint8_t source_id[16], PacemanSessionView *view);
 void paceman_service_notification_hint(const struct pbl_bt_device_internal *device, uint32_t uid,
                                        const uint8_t *app_id, size_t length);
+
+/* Session handoff is metadata only; the phone owns destination resolution. */
+typedef enum {
+  PacemanHandoffNone, PacemanHandoffReady, PacemanHandoffNotification,
+  PacemanHandoffOpenPhone, PacemanHandoffUnavailable,
+  PacemanHandoffSending, PacemanHandoffOffline
+} PacemanHandoffStatus;
+void paceman_service_continue_on_phone(const uint8_t source_id[16], const uint8_t session_id[16]);
+PacemanHandoffStatus paceman_service_handoff_status(void);

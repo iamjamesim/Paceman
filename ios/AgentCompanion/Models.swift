@@ -227,6 +227,14 @@ struct WatchSourceTransfer {
 }
 
 enum WatchWire {
+    static func sourceIdentifier(_ sourceID: String) -> Data {
+        Data(SHA256.hash(data: Data(sourceID.utf8)).prefix(16))
+    }
+    static func sessionIdentifier(sourceID: String, session: AgentSession) -> Data {
+        let identity = [sourceID, session.provider, session.id].joined(separator: "\u{0}")
+        return Data(SHA256.hash(data: Data(identity.utf8)).prefix(16))
+    }
+
     static func shouldPlayWorkingSound(state: ActivityState, previousState: ActivityState?,
                                        freshNewEvent: Bool, capabilities: UInt32) -> Bool {
         state == .working && previousState != .needsInput && freshNewEvent &&
@@ -274,7 +282,7 @@ enum WatchWire {
         let cards = Array(cards.prefix(8))
         var data = Data([79, 83, rich ? 2 : 1, UInt8(cards.count)])
         for card in cards {
-            data.append(contentsOf: SHA256.hash(data: Data(card.sourceID.utf8)).prefix(16))
+            data.append(sourceIdentifier(card.sourceID))
             let expiry = UInt32(clamping: Int64(max(0, card.expiresAt)))
             data.appendLE(expiry)
             data.append(card.state.wire)
@@ -323,8 +331,7 @@ enum WatchWire {
             counts.append(UInt8(visible.count))
             for session in visible {
                 // Include the computer and provider to keep identities scoped.
-                let identity = [card.sourceID, session.provider, session.id].joined(separator: "\u{0}")
-                body.append(contentsOf: SHA256.hash(data: Data(identity.utf8)).prefix(16))
+                body.append(sessionIdentifier(sourceID: card.sourceID, session: session))
                 body.append(session.provider == "codex" ? 1 : session.provider == "claude" ? 2 : 4)
                 body.append(session.state.wire)
                 body.append(contentsOf: [0, 0])
@@ -473,4 +480,44 @@ extension Snapshot {
 
 extension CodexAllowance {
     var usageID: String { "\(provider)/\(window)/\(windowDurationMins ?? 0)" }
+}
+
+struct WatchHandoffRequest: Equatable {
+    let sequence: UInt32
+    let source: Data
+    let session: Data
+
+    init?(_ data: Data) {
+        let bytes = Array(data)
+        guard bytes.count == 40, Array(bytes.prefix(4)) == [79, 72, 1, 0],
+              WatchWire.read32(bytes, at: 4) != 0,
+              bytes[8..<24].contains(where: { $0 != 0 }),
+              bytes[24..<40].contains(where: { $0 != 0 }) else { return nil }
+        sequence = WatchWire.read32(bytes, at: 4)
+        source = Data(bytes[8..<24]); session = Data(bytes[24..<40])
+    }
+
+    func response(_ result: WatchHandoffResult) -> Data {
+        var data = Data([79, 72, 1, result.rawValue])
+        data.appendLE(sequence)
+        return data
+    }
+}
+
+enum WatchHandoffResult: UInt8 { case ready = 1, notification = 2, openPhone = 3, unavailable = 4 }
+
+struct PendingWatchHandoff: Codable, Identifiable, Equatable {
+    let id: UUID
+    let watchID: String
+    let source: Data
+    let session: Data
+    let createdAt: Date
+
+    init(watchID: String, request: WatchHandoffRequest, now: Date = Date()) {
+        id = UUID(); self.watchID = watchID; source = request.source; session = request.session; createdAt = now
+    }
+    func isCurrent(now: Date = Date()) -> Bool {
+        source.count == 16 && session.count == 16 &&
+        now.timeIntervalSince(createdAt) >= 0 && now.timeIntervalSince(createdAt) < 600
+    }
 }

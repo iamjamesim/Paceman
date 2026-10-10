@@ -27,7 +27,8 @@ typedef struct {
   GColor session_accent;
   bool session_current, session_reload;
   EventServiceInfo updates;
-  bool expanded;
+  bool expanded, handoff_open;
+  AppTimer *handoff_timeout;
   PacemanNavigation navigation;
   AppTimer *expiry, *motion;
   uint32_t revision;
@@ -229,6 +230,24 @@ static void prv_session_row(GContext *ctx, const Layer *cell, MenuIndex *index, 
            GRect(56, y + 40, width - 75, 18), GTextAlignmentLeft);
 }
 
+static void prv_handoff_expired(void *context) {
+  Face *face = context;
+  face->handoff_timeout = NULL;
+  layer_mark_dirty(&face->canvas);
+}
+
+static void prv_continue(Face *face) {
+  if (!face->navigation.session_selected || face->handoff_open) return;
+  face->handoff_open = true;
+  paceman_service_continue_on_phone(face->navigation.source_id, face->navigation.session_id);
+  face->handoff_timeout = app_timer_register(11000, prv_handoff_expired, face);
+  layer_mark_dirty(&face->canvas);
+}
+
+static void prv_session_activate(MenuLayer *menu, MenuIndex *index, void *context) {
+  prv_continue(context);
+}
+
 static void prv_session_selected(MenuLayer *menu, MenuIndex next, MenuIndex previous, void *context) {
   Face *face = context;
   if (next.row >= face->session_view.source.session_count) return;
@@ -243,6 +262,7 @@ static const MenuLayerCallbacks s_session_callbacks = {
   .get_cell_height = prv_session_height,
   .draw_row = prv_session_row,
   .selection_changed = prv_session_selected,
+  .select_click = prv_session_activate,
 };
 
 static void prv_sessions(GContext *ctx, Face *face, uint32_t now, GColor accent) {
@@ -337,6 +357,28 @@ static void prv_draw(Layer *layer, GContext *ctx) {
   graphics_fill_rect(ctx, &layer->bounds);
   graphics_context_set_text_color(ctx, GColorBlack);
   const int width = layer->bounds.size.w;
+  if (face->expanded && face->handoff_open) {
+    layer_set_hidden(menu_layer_get_layer(&face->sessions), true);
+    prv_text(ctx, "Continue on phone", FONT_KEY_PACEMAN_DATE_14,
+             GRect(10, 8, width - 20, 22), GTextAlignmentLeft);
+    const PacemanHandoffStatus status = paceman_service_handoff_status();
+    const char *title = status == PacemanHandoffReady ? "Ready on phone" :
+        status == PacemanHandoffNotification ? "Check your phone" :
+        status == PacemanHandoffOpenPhone ? "Open Paceman" :
+        status == PacemanHandoffUnavailable ? "Session unavailable" :
+        status == PacemanHandoffSending ? "Sending…" : "Phone unavailable";
+    const char *detail = status == PacemanHandoffReady ? "Continue in Paceman on your iPhone." :
+        status == PacemanHandoffNotification ? "Tap the Paceman notification to continue." :
+        status == PacemanHandoffOpenPhone ? "Your selection is ready in the iPhone app." :
+        status == PacemanHandoffUnavailable ? "Check the latest activity on your phone." :
+        status == PacemanHandoffSending ? "Keep your phone nearby." :
+        "Open Paceman on your phone, then try again.";
+    prv_text(ctx, title, FONT_KEY_PACEMAN_STATUS_21,
+             GRect(10, 53, width - 20, 58), GTextAlignmentLeft);
+    prv_text(ctx, detail, FONT_KEY_PACEMAN_DATE_14,
+             GRect(10, 118, width - 20, 70), GTextAlignmentLeft);
+    return;
+  }
   if (face->expanded && face->navigation.sessions_open) {
     prv_sessions(ctx, face, now_seconds, accent);
     return;
@@ -416,6 +458,7 @@ static void prv_focus(bool focused) {
 
 static void prv_navigate(ClickRecognizerRef recognizer, void *context) {
   Face *face = context;
+  if (face->handoff_open) return;
   const int step = click_recognizer_get_button_id(recognizer) == BUTTON_ID_DOWN ? 1 : -1;
   if (face->navigation.sessions_open) {
     menu_layer_set_selected_next(&face->sessions, step < 0, MenuRowAlignCenter, true);
@@ -430,7 +473,7 @@ static void prv_navigate(ClickRecognizerRef recognizer, void *context) {
 
 static void prv_select(ClickRecognizerRef recognizer, void *context) {
   Face *face = context;
-  if (face->navigation.sessions_open) return;
+  if (face->navigation.sessions_open) { prv_continue(face); return; }
   PacemanView view;
   paceman_service_get_view(&view);
   paceman_navigation_sources(&face->navigation, view.sources, view.source_count, true, view.connected, rtc_get_time());
@@ -444,6 +487,12 @@ static void prv_select(ClickRecognizerRef recognizer, void *context) {
 
 static void prv_back(ClickRecognizerRef recognizer, void *context) {
   Face *face = context;
+  if (face->handoff_open) {
+    face->handoff_open = false;
+    if (face->handoff_timeout) { app_timer_cancel(face->handoff_timeout); face->handoff_timeout = NULL; }
+    layer_mark_dirty(&face->canvas);
+    return;
+  }
   if (face->navigation.sessions_open) {
     face->navigation.sessions_open = false;
     layer_mark_dirty(&face->canvas);
@@ -488,6 +537,7 @@ static void prv_run(bool expanded) {
   tick_timer_service_subscribe(MINUTE_UNIT, prv_tick);
   app_focus_service_subscribe_handlers((AppFocusHandlers){.did_focus = prv_focus});
   app_event_loop();
+  if (face->handoff_timeout) app_timer_cancel(face->handoff_timeout);
   if (face->motion)
     app_timer_cancel(face->motion);
   if (face->expiry)

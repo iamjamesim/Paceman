@@ -12,6 +12,12 @@ static bool id_exists, owner_exists, record_exists, corrupt_owner, io_failure, s
 static uint8_t id_bytes[20], owner_bytes[148];
 static size_t id_size;
 static bool queue_full, quiet;
+static time_t handoff_now = 50;
+static RtcTicks handoff_ticks;
+RtcTicks rtc_get_ticks(void) { return handoff_ticks; }
+time_t rtc_get_time(void) { return handoff_now; }
+static int handoff_notified;
+static uint8_t handoff_packet[40];
 static struct {
   void (*callback)(void *);
   void *context;
@@ -165,11 +171,16 @@ int ble_gatts_count_cfg(const struct ble_gatt_svc_def *services) {
 int ble_gatts_add_svcs(const struct ble_gatt_svc_def *services) {
   *services[0].characteristics[2].val_handle = 12;
   *services[0].characteristics[3].val_handle = 13;
+  *services[0].characteristics[5].val_handle = 14;
   return 0;
 }
 int ble_gatts_notify_custom(uint16_t c, uint16_t h, struct os_mbuf *m) {
   assert(c == 1);
-  if (h == 12) {
+  if (h == 14) {
+    assert(m->size == 40 && !memcmp(m->bytes, "OH\1\0", 4));
+    memcpy(handoff_packet, m->bytes, 40);
+    ++handoff_notified;
+  } else if (h == 12) {
     assert(m->size == 14);
     notified++;
   } else {
@@ -460,6 +471,47 @@ int main(void) {
   paceman_service_get_sessions(source_id, &sessions);
   assert(sessions.found && sessions.connected && sessions.source.session_count == 8);
   assert(sessions.sessions[7].id[0] == 8 && !strcmp(sessions.sessions[7].workspace, "paceman"));
+  // Session handoff: authenticated owner, current session, ACK matching, and timeout.
+  paceman_service_continue_on_phone(source_id, sessions.sessions[0].id);
+  assert(paceman_service_handoff_status() == PacemanHandoffOffline);
+  subscribed.subscribe.attr_handle = 14;
+  prv_gap_event(&subscribed, NULL);
+  paceman_service_continue_on_phone(source_id, sessions.sessions[0].id);
+  assert(paceman_service_handoff_status() == PacemanHandoffSending);
+  run_jobs();
+  assert(handoff_notified == 1 && !memcmp(handoff_packet + 8, source_id, 16) &&
+         !memcmp(handoff_packet + 24, sessions.sessions[0].id, 16));
+  uint8_t ack[8]; memcpy(ack, handoff_packet, 8); ack[3] = 1;
+  assert(att_access(2, 7, false, ack, sizeof(ack), NULL) == 8);
+  ack[4]++;
+  assert(att_access(1, 7, false, ack, sizeof(ack), NULL) != 0);
+  ack[4]--;
+  assert(att_access(1, 7, false, ack, sizeof(ack), NULL) == 0);
+  assert(paceman_service_handoff_status() == PacemanHandoffReady);
+  assert(att_access(1, 7, false, ack, sizeof(ack), NULL) != 0);
+  paceman_service_continue_on_phone(source_id, sessions.sessions[0].id);
+  run_jobs();
+  handoff_ticks += 11000;
+  assert(paceman_service_handoff_status() == PacemanHandoffOffline);
+  assert(att_access(1, 7, false, ack, sizeof(ack), NULL) != 0);
+  // Work delayed on the system queue must expire without reaching the phone.
+  const int before_delayed_handoff = handoff_notified;
+  paceman_service_continue_on_phone(source_id, sessions.sessions[0].id);
+  handoff_ticks += 11000;
+  run_jobs();
+  assert(handoff_notified == before_delayed_handoff);
+  assert(paceman_service_handoff_status() == PacemanHandoffOffline);
+
+  handoff_now = 101;
+  paceman_service_continue_on_phone(source_id, sessions.sessions[0].id);
+  assert(paceman_service_handoff_status() == PacemanHandoffUnavailable);
+  handoff_now = 50;
+  queue_full = true;
+  paceman_service_continue_on_phone(source_id, sessions.sessions[0].id);
+  assert(paceman_service_handoff_status() == PacemanHandoffOffline);
+  queue_full = false;
+  run_jobs();
+
   source_id[0] = 99;
   paceman_service_get_sessions(source_id, &sessions);
   assert(!sessions.found && !sessions.source.session_count && !sessions.sessions[0].id[0]);

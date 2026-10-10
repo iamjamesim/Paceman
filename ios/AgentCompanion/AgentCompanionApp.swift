@@ -88,6 +88,9 @@ struct CompanionRoot: View {
                     }
                 }
         }
+        .sheet(item: Binding(get: { model.handoff }, set: { if $0 == nil { model.dismissHandoff() } })) { request in
+            SessionHandoffSheet(model: model, request: request, theme: theme)
+        }
         .tint(theme.tint)
         .preferredColorScheme(.dark)
         .onAppear {
@@ -98,6 +101,11 @@ struct CompanionRoot: View {
                 }
             }
             guard presentation.preview else { return }
+            #if DEBUG
+            if presentation.previewScreen.hasPrefix("handoff") {
+                model.showHandoffPreview(presentation.previewScreen)
+            }
+            #endif
             switch presentation.previewScreen {
             case "weather", "weather-current", "weather-place", "weather-denied", "weather-permission", "weather-unavailable":
                 #if DEBUG
@@ -154,6 +162,66 @@ struct CompanionRoot: View {
                 path = []
             } else {
                 path = model.pairedSources.isEmpty && url.host == "connect" ? [.pairing] : []
+            }
+        }
+    }
+}
+
+private struct SessionHandoffSheet: View {
+    @ObservedObject var model: CompanionModel
+    let request: PendingWatchHandoff
+    let theme: CompanionTheme
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var openFailed = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    if let target = model.handoffTarget(request) {
+                        Text(target.computer).companionText(.supporting, theme: theme)
+                        Text(target.session.provider == "claude" ? "Claude" : target.session.provider == "codex" ? "Codex" : "Agent")
+                            .companionText(.title, theme: theme)
+                        if let label = MonitoringActivity.ContentState.sharedWorkspaceLabel([target.session.workspaceLabel]) {
+                            Text(label).companionText(.body, theme: theme)
+                        }
+                        Text((model.isFresh(target.sourceID) ? "" : "Last known: ") + target.session.state.title)
+                            .companionText(.body, theme: theme)
+                        if let url = target.session.appURL {
+                            Button {
+                                // Re-resolve from current phone-owned data at the moment of opening.
+                                guard let current = model.handoffTarget(request)?.session.appURL, current == url else { return }
+                                openURL(current) { accepted in openFailed = !accepted }
+                            } label: {
+                                Text(target.session.appLinkTitle).font(CompanionTextRole.button.font)
+                                    .foregroundStyle(theme.canvas)
+                                    .frame(maxWidth: .infinity).padding(.vertical, 12)
+                            }.buttonStyle(.borderedProminent).tint(theme.tint)
+                        } else {
+                            Text("This agent doesn’t provide a phone link.").companionText(.body, theme: theme)
+                        }
+                        if openFailed {
+                            Text("Couldn’t open the app. Check that it’s installed on this iPhone.")
+                                .companionText(.body, theme: theme)
+                        }
+                    } else {
+                        Text("Session unavailable").companionText(.title, theme: theme)
+                        Text("This session is no longer available. Check the latest activity in Paceman.")
+                            .companionText(.body, theme: theme)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(24)
+            }
+            .background(theme.canvas).foregroundStyle(theme.ink)
+            .navigationTitle("Continue on phone").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .preferredColorScheme(.dark)
+        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+        .task {
+            if let target = model.handoffTarget(request), !model.designPreview {
+                await model.refresh(sourceID: target.sourceID)
             }
         }
     }

@@ -12,6 +12,11 @@ Up to eight sessions per computer are shown, attention states first. Session
 detail requires an updated companion; older phones retain computer summaries. Down on
 the face opens Timeline; Select opens the launcher. With Touch on, tap the card
 after waking the watch, or use the default Double Tap wake gesture directly.
+Select or tap a session to continue on the phone. The watch shows whether Paceman
+received the selection; the phone opens a handoff sheet or schedules a notification.
+An updated companion is required, and the phone opens the agent app only after
+you choose its open button.
+
 Fresh input, failure and completion alerts use the watch’s vibration and sound
 settings. Quiet Time suppresses both; speaker mute keeps vibration enabled.
 
