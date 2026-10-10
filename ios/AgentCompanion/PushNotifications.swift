@@ -129,6 +129,38 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         }
     }
 
+    private func handoffNotificationID(_ id: UUID) -> String {
+        "paceman-watch-handoff-\(id.uuidString)"
+    }
+
+    func clearHandoffNotification(_ id: UUID) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [handoffNotificationID(id)])
+        center.removeDeliveredNotifications(withIdentifiers: [handoffNotificationID(id)])
+    }
+
+    func postHandoffNotification(_ id: UUID) async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard [.authorized, .provisional, .ephemeral].contains(settings.authorizationStatus),
+              settings.notificationCenterSetting == .enabled else { return false }
+        guard model?.handoffNotificationIsCurrent(id) == true else { return false }
+        let content = UNMutableNotificationContent()
+        content.title = "Continue on phone"
+        content.body = "Open Paceman to continue your selected session."
+        content.userInfo = ["pacemanHandoff": id.uuidString]
+        // Explicit watch selection, not another agent-progress alert. Keep it silent.
+        do {
+            try await center.add(UNNotificationRequest(identifier: handoffNotificationID(id), content: content, trigger: nil))
+            // A newer selection or foreground transition can overtake this await.
+            guard model?.handoffNotificationIsCurrent(id) == true else {
+                clearHandoffNotification(id)
+                return false
+            }
+            return true
+        } catch { return false }
+    }
+
     func refreshAuthorization() async {
         let settings = await UNUserNotificationCenter.current().notificationSettings()
         authorization = settings.authorizationStatus
@@ -287,6 +319,11 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
         willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         Task { @MainActor in
+            if let id = notification.request.content.userInfo["pacemanHandoff"] as? String {
+                self.model?.presentStoredHandoff(notificationID: id)
+                completionHandler([])
+                return
+            }
             let valid = self.enabled && (self.model?.pairedSources.contains {
                 PushHint.decode(notification.request.content.userInfo, for: $0) != nil
             } ?? false)
@@ -301,7 +338,12 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         Task { @MainActor in
-            _ = await self.receive(response.notification.request.content.userInfo, stage: "push_notification_opened")
+            if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+               let id = response.notification.request.content.userInfo["pacemanHandoff"] as? String {
+                self.model?.presentStoredHandoff(notificationID: id)
+            } else {
+                _ = await self.receive(response.notification.request.content.userInfo, stage: "push_notification_opened")
+            }
             completionHandler()
         }
     }

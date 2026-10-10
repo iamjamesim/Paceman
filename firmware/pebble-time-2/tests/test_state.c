@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include "paceman_state.h"
+#include "paceman_navigation.h"
 
 static const PacemanPeer owner = {
   .identity = {.type = 1, .address = {1, 2, 3, 4, 5, 6}},
@@ -63,6 +64,12 @@ static void check_sources(void) {
   assert(paceman_source_is_current(&s.sources[0], true, 99));
   assert(!paceman_source_is_current(&s.sources[0], true, 100));
   assert(!paceman_source_is_current(&s.sources[0], false, 99));
+  /* A disconnected display retains its lease, but cannot initiate an action. */
+  assert(paceman_source_has_current_activity(&s.sources[0], 99));
+  PacemanState disconnected = s;
+  paceman_disconnected(&disconnected);
+  assert(paceman_source_has_current_activity(&disconnected.sources[0], 99));
+  assert(!paceman_source_has_current_activity(&disconnected.sources[0], 100));
   frame[3] = 9;
   assert(paceman_receive_sources(&s, &owner, frame, sizeof(frame)) == PacemanInvalid);
   frame[3] = 8;
@@ -78,6 +85,7 @@ static void check_sources(void) {
   frame[4 + 21] = PacemanSourceHistory;
   assert(paceman_receive_sources(&s, &owner, frame, 52) == PacemanOK);
   assert(s.source_count == 1 && !paceman_source_is_current(&s.sources[0], true, 99));
+  assert(!paceman_source_has_current_activity(&s.sources[0], 99));
   frame[3] = 0;
   assert(paceman_receive_sources(&s, &owner, frame, 4) == PacemanOK);
   assert(s.source_count == 0 && s.sources_received);
@@ -96,7 +104,192 @@ static void check_sources(void) {
   assert(paceman_receive_sources(&s, &owner, frame, 4) == PacemanUnauthorized);
 }
 
+
+static size_t session_page(uint8_t *page, uint8_t total, uint8_t index, uint8_t count) {
+  memset(page, 0, PACEMAN_SOURCE_FRAME_MAX);
+  memcpy(page, "OS", 2); page[2] = 3; page[3] = total; page[4] = 42;
+  page[20] = index; page[21] = count; page[22] = 1;
+  uint8_t *source = page + 24;
+  source[0] = index + 1; source[16] = 100; source[20] = count ? 1 : 0;
+  source[21] = PacemanSourceCurrent;
+  memcpy(source + 22, "MacBook Pro", 12);
+  source[48] = count; source[56] = 3;
+  for (unsigned i = 0; i < count; ++i) {
+    uint8_t *row = page + 84 + 52 * i;
+    row[0] = i + 1; row[16] = i % 2 + 1; row[17] = 1;
+    memcpy(row + 20, "paceman", 8);
+  }
+  return 84 + 52 * count;
+}
+
+static void check_session_pages(void) {
+  PacemanState s = unowned(); enroll(&s);
+  uint8_t first[PACEMAN_SOURCE_FRAME_MAX], second[PACEMAN_SOURCE_FRAME_MAX];
+  size_t size = session_page(first, 2, 0, 2);
+  session_page(second, 2, 1, 2);
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanInvalid);
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  assert(!s.sources_received && !s.sources_revision && s.staged_count == 1);
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK); // Retry.
+  assert(s.staged_count == 1);
+  first[104] = 'X';
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanInvalid);
+  first[104] = 'p';
+  second[4] = 43;
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanInvalid);
+  second[4] = 42;
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanOK);
+  assert(s.source_count == 2 && s.sources_revision == 1);
+  assert(s.sources[1].sessions_known && s.sources[1].session_count == 2);
+  assert(s.sessions[1][1].provider == 2 && !strcmp(s.sessions[1][1].workspace, "paceman"));
+  // A new partial batch leaves the previous complete feed visible.
+  first[4] = 44; second[4] = 44;
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  assert(s.source_count == 2 && s.sources_revision == 1);
+  paceman_disconnected(&s);
+  assert(s.staged_count == 0 && s.source_count == 2);
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanUnauthorized);
+  enroll(&s);
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanInvalid);
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  second[24] = 1; // Duplicated computer ID.
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanInvalid);
+  second[24] = 2;
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanOK);
+  assert(s.sources_revision == 2);
+  // Reject malformed rows without replacing a committed feed.
+  size = session_page(first, 1, 0, 2);
+  const unsigned offsets[] = {23, 22, 100, 101, 102, 103, 135, 136, 104, 72};
+  const uint8_t values[] = {1, 2, 3, 0, 1, 1, 1, 1, '/', 1};
+  for (unsigned i = 0; i < sizeof(offsets) / sizeof(offsets[0]); ++i) {
+    uint8_t old = first[offsets[i]]; first[offsets[i]] = values[i];
+    assert(paceman_receive_sources(&s, &owner, first, size) == PacemanInvalid);
+    assert(s.source_count == 2 && s.sources_revision == 2);
+    first[offsets[i]] = old;
+  }
+  assert(paceman_receive_sources(&s, &owner, first, size - 1) == PacemanInvalid);
+  first[104] = 0xc0; first[105] = 0xaf; // Overlong UTF-8 slash.
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanInvalid);
+  first[104] = 0xc3; first[105] = 0xa9;
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  // Maximum feed: eight independent 500-byte pages.
+  for (uint8_t i = 0; i < 8; ++i) {
+    size = session_page(first, 8, i, 8);
+    assert(size == 500);
+    assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  }
+  assert(s.source_count == 8 && s.sources[7].session_count == 8 && s.sessions[7][7].id[0] == 8);
+  // Legacy summary has unknown detail; an explicit empty feed removes old rows.
+  uint8_t legacy[64] = {'O', 'S', 2, 1};
+  memcpy(legacy + 4, first + 24, 60);
+  assert(paceman_receive_sources(&s, &owner, legacy, sizeof(legacy)) == PacemanOK);
+  assert(!s.sources[0].sessions_known && !s.sources[0].session_count && !s.sessions[0][0].id[0]);
+  size = session_page(first, 1, 0, 0); first[22] = 0;
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  assert(!s.sources[0].sessions_known);
+  uint8_t empty[24] = {'O', 'S', 3};
+  assert(paceman_receive_sources(&s, &owner, empty, sizeof(empty)) == PacemanOK);
+  assert(!s.source_count && s.sources_received && !s.sessions[7][7].id[0]);
+}
+
+static size_t titled_page(uint8_t *page, uint8_t total, uint8_t index, uint8_t count, uint8_t chunk) {
+  session_page(page, total, index, 0);
+  page[2] = 4; page[21] = count; page[23] = chunk;
+  page[24 + 20] = count ? 1 : 0; page[24 + 48] = count;
+  const unsigned included = count > 4 ? (chunk ? count - 4 : 4) : count;
+  for (unsigned i = 0; i < included; ++i) {
+    uint8_t *row = page + 84 + 100 * i;
+    row[0] = 4 * chunk + i + 1; row[16] = 1; row[17] = 1;
+    memcpy(row + 20, "paceman", 8);
+    memcpy(row + 52, "Fix watch scrolling", 20);
+  }
+  return 84 + 100 * included;
+}
+
+static void check_titled_pages(void) {
+  PacemanState s = unowned(); enroll(&s);
+  uint8_t first[PACEMAN_SOURCE_FRAME_MAX], second[PACEMAN_SOURCE_FRAME_MAX];
+  size_t size = titled_page(first, 1, 0, 8, 0);
+  assert(size == 484);
+  titled_page(second, 1, 0, 8, 1);
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanInvalid);
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  assert(!s.sources_received && s.staged_chunk == 1);
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  assert(s.staged_chunk == 1);
+  second[84] = 1; // ID duplicated across chunks.
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanInvalid);
+  second[84] = 5;
+  second[24 + 16] = 101; // Chunks must have identical computer metadata.
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanInvalid);
+  second[24 + 16] = 100;
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanOK);
+  assert(s.source_count == 1 && s.sources_revision == 1);
+  assert(!strcmp(s.sessions[0][7].title, "Fix watch scrolling"));
+  // Title updates keep the existing selection identity and replace atomically.
+  first[4] = second[4] = 43; first[84 + 52] = 'A';
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  assert(s.sessions[0][0].title[0] == 'F');
+  paceman_disconnected(&s); enroll(&s);
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanInvalid);
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  assert(paceman_receive_sources(&s, &owner, second, size) == PacemanOK);
+  assert(s.sessions[0][0].title[0] == 'A');
+  // Invalid titles cannot replace a complete feed; titles may contain slashes.
+  size = titled_page(first, 1, 0, 1, 0);
+  first[84 + 99] = 1;
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanInvalid);
+  first[84 + 99] = 0; first[84 + 52] = 0xc0; first[84 + 53] = 0xaf;
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanInvalid);
+  first[84 + 52] = '/'; first[84 + 53] = 'A';
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  for (uint8_t i = 0; i < 8; ++i) {
+    for (uint8_t chunk = 0; chunk < 2; ++chunk) {
+      size = titled_page(first, 8, i, 8, chunk);
+      assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+    }
+  }
+  assert(s.source_count == 8 && s.sessions[7][7].id[0] == 8);
+  size = session_page(first, 1, 0, 1); // Old phones clear unavailable title detail.
+  assert(paceman_receive_sources(&s, &owner, first, size) == PacemanOK);
+  assert(!s.sessions[0][0].title[0]);
+  uint8_t empty[24] = {'O', 'S', 4};
+  assert(paceman_receive_sources(&s, &owner, empty, sizeof(empty)) == PacemanOK);
+  assert(!s.source_count && !s.sessions[0][0].title[0]);
+}
+
+static void check_navigation(void) {
+  PacemanNavigation nav = {0};
+  PacemanSource sources[2] = {{.id = {1}, .availability = PacemanSourceHistory},
+                            {.id = {2}, .availability = PacemanSourceCurrent, .expires_at = 100}};
+  paceman_navigation_sources(&nav, sources, 2, false, true, 99);
+  assert(nav.source_index == 1);
+  nav.sessions_open = true;
+  PacemanSource swapped[2] = {sources[1], sources[0]};
+  paceman_navigation_sources(&nav, swapped, 2, true, true, 99);
+  assert(nav.source_index == 0 && nav.sessions_open);
+  PacemanSession sessions[3] = {{.id = {1}}, {.id = {2}}, {.id = {3}}};
+  // The native menu owns movement; retain its selection across feed changes.
+  nav.session_index = 2;
+  paceman_navigation_sessions(&nav, sessions, 3);
+  assert(nav.session_index == 2 && nav.session_id[0] == 3);
+  PacemanSession reordered[3] = {sessions[2], sessions[0], sessions[1]};
+  paceman_navigation_sessions(&nav, reordered, 3);
+  assert(nav.session_index == 0 && nav.session_id[0] == 3);
+  paceman_navigation_sessions(&nav, sessions, 2);
+  assert(nav.session_index < 2 && nav.session_id[0] != 3);
+  paceman_navigation_sessions(&nav, sessions, 0);
+  assert(!nav.session_selected && !nav.session_index);
+  paceman_navigation_sources(&nav, sources, 1, true, false, 100);
+  assert(!nav.sessions_open && nav.source_id[0] == 1);
+  paceman_navigation_sources(&nav, sources, 0, true, false, 100);
+  assert(!nav.selected);
+}
+
 int main(void) {
+  check_session_pages();
+  check_titled_pages();
+  check_navigation();
   check_sources();
   PacemanState s;
   uint8_t bytes[32];

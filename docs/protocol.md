@@ -105,10 +105,10 @@ example, an allowance change raised `revision` to 12 without changing activity
 | `sourceName` | Source-reported name; the phone may show its own name. |
 | `observedAt` | Source response time in Unix seconds, not proof of a live agent. |
 | `changedAt` | Latest activity event time; presentation-only changes leave it alone. |
-| `freshFor` | Seconds the observation may count as current; the phone accepts greater than 0 and at most 60. |
+| `freshFor` | Contact freshness and eligibility to forward new activity; greater than 0 and at most 60 seconds. Display freshness uses its separate observation lease. |
 | `state` | `idle`, `working`, `needs_input`, `finished`, or `failed`. |
 | `eventID` | Opaque activity identity, 1–128 UTF-8 bytes without control characters; stable across presentation-only revisions. |
-| `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded workspace labels and Claude `remoteSessionID` (the Remote Control ID, distinct from the opaque row ID); no prompts or transcripts. |
+| `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded session `name` titles, workspace labels and Claude `remoteSessionID` (the Remote Control ID, distinct from the opaque row ID); no prompts or transcripts. |
 | `allowance` | Optional selected Codex reading; may advance `revision` without a new activity event. |
 | `allowances` | Optional array of up to two Codex usage windows, each with its own observation and reset time. |
 | `configuredProviders` | Optional enabled activity providers (`codex`, `claude`), including providers without a received event. |
@@ -342,21 +342,95 @@ activity.
 
 Capability bit 12 enables the optional write characteristic
 `7f510006-1b15-4f0d-b7a5-4cf3a2c98ee1`; devices without it retain aggregate activity.
-Each authenticated write replaces the feed, including an empty frame. Cards do
-not trigger alerts and stay in RAM.
+A complete authenticated feed replaces the previous feed, including an empty
+feed. Cards do not trigger alerts and stay in RAM.
 
 The frame is `OS`, version `1`, count `0–8`, followed by 48 bytes per computer.
 Integers are little endian. Each record contains a 16-byte opaque source ID
 (the phone uses the first 16 SHA-256 bytes of its source ID), a 32-bit Unix expiry,
 a one-byte activity state, a one-byte availability (`0` no activity, `1` current,
 `2` history), and a 26-byte null-terminated UTF-8 name. Current cards become history
-at expiry or when the watch loses its update channel.
+at the transmitted expiry; temporary update-channel loss does not shorten it.
 
 Capability bit 13 adds version `2`: the same header and 48-byte record prefix,
 followed by four 16-bit session counts (working, needs input, finished, failed),
 a provider bitmask (`1` Codex, `2` Claude, `4` other), and three reserved zero bytes.
 Version 2 records are 60 bytes; the largest frame is 484 bytes. Devices advertising
-both capabilities accept both versions; the phone sends version 2 only to them.
+both capabilities accept both versions; the phone uses the highest supported version.
+
+Capability bit 14 adds version `3`, an atomic batch with one page per computer.
+Each page starts with `OS`, version `3`, computer count `0–8`, a 16-byte batch ID,
+zero-based computer index, included session count `0–8`, a session-list-known
+flag (`0` or `1`), and one reserved zero byte. A nonempty page then carries the
+60-byte version-2 computer record and 52 bytes per session:
+
+| Bytes | Field |
+| --- | --- |
+| 0–15 | Opaque session ID (SHA-256 prefix of source ID, NUL, provider, NUL, session ID) |
+| 16 | Provider: `1` Codex, `2` Claude, `4` other |
+| 17 | Activity: working, needs input, finished, or failed |
+| 18–19 | Reserved zero bytes |
+| 20–51 | Null-terminated, path-free UTF-8 workspace label, at most 31 bytes |
+
+The phone sends up to eight sessions per computer, attention/failure first,
+then working and finished; computer counts retain the full totals. Version 3
+contains only the explicit workspace label, never titles, project paths, remote
+thread IDs, prompts or replies. Computer expiry is the five-minute display lease
+from source observation, independent of the Bluetooth connection; a new fetch
+renews it, delivery or reconnection alone does not. An unknown list has zero
+included rows; a known empty list has zero rows and zero counts. A zero-computer feed is header only.
+The maximum page is 500 bytes.
+
+Pages arrive in order under one batch ID. The phone finishes its captured batch
+before sending a newer snapshot. The watch validates and stages all pages before
+replacing the visible feed; disconnect discards the incomplete batch. Reconnect
+starts at page zero. The batch ID is the first 16 SHA-256 bytes of computer count
+followed, for each page, by its included count, known flag and body. Version 1/2
+writes remain accepted and clear session detail. Session freshness follows its
+computer; neither source nor session history is persisted.
+
+Capability bit 16 adds version `4` with explicit session titles. The same
+24-byte page header is used, but byte 21 is the computer's total included row
+count and byte 23 is chunk index `0` or `1`. Each chunk repeats the identical
+60-byte computer record and carries up to four 100-byte session records:
+the version-3 row followed by a 48-byte null-terminated UTF-8 title (at most
+47 bytes). Truncation preserves whole characters. Titles may include punctuation;
+workspace labels retain their path-free validation. No prompt preview, reply,
+project path or remote thread ID is added.
+
+Computers with more than four included sessions use two consecutive chunks;
+other computers use one, including known empty or unknown lists. The largest
+chunk is 484 bytes. The whole batch remains atomic across all computers and
+chunks, with duplicate-ID and combined state-count validation. Its fingerprint
+is computer count, version, then each chunk's total row count, known flag,
+chunk index and body. A title change replaces the feed while preserving selection
+by opaque identity. New firmware accepts versions 1–4; old firmware receives
+its existing highest supported version.
+
+## Accessory session handoff
+
+Capability bit 15 adds optional encrypted notification/write characteristic
+`7f510007-1b15-4f0d-b7a5-4cf3a2c98ee1`. A watch selection emits 40 bytes:
+`OH`, version `1`, reserved `0`, little-endian nonzero request sequence (4 bytes),
+source identifier (16 bytes), and session identifier (16 bytes), using the same
+opaque identifiers as the session feed. Only the authenticated owner subscribes
+or acknowledges; the selected session must be current. Requests are not replayed
+on reconnect.
+
+The phone writes an 8-byte acknowledgment: `OH`, version `1`, result byte, and
+matching request sequence. Results are `1` ready in foreground, `2` local
+notification scheduled, `3` saved for opening Paceman, and `4` unavailable. A
+result of `2` confirms scheduling, not notification display. The watch accepts
+only the outstanding request's acknowledgment within ten monotonic seconds.
+Older companions retain browsing without handoff.
+
+The phone resolves destinations from its own paired-source snapshots. The watch
+never supplies a URL. One pending selection (opaque IDs, watch identity, timestamp)
+is kept in phone preferences for up to ten minutes and cleared on dismissal;
+expired or removed-watch selections are discarded on access. Local notifications
+contain a request token and generic copy, not session content. Selecting a
+notification or foregrounding Paceman presents the handoff; opening the agent
+app remains an explicit phone action.
 
 ## Accessory authorization baseline
 

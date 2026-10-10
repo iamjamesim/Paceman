@@ -3,9 +3,22 @@
 Custom PebbleOS firmware for Paceman's [accessory protocol](../../docs/protocol.md#iphone-and-esp32-watch-ble).
 Keeps native watchfaces, Timeline, the launcher, alarms and backlight settings.
 
-Up opens the agent cards; Up/Down browse and Back returns to the face. Down on
+Up opens the computer cards. Select opens that computer’s session list; Up/Down
+browse with native animated scrolling (hold to repeat), and Back returns one level.
+The session list stops at its ends and keeps the computer heading fixed. Session
+rows follow the iPhone list: session title (provider fallback when unnamed),
+provider/status, and optional workspace label, with
+historical activity marked Last known.
+Up to eight sessions per computer are shown, attention states first. Session
+detail requires an updated companion; older phones retain computer summaries. Down on
 the face opens Timeline; Select opens the launcher. With Touch on, tap the card
 after waking the watch, or use the default Double Tap wake gesture directly.
+The session list labels Select as Continue on phone. Select or tap a session to
+continue on the phone. The watch shows whether Paceman
+received the selection; the phone opens a handoff sheet or schedules a notification.
+An updated companion is required, and the phone opens the agent app only after
+you choose its open button.
+
 Fresh input, failure and completion alerts use the watch’s vibration and sound
 settings. Quiet Time suppresses both; speaker mute keeps vibration enabled.
 
@@ -35,7 +48,8 @@ python3 firmware/pebble-time-2/tools/bundle.py --pebbleos /path/to/PebbleOS \
 ## First Paceman connection
 
 1. Install through the Pebble app's debug firmware updater.
-2. Forget the Bluetooth pairing used by the Pebble app on both devices:
+2. Force-close the Pebble app from the app switcher and keep it closed until
+   Paceman connects. Forget the Bluetooth pairing used by the Pebble app on both devices:
    **iPhone Settings → Bluetooth → Pebble → Forget This Device** and
    **watch Settings → Bluetooth → your iPhone → Forget**. Leave the watch's
    Bluetooth screen open.
@@ -52,8 +66,9 @@ Paceman pairings and the Pebble app's saved watch entry. Return to Paceman after
 and turn Updates back on.
 
 To reconnect a watch previously used with Paceman, including after removing it
-from Paceman or switching phones, use watch **Settings → System →
-Reset Paceman pairing** and confirm. This clears Paceman ownership, its profile and
+from Paceman or switching phones, force-close the Pebble app and keep it closed
+until Paceman connects. Use watch **Settings → System → Reset Paceman pairing**
+and confirm. This clears Paceman ownership, its profile and
 the old owner’s Bluetooth bond, preserving firmware, watch apps/settings and the
 watch ID. Forget Pebble in the old phone’s **Settings → Bluetooth**, then connect
 in Paceman with the watch’s Bluetooth screen open. Removing the accessory from

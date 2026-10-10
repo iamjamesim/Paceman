@@ -419,7 +419,7 @@ struct WatchDetail: View {
                 firmwareGuide
             }
             if watch.kind == .pebble {
-                Text("2. Forget the Bluetooth pairing on both devices: iPhone Settings → Bluetooth → Pebble → Forget This Device, and watch Settings → Bluetooth → your iPhone → Forget.")
+                Text("2. Force-close the Pebble app from the app switcher. Keep it closed until Paceman connects. Forget the Bluetooth pairing on both devices: iPhone Settings → Bluetooth → Pebble → Forget This Device, and watch Settings → Bluetooth → your iPhone → Forget.")
                 Text("3. Leave Settings → Bluetooth open on the watch, then tap Find accessory.")
             } else if watch.kind == .esp32 {
                 Text("2. Turn on the watch. A watch ready for pairing shows a six-digit code.")
@@ -432,7 +432,7 @@ struct WatchDetail: View {
     private var recovery: some View {
         VStack(alignment: .leading, spacing: 12) {
             if watch.kind == .pebble {
-                Text("1. On the watch, choose Settings → System → Reset Paceman pairing and confirm. This keeps your firmware, apps and watch settings.")
+                Text("1. Force-close the Pebble app from the app switcher and keep it closed until Paceman connects. On the watch, choose Settings → System → Reset Paceman pairing and confirm. This keeps your firmware, apps and watch settings.")
                 Text("2. Forget Pebble in iPhone Settings → Bluetooth. Leave the watch’s Settings → Bluetooth screen open, then try again.")
             } else if watch.kind == .esp32 {
                 VStack(alignment: .leading, spacing: 4) {

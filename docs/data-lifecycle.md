@@ -1,9 +1,12 @@
 # Data and lifecycle
 
-Pairing survives a connection failure. Activity expires on its snapshot lease:
-the phone may show the last known state, but does not animate or forward it as
-current. On reconnection, it fetches the latest state rather than replaying
-missed events. Normal computer removal confirms computer-side revocation before
+Pairing survives a connection failure. The iPhone session list, Live Activities
+and Pebble computer/session cards share a five-minute lease from the source
+observation; a temporary link failure does not shorten it.
+After expiry, activity is Last known and stops animating. The shorter snapshot
+lease governs connection status and forwarding new activity alerts, not display
+color. Reconnection fetches the latest state rather than replaying missed events.
+Normal computer removal confirms computer-side revocation before
 clearing the saved connection. An unreachable computer offers **Forget** to clear
 the iPhone connection without claiming remote revocation. Relay cleanup is
 best-effort and does not block removal. Each failed step is retried once. A local
@@ -20,13 +23,15 @@ See the [source protocol](protocol.md) for freshness fields.
 | iPhone Keychain | Source endpoints and credentials, installation ID, accessory owner identity; device-only, available after first unlock | Explicit removal or confirmed revocation |
 | iPhone verification Keychain state | App Attest key ID; pending challenge/proof and hashed pairing bindings, device-only | Key replacement; pending work completes, is rejected, or is discarded on expired retry |
 | iPhone protected Application Support | One last-known snapshot per source, weather cache and bounded transport diagnostics | Source removal, relevant setting change or replacement data |
-| iPhone preferences | Phone theme, source names, per-watch settings, watch usage source and per-accessory revision/delivery bookkeeping | User change or corresponding device removal |
+| iPhone preferences | Phone theme, source names, per-watch settings, watch usage source, per-accessory revision/delivery bookkeeping, and one opaque pending watch handoff | User change or corresponding device removal; pending handoff is cleared on dismissal or discarded on access after ten minutes |
 | ESP32 watch NVS | Owner bond, stable device ID, saved profile and wearer acknowledgement | Deliberate factory reset or owner transfer |
 | Pebble settings/PFS | Owner bond, stable device ID and saved profile | Confirmed watch-side Reset Paceman pairing clears ownership/profile and the owner bond, keeping the ID; factory reset clears all |
 | Apple Watch shared preferences | Per-computer Codex usage caches, observation times, phone revision and allowed source IDs | Phone removal of a source or newer accepted data from that source; expired readings remain unavailable |
 | Live Activity | Expiring ActivityKit display copy | New event, stale date or lifecycle end |
 
-The watch keeps activity in RAM, so reboot clears old alerts. The phone keeps
+Session titles are bounded to 80 characters. The source reads new session titles off the hook path and rechecks tracked title metadata every 30 seconds, to pick up generated titles and renames without blocking activity delivery. Title changes are presentation revisions, not new activity or alerts. Raw lookup IDs and title caches are held in source memory; titles also appear in stored event snapshots and the phone’s last-known snapshot. Missing metadata keeps the last successfully read title; an explicitly cleared title restores the provider fallback.
+
+The watch keeps activity, including titles, in RAM, so reboot clears old alerts. The phone keeps
 no durable queue of BLE writes. Omarchy verifies living agent owners after a
 source restart; Mac clears hook-only sessions until another hook arrives.
 When a Codex task resumes, Paceman checks Codex's saved history to confirm which
@@ -56,7 +61,9 @@ Phone-side Remove accessory removes access; it does not reset watch ownership.
   versa. Each surface reports its own link without inferring the other.
 
 Working does not time out; finished and failed rows retire after ten
-minutes. Disabling an agent clears its sessions; disabling Codex also clears usage.
+minutes. Live Activities end when idle, or after a 90-second terminal grace when
+no session is working or needs input. New observations do not restart that grace.
+Disabling an agent clears its sessions; disabling Codex also clears usage.
 Other agents continue without restarting the source.
 
 The source prunes old untracked sessions after 24 hours. Its events table keeps

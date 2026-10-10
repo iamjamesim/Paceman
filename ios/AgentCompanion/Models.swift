@@ -43,6 +43,16 @@ struct Snapshot: Codable {
     }
     enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, observedAt, changedAt, freshFor, state, eventID, sessions, allowance, allowances, configuredProviders }
     var identity: String { "\(sourceID)/\(generation)/\(eventID)" }
+    var activityFreshUntil: Double { observedAt + MonitoringActivity.displayLeaseDuration }
+
+    func shouldEndLiveActivity(at now: Date) -> Bool {
+        // A failed turn does not make the whole computer's activity terminal.
+        guard !(sessions ?? []).contains(where: { $0.state == .working || $0.state == .needsInput }) else {
+            return false
+        }
+        return state == .idle || ((state == .finished || state == .failed)
+            && now.timeIntervalSince1970 - changedAt >= MonitoringActivity.terminalGraceDuration)
+    }
 }
 
 enum WatchAggregate {
@@ -189,9 +199,52 @@ struct WatchSourceCard {
     let availability: UInt8 // 0 no activity, 1 current, 2 history
     let expiresAt: Double
     var sessions: [AgentSession] = []
+    var sessionsKnown: Bool = true
+}
+
+/// Finish one immutable feed before accepting a newer snapshot. A reconnect
+/// discards the transaction, so its next write always starts with page zero.
+struct WatchSourceTransfer {
+    private(set) var accepted: [Data]?
+    private(set) var pages: [Data]?
+    private(set) var pending: Data?
+    private var index = 0
+    var active: Bool { pages != nil }
+
+    mutating func next(_ desired: [Data]) -> Data? {
+        guard pending == nil else { return nil }
+        if pages == nil {
+            guard !desired.isEmpty, desired != accepted else { return nil }
+            pages = desired
+            index = 0
+        }
+        pending = pages![index]
+        return pending
+    }
+
+    mutating func acknowledge() {
+        guard pending != nil, let pages else { return }
+        pending = nil
+        index += 1
+        if index == pages.count {
+            accepted = pages
+            self.pages = nil
+            index = 0
+        }
+    }
+
+    func contains(_ desired: [Data]) -> Bool { !active && accepted == desired }
 }
 
 enum WatchWire {
+    static func sourceIdentifier(_ sourceID: String) -> Data {
+        Data(SHA256.hash(data: Data(sourceID.utf8)).prefix(16))
+    }
+    static func sessionIdentifier(sourceID: String, session: AgentSession) -> Data {
+        let identity = [sourceID, session.provider, session.id].joined(separator: "\u{0}")
+        return Data(SHA256.hash(data: Data(identity.utf8)).prefix(16))
+    }
+
     static func shouldPlayWorkingSound(state: ActivityState, previousState: ActivityState?,
                                        freshNewEvent: Bool, capabilities: UInt32) -> Bool {
         state == .working && previousState != .needsInput && freshNewEvent &&
@@ -239,7 +292,7 @@ enum WatchWire {
         let cards = Array(cards.prefix(8))
         var data = Data([79, 83, rich ? 2 : 1, UInt8(cards.count)])
         for card in cards {
-            data.append(contentsOf: SHA256.hash(data: Data(card.sourceID.utf8)).prefix(16))
+            data.append(sourceIdentifier(card.sourceID))
             let expiry = UInt32(clamping: Int64(max(0, card.expiresAt)))
             data.appendLE(expiry)
             data.append(card.state.wire)
@@ -266,6 +319,65 @@ enum WatchWire {
             }
         }
         return data
+    }
+
+    static func sourcePackets(_ cards: [WatchSourceCard], capabilities: UInt32,
+                              now: Date = Date()) -> [Data] {
+        guard capabilities & (1 << 14) != 0 else {
+            return [sources(cards, now: now, rich: capabilities & (1 << 13) != 0)]
+        }
+        let cards = Array(cards.prefix(8))
+        let titled = capabilities & (1 << 16) != 0
+        let version: UInt8 = titled ? 4 : 3
+        let priority: [ActivityState: Int] = [.needsInput: 0, .failed: 1, .working: 2, .finished: 3]
+        var pages: [(index: UInt8, count: UInt8, known: UInt8, chunk: UInt8, body: Data)] = []
+        for (index, card) in cards.enumerated() {
+            let source = Data(sources([card], now: now, rich: true).dropFirst(4))
+            let sessions = card.sessionsKnown ? card.sessions.filter { $0.state != .idle }.sorted {
+                let a = priority[$0.state] ?? 4, b = priority[$1.state] ?? 4
+                if a != b { return a < b }
+                return $0.id < $1.id
+            } : []
+            let visible = Array(sessions.prefix(8))
+            let chunkSize = titled ? 4 : 8
+            for start in stride(from: 0, to: max(1, visible.count), by: chunkSize) {
+                var body = source
+                for session in visible.dropFirst(start).prefix(chunkSize) {
+                    body.append(sessionIdentifier(sourceID: card.sourceID, session: session))
+                    body.append(session.provider == "codex" ? 1 : session.provider == "claude" ? 2 : 4)
+                    body.append(session.state.wire)
+                    body.append(contentsOf: [0, 0])
+                    let label = MonitoringActivity.ContentState.sharedWorkspaceLabel([session.workspaceLabel]) ?? ""
+                    body.append(wireText(label, capacity: 32))
+                    if titled { body.append(wireText(session.title ?? "", capacity: 48)) }
+                }
+                pages.append((UInt8(index), UInt8(visible.count), card.sessionsKnown ? 1 : 0,
+                              UInt8(start / chunkSize), body))
+            }
+        }
+        var fingerprint = Data([UInt8(cards.count)])
+        if titled { fingerprint.append(version) }
+        for page in pages {
+            fingerprint.append(contentsOf: [page.count, page.known])
+            if titled { fingerprint.append(page.chunk) }
+            fingerprint.append(page.body)
+        }
+        let batch = Data(SHA256.hash(data: fingerprint).prefix(16))
+        if cards.isEmpty { return [Data([79, 83, version, 0]) + batch + Data(repeating: 0, count: 4)] }
+        return pages.map { page in
+            Data([79, 83, version, UInt8(cards.count)]) + batch +
+                Data([page.index, page.count, page.known, page.chunk]) + page.body
+        }
+    }
+
+    private static func wireText(_ text: String, capacity: Int) -> Data {
+        var bytes = Data()
+        for character in text {
+            let encoded = Data(String(character).utf8)
+            if bytes.count + encoded.count >= capacity { break }
+            bytes.append(encoded)
+        }
+        return bytes + Data(repeating: 0, count: capacity - bytes.count)
     }
 
     static func profile(owner: UUID, revision: UInt32, now: Date = Date(), offset: Int,
@@ -385,4 +497,44 @@ extension Snapshot {
 
 extension CodexAllowance {
     var usageID: String { "\(provider)/\(window)/\(windowDurationMins ?? 0)" }
+}
+
+struct WatchHandoffRequest: Equatable {
+    let sequence: UInt32
+    let source: Data
+    let session: Data
+
+    init?(_ data: Data) {
+        let bytes = Array(data)
+        guard bytes.count == 40, Array(bytes.prefix(4)) == [79, 72, 1, 0],
+              WatchWire.read32(bytes, at: 4) != 0,
+              bytes[8..<24].contains(where: { $0 != 0 }),
+              bytes[24..<40].contains(where: { $0 != 0 }) else { return nil }
+        sequence = WatchWire.read32(bytes, at: 4)
+        source = Data(bytes[8..<24]); session = Data(bytes[24..<40])
+    }
+
+    func response(_ result: WatchHandoffResult) -> Data {
+        var data = Data([79, 72, 1, result.rawValue])
+        data.appendLE(sequence)
+        return data
+    }
+}
+
+enum WatchHandoffResult: UInt8 { case ready = 1, notification = 2, openPhone = 3, unavailable = 4 }
+
+struct PendingWatchHandoff: Codable, Identifiable, Equatable {
+    let id: UUID
+    let watchID: String
+    let source: Data
+    let session: Data
+    let createdAt: Date
+
+    init(watchID: String, request: WatchHandoffRequest, now: Date = Date()) {
+        id = UUID(); self.watchID = watchID; source = request.source; session = request.session; createdAt = now
+    }
+    func isCurrent(now: Date = Date()) -> Bool {
+        source.count == 16 && session.count == 16 &&
+        now.timeIntervalSince(createdAt) >= 0 && now.timeIntervalSince(createdAt) < 600
+    }
 }

@@ -29,6 +29,13 @@ static PacemanPeerID s_durable_peer;
 static bool s_bond_durable, s_save_queued, s_received;
 static uint16_t s_connection = BLE_HS_CONN_HANDLE_NONE, s_activity_handle, s_sync_handle;
 static uint16_t s_retired_connection = BLE_HS_CONN_HANDLE_NONE;
+#define HANDOFF_TIMEOUT_TICKS (10 * RTC_TICKS_HZ)
+static uint16_t s_handoff_handle;
+static bool s_handoff_subscribed;
+static uint32_t s_handoff_sequence;
+static RtcTicks s_handoff_started;
+static uint8_t s_handoff_request[40];
+static PacemanHandoffStatus s_handoff_status;
 static uint32_t s_notification_sequence, s_notification_uids[8];
 static size_t s_uid_count, s_uid_next;
 static struct ble_gap_event_listener s_listener;
@@ -169,7 +176,8 @@ static int prv_access(uint16_t connection, uint16_t attribute, struct ble_gatt_a
       const uint32_t capabilities =
           OMARCHY_CAP_TIME_SYNC | OMARCHY_CAP_HOUR_CYCLE | OMARCHY_CAP_RTC | OMARCHY_CAP_THEME |
           OMARCHY_CAP_AGENT_ACTIVITY | OMARCHY_CAP_ACTIVITY_FINISHED | OMARCHY_CAP_ACTIVITY_FAILED |
-          OMARCHY_CAP_NOTIFICATION_SYNC | PACEMAN_CAP_SOURCE_CARDS | PACEMAN_CAP_RICH_SOURCE_CARDS
+          OMARCHY_CAP_NOTIFICATION_SYNC | PACEMAN_CAP_SOURCE_CARDS | PACEMAN_CAP_RICH_SOURCE_CARDS |
+          PACEMAN_CAP_SESSION_CARDS | PACEMAN_CAP_SESSION_HANDOFF | PACEMAN_CAP_SESSION_TITLES
 #ifdef CONFIG_SPEAKER
           | OMARCHY_CAP_COMPLETION_SOUND
 #endif
@@ -185,7 +193,7 @@ static int prv_access(uint16_t connection, uint16_t attribute, struct ble_gatt_a
       result = PacemanOK;
       output_size = 8;
     }
-  } else if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR && (kind == 2 || kind == 4 || kind == 6)) {
+  } else if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR && (kind == 2 || kind == 4 || kind == 6 || kind == 7)) {
     const uint16_t size = OS_MBUF_PKTLEN(ctxt->om);
     uint16_t copied = 0;
     if (size > sizeof(bytes) || ble_hs_mbuf_to_flat(ctxt->om, bytes, sizeof(bytes), &copied)) {
@@ -197,9 +205,22 @@ static int prv_access(uint16_t connection, uint16_t attribute, struct ble_gatt_a
         if (!prv_queue_save())
           result = PacemanBusy;
       }
+    } else if (kind == 7) {
+      if (paceman_peer_authorized(&s_state, &peer) && connection == s_connection &&
+          s_handoff_subscribed && paceman_channel_ready(&s_state, true)) {
+        result = PacemanInvalid;
+        if (copied == 8 && !memcmp(bytes, "OH\1", 3) && bytes[3] >= 1 && bytes[3] <= 4 &&
+            !memcmp(bytes + 4, s_handoff_request + 4, 4) &&
+            s_handoff_status == PacemanHandoffSending && rtc_get_ticks() - s_handoff_started < HANDOFF_TIMEOUT_TICKS) {
+          s_handoff_status = bytes[3];
+          result = PacemanOK;
+          changed = true;
+        }
+      }
     } else if (kind == 6) {
+      const uint32_t revision = s_state.sources_revision;
       result = paceman_receive_sources(&s_state, &peer, bytes, copied);
-      changed = result == PacemanOK;
+      changed = result == PacemanOK && revision != s_state.sources_revision;
     } else {
       result = paceman_receive_activity(&s_state, &peer, bytes, copied, &haptic);
       if (result == PacemanOK) {
@@ -250,6 +271,8 @@ static const struct ble_gatt_svc_def s_services[] = {
           .flags = SEC_READ | BLE_GATT_CHR_F_NOTIFY,
           .val_handle = &s_sync_handle},
          {.uuid = CHR_UUID(6), .access_cb = prv_access, .arg = (void *)6, .flags = SEC_WRITE},
+         {.uuid = CHR_UUID(7), .access_cb = prv_access, .arg = (void *)7,
+          .flags = SEC_WRITE | BLE_GATT_CHR_F_NOTIFY, .val_handle = &s_handoff_handle},
          {0}
        }},
   {0}
@@ -263,10 +286,23 @@ static int prv_gap_event(struct ble_gap_event *event, void *unused) {
     if (event->disconnect.conn.conn_handle == s_connection) {
       s_connection = BLE_HS_CONN_HANDLE_NONE;
       paceman_disconnected(&s_state);
+      s_handoff_subscribed = false;
+      if (s_handoff_status == PacemanHandoffSending) s_handoff_status = PacemanHandoffOffline;
       s_uid_count = s_uid_next = 0;
     }
     pbl_mutex_unlock(&s_lock);
     prv_changed();
+  } else if (event->type == BLE_GAP_EVENT_SUBSCRIBE &&
+             event->subscribe.attr_handle == s_handoff_handle) {
+    PacemanPeer peer;
+    bool allowed = prv_peer(event->subscribe.conn_handle, &peer);
+    pbl_mutex_lock(&s_lock, PBL_FOREVER);
+    allowed = allowed && event->subscribe.conn_handle == s_connection &&
+              event->subscribe.conn_handle != s_retired_connection &&
+              paceman_peer_authorized(&s_state, &peer);
+    if (allowed) s_handoff_subscribed = event->subscribe.cur_notify;
+    pbl_mutex_unlock(&s_lock);
+    if (!allowed) ble_gap_terminate(event->subscribe.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
   } else if (event->type == BLE_GAP_EVENT_SUBSCRIBE &&
              (event->subscribe.attr_handle == s_activity_handle ||
               event->subscribe.attr_handle == s_sync_handle)) {
@@ -415,6 +451,22 @@ void paceman_service_get_view(PacemanView *view) {
   pbl_mutex_unlock(&s_lock);
 }
 
+uint32_t paceman_service_get_sessions(const uint8_t source_id[16], PacemanSessionView *view) {
+  pbl_mutex_lock(&s_lock, PBL_FOREVER);
+  memset(view, 0, sizeof(*view));
+  view->connected = paceman_channel_ready(&s_state, true);
+  for (size_t i = 0; i < s_state.source_count; ++i) {
+    if (memcmp(source_id, s_state.sources[i].id, 16)) continue;
+    view->found = true;
+    view->source = s_state.sources[i];
+    memcpy(view->sessions, s_state.sessions[i], sizeof(view->sessions));
+    break;
+  }
+  const uint32_t revision = s_state.sources_revision;
+  pbl_mutex_unlock(&s_lock);
+  return revision;
+}
+
 void paceman_service_notification_hint(const struct pbl_bt_device_internal *device, uint32_t uid,
                                        const uint8_t *app_id, size_t length) {
   static const char app[] = "ai.paceman.app";
@@ -450,4 +502,73 @@ void paceman_service_notification_hint(const struct pbl_bt_device_internal *devi
     if (mbuf)
       ble_gatts_notify_custom(connection, s_sync_handle, mbuf);
   }
+}
+
+static void prv_send_handoff(void *context) {
+  const uint32_t sequence = (uintptr_t)context;
+  pbl_mutex_lock(&s_lock, PBL_FOREVER);
+  if (sequence != s_handoff_sequence || s_handoff_status != PacemanHandoffSending) {
+    pbl_mutex_unlock(&s_lock);
+    return;
+  }
+  if (rtc_get_ticks() - s_handoff_started >= HANDOFF_TIMEOUT_TICKS) {
+    s_handoff_status = PacemanHandoffOffline;
+    pbl_mutex_unlock(&s_lock);
+    prv_changed();
+    return;
+  }
+  // Subscription was authorized against this connection's durable owner.
+  const bool ready = s_handoff_subscribed && s_connection != BLE_HS_CONN_HANDLE_NONE &&
+      s_connection != s_retired_connection && paceman_channel_ready(&s_state, true);
+  const uint16_t connection = s_connection;
+  uint8_t bytes[40];
+  memcpy(bytes, s_handoff_request, sizeof(bytes));
+  pbl_mutex_unlock(&s_lock);
+  struct os_mbuf *message = ready ? ble_hs_mbuf_from_flat(bytes, sizeof(bytes)) : NULL;
+  const bool failed = !message || ble_gatts_notify_custom(connection, s_handoff_handle, message);
+  if (failed) {
+    pbl_mutex_lock(&s_lock, PBL_FOREVER);
+    if (sequence == s_handoff_sequence && s_handoff_status == PacemanHandoffSending)
+      s_handoff_status = PacemanHandoffOffline;
+    pbl_mutex_unlock(&s_lock);
+  }
+  prv_changed();
+}
+
+void paceman_service_continue_on_phone(const uint8_t source_id[16], const uint8_t session_id[16]) {
+  pbl_mutex_lock(&s_lock, PBL_FOREVER);
+  s_handoff_status = PacemanHandoffUnavailable;
+  const uint32_t now = rtc_get_time();
+  bool found = false;
+  for (unsigned i = 0; i < s_state.source_count; ++i) {
+    const PacemanSource *source = &s_state.sources[i];
+    if (memcmp(source->id, source_id, 16) ||
+        !paceman_source_is_current(source, paceman_channel_ready(&s_state, true), now)) continue;
+    for (unsigned j = 0; j < source->session_count; ++j)
+      if (!memcmp(s_state.sessions[i][j].id, session_id, 16)) found = true;
+  }
+  if (!paceman_channel_ready(&s_state, true) || !s_handoff_subscribed)
+    s_handoff_status = PacemanHandoffOffline;
+  else if (found) {
+    if (++s_handoff_sequence == 0) ++s_handoff_sequence;
+    memcpy(s_handoff_request, "OH\1\0", 4);
+    for (unsigned i = 0; i < 4; ++i) s_handoff_request[4 + i] = s_handoff_sequence >> (8 * i);
+    memcpy(s_handoff_request + 8, source_id, 16);
+    memcpy(s_handoff_request + 24, session_id, 16);
+    s_handoff_status = PacemanHandoffSending;
+    s_handoff_started = rtc_get_ticks();
+    if (!system_task_add_callback_droppable(prv_send_handoff, (void *)(uintptr_t)s_handoff_sequence))
+      s_handoff_status = PacemanHandoffOffline;
+  }
+  pbl_mutex_unlock(&s_lock);
+  prv_changed();
+}
+
+PacemanHandoffStatus paceman_service_handoff_status(void) {
+  pbl_mutex_lock(&s_lock, PBL_FOREVER);
+  if (s_handoff_status == PacemanHandoffSending && rtc_get_ticks() - s_handoff_started >= HANDOFF_TIMEOUT_TICKS)
+    s_handoff_status = PacemanHandoffOffline;
+  const PacemanHandoffStatus result = s_handoff_status;
+  pbl_mutex_unlock(&s_lock);
+  return result;
 }
