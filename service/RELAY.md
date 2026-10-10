@@ -57,7 +57,7 @@ secrets, credentials, push tokens or a database export.
    of the source ID; use it to locate candidate source records. It is a lookup
    aid, not proof of ownership.
 2. Verify control through authenticated removal in the phone app or **Remove
-   phone access** on the computer where possible. For an unavailable device,
+   access…** for that phone on the computer where possible. For an unavailable device,
    corroborate ownership with previously verified evidence. If ownership cannot
    be verified, explain what is missing without disclosing or deleting records.
 3. For a verified pairing that needs manual cleanup, use a private database
