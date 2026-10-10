@@ -29,6 +29,9 @@ See the [source protocol](protocol.md) for freshness fields.
 The watch keeps activity in RAM, so reboot clears old alerts. The phone keeps
 no durable queue of BLE writes. Omarchy verifies living agent owners after a
 source restart; Mac clears hook-only sessions until another hook arrives.
+When a Codex task resumes, Paceman checks Codex's saved history to confirm which
+turn is latest before using its activity events. If the check is unavailable,
+Paceman waits and retries.
 
 Storage errors do not erase ownership, replace the watch ID or reopen pairing.
 Phone-side Remove accessory removes access; it does not reset watch ownership.

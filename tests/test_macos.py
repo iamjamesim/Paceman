@@ -24,6 +24,95 @@ from macos.codex_hook import workspace_label
 
 
 class MacSourceTests(unittest.TestCase):
+    def test_resumed_turn_uses_saved_order_and_replays_approval_lifecycle(self):
+        cases = [
+            ([("needs-input", "PermissionRequest")], "interrupted", "needs_input"),
+            ([("needs-input", "PermissionRequest"), ("working", "PostToolUse")], "interrupted", "working"),
+            ([("question-opened", "PreToolUse"), ("working", "PostToolUse")], "interrupted", "needs_input"),
+            ([("needs-input", "PermissionRequest"), ("completed", "Stop")], "completed", "finished"),
+            ([("needs-input", "PermissionRequest")], "failed", "failed"),
+        ]
+        for events, outcome, expected in cases:
+            with self.subTest(events=events, outcome=outcome), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                root.chmod(0o700)
+                clock = [10.0]
+                store = Store(root / "hub.sqlite3")
+                with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                        turn_status_reader=lambda _: {}, monotonic=lambda: clock[0],
+                        turn_metadata_reader=lambda _: {"one": [{"id": "resume", "status": outcome},
+                                                                {"id": "old", "status": "interrupted"}]}) as source:
+                    source.next_allowance_at = source.next_turn_status_at = source.next_turn_recovery_at = float("inf")
+                    base = dict(command="agent-event", session="one")
+                    source.receive(dict(base, turn="old", event="working", hook="UserPromptSubmit"))
+                    source.receive(dict(base, turn="old", event="interrupted", hook="Interrupt"))
+                    for event, hook in events:
+                        source.receive(dict(base, turn="resume", event=event, hook=hook))
+                    self.assertEqual(store.snapshot()["state"], "idle")
+                    source._recover_turns(list(source.pending_turn_events.items()))
+                    clock[0] += 6
+                    source.tick()
+                    self.assertEqual(store.snapshot()["state"], expected)
+                    source.receive(dict(base, turn="old", event="needs-input", hook="PermissionRequest"))
+                    source._recover_turns(list(source.pending_turn_events.items()))
+                    clock[0] += 6
+                    source.tick()
+                    self.assertEqual(store.snapshot()["state"], expected)
+                    self.assertFalse(source.pending_turn_events)
+
+    def test_resume_verification_retries_and_does_not_resurrect_invalidated_session(self):
+        for invalidate in ("prompt", "end", "disable", None):
+            with self.subTest(invalidate=invalidate), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                root.chmod(0o700)
+                store = Store(root / "hub.sqlite3")
+                with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                               turn_status_reader=lambda _: {}, turn_metadata_reader=lambda _: {}) as source:
+                    base = dict(command="agent-event", session="one")
+                    source.receive(dict(base, turn="old", event="working", hook="UserPromptSubmit"))
+                    source.receive(dict(base, turn="resume", event="needs-input", hook="PermissionRequest"))
+                    tracked = list(source.pending_turn_events.items())
+                    source._recover_turns(tracked)
+                    self.assertTrue(source.pending_turn_events)  # Unavailable metadata is not evidence.
+                    if invalidate == "prompt":
+                        source.receive(dict(base, turn="newer", event="working", hook="UserPromptSubmit"))
+                    elif invalidate == "end":
+                        source.receive(dict(base, turn="", event="ended", hook="SessionEnd"))
+                    elif invalidate == "disable":
+                        source.settings_reader = lambda: ["claude"]
+                        source._apply_settings()
+                    source.turn_metadata_reader = lambda _: {"one": [{"id": "resume", "status": "interrupted"}]}
+                    source._recover_turns(tracked)
+                    if invalidate is None:
+                        self.assertTrue(source.pending_attention)
+                    else:
+                        self.assertFalse(source.pending_attention)
+                        self.assertFalse(source.pending_turn_events)
+
+    def test_new_hook_during_metadata_read_is_retained_for_next_verification(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                           turn_status_reader=lambda _: {}) as source:
+                base = dict(command="agent-event", session="one")
+                source.receive(dict(base, turn="old", event="working", hook="UserPromptSubmit"))
+                source.receive(dict(base, turn="resume", event="working", hook="PostToolUse"))
+                def read(_):
+                    source.receive(dict(base, turn="newer", event="needs-input", hook="PermissionRequest"))
+                    return {"one": [{"id": "resume", "status": "interrupted"}, {"id": "old"}]}
+                source.turn_metadata_reader = read
+                source._recover_turns(list(source.pending_turn_events.items()))
+                batch = next(iter(source.pending_turn_events.values()))
+                self.assertEqual(batch["previous"], "resume")
+                self.assertEqual([event["turn"] for event in batch["events"]], ["newer"])
+                source.turn_metadata_reader = lambda _: {"one": [{"id": "newer", "status": "interrupted"},
+                                                                 {"id": "resume"}]}
+                source._recover_turns(list(source.pending_turn_events.items()))
+                self.assertTrue(source.pending_attention)
+                self.assertFalse(source.pending_turn_events)
+
     def test_codex_turn_reader_requests_status_without_items(self):
         with tempfile.TemporaryDirectory() as temporary:
             session, turn = str(uuid4()), str(uuid4())
