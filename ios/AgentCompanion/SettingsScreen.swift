@@ -95,6 +95,9 @@ struct CompanionSettings: View {
                 NavigationLink(value: FeedDestination.diagnostics) {
                     Label("Diagnostics", systemImage: "doc.text.magnifyingglass")
                 }.disabled(presentation.preview)
+                Link(destination: URL(string: "https://paceman.ai/privacy")!) {
+                    Label("Privacy policy", systemImage: "hand.raised")
+                }
             }.listRowBackground(theme.panel)
         }.scrollContentBackground(.hidden).background(theme.canvas).foregroundStyle(theme.ink)
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.inline)

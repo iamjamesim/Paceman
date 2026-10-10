@@ -44,3 +44,36 @@ The Omarchy user push service follows Sharing. Both platforms use the same relay
 Removing phone access deletes its local destinations and queues an idempotent relay revocation for the old client credential; the worker retries failures. Mac uninstall requests source revocation; if the relay is unreachable, it reports the source ID for manual cleanup. Revoked IDs cannot re-enroll. Postgres stores credential and token hashes, App Attest public keys and counters, pairing approvals, and revocation tombstones. Defaults allow 20 sources per App Attest key and 500 new source approvals per day; `PACEMAN_MAX_SOURCES_PER_ATTEST_KEY` and `PACEMAN_DAILY_ENROLLMENT_LIMIT` adjust them. Monitor rejection and rate-limit logs without recording credentials or tokens.
 
 Deploy the relay and matching iPhone/Mac source builds together for this test. Confirm fresh TestFlight pairing and APNs delivery on a physical iPhone. See [protocol](../docs/protocol.md#phone-notifications-and-live-activities) for the wire contract.
+
+## Privacy requests (project operator)
+
+Handle requests sent to the contact in the [privacy policy](https://paceman.ai/privacy).
+Keep correspondence and record lookups private; never ask users to email pairing
+secrets, credentials, push tokens or a database export.
+
+1. Record the request date, requested action and applicable response deadline.
+   Ask only for information needed to identify the affected device or pairing.
+   A support report's `sourceSupportID` is the first 12 hex characters of SHA-256
+   of the source ID; use it to locate candidate source records. It is a lookup
+   aid, not proof of ownership.
+2. Verify control through authenticated removal in the phone app or **Remove
+   phone access** on the computer where possible. For an unavailable device,
+   corroborate ownership with previously verified evidence. If ownership cannot
+   be verified, explain what is missing without disclosing or deleting records.
+3. For a verified pairing that needs manual cleanup, use a private database
+   session to confirm the exact `source_id`, `source_hash`, `client_id` and
+   `client_hash` tuple. In one transaction, insert that tuple into
+   `relay_revoked_clients` if absent, then delete only its `relay_approvals` row.
+   Its token bindings in `relay_approved_destinations` are deleted by cascade.
+   Confirm the approval and bindings are absent before committing. Do not revoke
+   an entire source when the request concerns only one phone.
+4. For access or broader erasure requests, review associated verification records,
+   support correspondence and any copies separately. Share only records belonging
+   to the verified requester. Retain security records only with a documented
+   reason; do not promise removal of every identifier merely because delivery
+   access was revoked. Shared App Attest keys may cover other active pairings.
+5. Reply with what was removed or provided, anything retained and why, and the
+   current log/backup expiry described in the policy. Track any exceptional
+   manual exports separately. If a backup is restored, reapply completed removals
+   before resuming delivery. Keep a minimal private completion record and remove
+   support attachments when no longer needed for the request or follow-up.
