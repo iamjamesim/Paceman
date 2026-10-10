@@ -667,13 +667,23 @@ extension CompanionModel {
     func showHandoffPreview(_ screen: String) {
         guard designPreview, let sourceID = pairedSources.first?.sourceID else { return }
         let now = Date().timeIntervalSince1970
-        let session = AgentSession(id: "handoff-preview", provider: screen.contains("codex") ? "codex" : "claude",
-            state: .needsInput, workspaceLabel: screen.contains("long") ? "launch-creative-direction-and-visual-assets" : "paceman",
+        let state: ActivityState = screen.contains("working") ? .working
+            : screen.contains("finished") ? .finished : screen.contains("failed") ? .failed : .needsInput
+        let session = AgentSession(id: "handoff-preview",
+            provider: screen.contains("no-link") ? "fixture" : screen.contains("codex") ? "codex" : "claude",
+            state: state,
+            name: screen.contains("long") ? "Investigate multi-machine source recovery after a long disconnect" : nil,
+            workspaceLabel: screen.contains("long") ? "launch-creative-direction-and-visual-assets" : "paceman",
             remoteSessionID: "session_previewHandoff")
+        var sessions = [session]
+        if screen.contains("multiple") {
+            sessions += [AgentSession(id: "other-codex", provider: "codex", state: .working, workspaceLabel: "website"),
+                         AgentSession(id: "other-claude", provider: "claude", state: .finished, workspaceLabel: "assets")]
+        }
         snapshots[sourceID] = Snapshot(schema: 1, sourceID: sourceID, generation: UUID().uuidString,
-            revision: 1, sourceName: screen.contains("long") ? "James’s MacBook Pro for design and development" : "MacBook Pro",
-            observedAt: now - (screen.contains("stale") ? 301 : 0), changedAt: now, freshFor: 30, state: .needsInput, eventID: "preview",
-            sessions: screen.contains("unavailable") ? [] : [session])
+            revision: 1, sourceName: screen.contains("long") ? "James’s MacBook Pro for design and development" : "Jamess-MacBook-Pro",
+            observedAt: now - (screen.contains("stale") ? 301 : 0), changedAt: now, freshFor: 30, state: state, eventID: "preview",
+            sessions: screen.contains("unavailable") ? [] : sessions)
         if !screen.contains("stale") { fetchedUptimes[sourceID] = ProcessInfo.processInfo.systemUptime }
         var data = Data([79, 72, 1, 0, 1, 0, 0, 0])
         data.append(WatchWire.sourceIdentifier(sourceID))

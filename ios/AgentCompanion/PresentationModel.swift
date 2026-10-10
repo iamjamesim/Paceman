@@ -95,6 +95,9 @@ final class PresentationModel: ObservableObject {
         model.setTheme(family)
     }
     func displayName(source: PairedSource?, snapshot: Snapshot? = nil) -> String {
+        if preview, previewScreen.hasPrefix("handoff") {
+            return ComputerDisplayName.resolve(override: nil, reported: snapshot?.sourceName, host: source?.endpoint.host)
+        }
         if preview, source?.endpoint.host == "macbook.example.ts.net" {
             return previewScreen == "multi-long" ? "James’s development MacBook Pro" : "Jamess MacBook Pro"
         }

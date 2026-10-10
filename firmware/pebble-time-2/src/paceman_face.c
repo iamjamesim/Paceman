@@ -302,7 +302,8 @@ static void prv_sessions(GContext *ctx, Face *face, uint32_t now, GColor accent)
     return;
   }
   const bool truncated = total > source->session_count;
-  const GRect frame = GRect(0, 45, width, height - 45 - (truncated ? 23 : 0));
+  const int footer_height = 20 + (truncated ? 23 : 0);
+  const GRect frame = GRect(0, 45, width, height - 45 - footer_height);
   const bool reload = face->session_reload ||
       memcmp(&view, &face->session_view, sizeof(view)) != 0;
   const uint8_t selected = face->navigation.session_index;
@@ -318,11 +319,13 @@ static void prv_sessions(GContext *ctx, Face *face, uint32_t now, GColor accent)
     face->session_reload = false;
   }
   layer_mark_dirty(menu_layer_get_layer(&face->sessions));
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  const GRect footer = GRect(0, height - footer_height, width, footer_height);
+  graphics_fill_rect(ctx, &footer);
+  graphics_context_set_text_color(ctx, GColorDarkGray);
+  prv_text(ctx, "Select: Continue on phone", FONT_KEY_PACEMAN_TEXT_13,
+           GRect(10, height - footer_height + 1, width - 20, 19), GTextAlignmentLeft);
   if (truncated) {
-    graphics_context_set_fill_color(ctx, GColorWhite);
-    const GRect footer = GRect(0, height - 23, width, 23);
-    graphics_fill_rect(ctx, &footer);
-    graphics_context_set_text_color(ctx, GColorDarkGray);
     snprintf(heading, sizeof(heading), "Showing %u of %u sessions", source->session_count, total);
     prv_text(ctx, heading, FONT_KEY_PACEMAN_TEXT_13,
              GRect(10, height - 21, width - 20, 19), GTextAlignmentLeft);

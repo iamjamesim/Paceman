@@ -153,7 +153,8 @@ struct CompanionHome: View {
 
     private func computerCard(_ paired: PairedSource) -> some View {
         let id = paired.sourceID
-        let firstPreview = presentation.preview && id == model.pairedSources.first?.sourceID
+        let firstPreview = presentation.preview && !presentation.previewScreen.hasPrefix("handoff")
+            && id == model.pairedSources.first?.sourceID
         let value = model.snapshots[id]
         let state = presentation.computerState(model: model, sourceID: id)
         let historical = !model.isActivityCurrent(id)
@@ -234,33 +235,12 @@ struct CompanionHome: View {
         .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
     }
 
-    private func sessionDescription(_ row: AgentDisplayRow, historical: Bool) -> some View {
-        let status = historical ? "Last known: " + row.statusLabel : row.statusLabel
-        let context = row.contextLabel.isEmpty ? "" : " · " + row.contextLabel
-        let color = historical || row.statusLabel != row.session.state.title
-            ? theme.secondaryInk : stateColor(row.session.state)
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(row.session.displayName).font(.subheadline.weight(.medium))
-                .foregroundStyle(historical ? theme.secondaryInk : theme.ink)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("\(Text(status).foregroundColor(color))\(Text(context).foregroundColor(theme.secondaryInk))")
-                .font(.caption).fixedSize(horizontal: false, vertical: true)
-        }.accessibilityElement(children: .combine)
-    }
-
     private func activityRow(_ row: AgentDisplayRow, historical: Bool) -> some View {
         let layout = typeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         return layout {
-            if !typeSize.isAccessibilitySize {
-                ActivityRobot(state: row.session.state, animate: !historical)
-                    .frame(width: 24, height: 24)
-                    .foregroundStyle(historical ? theme.secondaryInk : stateColor(row.session.state))
-                    .accessibilityHidden(true)
-            }
-            sessionDescription(row, historical: historical)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            AgentSessionSummary(row: row, historical: historical, theme: theme)
             sessionPill(row.session)
                 .fixedSize(horizontal: !typeSize.isAccessibilitySize, vertical: false)
         }.padding(.vertical, 12)
@@ -283,15 +263,44 @@ struct CompanionHome: View {
         }
     }
 
-    private func stateColor(_ state: ActivityState) -> Color {
-        PhoneMonitoringStatusColor.color(for: state.rawValue, onDark: theme.dark, fallback: theme.ink)
-    }
-
     private func emptyActivity(_ title: String, detail: String?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.system(.title3, design: .rounded, weight: .semibold))
             if let detail { Text(detail).font(.caption).foregroundStyle(theme.secondaryInk) }
         }.padding(.top, 16)
+    }
+}
+
+/// The same session identity and activity meaning on home and phone handoff.
+struct AgentSessionSummary: View {
+    let row: AgentDisplayRow
+    let historical: Bool
+    let theme: CompanionTheme
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var stateColor: Color {
+        PhoneMonitoringStatusColor.color(for: row.session.state.rawValue, onDark: theme.dark, fallback: theme.ink)
+    }
+
+    var body: some View {
+        let status = historical ? "Last known: " + row.statusLabel : row.statusLabel
+        let context = row.contextLabel.isEmpty ? "" : " · " + row.contextLabel
+        let color = historical || row.statusLabel != row.session.state.title ? theme.secondaryInk : stateColor
+        HStack(alignment: .center, spacing: 12) {
+            if !typeSize.isAccessibilitySize {
+                ActivityRobot(state: row.session.state, animate: !historical)
+                    .frame(width: 24, height: 24)
+                    .foregroundStyle(historical ? theme.secondaryInk : stateColor)
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.session.displayName).font(.subheadline.weight(.medium))
+                    .foregroundStyle(historical ? theme.secondaryInk : theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(Text(status).foregroundColor(color))\(Text(context).foregroundColor(theme.secondaryInk))")
+                    .font(.caption).fixedSize(horizontal: false, vertical: true)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }.accessibilityElement(children: .combine)
     }
 }
 

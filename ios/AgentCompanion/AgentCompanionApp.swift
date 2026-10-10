@@ -89,7 +89,7 @@ struct CompanionRoot: View {
                 }
         }
         .sheet(item: Binding(get: { model.handoff }, set: { if $0 == nil { model.dismissHandoff() } })) { request in
-            SessionHandoffSheet(model: model, request: request, theme: theme)
+            SessionHandoffSheet(model: model, presentation: presentation, request: request, theme: theme)
         }
         .tint(theme.tint)
         .preferredColorScheme(.dark)
@@ -169,6 +169,7 @@ struct CompanionRoot: View {
 
 private struct SessionHandoffSheet: View {
     @ObservedObject var model: CompanionModel
+    @ObservedObject var presentation: PresentationModel
     let request: PendingWatchHandoff
     let theme: CompanionTheme
     @Environment(\.dismiss) private var dismiss
@@ -181,14 +182,14 @@ private struct SessionHandoffSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if let target = model.handoffTarget(request) {
-                        Text(target.computer).companionText(.supporting, theme: theme)
-                        Text(target.session.provider == "claude" ? "Claude" : target.session.provider == "codex" ? "Codex" : "Agent")
-                            .companionText(.title, theme: theme)
-                        if let label = MonitoringActivity.ContentState.sharedWorkspaceLabel([target.session.workspaceLabel]) {
-                            Text(label).companionText(.body, theme: theme)
-                        }
-                        Text((model.isActivityCurrent(target.sourceID) ? "" : "Last known: ") + target.session.state.title)
-                            .companionText(.body, theme: theme)
+                        Text(presentation.displayName(
+                            source: model.pairedSources.first { $0.sourceID == target.sourceID },
+                            snapshot: model.snapshots[target.sourceID]))
+                            .companionText(.supporting, theme: theme)
+                        AgentSessionSummary(
+                            row: AgentDisplayRow(id: "session:" + target.session.id,
+                                session: target.session, detail: target.session.detail),
+                            historical: !model.isActivityCurrent(target.sourceID), theme: theme)
                         if let url = target.session.appURL {
                             Button {
                                 // Re-resolve from current phone-owned data at the moment of opening.

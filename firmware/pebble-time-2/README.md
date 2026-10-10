@@ -12,7 +12,8 @@ Up to eight sessions per computer are shown, attention states first. Session
 detail requires an updated companion; older phones retain computer summaries. Down on
 the face opens Timeline; Select opens the launcher. With Touch on, tap the card
 after waking the watch, or use the default Double Tap wake gesture directly.
-Select or tap a session to continue on the phone. The watch shows whether Paceman
+The session list labels Select as Continue on phone. Select or tap a session to
+continue on the phone. The watch shows whether Paceman
 received the selection; the phone opens a handoff sheet or schedules a notification.
 An updated companion is required, and the phone opens the agent app only after
 you choose its open button.
@@ -46,7 +47,8 @@ python3 firmware/pebble-time-2/tools/bundle.py --pebbleos /path/to/PebbleOS \
 ## First Paceman connection
 
 1. Install through the Pebble app's debug firmware updater.
-2. Forget the Bluetooth pairing used by the Pebble app on both devices:
+2. Force-close the Pebble app from the app switcher and keep it closed until
+   Paceman connects. Forget the Bluetooth pairing used by the Pebble app on both devices:
    **iPhone Settings → Bluetooth → Pebble → Forget This Device** and
    **watch Settings → Bluetooth → your iPhone → Forget**. Leave the watch's
    Bluetooth screen open.
@@ -63,8 +65,9 @@ Paceman pairings and the Pebble app's saved watch entry. Return to Paceman after
 and turn Updates back on.
 
 To reconnect a watch previously used with Paceman, including after removing it
-from Paceman or switching phones, use watch **Settings → System →
-Reset Paceman pairing** and confirm. This clears Paceman ownership, its profile and
+from Paceman or switching phones, force-close the Pebble app and keep it closed
+until Paceman connects. Use watch **Settings → System → Reset Paceman pairing**
+and confirm. This clears Paceman ownership, its profile and
 the old owner’s Bluetooth bond, preserving firmware, watch apps/settings and the
 watch ID. Forget Pebble in the old phone’s **Settings → Bluetooth**, then connect
 in Paceman with the watch’s Bluetooth screen open. Removing the accessory from

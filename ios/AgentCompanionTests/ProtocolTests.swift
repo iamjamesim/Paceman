@@ -54,6 +54,38 @@ final class ProtocolTests: XCTestCase {
     }
 
     @MainActor
+    func testHandoffFollowsLatestSessionStateAndDisplayFreshness() throws {
+        let model = CompanionModel(preview: true)
+        model.showHandoffPreview("handoff-codex-working")
+        let pending = try XCTUnwrap(model.handoff)
+        let original = try XCTUnwrap(model.handoffTarget(pending))
+        let now = Date().timeIntervalSince1970
+
+        for state in [ActivityState.needsInput, .working, .finished, .failed] {
+            model.snapshots[original.sourceID] = Snapshot(schema: 1, sourceID: original.sourceID,
+                generation: "latest", revision: 2, sourceName: "Current computer name",
+                observedAt: now, changedAt: now, freshFor: 30, state: state, eventID: "latest",
+                sessions: [AgentSession(id: original.session.id, provider: original.session.provider,
+                    state: state, workspaceLabel: "current-workspace")])
+            let current = try XCTUnwrap(model.handoffTarget(pending))
+            XCTAssertEqual(current.session.state, state)
+            XCTAssertEqual(current.session.detail, "current-workspace")
+            XCTAssertEqual(current.computer, "Current computer name")
+            XCTAssertEqual(model.handoff, pending)
+            XCTAssertTrue(model.isActivityCurrent(current.sourceID,
+                now: Date(timeIntervalSince1970: now + 299)))
+            XCTAssertFalse(model.isActivityCurrent(current.sourceID,
+                now: Date(timeIntervalSince1970: now + 300)))
+        }
+        model.errors[original.sourceID] = "Connection interrupted"
+        XCTAssertTrue(model.isActivityCurrent(original.sourceID,
+            now: Date(timeIntervalSince1970: now + 1)))
+        XCTAssertEqual(model.handoffTarget(pending)?.session.state, .failed)
+        model.snapshots[original.sourceID]?.sessions = []
+        XCTAssertNil(model.handoffTarget(pending))
+    }
+
+    @MainActor
     func testHandoffNotificationUsesLatestValidSelectionAndScopedDismissal() throws {
         let key = "pending-watch-handoff-v1"
         let defaults = UserDefaults.standard
