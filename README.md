@@ -21,6 +21,17 @@ choose, hack, or build.
 Paceman is in **alpha**. macOS and Omarchy installers are available via GitHub
 releases, and Paceman iOS is available through TestFlight.
 
+## How it connects
+
+Each computer runs a local status service. The iPhone reads authenticated HTTPS
+snapshots through [Tailscale](https://tailscale.com), so the service remains
+reachable away from the local network without exposing its API to the public
+internet.
+
+The service listens on loopback. Paceman configures Tailscale Serve and issues a
+separate credential for each paired phone. Notifications and Live Activities use
+Paceman's relay and Apple Push Notification service.
+
 ## Get started
 
 1. **[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**.
@@ -60,9 +71,6 @@ above.
   including optional session titles. It does not include prompts, agent replies,
   or tool arguments.
 - Optional project labels can appear on your Lock Screen.
-- Computer-to-phone snapshots travel over private HTTPS through Tailscale.
-  Notification and Live Activity payloads pass through Paceman's hosted relay
-  and Apple's push service.
 
 See the [privacy policy](https://paceman.ai/privacy) for service providers,
 diagnostics, retention and privacy requests.
