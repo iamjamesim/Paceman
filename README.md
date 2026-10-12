@@ -34,6 +34,11 @@ releases, and Paceman iOS is available through TestFlight.
 - **Connection:** [Tailscale](https://tailscale.com/download) on your computer and iPhone.
 - **Apple Watch (optional):** watchOS 26+.
 
+Your phone reads status from your own computer over a private connection, even
+when you're away. Tailscale keeps Paceman's status API off the public internet;
+Paceman sets up its private route and authenticates each paired phone. Already
+use Tailscale? Paceman fits into your existing network.
+
 ### Manual installation
 
 - **Mac:** [Build and install from source](macos/README.md#build-and-install-from-source).
