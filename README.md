@@ -21,17 +21,6 @@ choose, hack, or build.
 Paceman is in **alpha**. macOS and Omarchy installers are available via GitHub
 releases, and Paceman iOS is available through TestFlight.
 
-## How it connects
-
-Each computer runs a local status service. The iPhone reads authenticated HTTPS
-snapshots through [Tailscale](https://tailscale.com), so the service remains
-reachable away from the local network without exposing its API to the public
-internet.
-
-The service listens on loopback. Paceman configures Tailscale Serve and issues a
-separate credential for each paired phone. Notifications and Live Activities use
-Paceman's relay and Apple Push Notification service.
-
 ## Get started
 
 1. **[Get Paceman for iPhone on TestFlight](https://testflight.apple.com/join/wpMWQb7d)**.
@@ -44,6 +33,17 @@ Paceman's relay and Apple Push Notification service.
 - **Agent:** Codex or Claude Code 2.1.196+ installed on your computer.
 - **Connection:** [Tailscale](https://tailscale.com/download) on your computer and iPhone.
 - **Apple Watch (optional):** watchOS 26+.
+
+### How it connects
+
+Each computer runs a local status service. The iPhone reads authenticated HTTPS
+snapshots through [Tailscale](https://tailscale.com), so the service remains
+reachable away from the local network without exposing its API to the public
+internet.
+
+The service listens on loopback. Paceman configures Tailscale Serve and issues a
+separate credential for each paired phone. Notifications and Live Activities use
+Paceman's relay and Apple Push Notification service.
 
 ### Manual installation
 
