@@ -1,6 +1,8 @@
 # Push delivery
 
-By default, the source worker sends activity notifications and Live Activity updates through the authenticated relay, which holds the APNs key. It can also push Codex usage to Apple Watch. An ordinary notification reaches the ESP32 watch through Apple's Notification Center Service (ANCS); the watch asks the iPhone to fetch the current snapshot and forward it over Bluetooth. Activity pushes carry an event hint or expiring display copy, never source credentials, prompts, or transcripts. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
+By default, the source worker sends activity notifications and Live Activity updates through the authenticated relay, which holds the APNs key. It can also push Codex usage to Apple Watch. An ordinary notification reaches compatible ESP32/Pebble watches through Apple's Notification Center Service (ANCS); the watch asks the iPhone to fetch current snapshots and forward activity and supported session lists over Bluetooth. Activity pushes carry an event hint or expiring display copy, never source credentials, prompts, or transcripts. See the [wire contract](protocol.md#phone-notifications-and-live-activities).
+
+Session titles come from private snapshots and reach title-capable Pebble firmware through the v4 Bluetooth source-card feed. They are absent from APNs and ANCS payloads. Foreground refresh uses the same fetch and Bluetooth forwarding path.
 
 | State | Ordinary notification |
 | --- | --- |

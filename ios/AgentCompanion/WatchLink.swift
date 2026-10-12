@@ -310,16 +310,24 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private let activityUUID = CBUUID(string: "7f510004-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private let sourcesUUID = CBUUID(string: "7f510006-1b15-4f0d-b7a5-4cf3a2c98ee1")
     private var sourceFeed: CBCharacteristic?
+    private let handoffUUID = CBUUID(string: "7f510007-1b15-4f0d-b7a5-4cf3a2c98ee1")
+    private var handoff: CBCharacteristic?
+    private var handoffGeneration = UUID()
+    private var lastHandoffSequence: UInt32 = 0
+    var onSessionHandoff: ((WatchHandoffRequest) async -> WatchHandoffResult)?
+    private var supportsHandoff: Bool { capabilities & (1 << 15) != 0 }
+
     private var desiredSources: [WatchSourceCard] = []
-    private var pendingSources: Data?
-    private var acceptedSources: Data?
+    private var sourceTransfer = WatchSourceTransfer()
     private var supportsSourceCards: Bool { capabilities & (1 << 12) != 0 }
-    private var sourcePacket: Data { WatchWire.sources(desiredSources, rich: capabilities & (1 << 13) != 0) }
+    private var sourcePackets: [Data] { WatchWire.sourcePackets(desiredSources, capabilities: capabilities) }
 
     private func resetSourceFeed() {
+        handoff = nil
+        handoffGeneration = UUID()
+        lastHandoffSequence = 0
         sourceFeed = nil
-        pendingSources = nil
-        acceptedSources = nil
+        sourceTransfer = WatchSourceTransfer()
     }
 
     func updateSources(_ cards: [WatchSourceCard]) {
@@ -329,10 +337,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     private func writeSourcesIfNeeded() {
         guard supportsSourceCards, enabled, ready, !profileWritePending, !writePending,
-              pendingSources == nil, let sourceFeed, let peripheral else { return }
-        let packet = sourcePacket
-        guard packet != acceptedSources else { return }
-        pendingSources = packet
+              sourceTransfer.pending == nil, let sourceFeed, let peripheral else { return }
+        guard let packet = sourceTransfer.next(sourcePackets) else { return }
         peripheral.writeValue(packet, for: sourceFeed, type: .withResponse)
     }
     private let notificationUUID = CBUUID(string: "7f510005-1b15-4f0d-b7a5-4cf3a2c98ee1")
@@ -971,7 +977,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             stopForTerminalFailure("This accessory’s firmware isn’t compatible with Paceman. Install compatible firmware, then try again."); return
         }
         Diagnostics.shared.record("ble_characteristics_requested")
-        peripheral.discoverCharacteristics([profileUUID, identityUUID, activityUUID, notificationUUID, sourcesUUID], for: service)
+        peripheral.discoverCharacteristics([profileUUID, identityUUID, activityUUID, notificationUUID, sourcesUUID, handoffUUID], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
@@ -987,6 +993,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         self.profile = profile
         self.activity = activity
         sourceFeed = characteristics.first(where: { $0.uuid == sourcesUUID })
+        handoff = characteristics.first(where: { $0.uuid == handoffUUID })
         notificationSync = characteristics.first(where: { $0.uuid == notificationUUID })
         notificationSequence = nil
         observeNotificationSharing(peripheral)
@@ -999,6 +1006,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard enabled, preparing || ready, peripheral.state == .connected,
               self.peripheral?.identifier == peripheral.identifier else { return }
+        if characteristic.uuid == handoffUUID && error != nil { return }
         if WatchSetupRecovery.ownershipSavePending(error: error,
             activityRead: characteristic.uuid == activityUUID,
             paired: paired, profileAccepted: acceptedProfile) {
@@ -1013,6 +1021,24 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
                 : kind == .pebble ? WatchSetupRecovery.pebblePairingRecovery
                 : "Couldn’t connect securely. If this accessory was previously connected to Paceman, follow the reset steps below."
             recoverConnection(message); return
+        }
+        if characteristic.uuid == handoffUUID {
+            guard ready, supportsHandoff, characteristic.isNotifying,
+                  let request = WatchHandoffRequest(value), request.sequence > lastHandoffSequence else { return }
+            lastHandoffSequence = request.sequence
+            let generation = handoffGeneration
+            Task { @MainActor [weak self] in
+                guard let self, self.enabled, self.ready,
+                      self.handoffGeneration == generation,
+                      self.lastHandoffSequence == request.sequence,
+                      self.peripheral?.identifier == peripheral.identifier else { return }
+                let result = await self.onSessionHandoff?(request) ?? .unavailable
+                guard self.enabled, self.ready, self.handoffGeneration == generation,
+                      self.lastHandoffSequence == request.sequence,
+                      self.peripheral?.identifier == peripheral.identifier else { return }
+                peripheral.writeValue(request.response(result), for: characteristic, type: .withResponse)
+            }
+            return
         }
         if characteristic.uuid == identityUUID {
             do {
@@ -1089,6 +1115,9 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     private func restoreSubscriptions(_ peripheral: CBPeripheral) {
+        if supportsHandoff, let handoff, !handoff.isNotifying {
+            peripheral.setNotifyValue(true, for: handoff)
+        }
         if let activity, !activity.isNotifying {
             peripheral.setNotifyValue(true, for: activity)
         }
@@ -1131,6 +1160,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         guard enabled, preparing || ready, peripheral.state == .connected,
               self.peripheral?.identifier == peripheral.identifier else { return }
+        if characteristic.uuid == handoffUUID { return }
         let required = characteristic.uuid == activityUUID ||
             (supportsNotificationSync && characteristic.uuid == notificationUUID)
         if characteristic.uuid == notificationUUID {
@@ -1161,6 +1191,8 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        // An expired handoff ACK must not reset the monitoring connection.
+        if characteristic.uuid == handoffUUID { return }
         guard enabled, preparing || ready, peripheral.state == .connected,
               self.peripheral?.identifier == peripheral.identifier else { return }
         if let error {
@@ -1187,8 +1219,11 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
             }
             writeSourcesIfNeeded()
         } else if characteristic.uuid == sourcesUUID {
-            acceptedSources = pendingSources
-            pendingSources = nil
+            sourceTransfer.acknowledge()
+            if sourceTransfer.active {
+                writeSourcesIfNeeded()
+                return
+            }
             writeProfileIfNeeded()
             if let queued {
                 self.queued = nil
@@ -1238,7 +1273,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         let deadline = ProcessInfo.processInfo.systemUptime + 3
         while ProcessInfo.processInfo.systemUptime < deadline {
             if UserDefaults.standard.string(forKey: deliveryKey("delivered-event")) == identity &&
-                (!supportsSourceCards || (pendingSources == nil && acceptedSources == sourcePacket)) { return true }
+                (!supportsSourceCards || sourceTransfer.contains(sourcePackets)) { return true }
             guard enabled, ready, !Task.isCancelled else { return false }
             do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return false }
         }
@@ -1252,7 +1287,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         guard !profileWritePending else { return }
         guard enabled, ready, let activity, let peripheral else { return }
         guard Date().timeIntervalSince1970 - snapshot.observedAt < snapshot.freshFor else { return }
-        if writePending || pendingSources != nil {
+        if writePending || sourceTransfer.active {
             queued = snapshot
             queuedAt = Date()
             return
@@ -1287,7 +1322,7 @@ final class WatchLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     private func writeProfileIfNeeded() {
         guard sourceProfileResolved, enabled, preparing || ready, deviceID != nil,
-              !profileWritePending, !writePending, pendingSources == nil,
+              !profileWritePending, !writePending, !sourceTransfer.active,
               let owner, let profile, let peripheral, peripheral.state == .connected else { return }
         let now = Date()
         let packet = WatchWire.profile(owner: owner, revision: 1, now: now,

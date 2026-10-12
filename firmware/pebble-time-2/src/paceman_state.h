@@ -51,10 +51,17 @@ typedef struct {
   bool sources_received;
   uint8_t source_count;
   PacemanSource sources[PACEMAN_SOURCE_MAX];
+  PacemanSession sessions[PACEMAN_SOURCE_MAX][PACEMAN_SESSION_MAX];
+  uint32_t sources_revision;
+  /* Pages stay private until every computer in this replacement has arrived. */
+  uint8_t source_batch[16], staged_count, staged_total, staged_version, staged_chunk;
+  PacemanSource staged_sources[PACEMAN_SOURCE_MAX];
+  PacemanSession staged_sessions[PACEMAN_SOURCE_MAX][PACEMAN_SESSION_MAX];
 } PacemanState;
 
 /* The OS adapter serializes calls and persists pending off the Bluetooth task.
  * A missing record needs a durably saved random device ID before enrollment. */
+bool paceman_record_valid(const PacemanRecord *record);
 void paceman_state_init(PacemanState *state, PacemanStorage storage, const PacemanRecord *record);
 bool paceman_pairing_allowed(const PacemanState *state);
 bool paceman_peer_authorized(const PacemanState *state, const PacemanPeer *peer);

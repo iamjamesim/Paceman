@@ -2,6 +2,8 @@
 
 Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, presents each computer separately, and forwards current activity to compatible Bluetooth accessories. Current activity monitoring does not transmit prompts, agent replies, or tool arguments.
 
+Individual session rows include an optional provider title. Codex titles come from metadata-only App Server reads; Claude titles come from explicit local `custom-title` / `ai-title` records. Prompt previews are never used as titles. Titles travel over private HTTPS to the phone and, on compatible Pebble firmware, owner-authenticated BLE; APNs activity payloads stay aggregate.
+
 ```text
        Reviewed agent hooks
                  │
@@ -26,7 +28,7 @@ Mac and Omarchy differ in how they know a session is still running:
 
 Both treat a completed turn as Finished. Codex rejects late turn events; Claude rejects old prompt callbacks and permits a new tool start when a Stop hook continues the same turn. Activity and allowance changes advance the snapshot revision, but allowance alone does not create an activity alert.
 
-The iPhone keeps a last-known snapshot per computer. Old activity can appear as history but is not forwarded as current. Phone contact means an authenticated fetch, not watch delivery.
+The iPhone keeps a last-known snapshot per computer. The session list, Live Activities and Pebble cards share a bounded five-minute observation lease; expired activity appears as history and is not forwarded as a new alert. Connection freshness follows the shorter snapshot lease. Phone contact means an authenticated fetch, not watch delivery.
 
 ## When the phone is asleep
 

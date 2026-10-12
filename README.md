@@ -56,8 +56,9 @@ above.
 
 ## Privacy
 
-- Current activity monitoring shares status, Codex usage, and limited metadata.
-  It does not include prompts, agent replies, or tool arguments.
+- Current activity monitoring shares status, Codex usage, and limited metadata,
+  including optional session titles. It does not include prompts, agent replies,
+  or tool arguments.
 - Optional project labels can appear on your Lock Screen.
 - Computer-to-phone snapshots travel over private HTTPS through Tailscale.
   Notification and Live Activity payloads pass through Paceman's hosted relay

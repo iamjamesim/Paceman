@@ -1,8 +1,8 @@
 """Omarchy event receiver without Bluetooth ownership.
 
 Accepts Paceman's Codex and Claude hooks and the older omarchy-watch-codex protocol. Only
-opaque IDs and lifecycle states are retained; hook arguments and conversation
-content are ignored.
+opaque IDs and lifecycle states are retained from hooks; explicit provider
+titles are read separately. Hook arguments and conversation content are ignored.
 """
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ import time
 from service.allowance import allowance_snapshot
 from service.claude import ClaudeSession
 from service.claude_hooks import validate_message
+from service.session_titles import SessionTitles, read_session_titles
 from service.processes import AgentProcesses, ProcessIdentity
 
 MAX_AGE = 24 * 60 * 60
@@ -61,7 +62,7 @@ class EventHandler(socketserver.StreamRequestHandler):
 
 class OmarchySource:
     def __init__(self, store, *, socket_path: Path | None = None, state_dir: Path | None = None,
-                 processes=None, computer_name: str | None = None, monotonic=time.monotonic, providers=("codex",), settings_reader=None):
+                 processes=None, computer_name: str | None = None, monotonic=time.monotonic, providers=("codex",), settings_reader=None, title_reader=read_session_titles):
         self.providers = tuple(providers)
         self.settings_reader = settings_reader
         self.last_event_by_provider = {}
@@ -69,6 +70,8 @@ class OmarchySource:
         self.socket_path = socket_path or default_socket()
         self.state_dir = state_dir or Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "omarchy"
         self.lock = threading.RLock()
+        self.closed = False
+        self.titles = SessionTitles(self._titles_changed, reader=title_reader, monotonic=monotonic)
         self.next_poll = 0.0
         self.server = None
         self.thread = None
@@ -81,6 +84,8 @@ class OmarchySource:
         self.computer_name = (computer_name or socket.gethostname()).split(".")[0][:80] or "Computer"
 
     def __enter__(self):
+        self.closed = False
+        self.titles.start()
         # Never steal a live desktop socket or remove an unrelated filesystem entry.
         self.socket_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         if self.socket_path.exists() or self.socket_path.is_symlink():
@@ -129,6 +134,9 @@ class OmarchySource:
         return self
 
     def __exit__(self, *_):
+        with self.lock:
+            self.closed = True
+            self.titles.close()
         if self.thread is not None:
             self.server.shutdown()
             self.thread.join(timeout=2)
@@ -229,6 +237,7 @@ class OmarchySource:
                        (key, owner.pid, owner.start_ticks, owner.boot_id))
             db.execute("INSERT OR REPLACE INTO omarchy_sessions VALUES (?,?,?,?,?)",
                        (key, source, turn, state, time.time()))
+            self.titles.track(key, "codex", session)
             self.record_event(db, "codex")
             if event == "ended":
                 db.execute("UPDATE omarchy_processes SET closed=1 WHERE session_id=?", (key,))
@@ -321,6 +330,7 @@ class OmarchySource:
                        (key, "claude", current.turn, current.base_state, current.updated))
             db.execute("INSERT OR REPLACE INTO omarchy_claude VALUES (?,?)",
                        (key, json.dumps(asdict(current), separators=(",", ":"))))
+            self.titles.track(key, "claude", session)
             self.record_event(db, "claude")
             return self.publish(db, lifecycle_only=event in ("started", "ended"))
 
@@ -339,6 +349,9 @@ class OmarchySource:
 
     def tick(self, *, force=False):
         with self.lock:
+            if self.closed:
+                return
+            self.titles.refresh()
             if not force and self.monotonic() < self.next_poll:
                 return
             with self.store.connect() as db:
@@ -356,12 +369,20 @@ class OmarchySource:
                 self.publish(db, lifecycle_only=True)
             self.next_poll = self.monotonic() + 1
 
+    def _titles_changed(self):
+        with self.lock, self.store.connect() as db:
+            if self.closed:
+                return
+            db.execute("BEGIN IMMEDIATE")
+            self.publish(db)
+
     def publish(self, db, *, lifecycle_only=False) -> bool:
         records = db.execute("SELECT s.* FROM omarchy_sessions s JOIN omarchy_processes p "
                              "ON p.session_id=s.id WHERE p.closed=0 ORDER BY s.id").fetchall()
         cutoff = time.time() - FINISHED_RETENTION
         records = [row for row in records if row["state"] not in ("finished", "failed") or row["updated"] > cutoff]
         now_monotonic = self.monotonic()
+        self.titles.retain(row["id"] for row in records)
         sessions = []
         for row in records:
             question = self.pending_questions.get(row["id"])
@@ -369,6 +390,8 @@ class OmarchySource:
                      and question and question[0] == row["turn"] and question[1] <= now_monotonic
                      else row["state"])
             session = {"id": row["id"], "provider": row["provider"], "state": state}
+            if title := self.titles.name(row["id"]):
+                session["name"] = title
             if row["provider"] == "claude":
                 saved = db.execute("SELECT lifecycle FROM omarchy_claude WHERE id=?", (row["id"],)).fetchone()
                 if saved:

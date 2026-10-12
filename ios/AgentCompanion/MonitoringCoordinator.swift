@@ -20,8 +20,8 @@ extension MonitoringActivity.ContentState {
             failed = snapshot.state == .failed ? 1 : 0
         }
         observedAt = snapshot.observedAt
-        // The source worker renews this bounded ActivityKit lease while it runs.
-        freshUntil = snapshot.observedAt + 300
+        // Fresh source observations renew this bounded display lease.
+        freshUntil = snapshot.activityFreshUntil
         changedAt = snapshot.changedAt
         themeID = ThemePreference.current.rawValue
         providers = Self.providerCodes((snapshot.sessions ?? [])
@@ -88,6 +88,16 @@ final class MonitoringCoordinator: ObservableObject {
                         over current: MonitoringActivity.ContentState, currentEnded: Bool) -> Bool {
         currentEnded || candidate.observedAt > current.observedAt
             || (candidate.generation == current.generation && candidate.revision > current.revision)
+    }
+
+    static func shouldUpdate(_ candidate: MonitoringActivity.ContentState,
+                             over current: MonitoringActivity.ContentState) -> Bool {
+        if candidate.generation != current.generation { return true }
+        guard candidate.revision >= current.revision else { return false }
+        return candidate.revision > current.revision
+            || (current.providers == nil && candidate.providers?.isEmpty == false)
+            || (candidate.observedAt > current.observedAt && candidate.freshUntil > current.freshUntil
+                && candidate.observedAt >= current.freshUntil - MonitoringActivity.displayLeaseDuration / 2)
     }
 
     static func shouldRetireStaleActivity(isStale: Bool, staleDate: Date, now: Date) -> Bool {
@@ -213,14 +223,13 @@ final class MonitoringCoordinator: ObservableObject {
             guard let snapshot = snapshots[source.sourceID], fresh.contains(source.sourceID) else { continue }
             let state = MonitoringActivity.ContentState(snapshot: snapshot)
             MonitoringProviderCache.save(state, sourceID: source.sourceID)
-            if snapshot.state == .idle {
+            if snapshot.shouldEndLiveActivity(at: Date()) {
                 if let activity = activities[source.sourceID] { await end(activity, sourceID: source.sourceID) }
                 continue
             }
             if let activity = activities[source.sourceID] {
                 let current = activity.content.state
-                if current.generation != snapshot.generation || current.revision < snapshot.revision
-                    || (current.providers == nil && state.providers?.isEmpty == false) {
+                if Self.shouldUpdate(state, over: current) {
                     await activity.update(ActivityContent(state: state,
                         staleDate: Date(timeIntervalSince1970: state.freshUntil),
                         relevanceScore: state.relevanceScore))

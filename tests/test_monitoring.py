@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 from tests.identity import device
 from service.hub import Store
-from service.push import Result, Worker, live_notification, live_start_notification
+from service.push import (Result, Worker, live_notification, live_start_notification,
+                          should_end_live_activity)
 from tests.test_push import FakeSender
 
 
@@ -126,6 +127,58 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(self.sender.calls[-1][1]['aps']['event'], 'end')
         with self.store.connect() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM live_activities').fetchone()[0], 0)
+
+    def test_terminal_grace_uses_activity_change_not_observation(self):
+        for state in ('finished', 'failed'):
+            for sessions in (None, [], [{'state': state}]):
+                with self.subTest(state=state, sessions=sessions):
+                    snapshot = dict(state=state, changedAt=100, observedAt=189, sessions=sessions)
+                    self.assertFalse(should_end_live_activity(snapshot, 189))
+                    snapshot['observedAt'] = 190  # Fresh contact does not restart the grace.
+                    self.assertTrue(should_end_live_activity(snapshot, 190))
+        self.assertTrue(should_end_live_activity(dict(state='idle', sessions=[], changedAt=190), 190))
+
+    def test_mixed_failure_keeps_activity_and_allows_remote_start(self):
+        now = time.time()
+        self.store.emit('failed')
+        snapshot = self.store.snapshot()
+        snapshot.update(changedAt=now - 600, sessions=[{'state': 'failed'}, {'state': 'working'}])
+        self.register()
+        self.worker.step_live_activities(now, snapshot)
+        self.assertEqual(self.sender.calls[-1][1]['aps']['event'], 'update')
+        self.assertEqual(self.sender.calls[-1][1]['aps']['content-state']['working'], 1)
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM live_activities').fetchone()[0], 1)
+        # The same ongoing work is eligible for a remote start when no activity exists.
+        self.store.live_activity(self.credential, {'activityID': 'activity-1', 'action': 'remove'})
+        self.store.live_activity(self.credential, {
+            'action': 'register-start', 'deviceToken': 'cd' * 32, 'environment': 'development'})
+        self.worker.step_live_activities(now + 1, snapshot)
+        self.assertEqual(self.sender.calls[-1][1]['aps']['event'], 'start')
+        self.assertEqual(self.sender.calls[-1][1]['aps']['content-state']['working'], 1)
+        snapshot['sessions'][-1]['state'] = 'needs_input'
+        self.assertFalse(should_end_live_activity(snapshot, now + 600))
+
+    def test_failed_activity_ends_without_restarting_until_new_work(self):
+        now = time.time()
+        self.store.emit('failed')
+        snapshot = {**self.store.snapshot(), 'changedAt': now}
+        self.store.live_activity(self.credential, {
+            'action': 'register-start', 'deviceToken': 'cd' * 32, 'environment': 'development'})
+        self.register()
+        self.worker.step_live_activities(now, snapshot)
+        self.worker.step_live_activities(now + 89, snapshot)
+        self.assertEqual(self.sender.calls[-1][1]['aps']['event'], 'update')
+        self.worker.step_live_activities(now + 90, snapshot)
+        self.assertEqual(self.sender.calls[-1][1]['aps']['event'], 'end')
+        sent = len(self.sender.calls)
+        self.worker.step_live_activities(now + 91, snapshot)
+        self.assertEqual(len(self.sender.calls), sent)
+        self.store.emit('working')
+        snapshot = {**self.store.snapshot(), 'observedAt': now + 92, 'changedAt': now + 92}
+        self.worker.step_live_activities(now + 92, snapshot)
+        self.assertEqual(self.sender.calls[-1][1]['aps']['event'], 'start')
+        self.assertEqual(self.sender.calls[-1][1]['aps']['content-state']['working'], 1)
 
     def test_payload_is_quiet_and_excludes_private_text(self):
         snapshot = self.store.snapshot()

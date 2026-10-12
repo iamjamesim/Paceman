@@ -34,6 +34,21 @@ class OmarchyTests(unittest.TestCase):
             socket_path=self.root / 'omarchy-watch.sock', state_dir=self.root / 'omarchy',
             processes=self.processes, computer_name='build-station.example.net'))
 
+    def test_title_refresh_preserves_activity_identity(self):
+        self.source.titles.reader = lambda refs: {ref: "Fix watch scrolling" for ref in refs}
+        self.event('working')
+        before = self.store.snapshot()
+        self.source.titles.refresh()
+        self.source.titles.thread.join(2)
+        after = self.store.snapshot()
+        self.assertEqual(after['sessions'][0]['name'], 'Fix watch scrolling')
+        self.assertEqual(after['eventID'], before['eventID'])
+        self.assertEqual(after['changedAt'], before['changedAt'])
+        self.assertGreater(after['revision'], before['revision'])
+        self.event('ended')
+        self.assertFalse(self.source.titles.refs)
+        self.assertFalse(self.source.titles.names)
+
     def test_source_reports_computer_identity(self):
         snapshot = self.store.snapshot()
         self.assertEqual(snapshot['sourceName'], 'build-station')

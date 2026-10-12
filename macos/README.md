@@ -50,7 +50,7 @@ remains partial.
 
 The command shown in setup uses this installation’s Python runtime, the `-B` flag, and the hook script in your Mac user account. It is generated for your installation. Compare the full command in every Paceman row; don’t run it in a terminal or trust unrelated hooks.
 
-The hooks send event names, opaque task and turn IDs, and an optional short project label to Paceman’s private local socket. Claude hooks also send the Remote Control session ID when available, so the iPhone can open that chat. They don’t send prompts, replies, transcripts, tool arguments, or full paths. Project labels may appear on your iPhone Lock Screen.
+The hooks send event names, opaque task and turn IDs, and an optional short project label to Paceman’s private local socket. Claude hooks also send the Remote Control session ID when available, so the iPhone can open that chat. They don’t send prompts, replies, transcripts, tool arguments, or full paths. Project labels may appear on your iPhone Lock Screen. Separately, the source reads explicit provider title metadata for individual session rows on the phone and compatible Pebble firmware; it never substitutes prompt previews.
 
 </details>
 
@@ -93,7 +93,7 @@ optional short project label to Paceman's private local socket. With Remote
 Control active on Claude Code 2.1.199+, they also send its remote session ID so
 the phone can open the specific session. They do not send
 prompts, replies, transcripts, tool arguments/results or full paths. They make no
-Claude approval decisions. Project labels may appear on your iPhone Lock Screen.
+Claude approval decisions. Project labels may appear on your iPhone Lock Screen. Separately, the source reads explicit provider title metadata for individual session rows on the phone and compatible Pebble firmware; it never substitutes prompt previews.
 
 Keep Paceman's review window open, start a **fresh local Claude session** in the
 interface you use, and submit a prompt. Verify `lastAgentEventByProvider.claude`

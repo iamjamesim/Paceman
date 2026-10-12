@@ -9,6 +9,162 @@ import DeviceCheck
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
+    func testTitledSessionPacketsAreBoundedAtomicAndCapabilityGated() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let sessions = (0..<8).map { AgentSession(id: "session-\($0)", provider: "codex", state: .working,
+            name: "Fix session scrolling and handoff \(String(repeating: "é", count: 40))", workspaceLabel: "paceman") }
+        let card = WatchSourceCard(sourceID: "mac", name: "MacBook", state: .working,
+            availability: 1, expiresAt: now.timeIntervalSince1970 + 300, sessions: sessions)
+        let pages = WatchWire.sourcePackets([card], capabilities: (1 << 14) | (1 << 16), now: now)
+        XCTAssertEqual(pages.count, 2)
+        for (chunk, page) in pages.enumerated() {
+            XCTAssertEqual(page.count, 484)
+            XCTAssertEqual(Array(page.prefix(4)), [79, 83, 4, 1])
+            XCTAssertEqual(Array(page[20..<24]), [0, 8, 1, UInt8(chunk)])
+            let title = page[136..<184].prefix { $0 != 0 }
+            XCTAssertNotNil(String(data: Data(title), encoding: .utf8))
+            XCTAssertTrue(String(data: Data(title), encoding: .utf8)!.hasPrefix("Fix session scrolling"))
+        }
+        XCTAssertEqual(pages[0][4..<20], pages[1][4..<20])
+        var renamed = card
+        renamed.sessions[0].name = "New name"
+        let newPages = WatchWire.sourcePackets([renamed], capabilities: (1 << 14) | (1 << 16), now: now)
+        XCTAssertNotEqual(pages[0][4..<20], newPages[0][4..<20])
+        XCTAssertEqual(pages[0][84..<100], newPages[0][84..<100])
+        let legacy = WatchWire.sourcePackets([card], capabilities: 1 << 14, now: now)
+        XCTAssertEqual(legacy.count, 1)
+        XCTAssertEqual(legacy[0].count, 500)
+        XCTAssertEqual(legacy[0][2], 3)
+        XCTAssertFalse(String(decoding: legacy[0], as: UTF8.self).contains("Fix session"))
+        let empty = WatchWire.sourcePackets([], capabilities: (1 << 14) | (1 << 16), now: now)
+        XCTAssertEqual(empty[0].count, 24)
+        XCTAssertEqual(empty[0][2], 4)
+    }
+
+    func testSessionTitleNormalizationAndGrouping() {
+        let titled = AgentSession(id: "one", provider: "codex", state: .working, name: "  Fix\n scrolling\u{0}  ")
+        XCTAssertEqual(titled.displayName, "Fix scrolling")
+        let unnamed = AgentSession(id: "two", provider: "codex", state: .working, name: " \n")
+        XCTAssertEqual(unnamed.displayName, "Codex")
+        let rows = AgentDisplayRow.rows([titled, unnamed])
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertTrue(rows.contains { $0.session.id == titled.id })
+    }
+
+    func testHandoffWireRejectsMalformedRequestsAndEchoesSequence() throws {
+        var bytes = Data([79, 72, 1, 0, 7, 0, 0, 0])
+        bytes.append(Data(repeating: 1, count: 16)); bytes.append(Data(repeating: 2, count: 16))
+        let request = try XCTUnwrap(WatchHandoffRequest(bytes))
+        XCTAssertEqual(request.sequence, 7)
+        XCTAssertEqual(request.response(.notification), Data([79, 72, 1, 2, 7, 0, 0, 0]))
+        XCTAssertNil(WatchHandoffRequest(bytes.dropLast()))
+        for index in [0, 2, 3, 4] {
+            var invalid = bytes; invalid[index] = index == 3 ? 1 : 0
+            XCTAssertNil(WatchHandoffRequest(invalid))
+        }
+        var zero = bytes; zero.replaceSubrange(8..<24, with: Data(repeating: 0, count: 16))
+        XCTAssertNil(WatchHandoffRequest(zero))
+        let now = Date()
+        let pending = PendingWatchHandoff(watchID: "watch", request: request, now: now)
+        XCTAssertTrue(pending.isCurrent(now: now.addingTimeInterval(599)))
+        XCTAssertFalse(pending.isCurrent(now: now.addingTimeInterval(600)))
+        XCTAssertFalse(pending.isCurrent(now: now.addingTimeInterval(-1)))
+    }
+
+    @MainActor
+    func testHandoffResolvesOnlyCurrentPairedSourceAndExactSession() throws {
+        let model = CompanionModel(preview: true)
+        model.showHandoffPreview("handoff")
+        let pending = try XCTUnwrap(model.handoff)
+        let target = try XCTUnwrap(model.handoffTarget(pending))
+        XCTAssertEqual(target.session.appURL?.absoluteString, "claude://code/session_previewHandoff")
+        let card = WatchSourceCard(sourceID: target.sourceID, name: target.computer,
+            state: .needsInput, availability: 1, expiresAt: Date().timeIntervalSince1970 + 120,
+            sessions: [target.session])
+        let page = try XCTUnwrap(WatchWire.sourcePackets([card], capabilities: 1 << 14).first)
+        XCTAssertEqual(Data(page[24..<40]), pending.source)
+        XCTAssertEqual(Data(page[84..<100]), pending.session)
+        model.revokedSources.insert(target.sourceID)
+        XCTAssertNil(model.handoffTarget(pending))
+        model.revokedSources.remove(target.sourceID)
+        model.snapshots[target.sourceID]?.sessions = []
+        XCTAssertNil(model.handoffTarget(pending))
+        model.showHandoffPreview("handoff")
+        let renewed = try XCTUnwrap(model.handoff)
+        model.pairedSources = []
+        XCTAssertNil(model.handoffTarget(renewed))
+    }
+
+    @MainActor
+    func testHandoffFollowsLatestSessionStateAndDisplayFreshness() throws {
+        let model = CompanionModel(preview: true)
+        model.showHandoffPreview("handoff-codex-working")
+        let pending = try XCTUnwrap(model.handoff)
+        let original = try XCTUnwrap(model.handoffTarget(pending))
+        let now = Date().timeIntervalSince1970
+
+        for state in [ActivityState.needsInput, .working, .finished, .failed] {
+            model.snapshots[original.sourceID] = Snapshot(schema: 1, sourceID: original.sourceID,
+                generation: "latest", revision: 2, sourceName: "Current computer name",
+                observedAt: now, changedAt: now, freshFor: 30, state: state, eventID: "latest",
+                sessions: [AgentSession(id: original.session.id, provider: original.session.provider,
+                    state: state, name: "Current title \(state.title)", workspaceLabel: "current-workspace")])
+            let current = try XCTUnwrap(model.handoffTarget(pending))
+            XCTAssertEqual(current.session.state, state)
+            XCTAssertEqual(current.session.displayName, "Current title \(state.title)")
+            XCTAssertEqual(current.session.detail, "current-workspace")
+            XCTAssertEqual(current.computer, "Current computer name")
+            XCTAssertEqual(model.handoff, pending)
+            XCTAssertTrue(model.isActivityCurrent(current.sourceID,
+                now: Date(timeIntervalSince1970: now + 299)))
+            XCTAssertFalse(model.isActivityCurrent(current.sourceID,
+                now: Date(timeIntervalSince1970: now + 300)))
+        }
+        model.errors[original.sourceID] = "Connection interrupted"
+        XCTAssertTrue(model.isActivityCurrent(original.sourceID,
+            now: Date(timeIntervalSince1970: now + 1)))
+        XCTAssertEqual(model.handoffTarget(pending)?.session.state, .failed)
+        model.snapshots[original.sourceID]?.sessions = []
+        XCTAssertNil(model.handoffTarget(pending))
+    }
+
+    @MainActor
+    func testHandoffNotificationUsesLatestValidSelectionAndScopedDismissal() throws {
+        let key = "pending-watch-handoff-v1"
+        let defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        defer {
+            if let original { defaults.set(original, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        let model = CompanionModel(preview: true)
+        model.showHandoffPreview("handoff")
+        let first = try XCTUnwrap(model.handoff)
+        let target = try XCTUnwrap(model.handoffTarget(first))
+        defaults.set(try JSONEncoder().encode(first), forKey: key)
+        XCTAssertTrue(model.handoffNotificationIsCurrent(first.id))
+
+        var bytes = Data([79, 72, 1, 0, 2, 0, 0, 0])
+        bytes.append(first.source); bytes.append(first.session)
+        let request = try XCTUnwrap(WatchHandoffRequest(bytes))
+        let second = PendingWatchHandoff(watchID: first.watchID, request: request)
+        defaults.set(try JSONEncoder().encode(second), forKey: key)
+        XCTAssertFalse(model.handoffNotificationIsCurrent(first.id))
+        XCTAssertTrue(model.handoffNotificationIsCurrent(second.id))
+
+        // Dismissing the older visible sheet must preserve the newer pending selection.
+        model.dismissHandoff()
+        let saved = try JSONDecoder().decode(PendingWatchHandoff.self,
+            from: XCTUnwrap(defaults.data(forKey: key)))
+        XCTAssertEqual(saved.id, second.id)
+        XCTAssertNil(model.handoff)
+        model.revokedSources.insert(target.sourceID)
+        XCTAssertFalse(model.handoffNotificationIsCurrent(second.id))
+        model.revokedSources.remove(target.sourceID)
+        model.snapshots[target.sourceID]?.sessions = []
+        XCTAssertFalse(model.handoffNotificationIsCurrent(second.id))
+    }
+
     func testAppAttestRecoversRejectedCachedKeyAndApprovesPairing() async throws {
         for kind in ["attest", "assert"] {
             for code in [DCError.Code.invalidInput, .invalidKey] {
@@ -190,6 +346,108 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(Array(rich[4..<52]), Array(old[4..<52]))
         XCTAssertEqual(Array(rich[52..<64]), [1, 0, 1, 0, 0, 0, 0, 0, 3, 0, 0, 0])
         XCTAssertEqual(WatchWire.sources([], rich: true), Data([79, 83, 2, 0]))
+    }
+
+
+    func testSessionPagesContainOnlyAllowedMetadataAndPreserveLegacyFeeds() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let card = WatchSourceCard(sourceID: "mac", name: "MacBook Pro", state: .needsInput,
+            availability: 1, expiresAt: 1_800_000_030,
+            sessions: [AgentSession(id: "secret-session-id", provider: "claude", state: .needsInput,
+                name: "secret task title", project: "/private/secret-project",
+                workspaceLabel: "paceman", remoteSessionID: "session_secretRemote")])
+        let packets = WatchWire.sourcePackets([card], capabilities: 1 << 14, now: now)
+        let bytes = Array(packets[0])
+        XCTAssertEqual(bytes.count, 136)
+        XCTAssertEqual(Array(bytes.prefix(4)), [79, 83, 3, 1])
+        XCTAssertEqual(Array(bytes[20..<24]), [0, 1, 1, 0])
+        XCTAssertEqual(Array(bytes[24..<84]), Array(WatchWire.sources([card], now: now, rich: true).dropFirst(4)))
+        XCTAssertEqual(Array(bytes[100..<104]), [2, 2, 0, 0])
+        XCTAssertEqual(String(bytes: bytes[104..<111], encoding: .utf8), "paceman")
+        for forbidden in ["secret-session-id", "secret task title", "/private/secret-project", "session_secretRemote"] {
+            XCTAssertNil(packets[0].range(of: Data(forbidden.utf8)))
+        }
+        XCTAssertEqual(packets, WatchWire.sourcePackets([card], capabilities: 1 << 14, now: now))
+        XCTAssertEqual(WatchWire.sourcePackets([card], capabilities: 1 << 12, now: now),
+                       [WatchWire.sources([card], now: now)])
+        XCTAssertEqual(WatchWire.sourcePackets([card], capabilities: 1 << 13, now: now),
+                       [WatchWire.sources([card], now: now, rich: true)])
+        let other = WatchSourceCard(sourceID: "other", name: card.name, state: card.state,
+            availability: card.availability, expiresAt: card.expiresAt, sessions: card.sessions)
+        let otherBytes = Array(WatchWire.sourcePackets([other], capabilities: 1 << 14, now: now)[0])
+        XCTAssertNotEqual(Array(bytes[84..<100]), Array(otherBytes[84..<100]))
+    }
+
+    func testSessionPagesBoundLabelsAndPrioritizeAttention() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var sessions = (0..<9).map { AgentSession(id: "\($0)", provider: "codex", state: .working) }
+        sessions.append(AgentSession(id: "z", provider: "claude", state: .needsInput,
+                                     workspaceLabel: String(repeating: "é", count: 30)))
+        var card = WatchSourceCard(sourceID: "mac", name: "Mac", state: .needsInput,
+            availability: 1, expiresAt: 1_800_000_030, sessions: sessions)
+        let bytes = Array(WatchWire.sourcePackets([card], capabilities: 1 << 14, now: now)[0])
+        XCTAssertEqual(bytes.count, 500)
+        XCTAssertEqual(bytes[21], 8)
+        XCTAssertEqual(bytes[72], 9) // Complete computer counts survive row truncation.
+        XCTAssertEqual(bytes[74], 1)
+        XCTAssertEqual(bytes[101], 2) // Needs input is the first row.
+        XCTAssertEqual(String(bytes: bytes[104..<134], encoding: .utf8), String(repeating: "é", count: 15))
+        XCTAssertEqual(bytes[134], 0)
+        XCTAssertEqual(bytes[135], 0)
+        card.sessions = [AgentSession(id: "a", provider: "codex", state: .working,
+                                     workspaceLabel: "/Users/private")]
+        let sanitized = Array(WatchWire.sourcePackets([card], capabilities: 1 << 14, now: now)[0])
+        XCTAssertEqual(Array(sanitized[104..<136]), Array(repeating: 0, count: 32))
+    }
+
+    func testSessionPagesAreOneAtomicBatchAndDistinguishUnknownFromEmpty() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let cards = (0..<10).map { WatchSourceCard(sourceID: "mac-\($0)", name: "Mac \($0)",
+            state: .idle, availability: 1, expiresAt: 1_800_000_030, sessionsKnown: $0 != 1) }
+        let packets = WatchWire.sourcePackets(cards, capabilities: 1 << 14, now: now)
+        XCTAssertEqual(packets.count, 8)
+        for (index, packet) in packets.enumerated() {
+            let bytes = Array(packet)
+            XCTAssertEqual(bytes.count, 84)
+            XCTAssertEqual(bytes[3], 8)
+            XCTAssertEqual(bytes[20], UInt8(index))
+            XCTAssertEqual(bytes[21], 0)
+            XCTAssertEqual(bytes[22], index == 1 ? 0 : 1)
+            XCTAssertEqual(Array(bytes[4..<20]), Array(packets[0])[4..<20].map { $0 })
+        }
+        var updated = cards
+        updated[0].sessionsKnown = false
+        XCTAssertNotEqual(Array(packets[0])[4..<20], Array(WatchWire.sourcePackets(updated, capabilities: 1 << 14, now: now)[0])[4..<20])
+        let empty = Array(WatchWire.sourcePackets([], capabilities: 1 << 14, now: now)[0])
+        XCTAssertEqual(empty.count, 24)
+        XCTAssertEqual(Array(empty.prefix(4)), [79, 83, 3, 0])
+        XCTAssertEqual(Array(empty.suffix(4)), [0, 0, 0, 0])
+    }
+
+    func testSourceTransferFinishesCapturedBatchBeforeSendingNewSnapshot() {
+        let original = [Data([0]), Data([1]), Data([2])]
+        let newer = [Data([3]), Data([4])]
+        var transfer = WatchSourceTransfer()
+        XCTAssertEqual(transfer.next(original), original[0])
+        XCTAssertNil(transfer.next(newer))
+        XCTAssertFalse(transfer.contains(original))
+        transfer.acknowledge()
+        XCTAssertEqual(transfer.next(newer), original[1])
+        transfer.acknowledge()
+        XCTAssertEqual(transfer.next(newer), original[2])
+        transfer.acknowledge()
+        XCTAssertTrue(transfer.contains(original))
+        XCTAssertFalse(transfer.contains(newer))
+        XCTAssertNil(transfer.next(original))
+        XCTAssertEqual(transfer.next(newer), newer[0])
+        transfer.acknowledge()
+        // A reconnect discards partial delivery and restarts from page zero.
+        transfer = WatchSourceTransfer()
+        XCTAssertEqual(transfer.next(newer), newer[0])
+        transfer.acknowledge()
+        XCTAssertEqual(transfer.next(newer), newer[1])
+        transfer.acknowledge()
+        XCTAssertTrue(transfer.contains(newer))
     }
 
     func testSourceCardNamesAreBoundedAndNullTerminated() {
@@ -1478,6 +1736,79 @@ final class ProtocolTests: XCTestCase {
         let prefix = "removal-test-\(UUID().uuidString)"
         return PairedSourcesStore(key: prefix, oldPrimaryKey: prefix + "-primary",
                                   oldAdditionalKey: prefix + "-additional")
+    }
+
+    @MainActor
+    func testActivityDisplayLeaseSurvivesRecoveryWithoutExtendingObservation() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://lease.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret")
+        let observed = Date().timeIntervalSince1970 - 45
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            (200, try self.sourceFixture(["sourceID": source.sourceID, "observedAt": observed]))
+        })
+        model.pairedSources = [source]
+        defer { try? FileManager.default.removeItem(at: SourceSnapshotCache.url(for: source.sourceID)) }
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertFalse(model.isFresh(source.sourceID), "The transport lease remains thirty seconds")
+        XCTAssertEqual(model.connectionState(source.sourceID), .checking)
+        XCTAssertTrue(model.isActivityCurrent(source.sourceID))
+        model.errors[source.sourceID] = "Connection unavailable"
+        XCTAssertEqual(model.connectionState(source.sourceID), .reconnecting)
+        XCTAssertTrue(model.isActivityCurrent(source.sourceID))
+        XCTAssertTrue(model.isActivityCurrent(source.sourceID, now: Date(timeIntervalSince1970: observed + 299)))
+        XCTAssertFalse(model.isActivityCurrent(source.sourceID, now: Date(timeIntervalSince1970: observed + 300)))
+        let snapshot = try XCTUnwrap(model.snapshots[source.sourceID])
+        XCTAssertEqual(snapshot.activityFreshUntil, observed + 300)
+        XCTAssertEqual(MonitoringActivity.ContentState(snapshot: snapshot).freshUntil, snapshot.activityFreshUntil)
+        model.revokedSources.insert(source.sourceID)
+        XCTAssertFalse(model.isActivityCurrent(source.sourceID))
+        model.revokedSources.remove(source.sourceID)
+        model.pairedSources = []
+        XCTAssertFalse(model.isActivityCurrent(source.sourceID))
+    }
+
+    @MainActor
+    func testFreshObservationRenewsUnchangedLiveActivityWithoutRollingBackState() {
+        let original = MonitoringActivity.ContentState(generation: "source", revision: 7,
+            state: "working", working: 1, needsInput: 0, finished: 0, observedAt: 100, freshUntil: 400)
+        var refreshed = original
+        refreshed.observedAt = 249; refreshed.freshUntil = 549
+        XCTAssertFalse(MonitoringCoordinator.shouldUpdate(refreshed, over: original))
+        refreshed.observedAt = 250; refreshed.freshUntil = 550
+        XCTAssertTrue(MonitoringCoordinator.shouldUpdate(refreshed, over: original))
+        XCTAssertFalse(MonitoringCoordinator.shouldUpdate(original, over: refreshed))
+        refreshed.revision = 6
+        XCTAssertFalse(MonitoringCoordinator.shouldUpdate(refreshed, over: original))
+        refreshed.revision = 8; refreshed.observedAt = 110; refreshed.freshUntil = 410
+        XCTAssertTrue(MonitoringCoordinator.shouldUpdate(refreshed, over: original))
+    }
+
+    func testLiveActivityTerminalGraceDoesNotResetOnFreshObservation() throws {
+        for state in ["finished", "failed"] {
+            for sessions in [nil, [], [["id": "turn", "provider": "codex", "state": state]]] as [[[String: String]]?] {
+                var fixture: [String: Any] = ["state": state, "changedAt": 100, "observedAt": 189]
+                if let sessions { fixture["sessions"] = sessions }
+                let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(fixture))
+                XCTAssertFalse(snapshot.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 189)))
+                fixture["observedAt"] = 190
+                let renewed = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(fixture))
+                XCTAssertTrue(renewed.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 190)))
+            }
+        }
+        let idle = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(["state": "idle", "changedAt": 190]))
+        XCTAssertTrue(idle.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 190)))
+    }
+
+    func testLiveActivityFailurePreservesOtherWorkingOrWaitingSessions() throws {
+        for active in ["working", "needs_input"] {
+            let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture([
+                "state": "failed", "changedAt": 100, "observedAt": 700,
+                "sessions": [["id": "failed", "provider": "codex", "state": "failed"],
+                             ["id": "active", "provider": "claude", "state": active]]
+            ]))
+            XCTAssertEqual(snapshot.sessions?.count, 2)
+            XCTAssertFalse(snapshot.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 700)))
+        }
     }
 
     func testComputerConnectionStatesDistinguishRecoveryFromStaleActivity() {

@@ -16,6 +16,9 @@ final class CompanionModel: ObservableObject {
     @Published var revokedSources: Set<String> = []
     @Published var status = "Connect a work source"
     @Published var busy = false
+    @Published private(set) var handoff: PendingWatchHandoff?
+    private let handoffKey = "pending-watch-handoff-v1"
+
     private(set) var canForgetAfterRemovalFailure = false
     private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
     private let client: SourceClient
@@ -113,7 +116,8 @@ final class CompanionModel: ObservableObject {
                     : screen.hasPrefix("--screen=claude-") ? ["claude"]
                     : screen.hasPrefix("--screen=single-") || screen == "--screen=grouped" ? ["codex"]
                     : ["codex", "claude"]
-                let observed = Date().timeIntervalSince1970
+                let age = screen == "--screen=computer-stale" ? 301.0 : screen == "--screen=computer-checking" ? 45.0 : 0
+                let observed = Date().timeIntervalSince1970 - age
                 snapshots[id] = Snapshot(schema: 1, sourceID: id, generation: id, revision: 1,
                     sourceName: "MacBook Pro", observedAt: observed, changedAt: observed,
                     freshFor: 30, state: .idle, eventID: "1", allowance: nil,
@@ -172,6 +176,7 @@ final class CompanionModel: ObservableObject {
             self?.objectWillChange.send()
             Task { @MainActor [weak self] in
                 guard let self, !self.designPreview else { return }
+                if self.foreground { self.presentStoredHandoff() }
                 for link in self.accessories.links {
                     link.phoneWeather.bind(watchID: link.preferenceID,
                                       updates: link.paired && link.updatesEnabled && link.supportsWeather)
@@ -187,6 +192,11 @@ final class CompanionModel: ObservableObject {
     }
 
     private func configureAccessory(_ link: WatchLink) {
+        link.onSessionHandoff = { [weak self, weak link] request in
+            guard let self, let link, link.paired, link.updatesEnabled,
+                  let watchID = link.preferenceID else { return .unavailable }
+            return await self.receiveHandoff(request, watchID: watchID)
+        }
         link.phoneWeather.onChange = { [weak link] value, fahrenheit in link?.setWeather(value, fahrenheit: fahrenheit) }
         weatherObservers[link.id] = link.phoneWeather.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         if !designPreview {
@@ -201,6 +211,13 @@ final class CompanionModel: ObservableObject {
         guard !revokedSources.contains(sourceID), errors[sourceID] == nil,
               let value = snapshots[sourceID], let uptime = fetchedUptimes[sourceID] else { return false }
         return ProcessInfo.processInfo.systemUptime - uptime < value.freshFor
+    }
+
+    /// Display freshness is independent of the shorter transport lease and link recovery.
+    func isActivityCurrent(_ sourceID: String, now: Date = Date()) -> Bool {
+        guard !isRevoked(sourceID), pairedSources.contains(where: { $0.sourceID == sourceID }),
+              let value = snapshots[sourceID] else { return false }
+        return now.timeIntervalSince1970 < value.activityFreshUntil
     }
 
     func connectionState(_ sourceID: String) -> ComputerConnectionState {
@@ -250,9 +267,9 @@ final class CompanionModel: ObservableObject {
                 name: ComputerPreferences.displayName(for: source.sourceID,
                     sourceName: snapshot?.sourceName, host: source.endpoint.host),
                 state: snapshot?.state ?? .idle,
-                availability: snapshot == nil ? 0 : isFresh(source.sourceID) ? 1 : 2,
-                expiresAt: snapshot.map { $0.observedAt + $0.freshFor } ?? 0,
-                sessions: snapshot?.sessions ?? [])
+                availability: snapshot == nil ? 0 : isActivityCurrent(source.sourceID) ? 1 : 2,
+                expiresAt: snapshot?.activityFreshUntil ?? 0,
+                sessions: snapshot?.sessions ?? [], sessionsKnown: snapshot?.sessions != nil)
         }
         let priorities: [ActivityState: Int] = [.needsInput: 0, .failed: 1, .working: 2, .finished: 3, .idle: 4]
         let sortedCards = cards.sorted {
@@ -423,6 +440,7 @@ final class CompanionModel: ObservableObject {
         polling = nil
         Diagnostics.shared.record(value ? "app_foreground" : "app_background")
         if value {
+            presentStoredHandoff()
             polling = Task { [weak self] in
                 while !Task.isCancelled {
                     self?.accessories.links.forEach { $0.phoneWeather.refreshIfNeeded() }
@@ -564,3 +582,116 @@ final class CompanionModel: ObservableObject {
         }
     }
 }
+
+extension CompanionModel {
+    private var storedHandoff: PendingWatchHandoff? {
+        guard let data = UserDefaults.standard.data(forKey: handoffKey) else { return nil }
+        return try? JSONDecoder().decode(PendingWatchHandoff.self, from: data)
+    }
+
+    func handoffTarget(_ request: PendingWatchHandoff) -> (sourceID: String, computer: String, session: AgentSession)? {
+        guard request.isCurrent(),
+              designPreview || accessories.links.contains(where: {
+                  $0.paired && $0.updatesEnabled && $0.preferenceID == request.watchID
+              }),
+              let source = pairedSources.first(where: { WatchWire.sourceIdentifier($0.sourceID) == request.source }),
+              !revokedSources.contains(source.sourceID),
+              let snapshot = snapshots[source.sourceID],
+              let session = snapshot.sessions?.first(where: {
+                  WatchWire.sessionIdentifier(sourceID: source.sourceID, session: $0) == request.session
+              }) else { return nil }
+        return (source.sourceID, snapshot.sourceName, session)
+    }
+
+    func handoffNotificationIsCurrent(_ id: UUID) -> Bool {
+        storedHandoff.map { $0.id == id && handoffTarget($0) != nil } == true && !foreground
+    }
+
+    private func receiveHandoff(_ request: WatchHandoffRequest, watchID: String) async -> WatchHandoffResult {
+        let pending = PendingWatchHandoff(watchID: watchID, request: request)
+        guard handoffTarget(pending) != nil,
+              let data = try? JSONEncoder().encode(pending) else { return .unavailable }
+        if let previous = storedHandoff { push.clearHandoffNotification(previous.id) }
+        UserDefaults.standard.set(data, forKey: handoffKey)
+        if foreground {
+            presentStoredHandoff()
+            return .ready
+        }
+        let notified = await push.postHandoffNotification(pending.id)
+        // A foreground transition during notification scheduling should show the sheet
+        // and remove the now-redundant notification, never interrupt twice.
+        guard storedHandoff?.id == pending.id, handoffTarget(pending) != nil else {
+            push.clearHandoffNotification(pending.id)
+            return .unavailable
+        }
+        if foreground {
+            presentStoredHandoff()
+            return .ready
+        }
+        return notified ? .notification : .openPhone
+    }
+
+    func presentStoredHandoff(notificationID: String? = nil) {
+        guard let pending = storedHandoff,
+              notificationID == nil || pending.id.uuidString == notificationID else { return }
+        guard pending.isCurrent(),
+              let link = accessories.links.first(where: { $0.preferenceID == pending.watchID }),
+              link.updatesEnabled else {
+            UserDefaults.standard.removeObject(forKey: handoffKey)
+            push.clearHandoffNotification(pending.id)
+            return
+        }
+        // AccessorySetupKit restores authorization asynchronously on cold launch.
+        // Defer until its callback resolves, rather than discarding a valid selection.
+        guard link.setupResolved else { return }
+        guard link.paired else {
+            UserDefaults.standard.removeObject(forKey: handoffKey)
+            push.clearHandoffNotification(pending.id)
+            return
+        }
+        guard foreground, handoff != pending else { return }
+        handoff = pending
+        push.clearHandoffNotification(pending.id)
+    }
+
+    func dismissHandoff() {
+        guard let pending = handoff else { return }
+        if pending.id == storedHandoff?.id { UserDefaults.standard.removeObject(forKey: handoffKey) }
+        handoff = nil
+        push.clearHandoffNotification(pending.id)
+    }
+}
+
+#if DEBUG
+extension CompanionModel {
+    func showHandoffPreview(_ screen: String) {
+        guard designPreview, let sourceID = pairedSources.first?.sourceID else { return }
+        let now = Date().timeIntervalSince1970
+        let state: ActivityState = screen.contains("working") ? .working
+            : screen.contains("finished") ? .finished : screen.contains("failed") ? .failed : .needsInput
+        let session = AgentSession(id: "handoff-preview",
+            provider: screen.contains("no-link") ? "fixture" : screen.contains("codex") ? "codex" : "claude",
+            state: state,
+            name: screen.contains("long") ? "Investigate multi-machine source recovery after a long disconnect"
+                : screen.contains("titled") ? "Improve Pebble session browsing" : nil,
+            workspaceLabel: screen.contains("long") ? "launch-creative-direction-and-visual-assets" : "paceman",
+            remoteSessionID: "session_previewHandoff")
+        var sessions = [session]
+        if screen.contains("multiple") {
+            sessions += [AgentSession(id: "other-codex", provider: "codex", state: .working, name: "Update the launch website", workspaceLabel: "website"),
+                         AgentSession(id: "other-claude", provider: "claude", state: .finished, name: "Explore launch visual directions", workspaceLabel: "assets")]
+        }
+        snapshots[sourceID] = Snapshot(schema: 1, sourceID: sourceID, generation: UUID().uuidString,
+            revision: 1, sourceName: screen.contains("long") ? "James’s MacBook Pro for design and development" : "Jamess-MacBook-Pro",
+            observedAt: now - (screen.contains("stale") ? 301 : 0), changedAt: now, freshFor: 30, state: state, eventID: "preview",
+            sessions: screen.contains("unavailable") ? [] : sessions)
+        if !screen.contains("stale") { fetchedUptimes[sourceID] = ProcessInfo.processInfo.systemUptime }
+        var data = Data([79, 72, 1, 0, 1, 0, 0, 0])
+        data.append(WatchWire.sourceIdentifier(sourceID))
+        data.append(WatchWire.sessionIdentifier(sourceID: sourceID, session: session))
+        if let request = WatchHandoffRequest(data) {
+            handoff = PendingWatchHandoff(watchID: "preview", request: request)
+        }
+    }
+}
+#endif
