@@ -2,18 +2,19 @@
 
 Each Mac or Omarchy computer is an independent **source**. Its adapter turns
 local agent events into a snapshot. The iPhone pairs with sources separately,
-displays each one, and selects one fresh aggregate for the ESP32 watch. The
+displays each one, and forwards activity to compatible Bluetooth accessories.
+Devices with source-card support also receive per-computer session lists. The
 source service listens on `127.0.0.1`; the current phone connection uses
 private Tailscale HTTPS.
 
 | Sender → receiver | Wire format | Job |
 | --- | --- | --- |
-| Source service → Paceman iPhone app | Authenticated HTTPS snapshot | Authoritative agent state and freshness. |
+| Source service → Paceman iPhone app | Authenticated HTTPS snapshot | Authoritative agent state, freshness and optional session titles. |
 | Source push worker → authenticated relay → iOS Notification Center | Ordinary APNs alert | Notification event and a hint for the phone app to fetch. |
-| iOS Notification Center → ESP32 watch | Apple ANCS over BLE | Identifies a Paceman notification so the watch can request a fetch; does not forward APNs JSON. |
+| iOS Notification Center → ESP32/Pebble watch | Apple ANCS over BLE | Identifies a Paceman notification so the watch can request a fetch; does not forward APNs JSON. |
 | Source push worker → authenticated relay → iPhone Live Activity | ActivityKit APNs | Expiring display copy for the Lock Screen and Dynamic Island. |
 | Source push worker → authenticated relay → Paceman watchOS app | Background APNs | Optional Codex usage windows; the app then reloads its WidgetKit complications. |
-| Paceman iPhone app ↔ ESP32 watch | Encrypted BLE packets | Phone-selected profile and activity; watch acknowledgement and fetch requests. |
+| Paceman iPhone app ↔ compatible accessory | Encrypted BLE packets | Profile and activity, capability-gated session cards and handoff; acknowledgements and fetch requests. |
 
 ## Pairing and access
 
@@ -83,6 +84,7 @@ example, an allowance change raised `revision` to 12 without changing activity
     "id": "opaque-session-a",
     "provider": "codex",
     "state": "needs_input",
+    "name": "Improve Pebble session browsing",
     "workspaceLabel": "paceman"
   }],
   "allowance": {
@@ -183,23 +185,25 @@ stored source URL. The push cannot supply a URL or credential or set watch
 state. `eventID` need not equal `revision`. iOS decides whether and when to
 run the app or display the alert. Working and idle alerts use passive
 presentation, but remain `alert` pushes that can appear in Notification
-Center and reach the ESP32 watch through ANCS. They are not background pushes.
+Center and reach compatible ESP32/Pebble watches through ANCS. They are not background pushes.
 
-**ANCS is a different wire format.** The ESP32 watch receives an eight-byte
+**ANCS is a different wire format.** A compatible watch receives an eight-byte
 iOS notification event (`event`, `flags`, `category`, `count`, and a
 session-local notification UID). For example, `00 00 00 01 2a 00 00 00`
 means an added notification with UID 42; it contains none of the APNs JSON.
-The watch asks iOS only for that notification's
-`AppIdentifier`. If it matches Paceman, the watch increments its own BLE
-notification-sync sequence. The phone then fetches current snapshots and
-sends a new activity packet. The watch does not receive the APNs `aps` or
-`companion` object, read notification text, or derive agent state from it.
+Paceman's synchronization path uses the notification's `AppIdentifier`.
+If it matches Paceman, the watch increments its BLE notification-sync sequence.
+The phone then fetches current snapshots and sends activity and supported
+source-card packets. On title-capable Pebble firmware, the v4 source-card feed
+carries session titles from that snapshot. Paceman does not derive agent state
+or titles from notification text. Foreground refresh uses the same fetch and
+Bluetooth forwarding path.
 See [Apple's ANCS specification](https://developer.apple.com/library/archive/documentation/CoreBluetooth/Reference/AppleNotificationCenterServiceSpecification/Specification/Specification.html).
 
 ActivityKit receives a separate APNs payload (`apns-push-type: liveactivity`)
 with a revisioned, expiring **display copy**. It can update the Live Activity
 without running the app, but does not update the phone's paired snapshot or
-ESP32 watch. An update for snapshot revision 12 looks like:
+Bluetooth accessories. An update for snapshot revision 12 looks like:
 
 ```json
 {
@@ -275,7 +279,9 @@ Example background push:
 
 ## iPhone and ESP32 watch BLE
 
-The iPhone owns watch pairing, aggregate selection, and watch revisions.
+This BLE service is shared by ESP32 and Pebble accessories; capabilities gate
+optional source-card and handoff channels. The iPhone owns watch pairing,
+aggregate selection, and watch revisions.
 Source IDs and revisions do not become Bluetooth identities or revisions.
 The encrypted link uses service
 `7f510001-1b15-4f0d-b7a5-4cf3a2c98ee1`:
@@ -286,6 +292,8 @@ The encrypted link uses service
 | `02` profile | v1–v5 write, 36–111 bytes | Owner, clock, palette, weather, preferences, optional allowance. |
 | `04` activity | 14-byte `OA` read/write/notify | State, alert/sound flags, phone revision, wearer acknowledgement. |
 | `05` notification sync | 8-byte `ON` read/notify | Watch sequence requesting a current phone fetch. |
+| `06` source cards (optional) | v1–v4 write, 4–500 bytes | Computer/session lists; v4 includes explicit session titles. |
+| `07` handoff (optional) | 40-byte `OH` notify, 8-byte acknowledgment write | Selected source/session identities and handoff result. |
 
 For example, the activity packet below means needs input (`2`), alert and
 sound requested (`03`), phone revision 42, acknowledgement 39. Integers are
@@ -461,5 +469,6 @@ defines readiness and recovery.
 Implementations: [source API](../service/hub.py),
 [push encoders](../service/push.py),
 [iPhone source decoder](../ios/AgentCompanion/SourceClient.swift),
-[iPhone watch link](../ios/AgentCompanion/WatchLink.swift), and
-[watch ANCS client](../firmware/esp32-watch/firmware/main/watch_ancs.c).
+[iPhone watch link](../ios/AgentCompanion/WatchLink.swift),
+[ESP32 ANCS client](../firmware/esp32-watch/firmware/main/watch_ancs.c), and
+[Pebble accessory service](../firmware/pebble-time-2/src/paceman_service.c).
