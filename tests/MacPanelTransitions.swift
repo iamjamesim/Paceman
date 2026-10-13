@@ -36,6 +36,106 @@ private struct MacPanelTransitions {
     @MainActor static func model(_ commands: ControlledCommands) -> PanelModel {
         PanelModel(command: { commands.execute($0) }, needsSetup: { false }, progressURL: nil)
     }
+    @MainActor static func exerciseUpgradeDetection() {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appendingPathComponent("paceman-detection-" + UUID().uuidString)
+        try! files.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? files.removeItem(at: root) }
+        var count = 0
+        func check(_ expected: Bool, build: Any? = "27", previous: String? = "26\n",
+                   location: String = "Applications", recordedLocation: String? = "Applications",
+                   hasRuntime: Bool = true, runtimeExecutable: Bool = true,
+                   hasControl: Bool = true, controlExecutable: Bool = true,
+                   markerDirectory: Bool = false, runtimeDirectory: Bool = false, controlDirectory: Bool = false,
+                   runtimeSymlink: Bool = false, controlSymlink: Bool = false) {
+            count += 1
+            let fixture = root.appendingPathComponent("case-\(count)")
+            let app = fixture.appendingPathComponent(location).appendingPathComponent("Paceman.app")
+            let contents = app.appendingPathComponent("Contents")
+            try! files.createDirectory(at: contents, withIntermediateDirectories: true)
+            var info: [String: Any] = ["CFBundleIdentifier": "ai.paceman.test.detection.\(count)",
+                                      "CFBundleName": "Paceman", "CFBundlePackageType": "APPL"]
+            if let build { info["CFBundleVersion"] = build }
+            try! PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+                .write(to: contents.appendingPathComponent("Info.plist"))
+            let bundle = Bundle(url: app)!
+            let runtime = contents.appendingPathComponent("Resources/python/bin/python3")
+            if hasRuntime {
+                try! files.createDirectory(at: runtime.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if runtimeDirectory {
+                    try! files.createDirectory(at: runtime, withIntermediateDirectories: true)
+                } else if runtimeSymlink {
+                    let target = runtime.deletingLastPathComponent().appendingPathComponent("python3.14")
+                    try! Data().write(to: target)
+                    try! files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: target.path)
+                    try! files.createSymbolicLink(at: runtime, withDestinationURL: target)
+                } else {
+                    try! Data().write(to: runtime)
+                    try! files.setAttributes([.posixPermissions: runtimeExecutable ? 0o700 : 0o600], ofItemAtPath: runtime.path)
+                }
+            }
+            let state = fixture.appendingPathComponent("state")
+            try! files.createDirectory(at: state.appendingPathComponent("bin"), withIntermediateDirectories: true)
+            if hasControl {
+                let control = state.appendingPathComponent("bin/pacemanctl")
+                if controlDirectory {
+                    try! files.createDirectory(at: control, withIntermediateDirectories: true)
+                } else if controlSymlink {
+                    let target = state.appendingPathComponent("bin/control")
+                    try! Data().write(to: target)
+                    try! files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: target.path)
+                    try! files.createSymbolicLink(at: control, withDestinationURL: target)
+                } else {
+                    try! Data().write(to: control)
+                    try! files.setAttributes([.posixPermissions: controlExecutable ? 0o700 : 0o600], ofItemAtPath: control.path)
+                }
+            }
+            if let recordedLocation {
+                let installed = fixture.appendingPathComponent(recordedLocation).appendingPathComponent("Paceman.app").path
+                try! (installed + "\n").write(to: state.appendingPathComponent("installed-app"), atomically: true, encoding: .utf8)
+            }
+            let marker = state.appendingPathComponent("installed-build")
+            if markerDirectory { try! files.createDirectory(at: marker, withIntermediateDirectories: true) }
+            else if let previous { try! previous.write(to: marker, atomically: true, encoding: .utf8) }
+            let accepted = ["Applications", "UserApplications"].map {
+                fixture.appendingPathComponent($0).appendingPathComponent("Paceman.app").path
+            }
+            let before = try? Data(contentsOf: marker)
+            let actual = InstalledBuild.requiresUpgrade(bundle: bundle, stateDirectory: state, applicationPaths: accepted)
+            assert(actual == expected, "Upgrade detection case \(count): expected \(expected), got \(actual)")
+            assert((try? Data(contentsOf: marker)) == before) // Detection never rewrites installation state.
+        }
+        check(true)
+        check(true, previous: "1")
+        check(true, previous: " 26\n")
+        check(true, location: "UserApplications", recordedLocation: "UserApplications")
+        check(false, previous: "27") // Same build is already installed.
+        check(false, previous: "28") // Downgrades require explicit setup.
+        check(false, previous: nil)
+        for previous in ["", "not-a-build", "26.1", "0", "-1", "999999999999999999999999999"] {
+            check(false, previous: previous)
+        }
+        for build in ["", "not-a-build", "27.1", "0", "-1", "999999999999999999999999999"] {
+            check(false, build: build)
+        }
+        check(false, build: nil)
+        check(false, build: 27) // Plist metadata must use the documented string type.
+        check(false, location: "Downloads", recordedLocation: "Downloads")
+        check(false, location: "MountedDMG", recordedLocation: "MountedDMG")
+        check(false, recordedLocation: nil)
+        check(false, recordedLocation: "UserApplications") // Moving an install needs explicit setup.
+        check(false, hasRuntime: false)
+        check(false, runtimeExecutable: false)
+        check(false, hasControl: false)
+        check(false, controlExecutable: false)
+        check(false, markerDirectory: true)
+        check(false, runtimeDirectory: true)
+        check(false, controlDirectory: true)
+        check(true, runtimeSymlink: true) // Bundled Python normally uses an executable symlink.
+        check(true, controlSymlink: true)
+        print("\(count) upgrade detection cases passed")
+    }
+
     @MainActor static func exerciseSetupWindow() {
         // Use AppKit's real display loop: model-only tests miss constraint-pass crashes.
         let app = NSApplication.shared
@@ -86,7 +186,60 @@ private struct MacPanelTransitions {
     }
 
     @MainActor static func main() async {
+        exerciseUpgradeDetection()
         exerciseSetupWindow()
+        // Upgrades preserve setup, retry failed installs, and review changed hooks.
+        for changedHooks in [false, true] {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let url = folder.appendingPathComponent("setup-step")
+            try! "finished\n".write(to: url, atomically: true, encoding: .utf8)
+            let c = ControlledCommands(); let upgrade = ControlledCommands()
+            let m = PanelModel(command: { c.execute($0) }, needsSetup: { false },
+                needsUpgrade: { true }, upgrader: {
+                    let result = upgrade.execute(["upgrade"])
+                    if result.0 && changedHooks {
+                        try! "hooks\n".write(to: url, atomically: true, encoding: .utf8)
+                    }
+                    return (result.0 ? 0 : 1, result.1)
+                }, progressURL: url)
+            assert(m.upgradePending && m.shouldPresentSetup)
+            assert(m.upgradeBundled())
+            assert(!m.upgradeBundled()) // Reopen/repeated clicks never overlap installations.
+            await until("automatic upgrade") { upgrade.count == 1 }
+            upgrade.reply(0, false, "Could not restart the background service.")
+            await until("upgrade failure") { !m.busy }
+            assert(m.upgradePending && m.message != nil && m.setupStep == .finished)
+            assert(m.upgradeBundled())
+            await until("upgrade retry") { upgrade.count == 2 }
+            upgrade.reply(1)
+            await until("upgrade refreshed status") { c.count == 1 }
+            c.reply(0, true, paused)
+            await until("upgrade complete") { !m.upgradePending && m.hasReadStatus }
+            assert(!m.needsInstallation && !m.status.sharingEnabled)
+            assert(m.setupStep == (changedHooks ? .hooks : .finished))
+            assert(m.shouldPresentSetup == changedHooks)
+            assert(m.message == nil)
+            assert(!m.upgradeBundled()) // Installed build does not upgrade again.
+        }
+        do {
+            let c = ControlledCommands()
+            let fresh = PanelModel(command: { c.execute($0) }, needsSetup: { true },
+                needsUpgrade: { false }, upgrader: { fatalError("Fresh setup auto-installed") },
+                progressURL: nil)
+            assert(!fresh.upgradeBundled() && fresh.needsInstallation)
+        }
+        do {
+            let c = ControlledCommands()
+            let m = PanelModel(command: { c.execute($0) }, needsSetup: { false },
+                needsUpgrade: { true }, upgrader: { (2, "Notifications need repair") }, progressURL: nil)
+            assert(m.upgradeBundled())
+            await until("upgrade notification repair") { !m.busy }
+            assert(!m.upgradePending && m.needsInstallation && m.shouldPresentSetup)
+            assert(m.message == nil)
+            await until("notification repair status") { c.count == 1 }; c.reply(0, true, paused)
+        }
         // Agent selection never requests credentials or restarts the source.
         for enabled in [true, false] {
             let c = ControlledCommands(); let m = model(c)

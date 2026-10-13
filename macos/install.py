@@ -232,7 +232,8 @@ def build_app(destination: Path | None = None, *, version: str = "0.1",
 
 
 def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: bool = False,
-            prebuilt_app: Path | None = None, agents: list[str] | None = None):
+            prebuilt_app: Path | None = None, agents: list[str] | None = None,
+            upgrade: bool = False):
     global PYTHON
     if sys.version_info < (3, 11):
         raise ValueError("Install Python 3.11 or newer and run this installer with it")
@@ -246,6 +247,16 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
         if not (prebuilt_app / "Contents/Resources/python/bin/python3").is_file():
             raise ValueError("The prebuilt app has no bundled Python runtime")
         PYTHON = str(APP / "Contents/Resources/python/bin/python3")
+    if upgrade:
+        if (prebuilt_app is None or prebuilt_app != APP.resolve()
+                or (ROOT / "installed-app").read_text().strip() != str(APP)
+                or not (ROOT / "installed-build").is_file()
+                or not (ROOT / "bin/pacemanctl").is_file()):
+            raise ValueError("Automatic upgrade requires an existing install at this app location")
+        if agents is not None or replace_push_config:
+            raise ValueError("Automatic upgrade preserves agent selection and notification credentials")
+        agents = configured_providers(ROOT)
+        relay_url = None
     if relay_url is not None:
         relay_url = endpoint(relay_url)
     if agents is None:
@@ -274,7 +285,8 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
                                               open_menu=prebuilt_app is None,
                                               stop_installed_menu=(prebuilt_app is None or
                                                                    prebuilt_app != APP.resolve()),
-                                              replace_app=prebuilt_app != APP.resolve(), agents=agents)
+                                              replace_app=prebuilt_app != APP.resolve(), agents=agents,
+                                              upgrade=upgrade)
     finally:
         if not (staging / "ROLLBACK_INCOMPLETE").exists():
             shutil.rmtree(staging, ignore_errors=True)
@@ -284,7 +296,7 @@ def install(*, relay_url: str | None = DEFAULT_RELAY_URL, replace_push_config: b
 def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                     replace_push_config: bool = False, open_menu: bool = True,
                     stop_installed_menu: bool = True, replace_app: bool = True,
-                    agents: list[str] | None = None):
+                    agents: list[str] | None = None, upgrade: bool = False):
     if agents is None:
         agents = setup_providers(ROOT)
     try:
@@ -568,6 +580,9 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
     else:
         if route_ready:
             print("NEXT: Click Paceman's QR button and scan it in the iPhone app's Connect computer flow.")
+    if upgrade and any(changed_by_provider.values()):
+        # Changed commands must be reviewed by the user; unchanged upgrades keep progress.
+        (ROOT / "setup-step").write_text("hooks\n")
     (ROOT / "installed-app").write_text(str(APP) + "\n")
     installed_build = ROOT / "installed-build"
     if PYTHON == str(APP / "Contents/Resources/python/bin/python3"):
@@ -647,12 +662,15 @@ if __name__ == "__main__":
     parser.add_argument("--prebuilt-app", type=Path,
                         help="Install the signed app bundle without Xcode or an external Python")
     parser.add_argument("--agents", nargs="*", choices=PROVIDERS, help="Agents to monitor; updates preserve the existing selection")
+    parser.add_argument("--upgrade", action="store_true",
+                        help="Refresh an existing app's background code, preserving its configuration")
     arguments = parser.parse_args()
     try:
         ready = install(relay_url=None if arguments.no_push_setup else
                         arguments.relay_url or DEFAULT_RELAY_URL,
                         replace_push_config=arguments.relay_url is not None,
-                        prebuilt_app=arguments.prebuilt_app, agents=arguments.agents)
+                        prebuilt_app=arguments.prebuilt_app, agents=arguments.agents,
+                        upgrade=arguments.upgrade)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         print(f"Paceman install failed: {error}", file=sys.stderr)
         raise SystemExit(1)

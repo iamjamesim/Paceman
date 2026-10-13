@@ -243,6 +243,47 @@ class MacInstallTests(unittest.TestCase):
     def test_upgrade_preserves_existing_push_configuration(self):
         self._exercise_replacement(relay_url="https://relay.paceman.ai", existing_push=True)
 
+    def test_automatic_upgrade_keeps_finished_setup_when_hooks_are_unchanged(self):
+        self._exercise_replacement(upgrade=True, unchanged_hooks=True, replace_app=False)
+
+    def test_automatic_upgrade_requires_review_when_hook_commands_change(self):
+        self._exercise_replacement(upgrade=True, replace_app=False)
+
+    def test_automatic_upgrade_keeps_sharing_off_and_agents_disabled(self):
+        self._exercise_replacement(upgrade=True, replace_app=False, agents=[], sharing_paused=True)
+
+    def test_automatic_upgrade_rolls_back_when_the_service_cannot_start(self):
+        self._exercise_replacement(upgrade=True, replace_app=False, fail_start=True)
+
+    def test_automatic_upgrade_preserves_notification_configuration(self):
+        self._exercise_replacement(upgrade=True, unchanged_hooks=True, replace_app=False, existing_push=True)
+
+    def test_automatic_upgrade_requires_existing_install_and_preserves_selection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = Path(temporary) / "Applications/Paceman.app"
+            library = app / "Contents/Resources/lib"
+            (library / "macos").mkdir(parents=True)
+            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": installer.BUNDLE_ID}))
+            python = app / "Contents/Resources/python/bin/python3"
+            python.parent.mkdir(parents=True); python.touch()
+            root = Path(temporary) / "state"
+            root.mkdir()
+            with patch.multiple(installer, ROOT=root, APP=app, REPO=library, PYTHON=sys.executable), \
+                 patch.object(installer, "_finish_install", return_value=True) as finish:
+                with self.assertRaises(OSError):
+                    installer.install(prebuilt_app=app, upgrade=True)
+                finish.assert_not_called()
+                (root / "installed-app").write_text(str(app))
+                (root / "installed-build").write_text("26")
+                (root / "bin").mkdir(); (root / "bin/pacemanctl").touch()
+                (root / "agents.json").write_text(json.dumps({"providers": []}))
+                self.assertTrue(installer.install(prebuilt_app=app, upgrade=True))
+                self.assertEqual(finish.call_args.kwargs["agents"], [])
+                self.assertIsNone(finish.call_args.kwargs["relay_url"])
+                self.assertTrue(finish.call_args.kwargs["upgrade"])
+                with self.assertRaises(ValueError):
+                    installer.install(prebuilt_app=app, upgrade=True, agents=["codex"])
+
     def test_failed_push_setup_reports_partial_install(self):
         self._exercise_replacement(relay_url="https://relay.paceman.ai", fail_push=True)
 
@@ -261,7 +302,7 @@ class MacInstallTests(unittest.TestCase):
     def _exercise_replacement(self, fail_start: bool = False, fail_hooks: bool = False,
                               relay_url: str | None = None, existing_push: bool = False,
                               fail_push: bool = False, fail_route: bool = False,
-                              replace_app: bool = True, agents=None):
+                              replace_app: bool = True, agents=None, upgrade=False, unchanged_hooks=False, sharing_paused=False):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "home"
             root = home / "Library/Application Support/Paceman"
@@ -293,6 +334,17 @@ class MacInstallTests(unittest.TestCase):
             push_plist.write_bytes(plistlib.dumps({"Label": installer.PUSH_LABEL}))
             hooks.parent.mkdir(parents=True)
             hooks.write_text('{"hooks":{},"existing":true}\n')
+            interpreter = str(app / "Contents/Resources/python/bin/python3") if upgrade else sys.executable
+            if upgrade:
+                (app / "Contents").mkdir()
+                (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleVersion": "28"}))
+                Path(interpreter).parent.mkdir(parents=True); Path(interpreter).touch(); Path(interpreter).chmod(0o700)
+                (root / "setup-step").write_text("finished\n")
+            if unchanged_hooks:
+                with patch.multiple(installer, ROOT=root, PYTHON=interpreter):
+                    install_hooks(hooks)
+            if sharing_paused:
+                (root / "sharing-paused").write_text("paused\n")
             old_hooks = hooks.read_bytes()
             push_config = root / "private/apns.json"
             preserved_push = None
@@ -334,7 +386,7 @@ class MacInstallTests(unittest.TestCase):
 
             with patch.multiple(installer, ROOT=root, APP=app, PLIST=plist, PUSH_PLIST=push_plist,
                                 LOGIN_ATTENTION=root / "login-setup-incomplete",
-                                REPO=repo, PYTHON=sys.executable), \
+                                REPO=repo, PYTHON=interpreter), \
                  patch.object(Path, "home", return_value=home), \
                  patch.object(Path, "replace", replace_path), \
                  patch.object(installer.subprocess, "run", side_effect=command), \
@@ -345,12 +397,12 @@ class MacInstallTests(unittest.TestCase):
                  patch("builtins.print") as output:
                 if fail_start:
                     with self.assertRaises(subprocess.CalledProcessError):
-                        installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app, agents=agents)
+                        installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app, agents=agents, upgrade=upgrade)
                 elif fail_hooks:
                     with self.assertRaises(OSError):
-                        installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app, agents=agents)
+                        installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app, agents=agents, upgrade=upgrade)
                 else:
-                    ready = installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app, agents=agents)
+                    ready = installer._finish_install(staged_app, relay_url=relay_url, replace_app=replace_app, agents=agents, upgrade=upgrade)
                     self.assertEqual(ready, not fail_push)
                     if fail_route:
                         self.assertTrue(any("Phone connection setup is incomplete" in str(call)
@@ -363,7 +415,7 @@ class MacInstallTests(unittest.TestCase):
             self.assertEqual((root / "lib/desktop").exists(), failed)
             self.assertFalse((root / "lib/omarchy").exists())
             self.assertEqual((app / "version").read_text(), expected if replace_app else "old")
-            self.assertEqual((root / "bin/pacemanctl").read_text(), "old" if failed else f"#!{sys.executable} -IB\nnew")
+            self.assertEqual((root / "bin/pacemanctl").read_text(), "old" if failed else f"#!{interpreter} -IB\nnew")
             if failed:
                 self.assertEqual(plist.read_bytes(), old_plist)
                 self.assertEqual(hooks.read_bytes(), old_hooks)
@@ -378,7 +430,12 @@ class MacInstallTests(unittest.TestCase):
             self.assertEqual(push_plist.exists(), failed)
             self.assertEqual((root / "notification-setup-incomplete").exists(),
                              fail_push and not failed)
-            self.assertEqual(len(bootstraps), 3 if failed else 1)
+            self.assertEqual(len(bootstraps), 3 if failed else 0 if sharing_paused else 1)
+            if upgrade and not failed:
+                changed = hooks.read_bytes() != old_hooks
+                self.assertEqual((root / "setup-step").read_text(), "hooks\n" if changed else "finished\n")
+                self.assertEqual((root / "installed-build").read_text().strip(), "28")
+                self.assertEqual((root / "sharing-paused").exists(), sharing_paused)
             if relay_url and not failed:
                 self.assertEqual(push_calls, [] if existing_push else [relay_url])
                 self.assertEqual(push_config.exists(), not fail_push or existing_push)
