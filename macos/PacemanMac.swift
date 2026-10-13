@@ -1137,8 +1137,14 @@ private struct Panel: View {
                     Button("Restart Paceman") { model.run(["restart"]) }.font(.caption)
                 }
             }
-            Button("Manage Paceman…") { model.showingManagement = true }
-                .font(.caption)
+            HStack {
+                Button("Manage Paceman…") { model.showingManagement = true }
+                Spacer()
+                Button("Quit Paceman") { NSApplication.shared.terminate(nil) }
+                    .keyboardShortcut("q", modifiers: .command)
+                    .disabled(model.busy)
+            }
+            .font(.caption)
             if model.needsLoginRepair {
                 Text("Open at Login needs attention. Set it in Manage Paceman.")
                     .font(.caption).foregroundStyle(.secondary)
