@@ -36,4 +36,5 @@ class MacPanelTransitionTests(unittest.TestCase):
             self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
             result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("upgrade detection cases passed", result.stdout)
             self.assertIn("transition scenarios passed", result.stdout)

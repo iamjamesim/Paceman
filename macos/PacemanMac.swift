@@ -86,14 +86,26 @@ private enum InstalledBuild {
     static let loginMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/menu-login-configured"
 
     static var needsUpgrade: Bool {
-        guard isInApplications,
-              FileManager.default.isExecutableFile(atPath: Bundle.main.bundlePath + "/Contents/Resources/python/bin/python3"),
-              FileManager.default.fileExists(atPath: controlPath),
-              let installedApp = try? String(contentsOfFile: NSHomeDirectory() + "/Library/Application Support/Paceman/installed-app", encoding: .utf8),
-              installedApp.trimmingCharacters(in: .whitespacesAndNewlines) == appPath,
-              let bundled = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+        requiresUpgrade(bundle: .main,
+                        stateDirectory: URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/Paceman"),
+                        applicationPaths: appLocations)
+    }
+
+    static func requiresUpgrade(bundle: Bundle, stateDirectory: URL, applicationPaths: [String]) -> Bool {
+        func executableFile(_ path: String) -> Bool {
+            var directory = ObjCBool(false)
+            return FileManager.default.fileExists(atPath: path, isDirectory: &directory)
+                && !directory.boolValue && FileManager.default.isExecutableFile(atPath: path)
+        }
+        let app = bundle.bundlePath
+        guard applicationPaths.contains(app),
+              executableFile(app + "/Contents/Resources/python/bin/python3"),
+              executableFile(stateDirectory.appendingPathComponent("bin/pacemanctl").path),
+              let installedApp = try? String(contentsOf: stateDirectory.appendingPathComponent("installed-app"), encoding: .utf8),
+              installedApp.trimmingCharacters(in: .whitespacesAndNewlines) == app,
+              let bundled = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
               let build = Int(bundled),
-              let installed = try? String(contentsOfFile: markerPath, encoding: .utf8),
+              let installed = try? String(contentsOf: stateDirectory.appendingPathComponent("installed-build"), encoding: .utf8),
               let previous = Int(installed.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
         return previous > 0 && build > previous
     }

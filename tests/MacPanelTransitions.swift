@@ -36,6 +36,106 @@ private struct MacPanelTransitions {
     @MainActor static func model(_ commands: ControlledCommands) -> PanelModel {
         PanelModel(command: { commands.execute($0) }, needsSetup: { false }, progressURL: nil)
     }
+    @MainActor static func exerciseUpgradeDetection() {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appendingPathComponent("paceman-detection-" + UUID().uuidString)
+        try! files.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? files.removeItem(at: root) }
+        var count = 0
+        func check(_ expected: Bool, build: Any? = "27", previous: String? = "26\n",
+                   location: String = "Applications", recordedLocation: String? = "Applications",
+                   hasRuntime: Bool = true, runtimeExecutable: Bool = true,
+                   hasControl: Bool = true, controlExecutable: Bool = true,
+                   markerDirectory: Bool = false, runtimeDirectory: Bool = false, controlDirectory: Bool = false,
+                   runtimeSymlink: Bool = false, controlSymlink: Bool = false) {
+            count += 1
+            let fixture = root.appendingPathComponent("case-\(count)")
+            let app = fixture.appendingPathComponent(location).appendingPathComponent("Paceman.app")
+            let contents = app.appendingPathComponent("Contents")
+            try! files.createDirectory(at: contents, withIntermediateDirectories: true)
+            var info: [String: Any] = ["CFBundleIdentifier": "ai.paceman.test.detection.\(count)",
+                                      "CFBundleName": "Paceman", "CFBundlePackageType": "APPL"]
+            if let build { info["CFBundleVersion"] = build }
+            try! PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+                .write(to: contents.appendingPathComponent("Info.plist"))
+            let bundle = Bundle(url: app)!
+            let runtime = contents.appendingPathComponent("Resources/python/bin/python3")
+            if hasRuntime {
+                try! files.createDirectory(at: runtime.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if runtimeDirectory {
+                    try! files.createDirectory(at: runtime, withIntermediateDirectories: true)
+                } else if runtimeSymlink {
+                    let target = runtime.deletingLastPathComponent().appendingPathComponent("python3.14")
+                    try! Data().write(to: target)
+                    try! files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: target.path)
+                    try! files.createSymbolicLink(at: runtime, withDestinationURL: target)
+                } else {
+                    try! Data().write(to: runtime)
+                    try! files.setAttributes([.posixPermissions: runtimeExecutable ? 0o700 : 0o600], ofItemAtPath: runtime.path)
+                }
+            }
+            let state = fixture.appendingPathComponent("state")
+            try! files.createDirectory(at: state.appendingPathComponent("bin"), withIntermediateDirectories: true)
+            if hasControl {
+                let control = state.appendingPathComponent("bin/pacemanctl")
+                if controlDirectory {
+                    try! files.createDirectory(at: control, withIntermediateDirectories: true)
+                } else if controlSymlink {
+                    let target = state.appendingPathComponent("bin/control")
+                    try! Data().write(to: target)
+                    try! files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: target.path)
+                    try! files.createSymbolicLink(at: control, withDestinationURL: target)
+                } else {
+                    try! Data().write(to: control)
+                    try! files.setAttributes([.posixPermissions: controlExecutable ? 0o700 : 0o600], ofItemAtPath: control.path)
+                }
+            }
+            if let recordedLocation {
+                let installed = fixture.appendingPathComponent(recordedLocation).appendingPathComponent("Paceman.app").path
+                try! (installed + "\n").write(to: state.appendingPathComponent("installed-app"), atomically: true, encoding: .utf8)
+            }
+            let marker = state.appendingPathComponent("installed-build")
+            if markerDirectory { try! files.createDirectory(at: marker, withIntermediateDirectories: true) }
+            else if let previous { try! previous.write(to: marker, atomically: true, encoding: .utf8) }
+            let accepted = ["Applications", "UserApplications"].map {
+                fixture.appendingPathComponent($0).appendingPathComponent("Paceman.app").path
+            }
+            let before = try? Data(contentsOf: marker)
+            let actual = InstalledBuild.requiresUpgrade(bundle: bundle, stateDirectory: state, applicationPaths: accepted)
+            assert(actual == expected, "Upgrade detection case \(count): expected \(expected), got \(actual)")
+            assert((try? Data(contentsOf: marker)) == before) // Detection never rewrites installation state.
+        }
+        check(true)
+        check(true, previous: "1")
+        check(true, previous: " 26\n")
+        check(true, location: "UserApplications", recordedLocation: "UserApplications")
+        check(false, previous: "27") // Same build is already installed.
+        check(false, previous: "28") // Downgrades require explicit setup.
+        check(false, previous: nil)
+        for previous in ["", "not-a-build", "26.1", "0", "-1", "999999999999999999999999999"] {
+            check(false, previous: previous)
+        }
+        for build in ["", "not-a-build", "27.1", "0", "-1", "999999999999999999999999999"] {
+            check(false, build: build)
+        }
+        check(false, build: nil)
+        check(false, build: 27) // Plist metadata must use the documented string type.
+        check(false, location: "Downloads", recordedLocation: "Downloads")
+        check(false, location: "MountedDMG", recordedLocation: "MountedDMG")
+        check(false, recordedLocation: nil)
+        check(false, recordedLocation: "UserApplications") // Moving an install needs explicit setup.
+        check(false, hasRuntime: false)
+        check(false, runtimeExecutable: false)
+        check(false, hasControl: false)
+        check(false, controlExecutable: false)
+        check(false, markerDirectory: true)
+        check(false, runtimeDirectory: true)
+        check(false, controlDirectory: true)
+        check(true, runtimeSymlink: true) // Bundled Python normally uses an executable symlink.
+        check(true, controlSymlink: true)
+        print("\(count) upgrade detection cases passed")
+    }
+
     @MainActor static func exerciseSetupWindow() {
         // Use AppKit's real display loop: model-only tests miss constraint-pass crashes.
         let app = NSApplication.shared
@@ -86,6 +186,7 @@ private struct MacPanelTransitions {
     }
 
     @MainActor static func main() async {
+        exerciseUpgradeDetection()
         exerciseSetupWindow()
         // Upgrades preserve setup, retry failed installs, and review changed hooks.
         for changedHooks in [false, true] {
