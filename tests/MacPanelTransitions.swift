@@ -87,6 +87,58 @@ private struct MacPanelTransitions {
 
     @MainActor static func main() async {
         exerciseSetupWindow()
+        // Upgrades preserve setup, retry failed installs, and review changed hooks.
+        for changedHooks in [false, true] {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let url = folder.appendingPathComponent("setup-step")
+            try! "finished\n".write(to: url, atomically: true, encoding: .utf8)
+            let c = ControlledCommands(); let upgrade = ControlledCommands()
+            let m = PanelModel(command: { c.execute($0) }, needsSetup: { false },
+                needsUpgrade: { true }, upgrader: {
+                    let result = upgrade.execute(["upgrade"])
+                    if result.0 && changedHooks {
+                        try! "hooks\n".write(to: url, atomically: true, encoding: .utf8)
+                    }
+                    return (result.0 ? 0 : 1, result.1)
+                }, progressURL: url)
+            assert(m.upgradePending && m.shouldPresentSetup)
+            assert(m.upgradeBundled())
+            assert(!m.upgradeBundled()) // Reopen/repeated clicks never overlap installations.
+            await until("automatic upgrade") { upgrade.count == 1 }
+            upgrade.reply(0, false, "Could not restart the background service.")
+            await until("upgrade failure") { !m.busy }
+            assert(m.upgradePending && m.message != nil && m.setupStep == .finished)
+            assert(m.upgradeBundled())
+            await until("upgrade retry") { upgrade.count == 2 }
+            upgrade.reply(1)
+            await until("upgrade refreshed status") { c.count == 1 }
+            c.reply(0, true, paused)
+            await until("upgrade complete") { !m.upgradePending && m.hasReadStatus }
+            assert(!m.needsInstallation && !m.status.sharingEnabled)
+            assert(m.setupStep == (changedHooks ? .hooks : .finished))
+            assert(m.shouldPresentSetup == changedHooks)
+            assert(m.message == nil)
+            assert(!m.upgradeBundled()) // Installed build does not upgrade again.
+        }
+        do {
+            let c = ControlledCommands()
+            let fresh = PanelModel(command: { c.execute($0) }, needsSetup: { true },
+                needsUpgrade: { false }, upgrader: { fatalError("Fresh setup auto-installed") },
+                progressURL: nil)
+            assert(!fresh.upgradeBundled() && fresh.needsInstallation)
+        }
+        do {
+            let c = ControlledCommands()
+            let m = PanelModel(command: { c.execute($0) }, needsSetup: { false },
+                needsUpgrade: { true }, upgrader: { (2, "Notifications need repair") }, progressURL: nil)
+            assert(m.upgradeBundled())
+            await until("upgrade notification repair") { !m.busy }
+            assert(!m.upgradePending && m.needsInstallation && m.shouldPresentSetup)
+            assert(m.message == nil)
+            await until("notification repair status") { c.count == 1 }; c.reply(0, true, paused)
+        }
         // Agent selection never requests credentials or restarts the source.
         for enabled in [true, false] {
             let c = ControlledCommands(); let m = model(c)

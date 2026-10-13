@@ -143,7 +143,7 @@ Seeing activity on the Mac confirms hook delivery. Receiving it on your locked i
 - **Remove access…** disconnects one phone.
 - **Manage Paceman… → Uninstall Paceman…** removes the Mac app, background item, Paceman hooks, local pairings, notification credentials, and any unchanged Tailscale route Paceman created. During setup, Uninstall is in the **…** menu. The iPhone app and Tailscale stay installed.
 
-To update a release install, choose **Quit Paceman** in its menu-bar panel, replace it in Applications with the newer app from [Releases](https://github.com/iamjamesim/Paceman/releases), and reopen it. For a source install, rerun the installer from the newer source. Pairings and your Sharing choice are kept.
+To update a release install, choose **Quit Paceman** in its menu-bar panel, replace it in Applications with the newer app from [Releases](https://github.com/iamjamesim/Paceman/releases), and reopen it. Reopening a newer release automatically refreshes the background service. Pairings, agent choices, and your Sharing choice are kept; changed hooks require review. For a source install, rerun the installer from the newer source.
 
 ## Build and install from source
 

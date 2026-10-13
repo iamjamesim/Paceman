@@ -85,6 +85,19 @@ private enum InstalledBuild {
     static let loginAttentionMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/login-setup-incomplete"
     static let loginMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/menu-login-configured"
 
+    static var needsUpgrade: Bool {
+        guard isInApplications,
+              FileManager.default.isExecutableFile(atPath: Bundle.main.bundlePath + "/Contents/Resources/python/bin/python3"),
+              FileManager.default.fileExists(atPath: controlPath),
+              let installedApp = try? String(contentsOfFile: NSHomeDirectory() + "/Library/Application Support/Paceman/installed-app", encoding: .utf8),
+              installedApp.trimmingCharacters(in: .whitespacesAndNewlines) == appPath,
+              let bundled = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+              let build = Int(bundled),
+              let installed = try? String(contentsOfFile: markerPath, encoding: .utf8),
+              let previous = Int(installed.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
+        return previous > 0 && build > previous
+    }
+
     static var needsSetup: Bool {
         let bundled = Bundle.main.bundlePath + "/Contents/Resources/python/bin/python3"
         guard FileManager.default.isExecutableFile(atPath: bundled) else { return false }
@@ -125,14 +138,15 @@ private final class PanelModel: ObservableObject {
     @Published var hookReviewStartedAt: Double = 0
     @Published var connectingPhone: Bool
     @Published private(set) var setupStep: SetupStep
-    var shouldPresentSetup: Bool { needsInstallation || setupStep != .finished }
+    var shouldPresentSetup: Bool { upgradePending || needsInstallation || setupStep != .finished }
     private let progressURL: URL?
     @Published var loginStatus = SMAppService.mainApp.status
     @Published var expanded: String?
     @Published var confirming: String?
-    enum Operation { case idle, installing, command, pairing, savingReport, uninstalling, uninstalled }
+    enum Operation { case idle, installing, upgrading, command, pairing, savingReport, uninstalling, uninstalled }
     @Published private(set) var operation = Operation.idle
     @Published var needsInstallation: Bool
+    @Published private(set) var upgradePending: Bool
     @Published private(set) var hasReadStatus = false
     @Published var confirmingSetupUninstall = false
     var busy: Bool { operation != .idle }
@@ -154,10 +168,13 @@ private final class PanelModel: ObservableObject {
     }
     private let installer: @Sendable ([String]?) -> (Int32, String)
     private let needsSetup: () -> Bool
+    private let upgrader: @Sendable () -> (Int32, String)
 
     init(command: @escaping @Sendable ([String]) -> (Bool, String) = { PanelModel.execute($0) },
          installer: @escaping @Sendable ([String]?) -> (Int32, String) = { PanelModel.executeInstaller($0) },
          needsSetup: @escaping () -> Bool = { InstalledBuild.needsSetup },
+         needsUpgrade: () -> Bool = { InstalledBuild.needsUpgrade },
+         upgrader: @escaping @Sendable () -> (Int32, String) = { PanelModel.executeInstaller(nil, upgrade: true) },
          progressURL: URL? = SetupStep.fileURL,
          now: @escaping () -> Double = { Date().timeIntervalSince1970 }) {
         self.now = now
@@ -165,6 +182,8 @@ private final class PanelModel: ObservableObject {
         self.installer = installer
         self.needsSetup = needsSetup
         self.needsInstallation = needsSetup()
+        self.upgradePending = needsUpgrade()
+        self.upgrader = upgrader
         self.progressURL = progressURL
         let step = SetupStep.load(from: progressURL)
         self.setupStep = step
@@ -302,7 +321,7 @@ private final class PanelModel: ObservableObject {
         }
     }
 
-    nonisolated private static func executeInstaller(_ providers: [String]?) -> (Int32, String) {
+    nonisolated private static func executeInstaller(_ providers: [String]?, upgrade: Bool = false) -> (Int32, String) {
         let resources = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources")
         let python = resources.appendingPathComponent("python/bin/python3")
         let library = resources.appendingPathComponent("lib")
@@ -312,7 +331,7 @@ private final class PanelModel: ObservableObject {
         let process = Process()
         process.executableURL = python
         process.arguments = ["-m", "macos.install", "--prebuilt-app", Bundle.main.bundlePath] +
-            (providers.map { ["--agents"] + $0 } ?? [])
+            (providers.map { ["--agents"] + $0 } ?? []) + (upgrade ? ["--upgrade"] : [])
         process.currentDirectoryURL = library
         var environment = ProcessInfo.processInfo.environment
         environment["PYTHONPATH"] = library.path
@@ -327,6 +346,38 @@ private final class PanelModel: ObservableObject {
             process.waitUntilExit()
             return (process.terminationStatus, result)
         } catch { return (1, error.localizedDescription) }
+    }
+
+    @discardableResult
+    func upgradeBundled(onComplete: @escaping () -> Void = {}) -> Bool {
+        guard upgradePending, begin(.upgrading) else { return false }
+        let upgrader = self.upgrader
+        DispatchQueue.global(qos: .userInitiated).async {
+            let (code, result) = upgrader()
+            DispatchQueue.main.async {
+                self.operation = .idle
+                if code == 0 {
+                    self.upgradePending = false
+                    self.needsInstallation = self.needsSetup()
+                    let step = SetupStep.load(from: self.progressURL)
+                    self.setupStep = step
+                    self.connectingPhone = step == .phone
+                    if step == .hooks { self.hookReviewStartedAt = Date().timeIntervalSince1970 }
+                    self.hasReadStatus = false
+                    self.refresh()
+                } else if code == 2 {
+                    // The background code is current; notification repair still needs user action.
+                    self.upgradePending = false
+                    self.needsInstallation = true
+                    self.refresh()
+                } else {
+                    self.message = result.split(separator: "\n").last.map(String.init)
+                        ?? "Paceman could not finish updating. Try again."
+                }
+                onComplete()
+            }
+        }
+        return true
     }
 
     func installBundled() {
@@ -553,6 +604,33 @@ private struct PairingView: View {
         }
         .padding(28).frame(width: 340)
         .onExitCommand(perform: onDone)
+    }
+}
+
+private struct UpgradeView: View {
+    @ObservedObject var model: PanelModel
+    var onComplete: () -> Void = {}
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            PacemanMark().frame(width: 40, height: 40)
+            Text(model.busy ? "Updating Paceman…" : "Paceman couldn’t finish updating")
+                .font(.title2.weight(.semibold))
+            if model.busy {
+                ProgressView().controlSize(.small)
+            } else {
+                if let message = model.message {
+                    Text(message).fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Button("Quit Paceman") { NSApplication.shared.terminate(nil) }
+                    Spacer()
+                    Button("Retry") { model.upgradeBundled(onComplete: onComplete) }
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+        }
+        .padding(24).frame(width: 380, alignment: .leading)
     }
 }
 
@@ -809,7 +887,11 @@ private struct SetupFlowView: View {
 
     var body: some View {
         VStack {
-            if model.needsInstallation {
+            if model.upgradePending {
+                UpgradeView(model: model, onComplete: {
+                    if !model.shouldPresentSetup { onComplete() }
+                })
+            } else if model.needsInstallation {
                 InstallationView(model: model)
             } else if model.connectingPhone {
                 ConnectionSetupView(model: model) {
@@ -1047,7 +1129,11 @@ private struct Panel: View {
 
     var body: some View {
         ZStack {
-            if model.needsInstallation {
+            if model.upgradePending {
+                UpgradeView(model: model, onComplete: {
+                    if model.shouldPresentSetup { onOpenSetup() }
+                })
+            } else if model.needsInstallation {
                 InstallationView(model: model)
             } else if model.showingManagement {
                 ManagementView(model: model, onReview: onOpenSetup)
@@ -1268,7 +1354,13 @@ private final class PacemanAppDelegate: NSObject, NSApplicationDelegate, NSWindo
         statusItem = item
         popover.behavior = .transient
         popover.delegate = self
-        if model.shouldPresentSetup || CommandLine.arguments.contains("--show-setup") { showSetup() }
+        if model.upgradeBundled(onComplete: { [weak self] in
+            guard let self else { return }
+            if self.model.shouldPresentSetup { self.showSetup() }
+            else { self.setupWindow?.close(); self.showPanel() }
+        }) {
+            showSetup()
+        } else if model.shouldPresentSetup || CommandLine.arguments.contains("--show-setup") { showSetup() }
         #endif
     }
 
