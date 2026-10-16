@@ -2,6 +2,8 @@ import SwiftUI
 
 enum CompanionLayout {
     static let pageInset: CGFloat = 20
+    static let actionMinimumHeight: CGFloat = 56
+    static let actionVerticalInset: CGFloat = 16
 }
 
 /// Shared text roles: required guidance stays primary, regardless of setup state.

@@ -38,27 +38,33 @@ struct CompanionSidebar<Content: View>: View {
             let progress = width > 0 ? offset / width : 0
             ZStack(alignment: .leading) {
                 theme.canvas.ignoresSafeArea()
+                theme.ink.opacity(0.035).ignoresSafeArea()
                 sidebar
                     .frame(width: width)
                     .accessibilityHidden(!isPresented)
                     .allowsHitTesting(isPresented)
                 content
                     .frame(width: geometry.size.width, height: geometry.size.height)
-                    .background(theme.canvas)
+                    .background(theme.canvas.ignoresSafeArea(.container))
                     .accessibilityHidden(isPresented)
                     .overlay {
                         if progress > 0 {
                             Button { close() } label: {
-                                Color.black.opacity(0.16 * progress).contentShape(Rectangle())
+                                Color.clear.contentShape(Rectangle()).ignoresSafeArea(.container)
                             }.buttonStyle(.plain).accessibilityHidden(true)
                         }
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: progress > 0 ? 24 : 0))
-                    .shadow(color: .black.opacity(0.16 * progress), radius: 16, x: -4 * sign)
+                    // Extend only the drawing mask, not the navigation stack's
+                    // layout. Native safe areas and keyboard avoidance stay intact.
+                    .mask {
+                        RoundedRectangle(cornerRadius: progress > 0 ? 56 : 0, style: .continuous)
+                            .ignoresSafeArea(.container)
+                    }
+                    .shadow(color: .black.opacity(0.20 * progress), radius: 24, x: -8 * sign)
                     .offset(x: sign * offset)
             }
             .simultaneousGesture(revealGesture(width: width, screenWidth: geometry.size.width))
-            .clipped()
+            .mask { Rectangle().ignoresSafeArea(.container) }
         }
         .background(theme.canvas.ignoresSafeArea())
         .onChange(of: isPresented) { _, shown in
@@ -70,8 +76,8 @@ struct CompanionSidebar<Content: View>: View {
     }
 
     private var sidebar: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(spacing: 16) {
+            HStack(spacing: 12) {
                 if !typeSize.isAccessibilitySize {
                     PacemanMark().foregroundStyle(theme.tint).frame(width: 24, height: 24)
                         .accessibilityHidden(true)
@@ -79,32 +85,35 @@ struct CompanionSidebar<Content: View>: View {
                 Text("Paceman").companionText(.sectionTitle, theme: theme)
                     .accessibilityAddTraits(.isHeader).accessibilityFocused($headingFocused)
                 Spacer(minLength: 0)
-                Button { close() } label: {
-                    Image(systemName: "xmark").font(.system(size: 16, weight: .medium))
-                        .frame(width: 44, height: 44)
-                }.buttonStyle(.plain).foregroundStyle(theme.secondaryInk)
-                    .accessibilityLabel("Close navigation")
             }
+            .frame(minHeight: 44, alignment: .leading)
+            .padding(.horizontal, CompanionLayout.pageInset)
             ScrollView {
                 VStack(spacing: 4) {
                     destination(.work)
                     destination(.devices)
                 }
             }
-            destination(.settings)
+            HStack {
+                Spacer(minLength: 0)
+                Button { select(.settings) } label: {
+                    Image(systemName: CompanionSection.settings.symbol)
+                        .font(.body.weight(.medium))
+                        .padding(12)
+                        .frame(minWidth: 48, minHeight: 48)
+                        .background(theme.ink.opacity(0.06), in: Circle())
+                }.buttonStyle(.plain).accessibilityLabel("Settings")
+                    .accessibilityAddTraits(selection == .settings ? .isSelected : [])
+            }.padding(.horizontal, CompanionLayout.pageInset)
         }
-        .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 8)
+        .padding(.horizontal, 12).padding(.vertical, 8)
         .foregroundStyle(theme.ink)
         .accessibilityAction(.escape) { close() }
     }
 
     private func destination(_ section: CompanionSection) -> some View {
         Button {
-            withAnimation(animation) {
-                selection = section
-                isPresented = false
-                translation = 0
-            }
+            select(section)
         } label: {
             HStack(spacing: 12) {
                 if !typeSize.isAccessibilitySize {
@@ -116,12 +125,21 @@ struct CompanionSidebar<Content: View>: View {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-            .padding(12)
+            .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 12)
             .background(selection == section ? theme.ink.opacity(0.08) : .clear,
                         in: RoundedRectangle(cornerRadius: 12))
             .contentShape(Rectangle())
         }.buttonStyle(.plain)
             .accessibilityAddTraits(selection == section ? .isSelected : [])
+    }
+
+    private func select(_ section: CompanionSection) {
+        withAnimation(animation) {
+            selection = section
+            isPresented = false
+            translation = 0
+            dragging = false
+        }
     }
 
     private func revealGesture(width: CGFloat, screenWidth: CGFloat) -> some Gesture {
@@ -146,7 +164,7 @@ struct CompanionSidebar<Content: View>: View {
     }
 
     private func close() {
-        withAnimation(animation) { isPresented = false; translation = 0 }
+        withAnimation(animation) { isPresented = false; translation = 0; dragging = false }
     }
 }
 

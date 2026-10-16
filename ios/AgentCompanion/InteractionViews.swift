@@ -191,7 +191,7 @@ struct InteractionDetail: View {
     }
 }
 
-/// Compact decision controls retain full touch targets and expand with Dynamic Type.
+/// Bottom decision controls have a generous baseline and expand with Dynamic Type.
 private struct InputActionButton: View {
     let title: String
     let theme: CompanionTheme
@@ -201,8 +201,9 @@ private struct InputActionButton: View {
         Button(action: action) {
             Text(title).font(CompanionTextRole.button.font)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, minHeight: 20)
-                .padding(.vertical, 12).padding(.horizontal, 16)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, CompanionLayout.actionVerticalInset).padding(.horizontal, 16)
+                .frame(minHeight: CompanionLayout.actionMinimumHeight)
                 .foregroundStyle(primary ? theme.canvas : theme.ink)
                 .background(primary ? theme.ink : theme.ink.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
         }.buttonStyle(.plain)
