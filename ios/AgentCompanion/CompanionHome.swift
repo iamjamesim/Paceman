@@ -125,7 +125,7 @@ struct CompanionWork: View {
         }
         .background(CompanionCanvas(theme: theme))
         .toolbarBackground(.hidden, for: .navigationBar)
-        .foregroundStyle(theme.ink).navigationTitle("Work").navigationBarTitleDisplayMode(.inline)
+        .foregroundStyle(theme.ink).navigationTitle("Activity").navigationBarTitleDisplayMode(.inline)
         .onChange(of: model.pairedSources.map(\.sourceID)) { _, ids in
             if let filter, filter != "samples", !ids.contains(filter) { self.filter = nil }
         }
@@ -248,6 +248,11 @@ struct CompanionWork: View {
                         let state = presentation.computerState(model: model, sourceID: source.sourceID)
                         let name = presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID])
                         computerChip(name, id: source.sourceID, state: state)
+                            .contextMenu {
+                                NavigationLink(value: FeedDestination.otherComputer(source.sourceID)) {
+                                    Label("Computer details", systemImage: "laptopcomputer")
+                                }
+                            }
                     }
                     #if DEBUG
                     if showSamples && !presentation.preview { computerChip("Sample Mac", id: "samples") }
@@ -536,11 +541,24 @@ struct CompanionDevices: View {
                 }.fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Computers").companionText(.sectionTitle, theme: theme).accessibilityAddTraits(.isHeader)
-                    VStack(spacing: 0) {
+                    HStack {
+                        Text("Computers").companionText(.sectionTitle, theme: theme).accessibilityAddTraits(.isHeader)
+                        Spacer(minLength: 8)
+                        if !model.pairedSources.isEmpty {
+                            Button { open(.pairing) } label: {
+                                Image(systemName: "plus").font(.body)
+                                    .frame(minWidth: 44, minHeight: 44)
+                            }.buttonStyle(.plain).accessibilityLabel("Connect a computer")
+                        }
+                    }
+                    VStack(spacing: 12) {
                         ForEach(model.pairedSources, id: \.sourceID) { source in
                             computerRow(source)
                         }
+                    }
+                    if model.pairedSources.isEmpty {
+                        Text("Install Paceman on the computer where you use Codex or Claude, then connect it here.")
+                            .companionText(.body, theme: theme)
                         Button { open(.pairing) } label: {
                             HStack(spacing: 12) {
                                 if !typeSize.isAccessibilitySize {
@@ -554,11 +572,6 @@ struct CompanionDevices: View {
                                 .padding(.horizontal, 16).padding(.vertical, 8)
                                 .contentShape(Rectangle())
                         }.buttonStyle(.plain)
-                    }
-                    .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 20))
-                    if model.pairedSources.isEmpty {
-                        Text("Install Paceman on the computer where you use Codex or Claude, then connect it here.")
-                            .companionText(.body, theme: theme)
                         CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
                     }
                 }
@@ -573,17 +586,18 @@ struct CompanionDevices: View {
     private func deviceTile<Glyph: View>(title: String, status: String, destination: FeedDestination,
                                        @ViewBuilder glyph: () -> Glyph) -> some View {
         Button { open(destination) } label: {
-            VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
                 if !typeSize.isAccessibilitySize {
-                    glyph().frame(width: 40, height: 48).accessibilityHidden(true)
+                    glyph().frame(width: 37, height: 44).accessibilityHidden(true)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title).companionText(.label, theme: theme)
                     Text(status).companionText(.supporting, theme: theme)
                 }.fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12).padding(.vertical, 12)
+            .frame(minHeight: 80, maxHeight: .infinity, alignment: .leading)
             .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 20))
             .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
             .contentShape(RoundedRectangle(cornerRadius: 20))
@@ -619,7 +633,10 @@ struct CompanionDevices: View {
                     Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
                         .foregroundStyle(theme.secondaryInk.opacity(0.6)).accessibilityHidden(true)
                 }
-            }.padding(.horizontal, 16).padding(.vertical, 12).contentShape(Rectangle())
+            }.padding(.horizontal, 20).padding(.vertical, 16)
+                .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 24))
+                .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
+                .contentShape(RoundedRectangle(cornerRadius: 24))
         }.buttonStyle(.plain)
     }
 }

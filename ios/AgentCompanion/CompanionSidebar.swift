@@ -1,11 +1,11 @@
 import SwiftUI
 
 enum CompanionSection: String, CaseIterable {
-    case work = "Work", devices = "Devices", settings = "Settings"
+    case work = "Activity", devices = "Devices", settings = "Settings"
 
     var symbol: String {
         switch self {
-        case .work: return "tray"
+        case .work: return "waveform.path.ecg"
         case .devices: return "laptopcomputer.and.iphone"
         case .settings: return "gearshape"
         }
