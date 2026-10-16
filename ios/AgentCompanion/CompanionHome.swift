@@ -429,20 +429,6 @@ struct WorkDetail: View {
                         Text(explanation(item)).companionText(.body, theme: theme)
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        if let url = item.session.appURL {
-                            Button {
-                                openFailed = false
-                                openURL(url) { accepted in openFailed = !accepted }
-                            } label: {
-                                HStack(spacing: 8) {
-                                    Text(item.session.provider == "claude" ? "Open Claude Code" : item.session.appLinkTitle)
-                                        .companionText(.link, theme: theme)
-                                    Image(systemName: "arrow.up.forward").font(.caption)
-                                        .accessibilityHidden(true)
-                                }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                    .contentShape(Rectangle())
-                            }.buttonStyle(.plain)
-                        }
                         if openFailed {
                             Text("Couldn’t open the agent app. Check that it’s installed on this iPhone.")
                                 .companionText(.body, theme: theme)
@@ -461,6 +447,17 @@ struct WorkDetail: View {
             .modifier(TaskScrollEdge())
             .foregroundStyle(theme.ink).background(CompanionCanvas(theme: theme))
             .modifier(TaskNavigationTitle(title: item?.session.displayName ?? "Task unavailable", subtitle: item?.context ?? ""))
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if let item, let url = item.session.appURL {
+                        Button("Open") {
+                            openFailed = false
+                            openURL(url) { accepted in openFailed = !accepted }
+                        }
+                        .accessibilityLabel(item.session.provider == "claude" ? "Open Claude Code" : item.session.appLinkTitle)
+                    }
+                }
+            }
             .toolbar(.hidden, for: .tabBar)
             .onAppear { displayedRequest = item?.request }
             .onChange(of: item?.request?.id) { _, _ in
