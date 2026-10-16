@@ -140,7 +140,7 @@ struct PairingFlow: View {
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 24).padding(.bottom, 32)
+                .padding(.horizontal, CompanionLayout.pageInset).padding(.bottom, 32)
         }.background(CompanionCanvas(theme: theme)).foregroundStyle(theme.ink)
             .navigationTitle(reconnecting ? "Reconnect computer" : "Connect computer").navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $scanner) {
@@ -269,14 +269,14 @@ struct NotificationSetup: View {
                 } else {
                     NotificationDeliveryControls(theme: theme, preview: preview)
                 }
-            }.padding(24)
+            }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 24)
         }.foregroundStyle(theme.ink).background(theme.canvas)
             .navigationTitle("Watch notifications")
             .navigationBarTitleDisplayMode(.inline)
             .safeAreaInset(edge: .bottom) {
                 if let done {
                     completionActions(done)
-                        .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
+                        .padding(.horizontal, CompanionLayout.pageInset).padding(.top, 16).padding(.bottom, 12)
                         .background(theme.canvas)
                 }
             }

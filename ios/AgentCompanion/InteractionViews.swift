@@ -68,13 +68,14 @@ struct InteractionDetail: View {
                     if sampleResponse != nil {
                         Text("Sample task · nothing is sent to an agent.").companionText(.supporting, theme: theme)
                     }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
             }
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !sent && (sending || retryable || editable) {
                     responseActions
-                        .padding(.horizontal, 16).padding(.vertical, 12)
+                        .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 12)
                         .frame(maxWidth: .infinity)
                         .background(theme.canvas)
                 }

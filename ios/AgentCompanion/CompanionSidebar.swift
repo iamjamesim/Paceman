@@ -93,7 +93,7 @@ struct CompanionSidebar<Content: View>: View {
             }
             destination(.settings)
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
+        .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 8)
         .foregroundStyle(theme.ink)
         .accessibilityAction(.escape) { close() }
     }

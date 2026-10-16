@@ -149,7 +149,8 @@ struct CompanionWork: View {
                         Text(model.pairedSources.isEmpty ? "Connect your computer to follow Codex and Claude tasks here." : awaitingActivity ? "Activity will appear when your computer connects." : "Tasks appear when an agent starts working.")
                             .companionText(.body, theme: theme)
                         if model.pairedSources.isEmpty { Button("Connect a computer", action: openDevices).companionText(.button, theme: theme) }
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
                 }
             }.padding(.top, 4)
         }.defaultScrollAnchor(presentation.previewScreen == "work-scrolled" ? .center : .top)
@@ -174,7 +175,7 @@ struct CompanionWork: View {
                                     .foregroundStyle(theme.secondaryInk.opacity(0.6))
                                     .accessibilityHidden(true)
                             }
-                        }.padding(.horizontal, 16).padding(.vertical, 12)
+                        }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 12)
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                 }
@@ -238,7 +239,7 @@ struct CompanionWork: View {
             }.buttonStyle(.plain)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel("Filter computers").accessibilityValue(filterName)
-                .padding(.horizontal, 16).padding(.vertical, 8).background(theme.canvas)
+                .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 8).background(theme.canvas)
         } else {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
@@ -251,7 +252,7 @@ struct CompanionWork: View {
                     #if DEBUG
                     if showSamples && !presentation.preview { computerChip("Sample Mac", id: "samples") }
                     #endif
-                }.padding(.horizontal, 16).padding(.vertical, 8)
+                }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 8)
             }.scrollIndicators(.hidden)
                 .modifier(WorkScrollEdge())
                 .fixedSize(horizontal: false, vertical: true)
@@ -304,7 +305,7 @@ private struct WorkSectionSurface<Content: View>: View {
     let theme: CompanionTheme
     @ViewBuilder var content: () -> Content
     var body: some View {
-        content().padding(.horizontal, 16).padding(.vertical, 8)
+        content().padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 8)
             .frame(maxWidth: .infinity)
             .background(theme.canvas)
     }
@@ -425,7 +426,8 @@ struct WorkDetail: View {
                             Text("Task no longer available").companionText(.title, theme: theme)
                             Text("Return to Work for the latest activity.").companionText(.body, theme: theme)
                         }
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
                 }.scrollDismissesKeyboard(.interactively)
             }
         }
@@ -560,7 +562,7 @@ struct CompanionDevices: View {
                         CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
                     }
                 }
-            }.padding(16)
+            }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
         }
         .modifier(TaskScrollEdge())
         .foregroundStyle(theme.ink).background(CompanionCanvas(theme: theme))

@@ -1,5 +1,9 @@
 import SwiftUI
 
+enum CompanionLayout {
+    static let pageInset: CGFloat = 20
+}
+
 /// Shared text roles: required guidance stays primary, regardless of setup state.
 enum CompanionTextRole {
     case title, body, label, supporting, link, button, sectionTitle, prompt

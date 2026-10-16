@@ -294,7 +294,8 @@ private struct SessionHandoffSheet: View {
                         Text("This session is no longer available. Check the latest activity in Paceman.")
                             .companionText(.body, theme: theme)
                     }
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(24)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 24)
             }
             .background(theme.canvas).foregroundStyle(theme.ink)
             .navigationTitle("Continue on phone").navigationBarTitleDisplayMode(.inline)
