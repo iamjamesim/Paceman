@@ -7,6 +7,7 @@ final class CompanionModel: ObservableObject {
     let accessories: WatchAccessories
     var watch: WatchLink { accessories.selected }
     let monitoring = MonitoringCoordinator()
+    let interactions = InteractionInbox()
     var weather: PhoneWeather { watch.phoneWeather }
     let designPreview: Bool
     @Published var pairedSources: [PairedSource] = []
@@ -122,6 +123,12 @@ final class CompanionModel: ObservableObject {
                     sourceName: "MacBook Pro", observedAt: observed, changedAt: observed,
                     freshFor: 30, state: .idle, eventID: "1", allowance: nil,
                     sessions: [], configuredProviders: providers)
+            }
+            if screen.hasPrefix("--screen=input-"), let source = pairedSources.first {
+                if !screen.contains("empty") {
+                    interactions.preview(source, kind: screen.contains("question") ? "question" : "approval", multiple: screen.contains("multiple"))
+                    if screen.contains("multiple") { interactions.preview(source) }
+                }
             }
             #endif
         } else {
@@ -321,6 +328,7 @@ final class CompanionModel: ObservableObject {
     }
 
     private func clearSnapshot(_ sourceID: String) {
+        interactions.remove(sourceID)
         snapshots.removeValue(forKey: sourceID)
         lastContacts.removeValue(forKey: sourceID)
         fetchedUptimes.removeValue(forKey: sourceID)
@@ -417,6 +425,7 @@ final class CompanionModel: ObservableObject {
     }
 
     private func sourceFailed(_ error: Error, sourceID: String) {
+        interactions.remove(sourceID)
         let revoked = (error as? HubError)?.isUnauthorized == true
         errors[sourceID] = revoked ? "Access removed on this computer. Scan a new pairing code to reconnect."
             : "Source unavailable: \(error.localizedDescription)"
@@ -432,6 +441,7 @@ final class CompanionModel: ObservableObject {
 
     func setForeground(_ value: Bool) {
         foreground = value
+        interactions.setForeground(value)
         for link in accessories.links {
             link.phoneWeather.setForeground(value)
             link.setForeground(value)
@@ -553,6 +563,7 @@ final class CompanionModel: ObservableObject {
             if nameChanged { await monitoring.refreshComputerName(sourceID) }
             Diagnostics.shared.record("snapshot_received", event: value.identity, state: value.state)
             push.recoverRegistrationIfNeeded()
+            if foreground { await interactions.refresh(paired, snapshot: value, client: client) }
             if fromPush, let identity = watchAggregate?.identity {
                 _ = await accessories.waitForDelivery(of: identity)
             }

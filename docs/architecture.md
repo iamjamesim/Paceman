@@ -1,6 +1,6 @@
 # Architecture
 
-Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, presents each computer separately, and forwards current activity to compatible Bluetooth accessories. Current activity monitoring does not transmit prompts, agent replies, or tool arguments.
+Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, groups tasks across computers by attention and activity, and forwards current activity to compatible Bluetooth accessories. Ordinary monitoring does not transmit prompts, agent replies, or tool arguments. The opt-in response bridge shares pending approvals and questions over the authenticated connection without copying conversation history.
 
 Individual session rows include an optional provider title. Codex titles come from metadata-only App Server reads; Claude titles come from explicit local `custom-title` / `ai-title` records. Prompt previews are never used as titles. Titles travel over private HTTPS to the phone and, on compatible Pebble firmware, owner-authenticated BLE; APNs activity payloads stay aggregate.
 
@@ -54,3 +54,27 @@ WatchConnectivity also supplies the paired-computer list and cached readings.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
 are in [data lifecycle](data-lifecycle.md).
+
+## Optional phone responses
+
+The source can run a separate private response socket with `--interaction-socket`.
+The installer does not enable it or register response hooks. Reviewed synchronous
+hooks submit one live request at a time through this socket, independently of
+activity monitoring. The phone fetches pending requests only in the foreground
+and responds through the existing authenticated private connection.
+
+The adapter implements one-time permission decisions for Codex and Claude, and
+Claude `AskUserQuestion` answers. Codex questions require a connection to the
+owning runtime and are not exposed as actionable requests. Waiting in a response
+hook delays the native desktop prompt; release or timeout returns to native
+handling. A submission receipt is not proof that the agent consumed the answer.
+
+## iPhone navigation
+
+Work combines source-scoped tasks into Needs you, Working, Recent, and Last known
+sections, with full-width pinned headings and Recent collapsed by default. Computer
+chips filter work and show connection freshness; only the current task state
+uses an active color. A task is identified by source, provider, and session, never its title.
+Task rows push a current-state page with session identity in its navigation bar,
+available response controls, and a handoff to the agent app. The phone does not infer a result from a completed turn.
+Devices owns computer connections, accessories, Live Activities, and settings.

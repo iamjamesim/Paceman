@@ -472,3 +472,28 @@ Implementations: [source API](../service/hub.py),
 [iPhone watch link](../ios/AgentCompanion/WatchLink.swift),
 [ESP32 ANCS client](../firmware/esp32-watch/firmware/main/watch_ancs.c), and
 [Pebble accessory service](../firmware/pebble-time-2/src/paceman_service.c).
+
+## Opt-in pending interactions
+
+`interactionsEnabled: true` in an authenticated snapshot advertises the separate
+response endpoint; its absence leaves the existing monitoring behavior unchanged.
+`GET /v1/interactions` returns `sourceID`, a broker `generation`, and `requests`.
+Each request has `requestID`, `version: 1`, provider, canonical hashed `sessionID`,
+kind (`approval` or `question`), title, exact detail, questions, and monotonic
+`remainingSeconds`. Question fields are `id`, `prompt`, `multiple`, and
+`options` containing label/description. Request IDs identify individual hook
+invocations, never tool names or display titles.
+
+`POST /v1/interactions` uses the paired bearer credential and supplies generation,
+requestID, version, idempotencyKey and action (`allowOnce`, `deny`, `answer`, or
+`release`). Answers map question IDs to `{selected: [option indices], text}`.
+The first valid response wins. An identical retry with the same key returns the
+same `submitted` receipt; a stale request or conflicting retry returns 409.
+A receipt confirms Paceman submission only. Broker generations change on access
+invalidation. Release emits no native decision and lets desktop handling resume.
+
+The private response socket accepts one bounded newline JSON request envelope
+`{request, timeoutSeconds}` and returns one action/answers object. It is separate
+from the observation socket. Content is capped at 64 KiB per request, 32 concurrent
+requests, four questions and 16 options per question. HTTP submissions are capped
+at 64 KiB. Responses are never sent through notifications or BLE.

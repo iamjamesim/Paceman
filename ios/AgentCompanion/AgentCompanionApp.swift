@@ -35,64 +35,76 @@ struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
     @State private var path: [FeedDestination] = []
-    @State private var focusedSourceID: String?
+    @State private var selectedTab = 0
+    #if DEBUG
+    @StateObject private var samples = SampleWorkStore()
+    #endif
     var theme: CompanionTheme { presentation.theme(dark: true) }
     var body: some View {
-        NavigationStack(path: $path) {
-            CompanionHome(model: model, monitoring: model.monitoring, presentation: presentation,
-                theme: theme, focusedSourceID: focusedSourceID) { path.append($0) }
-                .navigationDestination(for: FeedDestination.self) { destination in
-                    switch destination {
-                    case .computer: ComputerDetail(model: model, presentation: presentation, theme: theme)
-                    case .otherComputer(let id): ComputerDetail(model: model, presentation: presentation, theme: theme, sourceID: id)
-                    case .liveActivities: LiveActivitiesDetail(model: model, monitoring: model.monitoring,
-                        presentation: presentation, theme: theme)
-                    case .watch:
-                        AccessoriesScreen(model: model, theme: theme,
-                            connect: { path.append(.connectAccessory) }, open: { path.append(.accessory($0)) })
-                    case .connectAccessory:
-                        WatchIntroduction(theme: theme, watchTheme: presentation.themeFamily.glance) { kind in
-                            model.accessories.beginSetup(kind)
-                            path.append(.watchPairing)
+        TabView(selection: $selectedTab) {
+            NavigationStack {
+                CompanionWork(model: model, presentation: presentation, inbox: model.interactions, theme: theme) { selectedTab = 1 }
+            }.tabItem { Label("Work", systemImage: "tray") }.tag(0)
+            NavigationStack(path: $path) {
+                CompanionDevices(model: model, monitoring: model.monitoring, presentation: presentation,
+                    theme: theme) { path.append($0) }
+                    .navigationDestination(for: FeedDestination.self) { destination in
+                        switch destination {
+                        case .computer: ComputerDetail(model: model, presentation: presentation, theme: theme)
+                        case .otherComputer(let id): ComputerDetail(model: model, presentation: presentation, theme: theme, sourceID: id)
+                        case .liveActivities: LiveActivitiesDetail(model: model, monitoring: model.monitoring,
+                            presentation: presentation, theme: theme)
+                        case .watch:
+                            AccessoriesScreen(model: model, theme: theme,
+                                connect: { path.append(.connectAccessory) }, open: { path.append(.accessory($0)) })
+                        case .connectAccessory:
+                            WatchIntroduction(theme: theme, watchTheme: presentation.themeFamily.glance) { kind in
+                                model.accessories.beginSetup(kind)
+                                path.append(.watchPairing)
+                            }
+                        case .watchPairing, .accessory:
+                            WatchDetail(model: model, theme: theme, watchTheme: presentation.themeFamily.glance,
+                                accessory: { if case .accessory(let id) = destination { return model.accessories.links.first { $0.id == id } }; return nil }(),
+                                preview: presentation.preview, previewConnected: presentation.previewHasWatch,
+                                previewPhase: presentation.previewWatchPhase,
+                                previewComplete: presentation.previewScreen == "watch-complete",
+                                previewResuming: presentation.previewScreen == "watch-resume",
+                                previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen)
+                                    ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") {
+                                path.append(.watchNotifications)
+                            }
+                        case .pairing, .reconnect:
+                            PairingFlow(model: model, theme: theme, preview: presentation.preview,
+                                reconnectingSourceID: { if case .reconnect(let id) = destination { return id }; return nil }()) { sourceID in
+                                path = [.otherComputer(sourceID)]
+                                Task { await model.refresh(sourceID: sourceID) }
+                            }
+                        case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview)
+                        case .watchNotifications:
+                            NotificationSetup(model: model, theme: theme, preview: presentation.preview,
+                                              done: { path = [] }, continueSetup: { if model.watch.supportsWeather { path.append(.watchWeatherSetup) } else { path = [.watch] } })
+                        case .watchWeatherSetup:
+                            WeatherSettings(weather: model.weather, theme: theme,
+                                            finishSetup: { path = presentation.preview ? [] : [.watch] },
+                                            preview: presentation.preview)
+                        case .watchTroubleshooting: WatchUpdateTroubleshooting(model: model, theme: theme, preview: presentation.preview)
+                        case .settings: CompanionSettings(model: model, presentation: presentation, theme: theme)
+                        case .appearance: AppearanceSettings(model: model, presentation: presentation, theme: theme)
+                        case .diagnostics: TransportDiagnostics(model: model)
+                        case .weather: WeatherSettings(weather: model.weather, theme: theme)
                         }
-                    case .watchPairing, .accessory:
-                        WatchDetail(model: model, theme: theme, watchTheme: presentation.themeFamily.glance,
-                            accessory: { if case .accessory(let id) = destination { return model.accessories.links.first { $0.id == id } }; return nil }(),
-                            preview: presentation.preview, previewConnected: presentation.previewHasWatch,
-                            previewPhase: presentation.previewWatchPhase,
-                            previewComplete: presentation.previewScreen == "watch-complete",
-                            previewResuming: presentation.previewScreen == "watch-resume",
-                            previewState: ["watch-off", "watch-disconnected", "watch-empty", "watch-bluetooth-off"].contains(presentation.previewScreen)
-                                ? presentation.previewScreen.replacingOccurrences(of: "watch-", with: "") : "connected") {
-                            path.append(.watchNotifications)
-                        }
-                    case .pairing, .reconnect:
-                        PairingFlow(model: model, theme: theme, preview: presentation.preview,
-                            reconnectingSourceID: { if case .reconnect(let id) = destination { return id }; return nil }()) { sourceID in
-                            path = [.otherComputer(sourceID)]
-                            Task { await model.refresh(sourceID: sourceID) }
-                        }
-                    case .notifications: NotificationSetup(model: model, theme: theme, preview: presentation.preview)
-                    case .watchNotifications:
-                        NotificationSetup(model: model, theme: theme, preview: presentation.preview,
-                                          done: { path = [] }, continueSetup: { if model.watch.supportsWeather { path.append(.watchWeatherSetup) } else { path = [.watch] } })
-                    case .watchWeatherSetup:
-                        WeatherSettings(weather: model.weather, theme: theme,
-                                        finishSetup: { path = presentation.preview ? [] : [.watch] },
-                                        preview: presentation.preview)
-                    case .watchTroubleshooting: WatchUpdateTroubleshooting(model: model, theme: theme, preview: presentation.preview)
-                    case .settings: CompanionSettings(model: model, presentation: presentation, theme: theme)
-                    case .appearance: AppearanceSettings(model: model, presentation: presentation, theme: theme)
-                    case .diagnostics: TransportDiagnostics(model: model)
-                    case .weather: WeatherSettings(weather: model.weather, theme: theme)
                     }
-                }
+            }
+            .tabItem { Label("Devices", systemImage: "laptopcomputer.and.iphone") }.tag(1)
         }
         .sheet(item: Binding(get: { model.handoff }, set: { if $0 == nil { model.dismissHandoff() } })) { request in
             SessionHandoffSheet(model: model, presentation: presentation, request: request, theme: theme)
         }
         .tint(theme.tint)
         .preferredColorScheme(.dark)
+        #if DEBUG
+        .environmentObject(samples)
+        #endif
         .onAppear {
             if !presentation.preview {
                 presentation.syncComputerNames(model.pairedSources, snapshots: model.snapshots)
@@ -139,6 +151,7 @@ struct CompanionRoot: View {
             case "computer-usage", "computer-usage-stale", "computer-usage-empty", "computer-usage-expired", "computer-usage-claude-only", "computer", "computer-offline", "computer-revoked", "computer-stale", "computer-waiting", "computer-long": path = [.computer]
             default: break
             }
+            if !path.isEmpty { selectedTab = 1 }
         }
         .onChange(of: model.pairedSources.first?.sourceID) { _, new in
             guard !presentation.preview else { return }
@@ -158,9 +171,10 @@ struct CompanionRoot: View {
             #endif
             if url.host == "computer", let id = url.pathComponents.dropFirst().first,
                model.pairedSources.contains(where: { $0.sourceID == id }) {
-                focusedSourceID = id
-                path = []
+                selectedTab = 1
+                path = [.otherComputer(id)]
             } else {
+                selectedTab = url.host == "connect" ? 1 : 0
                 path = model.pairedSources.isEmpty && url.host == "connect" ? [.pairing] : []
             }
         }

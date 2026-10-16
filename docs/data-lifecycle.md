@@ -75,3 +75,20 @@ shares its bounded local diagnostic log with a current connection snapshot. The
 Mac menu app saves a report with source and hook status plus recent notification
 outcomes. Both use the same hashed source support ID for matching reports;
 neither report includes credentials, prompts, computer names, or raw push tokens.
+
+## Opt-in response bridge
+
+Pending request content and answers are memory-only and excluded from snapshots,
+SQLite, APNs, accessories, and diagnostics. A live private hook connection owns
+each request. Disconnect, timeout (60 seconds by default, at most 120), provider
+disable, source shutdown, or a pairing-set change invalidates pending work.
+Restart never restores or replays an approval. Exact retries are deduplicated
+using prompt-free receipt hashes, bounded to 256 entries for five minutes.
+
+The phone clears its request inbox on backgrounding or connection failure and
+refetches on return. A response already submitted may finish while backgrounded;
+there is no automatic response retry or background request polling. A manual retry
+uses the same response and idempotency key. Unknown delivery stays unconfirmed.
+
+Development builds include sample Work tasks whose answers stay in a separate
+protected local file. Reset sample tasks clears only those sample responses.

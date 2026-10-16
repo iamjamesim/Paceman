@@ -2,10 +2,11 @@ import SwiftUI
 
 /// Shared text roles: required guidance stays primary, regardless of setup state.
 enum CompanionTextRole {
-    case title, body, label, supporting, link, button
+    case title, body, label, supporting, link, button, sectionTitle, prompt
     var font: Font {
         switch self {
         case .title: return .title2.weight(.semibold)
+        case .sectionTitle, .prompt: return .headline
         case .body: return .callout
         case .label, .link: return .callout.weight(.medium)
         case .supporting: return .subheadline

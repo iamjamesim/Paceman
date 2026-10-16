@@ -175,6 +175,28 @@ final class SourceClient {
         }
     }
 
+    func inputRequests(_ source: PairedSource) async throws -> InputRequests {
+        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/interactions"))
+        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
+        let data = try await response(request, maximumBytes: 2_200_000)
+        return try InputRequests.decode(data, sourceID: source.sourceID)
+    }
+
+    func submitInput(_ value: InputSubmission, source: PairedSource) async throws {
+        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/interactions"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(value)
+        guard (request.httpBody?.count ?? 0) <= 65536 else { throw HubError.message("Response is too long.") }
+        let data = try await response(request)
+        let receipt = try JSONDecoder().decode(InputReceipt.self, from: data)
+        guard receipt.status == "submitted", receipt.generation == value.generation,
+              receipt.requestID == value.requestID, receipt.version == value.version else {
+            throw HubError.message("The computer did not confirm this response.")
+        }
+    }
+
     func snapshot(_ source: PairedSource) async throws -> Snapshot {
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/snapshot"))
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
@@ -338,13 +360,13 @@ final class SourceClient {
         }
     }
 
-    private func response(_ request: URLRequest) async throws -> Data {
+    private func response(_ request: URLRequest, maximumBytes: Int = 65536) async throws -> Data {
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw HubError.message("Invalid server response") }
         guard http.statusCode == 200 else {
             throw HubError.http(http.statusCode)
         }
-        guard data.count <= 65536 else { throw HubError.message("Status response too large") }
+        guard data.count <= maximumBytes else { throw HubError.message("Status response too large") }
         return data
     }
 }

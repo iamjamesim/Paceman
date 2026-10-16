@@ -438,22 +438,56 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, address, store: Store, adapter=None, desktop_status=None,
-                 relay_url=None, relay_credential_hash=None):
+                 relay_url=None, relay_credential_hash=None, interactions=None):
         self.store = store
         self.adapter = adapter
         self.desktop_status = desktop_status
         self.relay_url = relay_url
         self.relay_credential_hash = relay_credential_hash
+        self.interaction_lock = threading.RLock()
+        self.interactions = interactions
+        self.interaction_access = self.interaction_access_state()
         self.started = time.monotonic()
         self.pair_attempts: list[float] = []
         self.pair_lock = threading.Lock()
         super().__init__(address, Handler)
+
+    def interaction_access_state(self):
+        with self.store.connect() as db:
+            clients = tuple(row[0] for row in db.execute("SELECT hash FROM clients ORDER BY hash"))
+        providers = tuple(getattr(self.adapter, "providers", ("codex", "claude")))
+        return clients, providers
+
+    def check_interaction_access(self):
+        if self.interactions is None:
+            return
+        with self.interaction_lock:
+            state = self.interaction_access_state()
+            if state != self.interaction_access:
+                self.interactions.cancel_all()
+                self.interaction_access = state
+
+    def submit_interaction(self, token, payload):
+        from service.interactions import BrokerError
+        # Serialize authorization and consumption against revocation, including
+        # revocation from the desktop's separate process. No network IO in this lock.
+        with self.interaction_lock, self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            clients = tuple(row[0] for row in db.execute("SELECT hash FROM clients ORDER BY hash"))
+            state = clients, tuple(getattr(self.adapter, "providers", ("codex", "claude")))
+            if state != self.interaction_access:
+                self.interactions.cancel_all()
+                self.interaction_access = state
+            if digest(token) not in clients:
+                raise BrokerError("unauthorized", 401)
+            return self.interactions.submit(payload)
 
     def service_actions(self):
         # Scheduled events occur without a client request, essential for lock tests.
         self.store.tick()
         if self.adapter is not None:
             self.adapter.tick()
+        self.check_interaction_access()
         if self.desktop_status is not None:
             self.desktop_status.publish(self.adapter)
 
@@ -481,7 +515,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_GET(self):
-        if self.path not in ("/v1/snapshot", "/v1/push"):
+        if self.path not in ("/v1/snapshot", "/v1/push", "/v1/interactions"):
             self.reply(404, {"error": "not_found"})
             return
         prefix, _, token = self.headers.get("Authorization", "").partition(" ")
@@ -489,16 +523,47 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(401, {"error": "unauthorized"})
             return
         if self.path == "/v1/snapshot":
-            self.reply(200, self.server.store.snapshot())
+            snapshot = self.server.store.snapshot()
+            if self.server.interactions is not None:
+                snapshot["interactionsEnabled"] = True
+            self.reply(200, snapshot)
             self.server.store.client_fetched(token)
             if self.server.desktop_status is not None:
                 self.server.desktop_status.phone_fetched()
+            return
+        if self.path == "/v1/interactions":
+            if self.server.interactions is None:
+                self.reply(404, {"error": "not_found"})
+            else:
+                self.server.check_interaction_access()
+                self.reply(200, {"sourceID": self.server.store.metadata("source_id"),
+                                 **self.server.interactions.pending()})
             return
         if self.path == "/v1/push":
             value = self.server.store.push_device(token)
             self.reply(200 if value else 401, value or {"error": "unauthorized"})
             return
     def do_POST(self):
+        if self.path == "/v1/interactions":
+            from service.interactions import BrokerError
+            prefix, _, token = self.headers.get("Authorization", "").partition(" ")
+            if prefix != "Bearer" or not self.server.store.authorized(token):
+                self.reply(401, {"error": "unauthorized"})
+                return
+            if self.server.interactions is None:
+                self.reply(404, {"error": "not_found"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 65536 or self.headers.get("Transfer-Encoding"):
+                    raise ValueError()
+                payload = json.loads(self.rfile.read(length))
+                self.reply(200, self.server.submit_interaction(token, payload))
+            except BrokerError as error:
+                self.reply(error.status, {"error": error.code})
+            except (ValueError, TypeError, AttributeError, TimeoutError, RecursionError):
+                self.reply(400, {"error": "invalid_request"})
+            return
         if self.path in ("/v1/push", "/v1/live-activity", "/v1/watch-push"):
             prefix, _, token = self.headers.get("Authorization", "").partition(" ")
             if prefix != "Bearer" or not self.server.store.authorized(token):
@@ -558,6 +623,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/v1/client":
             prefix, _, token = self.headers.get("Authorization", "").partition(" ")
             revoked = self.server.store.revoke_self(token) if prefix == "Bearer" else False
+            self.server.check_interaction_access()
             self.reply(200 if revoked else 401, {"revoked": True} if revoked else {"error": "unauthorized"})
             return
         if self.path != "/v1/push":
@@ -575,6 +641,8 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("serve")
     run.add_argument("--port", type=int, default=8765)
+    run.add_argument("--interaction-socket", type=Path,
+                     help="Opt-in private response hook socket; not enabled by the installer")
     run.add_argument("--source", choices=("synthetic", "omarchy", "macos"), default="synthetic")
     run.add_argument("--status-file", type=Path, help="Private desktop status JSON (optional)")
     run.add_argument("--relay-config", type=Path, help="Installed relay config, when notifications use a relay")
@@ -649,6 +717,13 @@ def main():
                 server.desktop_status = DesktopStatus(args.status_file, store)
                 server.desktop_status.publish(server.adapter, force=True)
                 stack.callback(server.desktop_status.publish, server.adapter, stopped=True, force=True)
+            if args.interaction_socket:
+                from service.interactions import InteractionBroker, ResponseListener
+                server.interactions = InteractionBroker(provider_enabled=lambda provider:
+                    provider in getattr(server.adapter, "providers", ("codex", "claude")))
+                server.interaction_access = server.interaction_access_state()
+                stack.callback(server.interactions.close)
+                stack.enter_context(ResponseListener(server.interactions, args.interaction_socket))
             print(f"{args.source.title()} source listening on 127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever(poll_interval=0.25)
