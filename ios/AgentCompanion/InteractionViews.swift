@@ -5,8 +5,12 @@ struct InteractionDetail: View {
     let item: PendingInput
     @ObservedObject var inbox: InteractionInbox
     let theme: CompanionTheme
+    var taskTitle = ""
+    var taskContext = ""
+    var openFailure: String?
     var preview = false
     var sampleResponse: ((InputSubmission) throws -> Void)? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var phase
     @State private var answers: [String: InputAnswer] = [:]
     @State private var submission: InputSubmission?
@@ -19,68 +23,88 @@ struct InteractionDetail: View {
     private var editable: Bool { submission == nil && !sending && inbox.isCurrent(item) && phase == .active }
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            VStack(alignment: .leading, spacing: 16) {
-                if sent {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(submission?.action == "release" ? "Continue on your computer" : "Your response")
-                            .companionText(.prompt, theme: theme)
-                        if let submission, submission.action == "answer" {
-                            ForEach(item.request.questions) { question in
-                                if let answer = submission.answers[question.id] {
-                                    Text(answer.text.isEmpty ? answer.selected.map { question.options[$0].label }.joined(separator: ", ") : answer.text)
-                                        .companionText(.body, theme: theme)
-                                }
-                            }
-                        }
-                        if let submission, submission.action != "answer" && submission.action != "release" {
-                            Text(submission.action == "allowOnce" ? "Allowed once" : "Declined").companionText(.body, theme: theme)
-                        }
-                        Text(sampleResponse == nil ? "Waiting for the agent’s next update." : "Saved on this phone.")
-                            .companionText(.body, theme: theme)
-                    }
-                } else {
-                    if !item.request.title.isEmpty || !item.request.detail.isEmpty {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if typeSize.isAccessibilitySize {
                         VStack(alignment: .leading, spacing: 8) {
-                            if !item.request.title.isEmpty { Text(item.request.title).companionText(.prompt, theme: theme) }
-                            if !item.request.detail.isEmpty {
-                                Text(item.request.detail).companionText(.body, theme: theme).textSelection(.enabled)
-                            }
+                            Text(taskTitle).companionText(.title, theme: theme)
+                            Text(taskContext).companionText(.supporting, theme: theme)
                         }
                     }
-                    ForEach(item.request.questions) { question in questionForm(question) }
-                    if let message { Text(message).companionText(.body, theme: theme) }
-                    if sending {
-                        ProgressView("Sending response…").companionText(.body, theme: theme)
-                    } else if retryable {
-                        InputActionButton(title: "Retry same response", theme: theme) {
-                            if let submission { send(submission) }
-                        }.disabled(phase != .active)
-                    } else if editable {
-                        VStack(spacing: 8) {
-                            if item.request.kind == "approval" {
-                                InputActionButton(title: "Allow once", theme: theme) { respond("allowOnce") }
-                                InputActionButton(title: "Decline", theme: theme, primary: false) { respond("deny") }
-                            } else {
-                                InputActionButton(title: "Send answer", theme: theme) { respond("answer") }
-                                    .disabled(!ready)
+                    if sent {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(submission?.action == "release" ? "Continue on your computer" : "Your response")
+                                .companionText(.prompt, theme: theme)
+                            if let submission, submission.action == "answer" {
+                                ForEach(item.request.questions) { question in
+                                    if let answer = submission.answers[question.id] {
+                                        Text(answer.text.isEmpty ? answer.selected.map { question.options[$0].label }.joined(separator: ", ") : answer.text)
+                                            .companionText(.body, theme: theme)
+                                    }
+                                }
                             }
-                            if sampleResponse == nil {
-                                Button { respond("release") } label: {
-                                    Text("Continue on computer").companionText(.body, theme: theme)
-                                        .frame(minHeight: 44).contentShape(Rectangle())
+                            if let submission, submission.action != "answer" && submission.action != "release" {
+                                Text(submission.action == "allowOnce" ? "Allowed once" : "Declined").companionText(.body, theme: theme)
+                            }
+                            Text(sampleResponse == nil ? "Waiting for the agent’s next update." : "Saved on this phone.")
+                                .companionText(.body, theme: theme)
+                        }
+                    } else {
+                        if !item.request.title.isEmpty || !item.request.detail.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                if !item.request.title.isEmpty { Text(item.request.title).companionText(.prompt, theme: theme) }
+                                if !item.request.detail.isEmpty {
+                                    Text(item.request.detail).companionText(.body, theme: theme).textSelection(.enabled)
                                 }
                             }
                         }
-                    } else if message == nil {
-                        Text("This request is no longer available. Continue on your computer.").companionText(.body, theme: theme)
+                        ForEach(item.request.questions) { question in questionForm(question) }
+                        if let message { Text(message).companionText(.body, theme: theme) }
+                        if !sending && !retryable && !editable && message == nil {
+                            Text("This request is no longer available. Continue on your computer.").companionText(.body, theme: theme)
+                        }
                     }
+                    if let openFailure { Text(openFailure).companionText(.body, theme: theme) }
+                    if sampleResponse != nil {
+                        Text("Sample task · nothing is sent to an agent.").companionText(.supporting, theme: theme)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !sent && (sending || retryable || editable) {
+                    responseActions
+                        .padding(.horizontal, 16).padding(.vertical, 12)
+                        .frame(maxWidth: .infinity)
+                        .background(theme.canvas)
                 }
             }
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") { focusedQuestion = nil }
+    }
+
+    @ViewBuilder private var responseActions: some View {
+        VStack(spacing: 8) {
+            if sending {
+                ProgressView("Sending response…").companionText(.body, theme: theme)
+                    .frame(minHeight: 44)
+            } else if retryable {
+                InputActionButton(title: "Retry same response", theme: theme) {
+                    if let submission { send(submission) }
+                }.disabled(phase != .active)
+            } else if editable {
+                if item.request.kind == "approval" {
+                    InputActionButton(title: "Allow once", theme: theme) { respond("allowOnce") }
+                    InputActionButton(title: "Decline", theme: theme, primary: false) { respond("deny") }
+                } else {
+                    InputActionButton(title: "Send answer", theme: theme) { respond("answer") }
+                        .disabled(!ready)
+                }
+                if sampleResponse == nil {
+                    Button { respond("release") } label: {
+                        Text("Continue on computer").companionText(.body, theme: theme)
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                }
             }
         }
     }

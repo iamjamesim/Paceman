@@ -77,4 +77,7 @@ chips filter work and show connection freshness; only the current task state
 uses an active color. A task is identified by source, provider, and session, never its title.
 Task rows push a current-state page with session identity in its navigation bar,
 available response controls, and a handoff to the agent app. The phone does not infer a result from a completed turn.
-Devices owns computer connections, accessories, Live Activities, and settings.
+Work is the primary screen. A slide-under sidebar opens Devices and Settings;
+one native navigation stack owns pushed pages and back navigation. Devices owns
+computer connections, accessories, and Live Activities. Response actions stay in
+a keyboard-aware bottom safe area while the request content scrolls.

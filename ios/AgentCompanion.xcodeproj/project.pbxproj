@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		ACB000000000000000000005 /* CompanionSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF000000000000000000005 /* CompanionSidebar.swift */; };
 		09DACEC89D3557D06DF4B92C /* SourceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16321946EF3229AC1C8C8EF6 /* SourceClient.swift */; };
 		0BF3A498A71EE05330E5B618 /* AgentCompanionWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 89EFB625009FFE549BBA2B4E /* AgentCompanionWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		0C5EDA3F3E02E44F4ED21750 /* ../Resources/JetBrainsMono-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 4E4A1F447E8A84C824FABEA4 /* ../Resources/JetBrainsMono-SemiBold.ttf */; };
@@ -139,6 +140,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		ACF000000000000000000005 /* CompanionSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSidebar.swift; sourceTree = "<group>"; };
 		031E47700CF4F7D578075936 /* AgentCompanionWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCompanionWidgets.swift; sourceTree = "<group>"; };
 		0A9CDC126C239A459B50BF92 /* WatchLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchLink.swift; sourceTree = "<group>"; };
 		0EB40FFAB4E1EF97F47D1EC3 /* ../Shared/MonitoringActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/MonitoringActivity.swift; sourceTree = "<group>"; };
@@ -283,6 +285,7 @@
 			children = (
 				D379F6C442F8870FB0E79011 /* AgentCompanionApp.swift */,
 				54B7D4A440EEDD69EDC2A9FD /* CompanionHome.swift */,
+				ACF000000000000000000005 /* CompanionSidebar.swift */,
 				9942C20CC22E078951EFC383 /* CompanionModel.swift */,
 				D2E6D3C202B2837FA88267EB /* DesignComponents.swift */,
 				34730BE9166078328F7B4C2E /* DeviceScreens.swift */,
@@ -576,6 +579,7 @@
 			files = (
 				4DD859D1BE648823977083D7 /* AgentCompanionApp.swift in Sources */,
 				18D3411A0012A71F226E0018 /* CompanionHome.swift in Sources */,
+				ACB000000000000000000005 /* CompanionSidebar.swift in Sources */,
 				121B30221447365343E59D83 /* CompanionModel.swift in Sources */,
 				91631E219B023E6346746153 /* DesignComponents.swift in Sources */,
 				BBB120693469CAA1EDBDA723 /* DeviceScreens.swift in Sources */,

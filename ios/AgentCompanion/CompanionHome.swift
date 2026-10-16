@@ -89,9 +89,9 @@ struct CompanionWork: View {
     #endif
     @AppStorage("show-sample-work") private var showSamples = true
     let theme: CompanionTheme
+    @Binding var filter: String?
+    @Binding var recentExpanded: Bool
     let openDevices: () -> Void
-    @State private var filter: String?
-    @State private var recentExpanded = false
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
     var items: [WorkItem] {
@@ -126,21 +126,6 @@ struct CompanionWork: View {
         .background(CompanionCanvas(theme: theme))
         .toolbarBackground(.hidden, for: .navigationBar)
         .foregroundStyle(theme.ink).navigationTitle("Work").navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 8) {
-                    PacemanMark().frame(width: 25, height: 25).foregroundStyle(theme.tint)
-                    Text("PACEMAN").font(.custom("AvenirNext-BoldItalic", fixedSize: 21)).accessibilityLabel("Paceman")
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(action: openDevices) { Image(systemName: "laptopcomputer") }
-                    .accessibilityLabel("Manage computers and devices")
-            }
-        }
-        .navigationDestination(for: WorkIdentity.self) { identity in
-            WorkDetail(identity: identity, model: model, presentation: presentation, inbox: inbox, theme: theme)
-        }
         .onChange(of: model.pairedSources.map(\.sourceID)) { _, ids in
             if let filter, filter != "samples", !ids.contains(filter) { self.filter = nil }
         }
@@ -171,7 +156,6 @@ struct CompanionWork: View {
             .accessibilityIdentifier("work-list")
             // The list owns its scroll effects; the stationary filter is a sibling.
             .modifier(WorkScrollEdge())
-            .clipped()
             .refreshable { if !presentation.preview { await model.refreshAll() } }
     }
 
@@ -184,10 +168,12 @@ struct CompanionWork: View {
                             WorkRow(item: item, theme: theme,
                                 showComputer: filter == nil && Set(items.map { $0.id.sourceID }).count > 1)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(theme.secondaryInk.opacity(0.6))
-                                .accessibilityHidden(true)
+                            if !typeSize.isAccessibilitySize {
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(theme.secondaryInk.opacity(0.6))
+                                    .accessibilityHidden(true)
+                            }
                         }.padding(.horizontal, 16).padding(.vertical, 12)
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain)
@@ -399,57 +385,56 @@ struct WorkDetail: View {
         #endif
         return WorkCatalog.live(model: model, presentation: presentation, inbox: inbox).first { $0.id == identity }
     }
+    private var openFailure: String? {
+        openFailed ? "Couldn’t open the agent app. Check that it’s installed on this iPhone." : nil
+    }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if let item {
-                    if typeSize.isAccessibilitySize {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(item.session.displayName).companionText(.title, theme: theme)
-                            Text(item.context).companionText(.supporting, theme: theme)
-                        }
-                    }
-                    if item.request == nil && displayedRequest == nil {
-                        Text(item.status).companionText(.prompt, theme: theme)
-                    }
-                    if let request = displayedRequest, phase == .active {
-                        #if DEBUG
-                        if item.sample {
-                            InteractionDetail(item: request, inbox: samples.sampleInbox, theme: theme,
-                                sampleResponse: { try samples.respond(request, $0) }).id(request.id)
-                        } else {
-                            InteractionDetail(item: request, inbox: inbox, theme: theme, preview: presentation.preview).id(request.id)
-                        }
-                        #else
-                        InteractionDetail(item: request, inbox: inbox, theme: theme).id(request.id)
-                        #endif
-                    } else if let response = item.response {
-                        Text(response).companionText(.body, theme: theme)
-                    } else {
-                        Text(explanation(item)).companionText(.body, theme: theme)
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        if openFailed {
-                            Text("Couldn’t open the agent app. Check that it’s installed on this iPhone.")
-                                .companionText(.body, theme: theme)
-                        }
-                        if item.sample {
-                            Text("Sample task · nothing is sent to an agent.").companionText(.supporting, theme: theme)
-                        }
-                    }
+        VStack(spacing: 0) {
+            if let item, let request = displayedRequest, phase == .active {
+                #if DEBUG
+                if item.sample {
+                    InteractionDetail(item: request, inbox: samples.sampleInbox, theme: theme,
+                        taskTitle: item.session.displayName, taskContext: item.context, openFailure: openFailure,
+                        sampleResponse: { try samples.respond(request, $0) }).id(request.id)
                 } else {
-                    Text("Task no longer available").companionText(.title, theme: theme)
-                    Text("Return to Work for the latest activity.").companionText(.body, theme: theme)
+                    InteractionDetail(item: request, inbox: inbox, theme: theme,
+                        taskTitle: item.session.displayName, taskContext: item.context, openFailure: openFailure,
+                        preview: presentation.preview).id(request.id)
                 }
-            }.frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
-        }.scrollDismissesKeyboard(.interactively)
+                #else
+                InteractionDetail(item: request, inbox: inbox, theme: theme,
+                    taskTitle: item.session.displayName, taskContext: item.context, openFailure: openFailure).id(request.id)
+                #endif
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let item {
+                            if typeSize.isAccessibilitySize {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(item.session.displayName).companionText(.title, theme: theme)
+                                    Text(item.context).companionText(.supporting, theme: theme)
+                                }
+                            }
+                            Text(item.status).companionText(.prompt, theme: theme)
+                            Text(item.response ?? explanation(item)).companionText(.body, theme: theme)
+                            if let openFailure { Text(openFailure).companionText(.body, theme: theme) }
+                            if item.sample {
+                                Text("Sample task · nothing is sent to an agent.").companionText(.supporting, theme: theme)
+                            }
+                        } else {
+                            Text("Task no longer available").companionText(.title, theme: theme)
+                            Text("Return to Work for the latest activity.").companionText(.body, theme: theme)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                }.scrollDismissesKeyboard(.interactively)
+            }
+        }
             .modifier(TaskScrollEdge())
             .foregroundStyle(theme.ink).background(CompanionCanvas(theme: theme))
             .modifier(TaskNavigationTitle(title: item?.session.displayName ?? "Task unavailable", subtitle: item?.context ?? ""))
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    if let item, let url = item.session.appURL {
+                if let item, let url = item.session.appURL {
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button("Open") {
                             openFailed = false
                             openURL(url) { accepted in openFailed = !accepted }
@@ -458,7 +443,6 @@ struct WorkDetail: View {
                     }
                 }
             }
-            .toolbar(.hidden, for: .tabBar)
             .onAppear { displayedRequest = item?.request }
             .onChange(of: item?.request?.id) { _, _ in
                 if let request = item?.request { displayedRequest = request }
@@ -522,42 +506,119 @@ struct CompanionDevices: View {
     @ObservedObject var presentation: PresentationModel
     let theme: CompanionTheme
     let open: (FeedDestination) -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var accessoryStatus: String {
+        let count = model.accessories.saved.count
+        return count == 0 ? "Connect a watch" : "\(count) \(count == 1 ? "accessory" : "accessories")"
+    }
+    private var liveActivitiesStatus: String {
+        presentation.preview
+            ? MonitoringCoordinator.displayStatus(available: presentation.previewScreen != "live-activities-off",
+                pairedCount: model.pairedSources.count, enabledCount: model.pairedSources.count)
+            : monitoring.status
+    }
+
     var body: some View {
-        List {
-            Section("Computers") {
-                ForEach(model.pairedSources, id: \.sourceID) { source in
-                    Button { open(.otherComputer(source.sourceID)) } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "laptopcomputer").foregroundStyle(theme.secondaryInk)
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID])).companionText(.label, theme: theme)
-                                Text(presentation.computerState(model: model, sourceID: source.sourceID).rawValue).companionText(.supporting, theme: theme)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
-                        }.padding(.vertical, 8)
-                    }.buttonStyle(.plain)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                let layout = typeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+                layout {
+                    deviceTile(title: "Accessories", status: accessoryStatus, destination: .watch) {
+                        WatchGlyph(theme: presentation.themeFamily.glance, timeFormat: model.watch.timeFormat)
+                    }
+                    deviceTile(title: "Live Activities", status: liveActivitiesStatus, destination: .liveActivities) {
+                        LiveActivityGlyph(theme: presentation.themeFamily.glance)
+                    }
+                }.fixedSize(horizontal: false, vertical: true)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Computers").companionText(.sectionTitle, theme: theme).accessibilityAddTraits(.isHeader)
+                    VStack(spacing: 0) {
+                        ForEach(model.pairedSources, id: \.sourceID) { source in
+                            computerRow(source)
+                        }
+                        Button { open(.pairing) } label: {
+                            HStack(spacing: 12) {
+                                if !typeSize.isAccessibilitySize {
+                                    Image(systemName: "plus").font(.body).frame(width: 24)
+                                        .accessibilityHidden(true)
+                                }
+                                Text("Connect a computer").companionText(.link, theme: theme)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }.foregroundStyle(theme.tint)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .padding(.horizontal, 16).padding(.vertical, 8)
+                                .contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                    }
+                    .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 20))
+                    if model.pairedSources.isEmpty {
+                        Text("Install Paceman on the computer where you use Codex or Claude, then connect it here.")
+                            .companionText(.body, theme: theme)
+                        CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
+                    }
                 }
-                Button { open(.pairing) } label: { Label("Connect a computer", systemImage: "plus").companionText(.body, theme: theme) }
-                if model.pairedSources.isEmpty {
-                    Text("Install Paceman on the computer where you use Codex or Claude, then connect it here.").companionText(.body, theme: theme)
-                    CompanionExternalLink(title: "Setup guide", url: SetupGuide.url, theme: theme)
+            }.padding(16)
+        }
+        .modifier(TaskScrollEdge())
+        .foregroundStyle(theme.ink).background(CompanionCanvas(theme: theme))
+        .navigationTitle("Devices").navigationBarTitleDisplayMode(.inline)
+        .refreshable { if !presentation.preview { await model.refreshAll() } }
+    }
+
+    private func deviceTile<Glyph: View>(title: String, status: String, destination: FeedDestination,
+                                       @ViewBuilder glyph: () -> Glyph) -> some View {
+        Button { open(destination) } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                if !typeSize.isAccessibilitySize {
+                    glyph().frame(width: 40, height: 48).accessibilityHidden(true)
                 }
-            }.listRowBackground(theme.panel)
-            Section("Stay in touch") {
-                Button { open(.watch) } label: {
-                    Label("Accessories", systemImage: "watch.analog").companionText(.body, theme: theme)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).companionText(.label, theme: theme)
+                    Text(status).companionText(.supporting, theme: theme)
+                }.fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(16)
+            .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 20))
+        }.buttonStyle(.plain)
+            .accessibilityElement(children: .combine)
+    }
+
+    private func computerRow(_ source: PairedSource) -> some View {
+        let state = presentation.computerState(model: model, sourceID: source.sourceID)
+        let name = presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID])
+        let duplicate = model.pairedSources.filter {
+            presentation.displayName(source: $0, snapshot: model.snapshots[$0.sourceID]) == name
+        }.count > 1
+        return Button { open(.otherComputer(source.sourceID)) } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                if !typeSize.isAccessibilitySize {
+                    Image(systemName: "laptopcomputer").font(.body).frame(width: 24)
+                        .foregroundStyle(theme.secondaryInk).accessibilityHidden(true)
                 }
-                Button { open(.liveActivities) } label: {
-                    Label("Live Activities", systemImage: "waveform").companionText(.body, theme: theme)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(name).companionText(.label, theme: theme)
+                    Text(state == .current ? "Connected" : state == .revoked ? "Access removed" : "Connecting")
+                        .companionText(.supporting, theme: theme)
+                    if state != .current {
+                        ComputerReceiptLabel(model: model, presentation: presentation, sourceID: source.sourceID)
+                            .companionText(.supporting, theme: theme)
+                    }
+                    if duplicate, let host = source.endpoint.host {
+                        Text(host).companionText(.supporting, theme: theme)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                if !typeSize.isAccessibilitySize {
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                        .foregroundStyle(theme.secondaryInk.opacity(0.6)).accessibilityHidden(true)
                 }
-            }.listRowBackground(theme.panel)
-        }.foregroundStyle(theme.ink).scrollContentBackground(.hidden).background(CompanionCanvas(theme: theme))
-            .navigationTitle("Devices")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) {
-                Button { open(.settings) } label: { Image(systemName: "gearshape") }.accessibilityLabel("Settings")
-            } }
-            .refreshable { if !presentation.preview { await model.refreshAll() } }
+            }.padding(.horizontal, 16).padding(.vertical, 12).contentShape(Rectangle())
+        }.buttonStyle(.plain)
     }
 }
 
