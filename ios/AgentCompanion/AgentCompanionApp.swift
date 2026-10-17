@@ -85,7 +85,7 @@ struct CompanionRoot: View {
             case .work:
                 CompanionWork(model: model, presentation: presentation, inbox: model.interactions,
                     theme: theme, filter: $workFilter, recentExpanded: $recentExpanded) {
-                    selectedSection = .devices
+                    path.append(FeedDestination.pairing)
                 }
             case .devices:
                 CompanionDevices(model: model, monitoring: model.monitoring, presentation: presentation,

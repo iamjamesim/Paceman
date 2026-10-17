@@ -91,7 +91,7 @@ struct CompanionWork: View {
     let theme: CompanionTheme
     @Binding var filter: String?
     @Binding var recentExpanded: Bool
-    let openDevices: () -> Void
+    let connectComputer: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
     var items: [WorkItem] {
@@ -109,6 +109,12 @@ struct CompanionWork: View {
     private var visible: [WorkItem] {
         items.filter { filter == nil || $0.id.sourceID == filter }
     }
+    private var hasComputerFilters: Bool {
+        #if DEBUG
+        if showSamples && !presentation.preview { return true }
+        #endif
+        return !model.pairedSources.isEmpty
+    }
     private var awaitingActivity: Bool {
         model.pairedSources.contains { source in
             guard filter == nil || source.sourceID == filter else { return false }
@@ -119,7 +125,7 @@ struct CompanionWork: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 5)) { _ in
             VStack(spacing: 0) {
-                if !typeSize.isAccessibilitySize { computerFilters }
+                if hasComputerFilters && !typeSize.isAccessibilitySize { computerFilters }
                 taskList
             }
         }
@@ -135,20 +141,36 @@ struct CompanionWork: View {
     private var taskList: some View {
         ScrollView {
             LazyVStack(spacing: 0, pinnedViews: typeSize.isAccessibilitySize ? [] : [.sectionHeaders]) {
-                if typeSize.isAccessibilitySize { computerFilters }
+                if hasComputerFilters && typeSize.isAccessibilitySize { computerFilters }
+                if model.pairedSources.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Your work, wherever it runs").companionText(.title, theme: theme)
+                        Text("Connect your computer to follow Codex and Claude tasks here.")
+                            .companionText(.body, theme: theme)
+                        Button(action: connectComputer) {
+                            Text("Connect a computer").font(CompanionTextRole.button.font)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 16).padding(.vertical, CompanionLayout.actionVerticalInset)
+                                .frame(minHeight: CompanionLayout.actionMinimumHeight)
+                                .foregroundStyle(theme.canvas)
+                                .background(theme.ink, in: RoundedRectangle(cornerRadius: 16))
+                        }.buttonStyle(.plain)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
+                }
                 ForEach(WorkGroup.allCases, id: \.self) { group in
                     let rows = visible.filter { $0.group == group }
                     if !rows.isEmpty {
                         workSection(group, rows: rows)
                     }
                 }
-                if visible.isEmpty {
+                if !model.pairedSources.isEmpty && visible.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(model.pairedSources.isEmpty ? "Your work, wherever it runs" : awaitingActivity ? "No activity received yet" : filter == nil ? "No tasks to show" : "No tasks on this computer")
+                        Text(awaitingActivity ? "No activity received yet" : filter == nil ? "No tasks to show" : "No tasks on this computer")
                             .companionText(.title, theme: theme)
-                        Text(model.pairedSources.isEmpty ? "Connect your computer to follow Codex and Claude tasks here." : awaitingActivity ? "Activity will appear when your computer connects." : "Tasks appear when an agent starts working.")
+                        Text(awaitingActivity ? "Activity will appear when your computer connects." : "Tasks appear when an agent starts working.")
                             .companionText(.body, theme: theme)
-                        if model.pairedSources.isEmpty { Button("Connect a computer", action: openDevices).companionText(.button, theme: theme) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
                 }
@@ -229,6 +251,9 @@ struct CompanionWork: View {
                     if showSamples && !presentation.preview { Text("Sample Mac").tag(Optional("samples")) }
                     #endif
                 }
+                if !model.pairedSources.isEmpty {
+                    Button("Connect a computer", systemImage: "plus", action: connectComputer)
+                }
             } label: {
                 HStack {
                     Text(filterName).companionText(.label, theme: theme)
@@ -257,6 +282,14 @@ struct CompanionWork: View {
                     #if DEBUG
                     if showSamples && !presentation.preview { computerChip("Sample Mac", id: "samples") }
                     #endif
+                    if !model.pairedSources.isEmpty {
+                        Button(action: connectComputer) {
+                            Image(systemName: "plus").font(.body)
+                                .frame(minWidth: 44, minHeight: 44)
+                                .foregroundStyle(theme.tint)
+                                .background(theme.ink.opacity(0.04), in: Circle())
+                        }.buttonStyle(.plain).accessibilityLabel("Connect a computer")
+                    }
                 }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 8)
             }.scrollIndicators(.hidden)
                 .modifier(WorkScrollEdge())

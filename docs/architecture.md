@@ -74,7 +74,8 @@ handling. A submission receipt is not proof that the agent consumed the answer.
 Activity combines source-scoped tasks into Needs you, Working, Recent, and Last known
 sections, with full-width pinned headings and Recent collapsed by default. Computer
 chips filter work and show connection freshness; only the current task state
-uses an active color. A task is identified by source, provider, and session, never its title.
+uses an active color. Activity opens pairing directly from its no-computer state
+or the filter row's add action. A task is identified by source, provider, and session, never its title.
 Task rows push a current-state page with session identity in its navigation bar,
 available response controls, and a handoff to the agent app. The phone does not infer a result from a completed turn.
 Activity is the primary screen. A slide-under sidebar opens Devices and Settings;
