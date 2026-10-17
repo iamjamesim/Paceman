@@ -120,6 +120,7 @@ struct WorkItem: Identifiable {
         // row still needs to say what was observed, without relying on a glyph.
         if historical { return session.state == .needsInput ? "Needs attention" : session.state.title }
         if request != nil { return nil }
+        if phase == .responded { return nil }
         if state == .needsInput && (returnedToComputer || response != nil) { return status }
         if state == .needsInput {
             return inputAvailability == .available || inputAvailability == .disabled ? "Continue on computer" : nil
@@ -154,7 +155,7 @@ enum WorkPhase: Hashable {
         case .approval: return "Approval needed"
         case .question: return "Question for you"
         case .attention, .resolving: return "Needs your attention"
-        case .responded: return "Response sent"
+        case .responded: return "Working"
         case .continued: return "Continue on computer"
         default: return activity.title
         }
@@ -164,8 +165,7 @@ enum WorkPhase: Hashable {
         case .approval, .resolving: return .approval
         case .question: return .question
         case .attention, .continued: return .attention
-        case .working: return .working
-        case .responded: return .sent
+        case .working, .responded: return .working
         case .failed: return .failed
         case .finished: return .finished
         case .idle: return .idle
@@ -174,7 +174,7 @@ enum WorkPhase: Hashable {
 }
 
 enum WorkStatusToken: Hashable {
-    case approval, question, attention, working, failed, finished, idle, sent
+    case approval, question, attention, working, failed, finished, idle
     var symbol: String? {
         switch self {
         case .approval: return "hand.raised"
@@ -183,7 +183,6 @@ enum WorkStatusToken: Hashable {
         case .failed: return "xmark.circle"
         case .finished: return "checkmark.circle"
         case .idle: return "ellipsis.circle"
-        case .sent: return "paperplane"
         case .working: return nil
         }
     }

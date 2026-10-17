@@ -254,14 +254,14 @@ struct TaskCard: View {
             }
             VStack(alignment: .leading, spacing: 12) {
                 detailRow("Computer", symbol: "laptopcomputer", value: item.computer)
-                detailRow("Agent", symbol: "terminal", value: item.session.provider == "claude" ? "Claude Code" : item.session.provider.capitalized)
                 if !item.session.detail.isEmpty { detailRow("Project", symbol: "folder", value: item.session.detail) }
+                detailRow("Agent", symbol: "terminal", value: item.session.provider == "claude" ? "Claude Code" : item.session.provider.capitalized)
                 // Snapshot observation is computer-scoped. It is never a task
                 // start time or last activity time; the protocol supplies neither.
                 if let snapshot = model.snapshots[item.id.sourceID], snapshot.observedAt > 0 {
                     let observed = Date(timeIntervalSince1970: snapshot.observedAt)
-                    detailRow("Computer updated", symbol: "clock", value: observed
-                        .formatted(date: Calendar.current.isDateInToday(observed) ? .omitted : .abbreviated, time: .shortened))
+                    let time = observed.formatted(date: Calendar.current.isDateInToday(observed) ? .omitted : .abbreviated, time: .shortened)
+                    detailRow("Computer updated", symbol: "clock", value: "Computer updated \(time)", includesLabel: true)
                 }
             }
             if item.historical {
@@ -271,22 +271,17 @@ struct TaskCard: View {
         }
     }
 
-    private func detailRow(_ label: String, symbol: String, value: String) -> some View {
-        let layout = typeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 16))
-        return layout {
-            Label {
-                Text(label)
-            } icon: {
-                Image(systemName: symbol).resizable().scaledToFit()
-                    .frame(width: detailIconSize, height: detailIconSize).accessibilityHidden(true)
-            }.companionText(.supporting, theme: theme)
+    private func detailRow(_ label: String, symbol: String, value: String, includesLabel: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: symbol).resizable().scaledToFit()
+                .frame(width: detailIconSize, height: detailIconSize)
+                .companionText(.supporting, theme: theme).accessibilityHidden(true)
             Text(value).companionText(.body, theme: theme)
-                .frame(maxWidth: .infinity, alignment: typeSize.isAccessibilitySize ? .leading : .trailing)
-                .multilineTextAlignment(typeSize.isAccessibilitySize ? .leading : .trailing)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
-        }.accessibilityElement(children: .combine)
+        }.accessibilityElement(children: .ignore)
+            .accessibilityLabel(includesLabel ? value : "\(label), \(value)")
     }
 
     private var heading: TaskCardHeading {

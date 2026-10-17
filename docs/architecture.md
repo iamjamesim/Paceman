@@ -95,9 +95,10 @@ Live Activity taps open source-filtered Activity, not computer settings. A uniqu
 task in the displayed source revision opens its response card or task details;
 ambiguous or outdated summaries stay in the list without guessing a task.
 Response cards lead with the request and dismiss after confirmed submission outside Review;
-acknowledged responses leave Needs you, retaining a Response sent label until
-the agent updates. Idle uses a quiet ellipsis-circle; Response sent uses a static
-paper plane. Only current Working animates. A request lookup is scoped to its
+acknowledged responses leave Needs you and use the normal Working presentation
+until the agent updates. The receipt remains distinct from observed agent state;
+it does not establish execution or completion. Idle uses a quiet ellipsis-circle.
+Only current Working animates. A request lookup is scoped to its
 source event; loading never inherits an earlier event's native-only fallback.
 Uncertain delivery keeps the same response available for an explicit retry. A separate
 open icon on each addressable row opens the agent app and returns any still-pending

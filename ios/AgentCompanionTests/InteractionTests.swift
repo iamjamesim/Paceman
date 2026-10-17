@@ -850,8 +850,9 @@ final class InteractionTests: XCTestCase {
         let sent = item(.needsInput, delivery: .sent)
         XCTAssertEqual(sent.group, .working, "A confirmed response no longer needs a user action")
         XCTAssertEqual(sent.state, .needsInput, "Submission does not manufacture an agent state transition")
-        XCTAssertEqual(sent.statusToken, .sent)
-        XCTAssertEqual(sent.statusDetail, "Response sent")
+        XCTAssertEqual(sent.statusToken, .working)
+        XCTAssertNil(sent.statusDetail)
+        XCTAssertEqual(sent.status, "Working")
         let running = item(.working)
         XCTAssertEqual(running.group, .working)
         XCTAssertEqual(running.statusToken, .working)
@@ -878,7 +879,7 @@ final class InteractionTests: XCTestCase {
                                        "History must name the observed state, not show a delivery receipt")
                     }
                     if row.group == .working {
-                        XCTAssertEqual(row.statusToken, row.phase == .responded ? .sent : .working)
+                        XCTAssertEqual(row.statusToken, .working)
                     }
                     if state == .finished { XCTAssertEqual(row.statusToken, .finished) }
                     let nextRequest = item(state, historical: historical, request: pending, delivery: delivery)
@@ -930,8 +931,8 @@ final class InteractionTests: XCTestCase {
         var submitted = first
         submitted.delivery = .sent
         XCTAssertEqual(submitted.group, .working)
-        XCTAssertEqual(submitted.statusToken, .sent)
-        XCTAssertEqual(submitted.status, "Response sent")
+        XCTAssertEqual(submitted.statusToken, .working)
+        XCTAssertEqual(submitted.status, "Working")
         inbox.remove(pending.source.sourceID)
         XCTAssertNil(inbox.receipt(for: id))
     }
