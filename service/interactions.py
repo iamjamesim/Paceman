@@ -25,6 +25,7 @@ import uuid
 
 
 MAX_WIRE_BYTES = 65536
+RESPONSE_TIMEOUT_SECONDS = 600
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
 
 
@@ -128,7 +129,7 @@ class InteractionBroker:
 
     def _publish(self, request, timeout):
         normalized = _request(request)
-        if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 120:
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= RESPONSE_TIMEOUT_SECONDS:
             raise BrokerError("invalid_request")
         with self._lock:
             self._prune()
@@ -287,7 +288,7 @@ class _Handler(socketserver.BaseRequestHandler):
                 raise ValueError()
             message = json.loads(raw)
             _keys(message, ("request",), ("timeoutSeconds",))
-            pending = broker._publish(message["request"], message.get("timeoutSeconds", 60))
+            pending = broker._publish(message["request"], message.get("timeoutSeconds", RESPONSE_TIMEOUT_SECONDS))
             connection.settimeout(.2)
             while not pending.ready.is_set():
                 if select.select([connection], [], [], .05)[0]:

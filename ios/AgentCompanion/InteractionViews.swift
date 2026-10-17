@@ -10,6 +10,7 @@ struct InteractionDetail: View {
     var contentTopInset: CGFloat = 16
     var openSession: SessionOpenButton? = nil
     @Environment(\.scenePhase) private var phase
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var answers: [String: InputAnswer] = [:]
     private var response: InputResponseState? { inbox.response(for: item) }
     private var submission: InputSubmission? { response?.submission }
@@ -17,6 +18,11 @@ struct InteractionDetail: View {
     private var sent: Bool { response?.phase == .submitted }
     private var retryable: Bool { response?.phase == .unconfirmed }
     private var message: String? { response?.message }
+    private var approvalContent: ApprovalDetailContent { ApprovalDetailContent(item.request.detail) }
+    private var approvalAction: ApprovalActionContent? { approvalContent.action.map(ApprovalActionContent.init) }
+    private var requestTitle: String {
+        item.request.kind == "approval" ? approvalAction?.title(item.request.title) ?? item.request.title : item.request.title
+    }
     @FocusState private var focusedQuestion: String?
     private var ready: Bool {
         item.request.questions.allSatisfy { (answers[$0.id] ?? InputAnswer()).valid(for: $0) }
@@ -34,12 +40,15 @@ struct InteractionDetail: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     if let heading { heading }
+                    if typeSize.isAccessibilitySize, let message {
+                        Text(message).companionText(.body, theme: theme)
+                    }
                     if let context { Text(context).companionText(.supporting, theme: theme) }
                     if (item.request.kind != "question" && !item.request.title.isEmpty) || !item.request.detail.isEmpty {
-                        let directApproval = item.request.kind == "approval" && ApprovalDetailContent(item.request.detail).explanation.isEmpty
+                        let directApproval = item.request.kind == "approval" && approvalContent.explanation.isEmpty && approvalAction?.explanation == nil
                         VStack(alignment: .leading, spacing: directApproval ? CompanionLayout.taskPromptSpacing : 8) {
                             if !item.request.title.isEmpty && item.request.kind != "question" {
-                                Text(item.request.title).companionText(.cardTitle, theme: theme)
+                                Text(requestTitle).companionText(.cardTitle, theme: theme)
                                     .accessibilityAddTraits(.isHeader)
                             }
                             if !item.request.detail.isEmpty {
@@ -55,7 +64,6 @@ struct InteractionDetail: View {
                     if editable, let validationMessage {
                         Text(validationMessage).companionText(.body, theme: theme)
                     }
-                    if let message { Text(message).companionText(.body, theme: theme) }
                     if !sent && !sending && !retryable && !editable && message == nil {
                         Text("This request is no longer available. Continue on your computer.").companionText(.body, theme: theme)
                     }
@@ -66,8 +74,12 @@ struct InteractionDetail: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if (!sent && (sending || retryable || editable)) || openSession != nil {
+                if message != nil || (!sent && (sending || retryable || editable)) || openSession != nil {
                     VStack(spacing: 8) {
+                        if !typeSize.isAccessibilitySize, let message {
+                            Text(message).companionText(.body, theme: theme)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         if !sent && (sending || retryable || editable) { responseActions }
                         if let openSession { openSession }
                     }
@@ -160,23 +172,24 @@ struct InteractionDetail: View {
     }
 
     private var approvalDetail: some View {
-        let content = ApprovalDetailContent(item.request.detail)
+        let content = approvalContent
         return VStack(alignment: .leading, spacing: 24) {
             if !content.explanation.isEmpty {
                 Text(content.explanation).companionText(.body, theme: theme).textSelection(.enabled)
             }
-            if let action = content.action {
-                let presentation = ApprovalActionContent(action)
+            if let presentation = approvalAction {
+                if let explanation = presentation.explanation, explanation != content.explanation {
+                    Text(explanation).companionText(.body, theme: theme).textSelection(.enabled)
+                }
                 VStack(alignment: .leading, spacing: 12) {
                     if !presentation.body.isEmpty {
-                        Text(presentation.body).companionText(.code, theme: theme)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                            .background(theme.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+                        approvalCode(presentation.body)
                     }
-                    if let tool = presentation.tool, item.request.title != "Allow \(tool)?" {
+                    if let arguments = presentation.otherArguments {
+                        Text("Other arguments").companionText(.label, theme: theme)
+                        approvalCode(arguments)
+                    }
+                    if let tool = presentation.tool, presentation.kind == .tool, item.request.title != "Allow \(tool)?" {
                         Text("Tool: " + tool).companionText(.supporting, theme: theme).textSelection(.enabled)
                     }
                     if let directory = presentation.directory {
@@ -186,6 +199,15 @@ struct InteractionDetail: View {
                 }
             }
         }
+    }
+
+    private func approvalCode(_ value: String) -> some View {
+        Text(value).companionText(.code, theme: theme)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(theme.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private func respond(_ action: String) {

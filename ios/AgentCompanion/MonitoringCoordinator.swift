@@ -215,6 +215,8 @@ final class MonitoringCoordinator: ObservableObject {
             await end(activity, sourceID: sourceID)
         }
         for source in sources {
+            // Pairing or removal can finish while registration is awaiting I/O.
+            guard self.sources[source.sourceID]?.credential == source.credential else { continue }
             if !isEnabled(source.sourceID) {
                 if let activity = activities[source.sourceID] { await end(activity, sourceID: source.sourceID) }
                 continue

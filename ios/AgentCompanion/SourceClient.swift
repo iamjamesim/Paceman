@@ -104,6 +104,11 @@ enum PairedSourceOrder {
 
 final class NoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask,
+                    didFinishCollecting metrics: URLSessionTaskMetrics) {
+        Diagnostics.shared.recordSourceTransport(task: task, metrics: metrics)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)
@@ -119,6 +124,8 @@ final class SourceClient {
         configuration.httpCookieStorage = nil
         session = URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
     }
+
+    deinit { session.invalidateAndCancel() }
 
     func pair(_ invitation: Invitation, device: ClientDevice, previous: PairedSource? = nil) async throws -> PairedSource {
         let origin = try invitation.validatedURL()

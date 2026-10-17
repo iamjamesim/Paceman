@@ -45,6 +45,11 @@ Phone-side Remove accessory removes access; it does not reset watch ownership.
 
 ## Freshness and recovery
 
+Foreground status refreshes run independently per computer. Request lookups and
+Live Activity registration do not block them; concurrent status hints share one
+fetch per computer. Leaving the foreground cancels foreground-only reads, preserving
+fetches owned by push or Watch callbacks and submitted responses.
+
 - A source with no snapshot says `No activity received yet`; expired activity
   appears as `Last known:`.
 - Each Codex usage window retains its original observation and reset times; after reset it
@@ -82,7 +87,7 @@ neither report includes credentials, prompts, computer names, or raw push tokens
 
 Requests and answers are memory-only, excluded from snapshots, SQLite, APNs,
 accessories, and diagnostics. Each request belongs to a live hook connection;
-disconnect, timeout (60 seconds by default, maximum 120), provider disable, source
+disconnect, timeout (up to ten minutes), provider disable, source
 shutdown, or pairing changes invalidate it. Restart never replays approvals.
 Deduplication retains response hashes and receipt metadata, at most 256 for five minutes.
 

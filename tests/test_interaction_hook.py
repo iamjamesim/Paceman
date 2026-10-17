@@ -223,9 +223,9 @@ class InteractionHookTests(unittest.TestCase):
                     patch.dict(hook.os.environ, {"PACEMAN_INTERACTION_SOCKET": "/tmp/test.sock"}):
                 self.assertEqual(hook.exchange(request), expected)
             connection.connect.assert_called_once_with("/tmp/test.sock")
-            connection.settimeout.assert_called_once_with(62)
+            connection.settimeout.assert_called_once_with(602)
             envelope = json.loads(connection.sendall.call_args.args[0])
-            self.assertEqual(envelope, {"request": request, "timeoutSeconds": 60})
+            self.assertEqual(envelope, {"request": request, "timeoutSeconds": 600})
 
     def test_cli_fallback_exits_zero_without_stdout_or_stderr(self):
         with tempfile.TemporaryDirectory() as directory:

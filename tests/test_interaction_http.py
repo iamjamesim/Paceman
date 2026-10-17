@@ -96,6 +96,7 @@ class InteractionHTTPTests(unittest.TestCase):
                             self.fail('Executable hook did not publish its request')
                         time.sleep(.01)
                         listing = self.call('GET', '/v1/interactions')[1]
+                    self.assertGreater(listing['requests'][0]['remainingSeconds'], 590)
                     extra = {'answers': {'q0': {'selected': [0], 'text': ''}}} if is_question else {}
                     self.assertEqual(self.call('POST', '/v1/interactions',
                         self.answer(listing, action, **extra))[0], 200)

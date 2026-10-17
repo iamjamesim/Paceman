@@ -10,6 +10,7 @@ import stat
 import tempfile
 
 from macos.agents import PROVIDERS, configured_providers, hook_path
+from service.interactions import RESPONSE_TIMEOUT_SECONDS
 
 
 def enabled(root: Path) -> bool:
@@ -65,7 +66,7 @@ def updated_hooks(document, root: Path, python: str, provider: str, active: bool
                        else "^request_user_input(_async)?$"))
         for event, matcher in events:
             group = {"hooks": [{"type": "command", "command": command(root, python, provider),
-                                "timeout": 65}]}
+                                "timeout": RESPONSE_TIMEOUT_SECONDS + 5}]}
             if matcher:
                 group["matcher"] = matcher
             hooks.setdefault(event, []).append(group)

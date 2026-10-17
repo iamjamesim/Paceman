@@ -248,21 +248,25 @@ struct TaskCard: View {
                     if !isReview { TaskCardCloseButton(theme: theme) }
                 }
             }
-            HStack(spacing: 10) {
-                WorkStatusMark(item: item, theme: theme).frame(width: 18, height: 18)
-                Text(item.status).companionText(.body, theme: theme)
-            }
-            VStack(alignment: .leading, spacing: 12) {
-                detailRow("Computer", symbol: "laptopcomputer", value: item.computer)
-                if !item.session.detail.isEmpty { detailRow("Project", symbol: "folder", value: item.session.detail) }
-                detailRow("Agent", symbol: "terminal", value: item.session.provider == "claude" ? "Claude Code" : item.session.provider.capitalized)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
+                    WorkStatusMark(item: item, theme: theme).frame(width: 18, height: 18)
+                    Text(item.status).companionText(.body, theme: theme)
+                }
                 // Snapshot observation is computer-scoped. It is never a task
                 // start time or last activity time; the protocol supplies neither.
                 if let snapshot = model.snapshots[item.id.sourceID], snapshot.observedAt > 0 {
                     let observed = Date(timeIntervalSince1970: snapshot.observedAt)
                     let time = observed.formatted(date: Calendar.current.isDateInToday(observed) ? .omitted : .abbreviated, time: .shortened)
-                    detailRow("Computer updated", symbol: "clock", value: "Computer updated \(time)", includesLabel: true)
+                    Text("Last updated at \(time)").companionText(.supporting, theme: theme)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Computer status last updated at \(time)")
                 }
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                detailRow("Computer", symbol: "laptopcomputer", value: item.computer)
+                if !item.session.detail.isEmpty { detailRow("Project", symbol: "folder", value: item.session.detail) }
+                detailRow("Agent", symbol: "terminal", value: item.session.provider == "claude" ? "Claude Code" : item.session.provider.capitalized)
             }
             if item.historical {
                 Text("Last received activity. This task’s current status is unavailable.")
@@ -271,7 +275,7 @@ struct TaskCard: View {
         }
     }
 
-    private func detailRow(_ label: String, symbol: String, value: String, includesLabel: Bool = false) -> some View {
+    private func detailRow(_ label: String, symbol: String, value: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: symbol).resizable().scaledToFit()
                 .frame(width: detailIconSize, height: detailIconSize)
@@ -281,7 +285,7 @@ struct TaskCard: View {
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
         }.accessibilityElement(children: .ignore)
-            .accessibilityLabel(includesLabel ? value : "\(label), \(value)")
+            .accessibilityLabel("\(label), \(value)")
     }
 
     private var heading: TaskCardHeading {

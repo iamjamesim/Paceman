@@ -8,7 +8,7 @@ import threading
 import time
 import unittest
 
-from service.interactions import BrokerError, InteractionBroker, ResponseListener
+from service.interactions import BrokerError, InteractionBroker, ResponseListener, RESPONSE_TIMEOUT_SECONDS
 
 
 def approval(**changes):
@@ -92,6 +92,31 @@ class BrokerTests(unittest.TestCase):
             self.broker.submit(payload)
         self.broker._publish(approval(), 60)  # Still usable after revocation.
 
+    def test_question_remains_answerable_after_first_minute(self):
+        pending = self.broker._publish(question(), RESPONSE_TIMEOUT_SECONDS)
+        self.now += 61
+        request = self.broker.pending()["requests"][0]
+        self.assertEqual(request["remainingSeconds"], 539)
+        self.assertEqual(request["questions"], question()["questions"])
+        self.assertFalse(pending.ready.is_set())
+        self.now += 538
+        answers = {"q0": {"selected": [1], "text": ""}}
+        receipt = self.broker.submit(response(self.broker, pending, "answer", answers=answers))
+        self.assertEqual(receipt["status"], "submitted")
+        self.assertEqual(pending.response, {"action": "answer", "answers": answers})
+
+    def test_response_window_expires_at_ten_minutes_without_approving(self):
+        pending = self.broker._publish(question(), RESPONSE_TIMEOUT_SECONDS)
+        self.now += 599
+        self.assertEqual(self.broker.pending()["requests"][0]["remainingSeconds"], 1)
+        self.now += 1
+        self.assertEqual(self.broker.pending()["requests"], [])
+        self.assertEqual(pending.response, {"action": "release"})
+        with self.assertRaises(BrokerError) as rejected:
+            self.broker.submit(response(self.broker, pending, "answer",
+                answers={"q0": {"selected": [0], "text": ""}}))
+        self.assertEqual(rejected.exception.code, "stale_request")
+
     def test_question_cardinality_and_index_validation(self):
         for answer in ({"selected": [], "text": ""},
                        {"selected": [0, 1], "text": ""},
@@ -137,7 +162,7 @@ class BrokerTests(unittest.TestCase):
                         dict(question(), questions=[])):
             with self.assertRaises(BrokerError):
                 self.broker._publish(content, 60)
-        for timeout in (0, 121, float("nan"), float("inf"), True):
+        for timeout in (0, 601, float("nan"), float("inf"), True):
             with self.assertRaises(BrokerError):
                 self.broker._publish(approval(), timeout)
         for _ in range(32):
@@ -205,6 +230,7 @@ class ListenerTests(unittest.TestCase):
     def test_round_trip_and_no_native_consumption_claim(self):
         connection = self.connect({"request": approval()})
         request = self.until(lambda: self.broker.pending()["requests"])[0]
+        self.assertGreater(request["remainingSeconds"], 590)
         result = self.broker.submit(dict(generation=self.broker.generation,
             requestID=request["requestID"], version=1, idempotencyKey="one", action="deny"))
         self.assertEqual(result["status"], "submitted")
@@ -238,7 +264,7 @@ class ListenerTests(unittest.TestCase):
         self.assertFalse(self.path.exists())
 
     def test_invalid_payload_never_publishes(self):
-        for payload in ({"request": approval(), "timeoutSeconds": 121},
+        for payload in ({"request": approval(), "timeoutSeconds": 601},
                         {"request": dict(approval(), detail="x" * 20000)},
                         {"request": approval(), "unknown": "secret"}):
             connection = self.connect(payload)

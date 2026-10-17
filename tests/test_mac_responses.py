@@ -39,8 +39,11 @@ class ResponseSetupTests(unittest.TestCase):
             hook = value['hooks']['PermissionRequest'][-1]['hooks'][0]
             self.assertEqual(shlex.split(hook['command']), [sys.executable, '-B',
                 str(self.root / 'lib/macos/interaction_hook.py'), '--provider', provider])
-            self.assertEqual(hook['timeout'], 65)
+            self.assertEqual(hook['timeout'], 605)
             self.assertNotIn('async', hook)
+            question_hook = value['hooks']['PreToolUse'][-1]['hooks'][0]
+            self.assertEqual(question_hook['timeout'], hook['timeout'])
+            self.assertNotIn('async', question_hook)
             if provider == 'claude':
                 self.assertEqual(value['hooks']['PreToolUse'][-1]['matcher'], '^AskUserQuestion$')
             else:

@@ -40,12 +40,16 @@ struct ApprovalDetailContent {
         }
     }
 }
-/// Recognize only the bridge's leading metadata lines. The remaining tool input
-/// is displayed verbatim; unfamiliar or ambiguous lines remain in the action.
+/// Present the documented shell hook input without guessing the meaning of
+/// arbitrary tool fields. Unknown or malformed input stays verbatim.
 struct ApprovalActionContent {
+    enum Kind { case command, patch, tool }
     let body: String
     let tool: String?
     let directory: String?
+    let explanation: String?
+    let otherArguments: String?
+    let kind: Kind
     init(_ action: String) {
         var remaining = action[...]
         var parsedTool: String?
@@ -60,11 +64,48 @@ struct ApprovalActionContent {
             } else { break }
             remaining = end == remaining.endIndex ? ""[...] : remaining[remaining.index(after: end)...]
         }
-        if remaining.hasPrefix("Command: ") { remaining = remaining.dropFirst(9) }
+        let explicitCommand = remaining.hasPrefix("Command: ")
+        if explicitCommand { remaining = remaining.dropFirst(9) }
         else if remaining.hasPrefix("\n") { remaining = remaining.dropFirst() }
-        body = String(remaining)
         tool = parsedTool
         directory = parsedDirectory
+        let original = String(remaining)
+        // Codex normalizes shell_command/exec_command to Bash command/description.
+        // A field called description on an MCP tool may be content to write.
+        let knownKind: Kind? = ["Bash", "PowerShell"].contains(parsedTool ?? "") ? .command
+            : parsedTool == "apply_patch" ? .patch : nil
+        if !explicitCommand, let knownKind,
+           let data = original.data(using: .utf8),
+           var input = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let command = input["command"] as? String, !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            input.removeValue(forKey: "command")
+            let description = input["description"] as? String
+            if description != nil || input["description"] is NSNull { input.removeValue(forKey: "description") }
+            // Preserve every other argument, including unfamiliar fields and
+            // non-string descriptions. If re-encoding fails, keep the full input.
+            let extras = input.isEmpty ? nil : try? JSONSerialization.data(
+                withJSONObject: input, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            if input.isEmpty || extras != nil {
+                body = command
+                explanation = description?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? description : nil
+                otherArguments = extras.flatMap { String(data: $0, encoding: .utf8) }
+                kind = knownKind
+                return
+            }
+        }
+        body = original
+        explanation = nil
+        otherArguments = nil
+        kind = explicitCommand ? .command : .tool
+    }
+
+    func title(_ original: String) -> String {
+        guard original == "Allow \(tool ?? "")?" else { return original }
+        switch kind {
+        case .command: return "Run this command?"
+        case .patch: return "Apply these changes?"
+        case .tool: return original
+        }
     }
 }
 
@@ -87,7 +128,7 @@ struct InputRequests: Decodable {
                   request.sessionID.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil, !request.title.isEmpty,
                   request.title.unicodeScalars.count <= 256, request.detail.unicodeScalars.count <= 16384,
                   request.remainingSeconds.isFinite, request.remainingSeconds > 0,
-                  request.remainingSeconds <= 120, request.questions.count <= 4,
+                  request.remainingSeconds <= 600, request.questions.count <= 4,
                   Set(request.questions.map(\.id)).count == request.questions.count,
                   request.kind == "question" ? !request.questions.isEmpty : request.questions.isEmpty else {
                 throw HubError.message("The computer returned an unsupported request.")
@@ -164,6 +205,8 @@ struct InputResponseState {
 
 /// Request content lives in RAM only and is discarded on backgrounding.
 @MainActor final class InteractionInbox: ObservableObject {
+    private let client: SourceClient
+    init(client: SourceClient = SourceClient()) { self.client = client }
     @Published private(set) var bySource: [String: [PendingInput]] = [:]
     @Published private(set) var responses: [String: InputResponseState] = [:]
     @Published private(set) var availability: [String: InputAvailability] = [:]
@@ -189,7 +232,7 @@ struct InputResponseState {
         guard let item, !item.historical, item.state == .needsInput else { return nil }
         return item.request ?? response(for: item.id)?.item
     }
-    @discardableResult func releaseRequest(for identity: WorkIdentity, client: SourceClient = SourceClient()) -> Task<Void, Never>? {
+    @discardableResult func releaseRequest(for identity: WorkIdentity, client: SourceClient? = nil) -> Task<Void, Never>? {
         guard let item = items.first(where: {
             $0.source.sourceID == identity.sourceID && $0.request.provider == identity.provider
                 && $0.request.sessionID == identity.sessionID && isCurrent($0)
@@ -321,8 +364,12 @@ struct InputResponseState {
             bySource[source.sourceID] = pending
             reconcile(snapshot)
             availability[source.sourceID] = .available
+            Diagnostics.shared.record("interaction_fetch_received", sourceID: source.sourceID,
+                duration: ProcessInfo.processInfo.systemUptime - started)
         } catch {
-            guard expectedEpoch == epoch, revision == revisions[source.sourceID, default: 0] else { return }
+            guard !Task.isCancelled, expectedEpoch == epoch, revision == revisions[source.sourceID, default: 0] else { return }
+            Diagnostics.shared.recordError("interaction_fetch_failed", error: error, sourceID: source.sourceID,
+                duration: ProcessInfo.processInfo.systemUptime - started)
             if (error as? HubError)?.isUnauthorized == true { remove(source.sourceID) }
             sourceUnavailable(source.sourceID)
         }
@@ -350,7 +397,7 @@ struct InputResponseState {
     /// Submission belongs to the inbox, not to a sheet's lifetime. Reopening a
     /// card cannot create another decision while the original POST is in flight.
     @discardableResult func submit(_ item: PendingInput, action: String, answers: [String: InputAnswer] = [:],
-                client: SourceClient = SourceClient()) -> Task<Void, Never>? {
+                client: SourceClient? = nil) -> Task<Void, Never>? {
         guard isCurrent(item), responses[item.id] == nil, operations[item.id] == nil,
               ["answer", "allowOnce", "deny", "release"].contains(action) else { return nil }
         if action == "answer" {
@@ -363,27 +410,32 @@ struct InputResponseState {
         guard submission.fitsWireLimit else { return nil }
         responses[item.id] = InputResponseState(item: item, submission: submission,
             startedAt: ProcessInfo.processInfo.systemUptime, phase: .sending)
-        return send(item, submission: submission, client: client)
+        return send(item, submission: submission, client: client ?? self.client)
     }
 
-    @discardableResult func retry(_ item: PendingInput, client: SourceClient = SourceClient()) -> Task<Void, Never>? {
+    @discardableResult func retry(_ item: PendingInput, client: SourceClient? = nil) -> Task<Void, Never>? {
         guard active, var value = responses[item.id], value.phase == .unconfirmed else { return nil }
         value.phase = .sending
         value.message = nil
         responses[item.id] = value
-        return send(item, submission: value.submission, client: client)
+        return send(item, submission: value.submission, client: client ?? self.client)
     }
 
     private func send(_ item: PendingInput, submission: InputSubmission, client: SourceClient) -> Task<Void, Never> {
         let expectedEpoch = epoch
+        let started = ProcessInfo.processInfo.systemUptime
         let operation = Task { @MainActor [weak self] in
             defer { self?.operations.removeValue(forKey: item.id) }
             do {
                 try await client.submitInput(submission, source: item.source)
+                Diagnostics.shared.record("interaction_submit_confirmed", sourceID: item.source.sourceID,
+                    duration: ProcessInfo.processInfo.systemUptime - started)
                 guard let self, self.active, self.epoch == expectedEpoch,
                       self.responses[item.id]?.submission == submission else { return }
                 self.didSubmit(item, submission: submission)
             } catch {
+                Diagnostics.shared.recordError("interaction_submit_failed", error: error, sourceID: item.source.sourceID,
+                    duration: ProcessInfo.processInfo.systemUptime - started)
                 guard let self, self.active, self.epoch == expectedEpoch,
                       self.responses[item.id]?.submission == submission else { return }
                 let definitive: Bool

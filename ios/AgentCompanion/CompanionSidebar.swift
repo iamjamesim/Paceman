@@ -6,7 +6,7 @@ enum CompanionSection: String, CaseIterable {
 
     var symbol: String {
         switch self {
-        case .work: return "list.bullet.rectangle"
+        case .work: return "list.bullet.rectangle.portrait"
         case .devices: return "laptopcomputer.and.iphone"
         case .settings: return "gearshape"
         }

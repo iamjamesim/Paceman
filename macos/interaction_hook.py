@@ -12,9 +12,13 @@ from pathlib import Path
 import socket
 import sys
 
+# Direct hooks run from the installed macos directory, outside the package root.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from service.interactions import RESPONSE_TIMEOUT_SECONDS
+
 
 MAX_BYTES = 64 * 1024
-TIMEOUT_SECONDS = 60
+TIMEOUT_SECONDS = RESPONSE_TIMEOUT_SECONDS
 
 
 def _text(value, maximum, *, empty=False):
@@ -169,7 +173,6 @@ def native_response(provider, original, request, reply):
 
 def notify_answered(original):
     """Clear only this invocation's attention; send no question or answer text."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from macos.codex_hook import deliver
     turn, tool_id = original.get("turn_id"), original.get("tool_use_id")
     if not _text(turn, 160) or not _text(tool_id, 160):

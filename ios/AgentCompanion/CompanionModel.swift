@@ -7,7 +7,7 @@ final class CompanionModel: ObservableObject {
     let accessories: WatchAccessories
     var watch: WatchLink { accessories.selected }
     let monitoring = MonitoringCoordinator()
-    let interactions = InteractionInbox()
+    let interactions: InteractionInbox
     var weather: PhoneWeather { watch.phoneWeather }
     let designPreview: Bool
     @Published var pairedSources: [PairedSource] = []
@@ -27,6 +27,21 @@ final class CompanionModel: ObservableObject {
     private let pairedStore = PairedSourcesStore()
     private let savePairedSources: ([PairedSource]) throws -> Void
     private var polling: Task<Void, Never>?
+    private struct SourceRefresh {
+        let id: UUID
+        let task: Task<UIBackgroundFetchResult, Never>
+        var backgroundOwned: Bool
+    }
+    private struct RequestRefresh {
+        let id: UUID
+        let observation: String
+        let task: Task<Void, Never>
+    }
+    private var sourceRefreshes: [String: SourceRefresh] = [:]
+    private var requestRefreshes: [String: RequestRefresh] = [:]
+    private var monitoringRefresh: Task<Void, Never>?
+    private var monitoringRefreshPending = false
+    private var changedComputerNames: Set<String> = []
     private var sourceEpoch = UUID()
     private var foreground = false
     private var watchRefreshPending = false
@@ -34,6 +49,7 @@ final class CompanionModel: ObservableObject {
     private var watchPushSyncing = false
     private var watchPushSyncPending = false
     private var watchBackgroundTask = UIBackgroundTaskIdentifier.invalid
+    private var watchRefreshCallers = 0
     private var fetchedUptimes: [String: TimeInterval] = [:]
     private var changeObserver: AnyCancellable?
     private var weatherObservers: [String: AnyCancellable] = [:]
@@ -42,6 +58,7 @@ final class CompanionModel: ObservableObject {
     init(preview: Bool = false, push: PushCoordinator? = nil, client: SourceClient = SourceClient(),
          savePairedSources: (([PairedSource]) throws -> Void)? = nil) {
         self.client = client
+        self.interactions = InteractionInbox(client: client)
         self.push = push ?? .shared
         self.savePairedSources = savePairedSources ?? PairedSourcesStore().save
         designPreview = preview
@@ -312,7 +329,7 @@ final class CompanionModel: ObservableObject {
             let paired = try await client.pair(invitation, device: ClientDevice.current(), previous: existing)
             let values = PairedSourceOrder.updating(paired, in: pairedSources)
             try savePairedSources(values)
-            sourceEpoch = UUID()
+            invalidateRefreshes()
             pairedSources = values
             clearSnapshot(paired.sourceID)
             errors.removeValue(forKey: paired.sourceID)
@@ -328,6 +345,8 @@ final class CompanionModel: ObservableObject {
     }
 
     private func clearSnapshot(_ sourceID: String) {
+        sourceRefreshes.removeValue(forKey: sourceID)?.task.cancel()
+        requestRefreshes.removeValue(forKey: sourceID)?.task.cancel()
         interactions.remove(sourceID)
         snapshots.removeValue(forKey: sourceID)
         lastContacts.removeValue(forKey: sourceID)
@@ -411,7 +430,7 @@ final class CompanionModel: ObservableObject {
         let remaining = PairedSourceOrder.removing(paired.sourceID, from: pairedSources)
         // Commit credentials first. A storage failure must retain the connection.
         try savePairedSources(remaining)
-        sourceEpoch = UUID()
+        invalidateRefreshes()
         clearSnapshot(paired.sourceID)
         errors.removeValue(forKey: paired.sourceID)
         revokedSources.remove(paired.sourceID)
@@ -441,6 +460,7 @@ final class CompanionModel: ObservableObject {
     }
 
     func setForeground(_ value: Bool) {
+        guard foreground != value else { return }
         foreground = value
         interactions.setForeground(value)
         for link in accessories.links {
@@ -449,13 +469,21 @@ final class CompanionModel: ObservableObject {
         }
         polling?.cancel()
         polling = nil
+        cancelSourceRefreshes(includingBackground: false)
         Diagnostics.shared.record(value ? "app_foreground" : "app_background")
         if value {
             presentStoredHandoff()
             polling = Task { [weak self] in
                 while !Task.isCancelled {
                     self?.accessories.links.forEach { $0.phoneWeather.refreshIfNeeded() }
-                    await self?.refreshAll()
+                    if let self {
+                        // Each source has one owned operation. A slow computer
+                        // or request lookup cannot hold up another poll.
+                        for paired in self.pairedSources where !self.isRevoked(paired.sourceID) {
+                            _ = self.startRefresh(paired)
+                        }
+                        self.scheduleMonitoringRefresh()
+                    }
                     do { try await Task.sleep(nanoseconds: 5_000_000_000) }
                     catch { break }
                 }
@@ -487,20 +515,30 @@ final class CompanionModel: ObservableObject {
 
     @discardableResult
     func refreshAll(fromWatch: Bool = false) async -> UIBackgroundFetchResult {
-        if fromWatch && !foreground && watchBackgroundTask == .invalid {
-            watchBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Watch status response") { [weak self] in
-                self?.endWatchBackgroundTask()
+        if fromWatch {
+            watchRefreshCallers += 1
+            if watchBackgroundTask == .invalid {
+                watchBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Watch status response") { [weak self] in
+                    self?.endWatchBackgroundTask()
+                }
             }
         }
-        defer { if fromWatch && !watchRefreshPending && !watchRefreshScheduled { endWatchBackgroundTask() } }
+        defer {
+            if fromWatch {
+                watchRefreshCallers -= 1
+                if watchRefreshCallers == 0 && !watchRefreshPending && !watchRefreshScheduled { endWatchBackgroundTask() }
+            }
+        }
         if fromWatch && busy { watchRefreshPending = true; return .noData }
         var changed = false
         var failed = false
-        for paired in pairedSources where !isRevoked(paired.sourceID) {
-            let result = await refreshOne(paired)
+        let tasks = pairedSources.filter { !isRevoked($0.sourceID) }.compactMap { startRefresh($0, fromWatch: fromWatch) }
+        for task in tasks {
+            let result = await task.value
             changed = changed || result == .newData
             failed = failed || result == .failed
         }
+        if fromWatch { await monitoringRefresh?.value }
         await monitoring.retireExpiredStaleActivities()
         if fromWatch, let identity = watchAggregate?.identity { _ = await accessories.waitForDelivery(of: identity) }
         return changed ? .newData : failed ? .failed : .noData
@@ -508,31 +546,46 @@ final class CompanionModel: ObservableObject {
 
     @discardableResult
     func refresh(sourceID: String, fromPush: Bool = false) async -> UIBackgroundFetchResult {
-        if fromPush {
-            // Two computers can notify at once. Wait for the current fetch so
-            // the second hint has a chance to fetch its own source.
-            let deadline = ProcessInfo.processInfo.systemUptime + 12
-            while busy && ProcessInfo.processInfo.systemUptime < deadline {
-                do { try await Task.sleep(for: .milliseconds(100)) }
-                catch { return .noData }
-            }
+        guard let paired = pairedSources.first(where: { $0.sourceID == sourceID }), !isRevoked(sourceID),
+              let task = startRefresh(paired, fromPush: fromPush) else { return .noData }
+        let result = await task.value
+        if fromPush { await monitoringRefresh?.value }
+        if fromPush, let identity = watchAggregate?.identity {
+            _ = await accessories.waitForDelivery(of: identity)
         }
-        guard let paired = pairedSources.first(where: { $0.sourceID == sourceID }), !isRevoked(sourceID) else { return .noData }
-        return await refreshOne(paired, fromPush: fromPush)
+        return result
     }
 
-    private func refreshOne(_ paired: PairedSource, fromPush: Bool = false) async -> UIBackgroundFetchResult {
-        guard !busy else { return .noData }
+    private func startRefresh(_ paired: PairedSource, fromPush: Bool = false,
+                              fromWatch: Bool = false) -> Task<UIBackgroundFetchResult, Never>? {
+        guard !busy else { return nil }
+        let backgroundOwned = fromPush || fromWatch
+        if let current = sourceRefreshes[paired.sourceID] {
+            // A platform callback can join a foreground poll. Its ownership
+            // outlives the scene that happened to start the shared request.
+            if backgroundOwned { sourceRefreshes[paired.sourceID]?.backgroundOwned = true }
+            return current.task
+        }
+        let id = UUID()
+        let task = Task { [weak self] in
+            guard let self, !Task.isCancelled else { return UIBackgroundFetchResult.noData }
+            let result = await self.refreshOne(paired, fromPush: fromPush)
+            if self.sourceRefreshes[paired.sourceID]?.id == id {
+                self.sourceRefreshes.removeValue(forKey: paired.sourceID)
+            }
+            return result
+        }
+        sourceRefreshes[paired.sourceID] = SourceRefresh(id: id, task: task, backgroundOwned: backgroundOwned)
+        return task
+    }
+
+    private func refreshOne(_ paired: PairedSource, fromPush: Bool) async -> UIBackgroundFetchResult {
         let epoch = sourceEpoch
         let sourceID = paired.sourceID
         let previousIdentity = snapshots[sourceID]?.identity
         let recovering = errors[sourceID] != nil || snapshots[sourceID] == nil
-        busy = true
-        defer {
-            busy = false
-            schedulePendingWatchRefresh()
-        }
-        Diagnostics.shared.record(fromPush ? "push_triggered_fetch" : "foreground_fetch")
+        let started = ProcessInfo.processInfo.systemUptime
+        Diagnostics.shared.record(fromPush ? "push_triggered_fetch" : "foreground_fetch", sourceID: sourceID)
         do {
             let value = try await client.snapshot(paired)
             guard epoch == sourceEpoch, !Task.isCancelled else { return .noData }
@@ -560,22 +613,72 @@ final class CompanionModel: ObservableObject {
             catch { Diagnostics.shared.record("source_cache_write_failed") }
             forwardWatchAggregate()
             if recovering { Task { await syncWatchPush() } }
-            // Resolve the visible request before unrelated ActivityKit work.
-            if foreground { await interactions.refresh(paired, snapshot: value, client: client) }
-            await monitoring.reconcile(sources: pairedSources.filter { !isRevoked($0.sourceID) },
-                snapshots: snapshots, fresh: Set(pairedSources.filter { isFresh($0.sourceID) }.map(\.sourceID)))
-            if nameChanged { await monitoring.refreshComputerName(sourceID) }
-            Diagnostics.shared.record("snapshot_received", event: value.identity, state: value.state)
+            if foreground { refreshRequests(paired, snapshot: value) }
+            if nameChanged { changedComputerNames.insert(sourceID) }
+            scheduleMonitoringRefresh()
+            Diagnostics.shared.record("snapshot_received", event: value.identity, state: value.state,
+                sourceID: sourceID, duration: ProcessInfo.processInfo.systemUptime - started)
             push.recoverRegistrationIfNeeded()
-            if fromPush, let identity = watchAggregate?.identity {
-                _ = await accessories.waitForDelivery(of: identity)
-            }
             return value.identity == previousIdentity ? .noData : .newData
         } catch {
             guard epoch == sourceEpoch, !Task.isCancelled else { return .noData }
+            requestRefreshes.removeValue(forKey: sourceID)?.task.cancel()
             sourceFailed(error, sourceID: sourceID)
-            Diagnostics.shared.recordError("source_fetch_failed", error: error)
+            Diagnostics.shared.recordError("source_fetch_failed", error: error, sourceID: sourceID,
+                duration: ProcessInfo.processInfo.systemUptime - started)
             return .failed
+        }
+    }
+
+    private func refreshRequests(_ paired: PairedSource, snapshot: Snapshot) {
+        let sourceID = paired.sourceID
+        if let current = requestRefreshes[sourceID] {
+            if current.observation == snapshot.identity { return }
+            current.task.cancel()
+        }
+        let id = UUID()
+        let task = Task { [weak self] in
+            guard let self, !Task.isCancelled else { return }
+            await self.interactions.refresh(paired, snapshot: snapshot, client: self.client)
+            if self.requestRefreshes[sourceID]?.id == id {
+                self.requestRefreshes.removeValue(forKey: sourceID)
+            }
+        }
+        requestRefreshes[sourceID] = RequestRefresh(id: id, observation: snapshot.identity, task: task)
+    }
+
+    private func cancelSourceRefreshes(includingBackground: Bool = true) {
+        for (sourceID, refresh) in sourceRefreshes where includingBackground || !refresh.backgroundOwned {
+            refresh.task.cancel()
+            sourceRefreshes.removeValue(forKey: sourceID)
+        }
+        requestRefreshes.values.forEach { $0.task.cancel() }
+        requestRefreshes.removeAll()
+    }
+
+    private func invalidateRefreshes() {
+        sourceEpoch = UUID()
+        cancelSourceRefreshes()
+    }
+
+    private func scheduleMonitoringRefresh() {
+        monitoringRefreshPending = true
+        guard monitoringRefresh == nil else { return }
+        monitoringRefresh = Task { [weak self] in
+            guard let self else { return }
+            defer { self.monitoringRefresh = nil }
+            repeat {
+                self.monitoringRefreshPending = false
+                let names = self.changedComputerNames
+                self.changedComputerNames.removeAll()
+                await self.monitoring.reconcile(sources: self.pairedSources.filter { !self.isRevoked($0.sourceID) },
+                    snapshots: self.snapshots,
+                    fresh: Set(self.pairedSources.filter { self.isFresh($0.sourceID) }.map(\.sourceID)))
+                for sourceID in names where self.pairedSources.contains(where: { $0.sourceID == sourceID }) {
+                    await self.monitoring.refreshComputerName(sourceID)
+                }
+                await self.monitoring.retireExpiredStaleActivities()
+            } while self.monitoringRefreshPending
         }
     }
 

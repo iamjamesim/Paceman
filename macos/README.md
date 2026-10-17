@@ -24,7 +24,7 @@ reloads user hooks in a fresh session after workspace trust. Both agents add
 Unlike monitoring, these hooks share pending tool arguments, full working directory,
 and question/choice text with paired phones over private HTTPS. Content stays in
 memory, outside snapshots, storage, notifications, accessories, and diagnostics.
-Keep Paceman open to respond within 60 seconds; timeout or connection loss returns
+Keep Paceman open to respond within ten minutes; timeout or connection loss returns
 to native handling without approving. Secret Codex questions remain native;
 [provider handling differs](../docs/architecture.md#optional-phone-responses).
 

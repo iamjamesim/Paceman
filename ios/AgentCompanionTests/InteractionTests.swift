@@ -19,12 +19,15 @@ final class InteractionTests: XCTestCase {
         XCTAssertNil(ApprovalDetailContent(unknown).action)
     }
 
-    func testApprovalPresentationKeepsEveryArgumentAndAmbiguousLine() {
+    func testApprovalPresentationKeepsEveryArgumentAndAmbiguousLine() throws {
         let payload = "{\"command\":\"printf '日本語' && swift test\",\"timeout\":120,\"description\":\"Verify all changes\"}\n"
         let content = ApprovalActionContent("Tool: Bash\nWorking directory: /Projects/My App\n\n" + payload)
         XCTAssertEqual(content.tool, "Bash")
         XCTAssertEqual(content.directory, "/Projects/My App")
-        XCTAssertEqual(content.body, payload)
+        XCTAssertEqual(content.body, "printf '日本語' && swift test")
+        XCTAssertEqual(content.explanation, "Verify all changes")
+        let extras = try JSONSerialization.jsonObject(with: XCTUnwrap(content.otherArguments).data(using: .utf8)!) as? [String: Int]
+        XCTAssertEqual(extras, ["timeout": 120])
         let command = "echo one\nprintf 'two\\n'\n"
         XCTAssertEqual(ApprovalActionContent("Working directory: /tmp\nCommand: " + command).body, command)
         let unknown = "Custom input\nTool: this is part of the input\n"
@@ -32,6 +35,64 @@ final class InteractionTests: XCTestCase {
         let duplicate = ApprovalActionContent("Tool: Bash\nTool: another tool\nCommand: preserve this")
         XCTAssertEqual(duplicate.tool, "Bash")
         XCTAssertEqual(duplicate.body, "Tool: another tool\nCommand: preserve this")
+    }
+
+    func testShellApprovalPromotesReasonAndKeepsExactCommandForBothHookFormats() throws {
+        let command = "printf '日本語\\n'\nprintf '%s' \"$HOME\"\n"
+        let reason = "May I identify the read-only process so I can stop its slow search?"
+        for tool in ["Bash", "PowerShell"] {
+            let payload = try JSONSerialization.data(withJSONObject: ["command": command, "description": reason])
+            let content = ApprovalActionContent("Tool: \(tool)\nWorking directory: /Projects/My App\n\n" + String(decoding: payload, as: UTF8.self))
+            XCTAssertEqual(content.title("Allow \(tool)?"), "Run this command?")
+            XCTAssertEqual(content.title("Run the test suite?"), "Run the test suite?")
+            XCTAssertEqual(content.explanation, reason)
+            XCTAssertEqual(content.body, command)
+            XCTAssertEqual(content.directory, "/Projects/My App")
+            XCTAssertNil(content.otherArguments)
+        }
+    }
+
+    func testApprovalWithoutReasonAndWithAdditionalArgumentsDoesNotLoseInput() throws {
+        for description in [NSNull(), "", "  ", 42] as [Any] {
+            let input: [String: Any] = ["command": "swift test", "description": description,
+                "timeout": 120_000, "run_in_background": true, "environment": ["MODE": "verify"]]
+            let data = try JSONSerialization.data(withJSONObject: input)
+            let content = ApprovalActionContent("Tool: Bash\nWorking directory: /tmp\n\n" + String(decoding: data, as: UTF8.self))
+            XCTAssertNil(content.explanation)
+            XCTAssertEqual(content.body, "swift test")
+            let extraData = try XCTUnwrap(content.otherArguments).data(using: .utf8)!
+            let extras = try XCTUnwrap(JSONSerialization.jsonObject(with: extraData) as? [String: Any])
+            XCTAssertEqual(extras["timeout"] as? Int, 120_000)
+            XCTAssertEqual(extras["run_in_background"] as? Bool, true)
+            XCTAssertEqual(extras["environment"] as? [String: String], ["MODE": "verify"])
+            if description is Int { XCTAssertEqual(extras["description"] as? Int, 42) }
+        }
+        let content = ApprovalActionContent("Tool: Bash\n\n{\"command\":\"pwd\"}")
+        XCTAssertEqual(content.body, "pwd")
+        XCTAssertNil(content.explanation)
+        XCTAssertNil(content.otherArguments)
+    }
+
+    func testUnknownAndMalformedApprovalsStayVerbatimAndPatchIsNotAShellCommand() throws {
+        let payload = #"{"command":"not necessarily a shell command","description":"Content to write","other":[1,true]}"#
+        for tool in ["mcp__issues__create", "Write", "Edit", "exec_command"] {
+            let content = ApprovalActionContent("Tool: \(tool)\n\n" + payload)
+            XCTAssertEqual(content.body, payload)
+            XCTAssertNil(content.explanation)
+            XCTAssertEqual(content.title("Allow \(tool)?"), "Allow \(tool)?")
+        }
+        for invalid in ["{\"command\":", "{\"command\":[\"ls\"],\"description\":\"List files\"}", "{\"description\":\"Missing command\"}"] {
+            let content = ApprovalActionContent("Tool: Bash\n\n" + invalid)
+            XCTAssertEqual(content.body, invalid)
+            XCTAssertNil(content.explanation)
+            XCTAssertEqual(content.title("Allow Bash?"), "Allow Bash?")
+        }
+        let patch = "*** Begin Patch\n*** Delete File: old.txt\n*** End Patch"
+        let data = try JSONSerialization.data(withJSONObject: ["command": patch, "description": "Remove the obsolete file."])
+        let content = ApprovalActionContent("Tool: apply_patch\n\n" + String(decoding: data, as: UTF8.self))
+        XCTAssertEqual(content.title("Allow apply_patch?"), "Apply these changes?")
+        XCTAssertEqual(content.body, patch)
+        XCTAssertEqual(content.explanation, "Remove the obsolete file.")
     }
 
     @MainActor func testCatalogPreservesDistinctSessionIdentityAndLegacyActivity() throws {
@@ -64,6 +125,234 @@ final class InteractionTests: XCTestCase {
         XCTAssertTrue(WorkCatalog.live(model: model, presentation: presentation, inbox: inbox).isEmpty)
     }
 
+    private func refreshSource(_ host: String) -> PairedSource {
+        PairedSource(endpoint: URL(string: "https://\(host).example")!, sourceID: UUID().uuidString,
+            clientID: UUID().uuidString, credential: "test")
+    }
+
+    private func refreshSnapshot(_ source: PairedSource, revision: Int = 1,
+                                 state: String = "working", interactions: Bool = false) -> Data {
+        try! JSONSerialization.data(withJSONObject: [
+            "schema": 1, "sourceID": source.sourceID, "generation": source.sourceID,
+            "revision": revision, "eventID": String(revision), "sourceName": "Test",
+            "observedAt": Date().timeIntervalSince1970, "changedAt": Date().timeIntervalSince1970,
+            "freshFor": 30, "state": state, "interactionsEnabled": interactions,
+            "sessions": [["id": String(repeating: "a", count: 64), "provider": "claude", "state": state]]])
+    }
+
+    @MainActor func testSlowFirstComputerDoesNotDelayOtherComputerOrItsNextRefresh() async throws {
+        let slow = refreshSource("slow"), fast = refreshSource("fast")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config))
+        model.pairedSources = [slow, fast]
+        model.snapshots = [:]
+        let slowStarted = expectation(description: "first computer pending")
+        let fastStarted = expectation(description: "second computer requested independently")
+        var pending: InteractionURLProtocol?
+        var revision = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.host == slow.endpoint.host {
+                    pending = transport
+                    slowStarted.fulfill()
+                } else {
+                    revision += 1
+                    transport.finish(self.refreshSnapshot(fast, revision: revision))
+                    if revision == 1 { fastStarted.fulfill() }
+                }
+            }
+        }
+        defer { InteractionURLProtocol.start = nil }
+        let all = Task { await model.refreshAll() }
+        await fulfillment(of: [slowStarted, fastStarted], timeout: 2)
+        let first = await model.refresh(sourceID: fast.sourceID)
+        XCTAssertEqual(first, .newData)
+        XCTAssertNotNil(model.snapshots[fast.sourceID])
+        XCTAssertNil(model.snapshots[slow.sourceID])
+        let next = await model.refresh(sourceID: fast.sourceID)
+        XCTAssertEqual(next, .newData)
+        XCTAssertGreaterThanOrEqual(revision, 2)
+        XCTAssertFalse(model.busy, "Status reads must not block pairing controls")
+        pending?.client?.urlProtocol(pending!, didFailWithError: URLError(.timedOut))
+        _ = await all.value
+        XCTAssertNotNil(model.errors[slow.sourceID])
+        XCTAssertNil(model.errors[fast.sourceID])
+    }
+
+    @MainActor func testPendingRequestReadDoesNotBlockSnapshotsAndIsCancelledInBackground() async throws {
+        let source = refreshSource("fast")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        let started = expectation(description: "request lookup pending")
+        let stopped = expectation(description: "request lookup cancelled on background")
+        var snapshots = 0
+        var requests = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.path == "/v1/snapshot" {
+                    snapshots += 1
+                    transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                } else {
+                    requests += 1
+                    started.fulfill()
+                }
+            }
+        }
+        InteractionURLProtocol.stop = { transport in
+            if transport.request.url?.path == "/v1/interactions" { stopped.fulfill() }
+        }
+        defer { model.setForeground(false); InteractionURLProtocol.start = nil; InteractionURLProtocol.stop = nil }
+        model.setForeground(true)
+        await fulfillment(of: [started], timeout: 2)
+        _ = await model.refresh(sourceID: source.sourceID)
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertGreaterThanOrEqual(snapshots, 2)
+        XCTAssertEqual(requests, 1, "A repeated snapshot must coalesce the same pending lookup")
+        XCTAssertNil(model.errors[source.sourceID])
+        model.setForeground(false)
+        await fulfillment(of: [stopped], timeout: 2)
+        XCTAssertTrue(model.interactions.items.isEmpty)
+        XCTAssertNil(model.interactions.availability[source.sourceID], "Cancellation must not become a connection failure")
+    }
+
+    @MainActor func testConcurrentRefreshHintsShareOneSourceOperation() async throws {
+        let source = refreshSource("fast")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        let started = expectation(description: "one source request")
+        var pending: InteractionURLProtocol?
+        var count = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in count += 1; pending = transport; started.fulfill() }
+        }
+        defer { InteractionURLProtocol.start = nil }
+        let first = Task { await model.refresh(sourceID: source.sourceID) }
+        await fulfillment(of: [started], timeout: 2)
+        let second = Task { await model.refresh(sourceID: source.sourceID, fromPush: true) }
+        await Task.yield()
+        pending?.finish(refreshSnapshot(source))
+        let results = await [first.value, second.value]
+        XCTAssertEqual(results, [.newData, .newData])
+        XCTAssertEqual(count, 1)
+    }
+
+    @MainActor func testPushPromotesForegroundFetchAcrossBackgroundTransition() async throws {
+        try await checkBackgroundOwnerPreservesForegroundFetch(fromWatch: false)
+    }
+
+    @MainActor func testWatchPromotesForegroundFetchAcrossBackgroundTransition() async throws {
+        try await checkBackgroundOwnerPreservesForegroundFetch(fromWatch: true)
+    }
+
+    @MainActor private func checkBackgroundOwnerPreservesForegroundFetch(fromWatch: Bool) async throws {
+        let source = refreshSource("background-owner")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        let started = expectation(description: "foreground snapshot pending")
+        var pending: InteractionURLProtocol?
+        var requestCount = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                requestCount += 1
+                pending = transport
+                started.fulfill()
+            }
+        }
+        defer { model.setForeground(false); InteractionURLProtocol.start = nil }
+        model.setForeground(true)
+        await fulfillment(of: [started], timeout: 2)
+        let joined = expectation(description: "platform callback joins existing snapshot")
+        let background = Task { @MainActor in
+            joined.fulfill()
+            if fromWatch { return await model.refreshAll(fromWatch: true) }
+            return await model.refresh(sourceID: source.sourceID, fromPush: true)
+        }
+        await fulfillment(of: [joined], timeout: 2)
+        model.setForeground(false)
+        model.setForeground(false) // inactive -> background reports false twice.
+        try XCTUnwrap(pending).finish(refreshSnapshot(source))
+        let result = await background.value
+        XCTAssertEqual(result, .newData)
+        XCTAssertNotNil(model.snapshots[source.sourceID])
+        XCTAssertNil(model.errors[source.sourceID])
+        XCTAssertEqual(requestCount, 1, "The platform callback should retain the coalesced operation")
+    }
+
+    @MainActor func testRepeatedBackgroundPhasePreservesPushFetch() async throws {
+        let source = refreshSource("background-push")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        let started = expectation(description: "background push fetch started")
+        var pending: InteractionURLProtocol?
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in pending = transport; started.fulfill() }
+        }
+        defer { InteractionURLProtocol.start = nil }
+        let push = Task { await model.refresh(sourceID: source.sourceID, fromPush: true) }
+        await fulfillment(of: [started], timeout: 2)
+        model.setForeground(false)
+        try XCTUnwrap(pending).finish(refreshSnapshot(source))
+        let result = await push.value
+        XCTAssertEqual(result, .newData)
+        XCTAssertNotNil(model.snapshots[source.sourceID])
+    }
+
+    @MainActor func testForegroundOnlySnapshotIsCancelledOnBackground() async throws {
+        let source = refreshSource("foreground-only")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        let started = expectation(description: "foreground snapshot started")
+        let stopped = expectation(description: "foreground snapshot cancelled")
+        InteractionURLProtocol.start = { _ in started.fulfill() }
+        InteractionURLProtocol.stop = { _ in stopped.fulfill() }
+        defer { model.setForeground(false); InteractionURLProtocol.start = nil; InteractionURLProtocol.stop = nil }
+        model.setForeground(true)
+        await fulfillment(of: [started], timeout: 2)
+        model.setForeground(false)
+        await fulfillment(of: [stopped], timeout: 2)
+        XCTAssertNil(model.snapshots[source.sourceID])
+        XCTAssertNil(model.errors[source.sourceID])
+    }
+
+    @MainActor func testRemovalStillCancelsBackgroundOwnedFetch() async throws {
+        let source = refreshSource("removed-background-source")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config),
+                                   savePairedSources: { _ in })
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        let started = expectation(description: "background snapshot started")
+        let stopped = expectation(description: "removed source request cancelled")
+        InteractionURLProtocol.start = { _ in started.fulfill() }
+        InteractionURLProtocol.stop = { _ in stopped.fulfill() }
+        defer { InteractionURLProtocol.start = nil; InteractionURLProtocol.stop = nil }
+        let push = Task { await model.refresh(sourceID: source.sourceID, fromPush: true) }
+        await fulfillment(of: [started], timeout: 2)
+        let removed = await model.forget(source)
+        XCTAssertTrue(removed)
+        await fulfillment(of: [stopped], timeout: 2)
+        let result = await push.value
+        XCTAssertEqual(result, .noData)
+        XCTAssertTrue(model.pairedSources.isEmpty)
+        XCTAssertNil(model.snapshots[source.sourceID])
+    }
+
     private let sourceID = UUID().uuidString
     private func fixture() -> [String: Any] {
         ["sourceID": sourceID, "generation": UUID().uuidString, "requests": [[
@@ -91,6 +380,25 @@ final class InteractionTests: XCTestCase {
         duplicated["requests"] = requests + requests
         XCTAssertThrowsError(try InputRequests.decode(JSONSerialization.data(withJSONObject: duplicated), sourceID: sourceID))
     }
+    func testPhoneAcceptsTheFullResponseWindowForBothProviders() throws {
+        for provider in ["claude", "codex"] {
+            for remaining in [0.1, 61, 599, 600, 600.1] {
+                var value = fixture()
+                var requests = try XCTUnwrap(value["requests"] as? [[String: Any]])
+                requests[0]["provider"] = provider
+                requests[0]["remainingSeconds"] = remaining
+                value["requests"] = requests
+                let data = try JSONSerialization.data(withJSONObject: value)
+                if remaining <= 600 {
+                    XCTAssertEqual(try InputRequests.decode(data, sourceID: sourceID)
+                        .requests.first?.remainingSeconds, remaining)
+                } else {
+                    XCTAssertThrowsError(try InputRequests.decode(data, sourceID: sourceID))
+                }
+            }
+        }
+    }
+
     func testCodexQuestionsUseTheSameCardsAndValidationAsClaude() throws {
         var value = fixture()
         var requests = try XCTUnwrap(value["requests"] as? [[String: Any]])
@@ -249,19 +557,19 @@ final class InteractionTests: XCTestCase {
     @MainActor func testSubmissionIsOwnedOnceAcrossCardReopenAndRetryUsesExactEnvelope() async throws {
         let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
                                   clientID: "client", credential: "fixture")
-        let inbox = InteractionInbox()
-        inbox.preview(source)
-        let item = try XCTUnwrap(inbox.items.first)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [InteractionURLProtocol.self]
         let client = SourceClient(configuration: configuration)
+        let inbox = InteractionInbox(client: client)
+        inbox.preview(source)
+        let item = try XCTUnwrap(inbox.items.first)
         let started = expectation(description: "One POST started")
         var requests: [InteractionURLProtocol] = []
         InteractionURLProtocol.start = { request in requests.append(request); started.fulfill() }
         defer { InteractionURLProtocol.start = nil }
-        let sending = inbox.submit(item, action: "allowOnce", client: client)
+        let sending = inbox.submit(item, action: "allowOnce")
         let original = try XCTUnwrap(inbox.response(for: item)?.submission)
-        inbox.submit(item, action: "deny", client: client)
+        inbox.submit(item, action: "deny")
         XCTAssertEqual(inbox.response(for: item)?.submission, original)
         await fulfillment(of: [started], timeout: 2)
         XCTAssertEqual(requests.count, 1)
@@ -275,7 +583,7 @@ final class InteractionTests: XCTestCase {
         uncertainObserver.cancel()
         let retryStarted = expectation(description: "Retry started")
         InteractionURLProtocol.start = { request in requests.append(request); retryStarted.fulfill() }
-        let retryTask = inbox.retry(item, client: client)
+        let retryTask = inbox.retry(item)
         XCTAssertEqual(inbox.response(for: item)?.submission, original, "Retry preserves action, answers, and idempotency key")
         await fulfillment(of: [retryStarted], timeout: 2)
         let confirmed = expectation(description: "Receipt accepted")
@@ -968,8 +1276,15 @@ final class SidebarGestureTests: XCTestCase {
 
 private final class InteractionURLProtocol: URLProtocol {
     static var start: ((InteractionURLProtocol) -> Void)?
+    static var stop: ((InteractionURLProtocol) -> Void)?
+    func finish(_ data: Data) {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200,
+            httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() { Self.start?(self) }
-    override func stopLoading() {}
+    override func stopLoading() { Self.stop?(self) }
 }
