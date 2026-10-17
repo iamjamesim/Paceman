@@ -1,16 +1,15 @@
 import SwiftUI
 
-/// Response controls are part of the task page, with no nested navigation or modal.
+/// Shared response content and bottom actions inside the current-task card.
 struct InteractionDetail: View {
     let item: PendingInput
     @ObservedObject var inbox: InteractionInbox
     let theme: CompanionTheme
-    var taskTitle = ""
-    var taskContext = ""
-    var openFailure: String?
+    var heading: TaskCardHeading? = nil
+    var contentTopInset: CGFloat = 16
+    var openSession: SessionOpenButton? = nil
     var preview = false
     var sampleResponse: ((InputSubmission) throws -> Void)? = nil
-    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var phase
     @State private var answers: [String: InputAnswer] = [:]
     @State private var submission: InputSubmission?
@@ -24,13 +23,8 @@ struct InteractionDetail: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    if typeSize.isAccessibilitySize {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(taskTitle).companionText(.title, theme: theme)
-                            Text(taskContext).companionText(.supporting, theme: theme)
-                        }
-                    }
+                VStack(alignment: .leading, spacing: 24) {
+                    if let heading { heading }
                     if sent {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(submission?.action == "release" ? "Continue on your computer" : "Your response")
@@ -50,11 +44,19 @@ struct InteractionDetail: View {
                                 .companionText(.body, theme: theme)
                         }
                     } else {
-                        if !item.request.title.isEmpty || !item.request.detail.isEmpty {
-                            VStack(alignment: .leading, spacing: 8) {
-                                if !item.request.title.isEmpty { Text(item.request.title).companionText(.prompt, theme: theme) }
+                        if (item.request.kind != "question" && !item.request.title.isEmpty) || !item.request.detail.isEmpty {
+                            let directApproval = item.request.kind == "approval" && ApprovalDetailContent(item.request.detail).explanation.isEmpty
+                            VStack(alignment: .leading, spacing: directApproval ? CompanionLayout.taskPromptSpacing : 8) {
+                                if !item.request.title.isEmpty && item.request.kind != "question" {
+                                    Text(item.request.title).companionText(.cardTitle, theme: theme)
+                                        .accessibilityAddTraits(.isHeader)
+                                }
                                 if !item.request.detail.isEmpty {
-                                    Text(item.request.detail).companionText(.body, theme: theme).textSelection(.enabled)
+                                    if item.request.kind == "approval" {
+                                        approvalDetail
+                                    } else {
+                                        Text(item.request.detail).companionText(.body, theme: theme).textSelection(.enabled)
+                                    }
                                 }
                             }
                         }
@@ -64,20 +66,22 @@ struct InteractionDetail: View {
                             Text("This request is no longer available. Continue on your computer.").companionText(.body, theme: theme)
                         }
                     }
-                    if let openFailure { Text(openFailure).companionText(.body, theme: theme) }
-                    if sampleResponse != nil {
-                        Text("Sample task · nothing is sent to an agent.").companionText(.supporting, theme: theme)
-                    }
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
+                    .padding(.horizontal, CompanionLayout.pageInset)
+                    .padding(.top, contentTopInset).padding(.bottom, 16)
+                    .taskCardMeasure(.content)
             }
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !sent && (sending || retryable || editable) {
-                    responseActions
+                if (!sent && (sending || retryable || editable)) || openSession != nil {
+                    VStack(spacing: 8) {
+                        if !sent && (sending || retryable || editable) { responseActions }
+                        if let openSession { openSession }
+                    }
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 12)
                         .frame(maxWidth: .infinity)
                         .background(theme.canvas)
+                        .taskCardMeasure(.actions)
                 }
             }
         }
@@ -111,40 +115,17 @@ struct InteractionDetail: View {
     }
 
     private func questionForm(_ question: InteractionQuestion) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(question.prompt).companionText(.prompt, theme: theme)
-                if question.multiple { Text("Choose one or more, or write a response.").companionText(.body, theme: theme) }
-            }
-            VStack(spacing: 0) {
-                ForEach(question.options.indices, id: \.self) { index in
-                    let option = question.options[index]
-                    let selected = answers[question.id]?.selected.contains(index) == true
-                    Button {
-                        var value = answers[question.id] ?? InputAnswer()
-                        value.text = ""
-                        if question.multiple {
-                            if selected { value.selected.removeAll { $0 == index } }
-                            else { value.selected.append(index); value.selected.sort() }
-                        } else { value.selected = selected ? [] : [index] }
-                        answers[question.id] = value
-                        focusedQuestion = nil
-                    } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Image(systemName: question.multiple ? (selected ? "checkmark.square.fill" : "square") : (selected ? "largecircle.fill.circle" : "circle"))
-                                .font(.body)
-                                .foregroundStyle(selected ? theme.tint : theme.secondaryInk).accessibilityHidden(true)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(option.label).companionText(.body, theme: theme)
-                                if !option.description.isEmpty { Text(option.description).companionText(.supporting, theme: theme) }
-                            }.frame(maxWidth: .infinity, alignment: .leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }.padding(.vertical, 8).frame(minHeight: 44).contentShape(Rectangle())
-                    }.buttonStyle(.plain).disabled(!editable)
-                        .accessibilityAddTraits(selected ? .isSelected : [])
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: CompanionLayout.taskPromptSpacing) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(question.prompt).companionText(.cardTitle, theme: theme)
+                        .accessibilityAddTraits(.isHeader)
+                    if question.multiple { Text("Choose one or more.").companionText(.body, theme: theme) }
                 }
+                if !question.options.isEmpty { questionChoices(question) }
             }
             TextField(question.options.isEmpty ? "Your answer" : "Or write a response", text: Binding(get: { answers[question.id]?.text ?? "" }, set: { text in
+                guard (answers[question.id]?.text ?? "") != text else { return }
                 answers[question.id] = InputAnswer(selected: [], text: text)
             }), axis: .vertical)
                 .companionText(.body, theme: theme)
@@ -154,6 +135,66 @@ struct InteractionDetail: View {
                 .padding(12)
                 .background(theme.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
                 .disabled(!editable)
+        }
+    }
+
+    private func questionChoices(_ question: InteractionQuestion) -> some View {
+        VStack(spacing: 0) {
+            ForEach(question.options.indices, id: \.self) { index in
+                let option = question.options[index]
+                let selected = answers[question.id]?.selected.contains(index) == true
+                Button {
+                    var value = answers[question.id] ?? InputAnswer()
+                    value.text = ""
+                    if question.multiple {
+                        if selected { value.selected.removeAll { $0 == index } }
+                        else { value.selected.append(index); value.selected.sort() }
+                    } else { value.selected = selected ? [] : [index] }
+                    answers[question.id] = value
+                    focusedQuestion = nil
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Image(systemName: question.multiple ? (selected ? "checkmark.square.fill" : "square") : (selected ? "largecircle.fill.circle" : "circle"))
+                            .font(.body)
+                            .foregroundStyle(selected ? theme.tint : theme.secondaryInk).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(option.label).companionText(.label, theme: theme)
+                            if !option.description.isEmpty { Text(option.description).companionText(.supporting, theme: theme) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }.padding(.vertical, 8).frame(minHeight: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain).disabled(!editable)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+    }
+
+    private var approvalDetail: some View {
+        let content = ApprovalDetailContent(item.request.detail)
+        return VStack(alignment: .leading, spacing: 24) {
+            if !content.explanation.isEmpty {
+                Text(content.explanation).companionText(.body, theme: theme).textSelection(.enabled)
+            }
+            if let action = content.action {
+                let presentation = ApprovalActionContent(action)
+                VStack(alignment: .leading, spacing: 12) {
+                    if !presentation.body.isEmpty {
+                        Text(presentation.body).companionText(.code, theme: theme)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(theme.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    if let tool = presentation.tool, item.request.title != "Allow \(tool)?" {
+                        Text("Tool: " + tool).companionText(.supporting, theme: theme).textSelection(.enabled)
+                    }
+                    if let directory = presentation.directory {
+                        Text(directory).companionText(.supporting, theme: theme).textSelection(.enabled)
+                            .accessibilityLabel("Working directory: " + directory)
+                    }
+                }
+            }
         }
     }
 
@@ -199,13 +240,7 @@ private struct InputActionButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Text(title).font(CompanionTextRole.button.font)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, CompanionLayout.actionVerticalInset).padding(.horizontal, 16)
-                .frame(minHeight: CompanionLayout.actionMinimumHeight)
-                .foregroundStyle(primary ? theme.canvas : theme.ink)
-                .background(primary ? theme.ink : theme.ink.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
+            TaskCardActionLabel(title: title, theme: theme, primary: primary)
         }.buttonStyle(.plain)
     }
 }

@@ -11,6 +11,7 @@ struct WorkItem: Identifiable {
     let session: AgentSession
     let computer: String
     let historical: Bool
+    var aggregate = false
     var returnedToComputer = false
     var sample = false
     var response: String? = nil
@@ -46,19 +47,33 @@ enum WorkGroup: String, CaseIterable {
     static func live(model: CompanionModel, presentation: PresentationModel, inbox: InteractionInbox) -> [WorkItem] {
         model.pairedSources.flatMap { source -> [WorkItem] in
             let snapshot = model.snapshots[source.sourceID]
-            let sessions = presentation.preview && source.sourceID == model.pairedSources.first?.sourceID
-                ? presentation.previewSessions : snapshot?.sessions ?? []
-            let connected = presentation.computerState(model: model, sourceID: source.sourceID) == .current
-            let current = presentation.preview ? connected : model.isActivityCurrent(source.sourceID)
-            return sessions.map { session in
-                let id = WorkIdentity(sourceID: source.sourceID, sessionID: session.id, provider: session.provider)
-                return WorkItem(id: id, session: session,
-                    computer: presentation.displayName(source: source, snapshot: snapshot), historical: !current,
-                    returnedToComputer: connected && session.state == .needsInput && inbox.receipt(for: id) == .released,
-                    response: connected && session.state == .needsInput ? inbox.receipt(for: id)?.message : nil,
-                    request: connected ? inbox.items.first { $0.source.sourceID == id.sourceID && $0.request.sessionID == id.sessionID && $0.request.provider == id.provider && inbox.isCurrent($0) } : nil)
+            let content: AgentFeedContent = presentation.preview && !presentation.previewScreen.hasPrefix("handoff")
+                && source.sourceID == model.pairedSources.first?.sourceID
+                ? .sessions(presentation.previewSessions) : AgentFeedContent.resolve(snapshot)
+            switch content {
+            case .sessions(let sessions):
+                return sessions.map { item(session: $0, source: source, model: model, presentation: presentation, inbox: inbox) }
+            case .summary(let state):
+                var summary = item(session: AgentSession(id: "aggregate", provider: "aggregate", state: state,
+                    name: "Agent activity"), source: source, model: model, presentation: presentation, inbox: inbox)
+                summary.aggregate = true
+                return [summary]
+            case .waiting, .empty: return []
             }
         }
+    }
+
+    static func item(session: AgentSession, source: PairedSource, model: CompanionModel,
+                     presentation: PresentationModel, inbox: InteractionInbox) -> WorkItem {
+        let id = WorkIdentity(sourceID: source.sourceID, sessionID: session.id, provider: session.provider)
+        let connected = presentation.computerState(model: model, sourceID: source.sourceID) == .current
+        let current = presentation.preview && !presentation.previewScreen.hasPrefix("handoff")
+            ? connected : model.isActivityCurrent(source.sourceID)
+        return WorkItem(id: id, session: session,
+            computer: presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID]), historical: !current,
+            returnedToComputer: connected && session.state == .needsInput && inbox.receipt(for: id) == .released,
+            response: connected && session.state == .needsInput ? inbox.receipt(for: id)?.message : nil,
+            request: connected ? inbox.items.first { $0.source.sourceID == id.sourceID && $0.request.sessionID == id.sessionID && $0.request.provider == id.provider && inbox.isCurrent($0) } : nil)
     }
     #if DEBUG
     static func samples(_ store: SampleWorkStore) -> [WorkItem] {
@@ -92,6 +107,7 @@ struct CompanionWork: View {
     @Binding var filter: String?
     @Binding var recentExpanded: Bool
     let connectComputer: () -> Void
+    let inspectTask: (WorkIdentity) -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
     var items: [WorkItem] {
@@ -186,39 +202,46 @@ struct CompanionWork: View {
         Section {
             if group != .recent || recentExpanded {
                 ForEach(rows) { item in
-                    NavigationLink(value: item.id) {
-                        HStack(spacing: 12) {
-                            WorkRow(item: item, theme: theme,
-                                showComputer: filter == nil && Set(items.map { $0.id.sourceID }).count > 1)
+                    let layout = typeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                        : AnyLayout(HStackLayout(spacing: 12))
+                    layout {
+                        if item.aggregate {
+                            WorkRow(item: item, theme: theme)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            if !typeSize.isAccessibilitySize {
-                                Image(systemName: "chevron.right")
-                                    .font(.footnote.weight(.semibold))
-                                    .foregroundStyle(theme.secondaryInk.opacity(0.6))
-                                    .accessibilityHidden(true)
+                        } else {
+                            Button { inspectTask(item.id) } label: {
+                                WorkRow(item: item, theme: theme,
+                                    showComputer: filter == nil && Set(items.map { $0.id.sourceID }).count > 1)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
+                        if item.session.appURL != nil {
+                            SessionOpenButton(session: item.session, theme: theme) {
+                                items.first { $0.id == item.id }?.session
                             }
-                        }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 12)
-                            .contentShape(Rectangle())
-                    }.buttonStyle(.plain)
+                        }
+                    }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 12)
                 }
             }
         } header: {
             WorkSectionSurface(theme: theme) {
                 if group == .recent {
                     Button { recentExpanded.toggle() } label: {
-                        groupHeading(group, count: rows.count)
+                        groupHeading(group, count: rows.contains { $0.aggregate } ? nil : rows.count)
                     }.buttonStyle(.plain)
                         .accessibilityValue(recentExpanded ? "Expanded" : "Collapsed")
                         .accessibilityHint("Show or hide recent tasks")
-                } else { groupHeading(group, count: rows.count) }
+                } else { groupHeading(group, count: rows.contains { $0.aggregate } ? nil : rows.count) }
             }
         }
     }
 
-    private func groupHeading(_ group: WorkGroup, count: Int) -> some View {
+    private func groupHeading(_ group: WorkGroup, count: Int?) -> some View {
         HStack(spacing: 8) {
             Text(group.rawValue).companionText(.sectionTitle, theme: theme)
-            Text("\(count)").companionText(.supporting, theme: theme).monospacedDigit()
+            if let count { Text("\(count)").companionText(.supporting, theme: theme).monospacedDigit() }
             if group == .recent {
                 Image(systemName: recentExpanded ? "chevron.down" : "chevron.right")
                     .font(.caption.weight(.semibold)).foregroundStyle(theme.secondaryInk)
@@ -226,7 +249,7 @@ struct CompanionWork: View {
             Spacer(minLength: 0)
         }.frame(minHeight: group == .recent ? 44 : 32).contentShape(Rectangle())
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(group.rawValue), \(count) \(count == 1 ? "task" : "tasks")")
+            .accessibilityLabel(count.map { "\(group.rawValue), \($0) \($0 == 1 ? "task" : "tasks")" } ?? group.rawValue)
             .accessibilityAddTraits(.isHeader)
 
     }
@@ -390,7 +413,7 @@ struct WorkRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.session.displayName).companionText(.body, theme: theme)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                Text([item.request != nil && item.response == nil ? (item.request?.request.kind == "approval" ? "Approval" : "Question") : nil,
+                Text(item.aggregate ? item.computer : [item.request != nil && item.response == nil ? (item.request?.request.kind == "approval" ? "Approval" : "Question") : nil,
                       item.session.provider.capitalized, item.session.detail,
                       showComputer ? item.computer : nil,
                       item.returnedToComputer || item.response != nil ? item.status : nil]
@@ -404,109 +427,6 @@ struct WorkRow: View {
     }
 }
 
-struct WorkDetail: View {
-    let identity: WorkIdentity
-    @ObservedObject var model: CompanionModel
-    @ObservedObject var presentation: PresentationModel
-    @ObservedObject var inbox: InteractionInbox
-    #if DEBUG
-    @EnvironmentObject private var samples: SampleWorkStore
-    #endif
-    @Environment(\.dynamicTypeSize) private var typeSize
-    @Environment(\.scenePhase) private var phase
-    @Environment(\.openURL) private var openURL
-    let theme: CompanionTheme
-    @State private var displayedRequest: PendingInput?
-    @State private var openFailed = false
-    private var item: WorkItem? {
-        #if DEBUG
-        if identity.sourceID == "samples" { return WorkCatalog.samples(samples).first { $0.id == identity } }
-        #endif
-        return WorkCatalog.live(model: model, presentation: presentation, inbox: inbox).first { $0.id == identity }
-    }
-    private var openFailure: String? {
-        openFailed ? "Couldn’t open the agent app. Check that it’s installed on this iPhone." : nil
-    }
-    var body: some View {
-        VStack(spacing: 0) {
-            if let item, let request = displayedRequest, phase == .active {
-                #if DEBUG
-                if item.sample {
-                    InteractionDetail(item: request, inbox: samples.sampleInbox, theme: theme,
-                        taskTitle: item.session.displayName, taskContext: item.context, openFailure: openFailure,
-                        sampleResponse: { try samples.respond(request, $0) }).id(request.id)
-                } else {
-                    InteractionDetail(item: request, inbox: inbox, theme: theme,
-                        taskTitle: item.session.displayName, taskContext: item.context, openFailure: openFailure,
-                        preview: presentation.preview).id(request.id)
-                }
-                #else
-                InteractionDetail(item: request, inbox: inbox, theme: theme,
-                    taskTitle: item.session.displayName, taskContext: item.context, openFailure: openFailure).id(request.id)
-                #endif
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if let item {
-                            if typeSize.isAccessibilitySize {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(item.session.displayName).companionText(.title, theme: theme)
-                                    Text(item.context).companionText(.supporting, theme: theme)
-                                }
-                            }
-                            Text(item.status).companionText(.prompt, theme: theme)
-                            Text(item.response ?? explanation(item)).companionText(.body, theme: theme)
-                            if let openFailure { Text(openFailure).companionText(.body, theme: theme) }
-                            if item.sample {
-                                Text("Sample task · nothing is sent to an agent.").companionText(.supporting, theme: theme)
-                            }
-                        } else {
-                            Text("Task no longer available").companionText(.title, theme: theme)
-                            Text("Return to Activity for current tasks.").companionText(.body, theme: theme)
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
-                }.scrollDismissesKeyboard(.interactively)
-            }
-        }
-            .modifier(TaskScrollEdge())
-            .foregroundStyle(theme.ink).background(CompanionCanvas(theme: theme))
-            .modifier(TaskNavigationTitle(title: item?.session.displayName ?? "Task unavailable", subtitle: item?.context ?? ""))
-            .toolbar {
-                if let item, let url = item.session.appURL {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Open") {
-                            openFailed = false
-                            openURL(url) { accepted in openFailed = !accepted }
-                        }
-                        .accessibilityLabel(item.session.provider == "claude" ? "Open Claude Code" : item.session.appLinkTitle)
-                    }
-                }
-            }
-            .onAppear { displayedRequest = item?.request }
-            .onChange(of: item?.request?.id) { _, _ in
-                if let request = item?.request { displayedRequest = request }
-            }
-            .onChange(of: phase) { _, value in
-                if value != .active { displayedRequest = nil }
-                else { displayedRequest = item?.request }
-            }
-    }
-    private func explanation(_ item: WorkItem) -> String {
-        if item.historical { return "This is the computer’s last received activity. Responses are available when its connection is up to date." }
-        if item.sample {
-            return item.state == .finished ? "The setup guide now includes pairing and notification steps." : "Reviewing search results and checking keyboard navigation."
-        }
-        switch item.state {
-        case .needsInput: return "Continue in the agent app. This task hasn't provided a question or approval that can be answered here."
-        case .working: return "The agent is working. Its next question or approval will appear here when available."
-        case .finished: return "The agent finished its turn. Open the agent app to review the result."
-        case .failed: return "The agent reported a problem. Open the agent app for details."
-        case .idle: return "This task is idle."
-        }
-    }
-}
-
 private struct TaskScrollEdge: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
@@ -514,29 +434,6 @@ private struct TaskScrollEdge: ViewModifier {
         } else {
             content
         }
-    }
-}
-
-/// Keep the native navigation bar and back button, with an accessible title view.
-/// At accessibility sizes, full session context moves into the scrolling content.
-private struct TaskNavigationTitle: ViewModifier {
-    let title: String
-    let subtitle: String
-    @Environment(\.dynamicTypeSize) private var typeSize
-    func body(content: Content) -> some View {
-        content.navigationTitle(title).navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                if !typeSize.isAccessibilitySize {
-                    ToolbarItem(placement: .principal) {
-                        VStack(spacing: 0) {
-                            Text(title).font(.headline).lineLimit(1)
-                            Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }.accessibilityElement(children: .combine)
-                            .accessibilityLabel(title + ", " + subtitle)
-                            .accessibilityAddTraits(.isHeader)
-                    }
-                }
-            }
     }
 }
 
@@ -671,39 +568,6 @@ struct CompanionDevices: View {
                 .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
                 .contentShape(RoundedRectangle(cornerRadius: 24))
         }.buttonStyle(.plain)
-    }
-}
-
-/// The same session identity and activity meaning on home and phone handoff.
-struct AgentSessionSummary: View {
-    let row: AgentDisplayRow
-    let historical: Bool
-    let theme: CompanionTheme
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    private var stateColor: Color {
-        PhoneMonitoringStatusColor.color(for: row.session.state.rawValue, onDark: theme.dark, fallback: theme.ink)
-    }
-
-    var body: some View {
-        let status = historical ? "Last known: " + row.statusLabel : row.statusLabel
-        let context = row.contextLabel.isEmpty ? "" : " · " + row.contextLabel
-        let color = historical || row.statusLabel != row.session.state.title ? theme.secondaryInk : stateColor
-        HStack(alignment: .center, spacing: 12) {
-            if !typeSize.isAccessibilitySize {
-                ActivityRobot(state: row.session.state, animate: !historical)
-                    .frame(width: 24, height: 24)
-                    .foregroundStyle(historical ? theme.secondaryInk : stateColor)
-                    .accessibilityHidden(true)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(row.session.displayName).font(.subheadline.weight(.medium))
-                    .foregroundStyle(historical ? theme.secondaryInk : theme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("\(Text(status).foregroundColor(color))\(Text(context).foregroundColor(theme.secondaryInk))")
-                    .font(.caption).fixedSize(horizontal: false, vertical: true)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-        }.accessibilityElement(children: .combine)
     }
 }
 

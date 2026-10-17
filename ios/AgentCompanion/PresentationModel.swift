@@ -166,84 +166,8 @@ enum AgentFeedContent: Equatable {
         }
         return snapshot.state == .idle ? .empty : .summary(snapshot.state)
     }
-    var headline: String {
-        switch self {
-        case .waiting: return "No activity received yet"
-        case .empty: return "No active agents"
-        case .summary(let state): return state.title
-        case .sessions(let sessions):
-            let counts = Dictionary(grouping: sessions, by: \.state).mapValues(\.count)
-            for state in [ActivityState.needsInput, .failed, .working, .finished] {
-                if let count = counts[state], count > 0 { return Self.countLabel(count, state: state) }
-            }
-            return "No active agents"
-        }
-    }
-    var supportingStatus: String? {
-        guard case .sessions(let sessions) = self else { return nil }
-        let counts = Dictionary(grouping: sessions, by: \.state).mapValues(\.count)
-        let activeStates = [ActivityState.needsInput, .failed, .working, .finished].filter { (counts[$0] ?? 0) > 0 }
-        let labels = activeStates.dropFirst().map { Self.countLabel(counts[$0]!, state: $0) }
-        return labels.isEmpty ? nil : labels.joined(separator: " · ")
-    }
-    var hasActivity: Bool {
-        switch self {
-        case .summary, .sessions: return true
-        case .waiting, .empty: return false
-        }
-    }
-    fileprivate static func countLabel(_ count: Int, state: ActivityState) -> String {
-        switch state {
-        case .needsInput: return "\(count) \(count == 1 ? "needs" : "need") input"
-        case .working: return "\(count) working"
-        case .finished: return "\(count) finished"
-        case .failed: return "\(count) failed"
-        case .idle: return "\(count) idle"
-        }
-    }
     fileprivate static func priority(_ state: ActivityState) -> Int {
         switch state { case .needsInput: return 0; case .failed: return 1; case .working: return 2; case .finished: return 3; case .idle: return 4 }
-    }
-}
-
-/// Preserve identifiable sessions; combine otherwise indistinguishable provider rows.
-struct AgentDisplayRow: Identifiable {
-    let id: String
-    let session: AgentSession
-    let detail: String
-    // Grouped rows retain every state count; the leading mark shows priority.
-    var statusLabel: String { id.hasPrefix("group:") && !detail.isEmpty ? detail : session.state.title }
-    var contextLabel: String { id.hasPrefix("group:") ? "" : detail }
-
-    static func rows(_ sessions: [AgentSession]) -> [Self] {
-        var rows: [Self] = []
-        var unnamed: [String: [AgentSession]] = [:]
-        for session in sessions {
-            let identifiable = [session.title, session.project].compactMap { $0 }
-                .contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            if identifiable || (session.provider == "claude" && session.remoteSessionID != nil) {
-                rows.append(Self(id: "session:" + session.id, session: session, detail: session.detail))
-            } else { unnamed[session.provider, default: []].append(session) }
-        }
-        for (provider, members) in unnamed {
-            if members.count == 1, let session = members.first {
-                rows.append(Self(id: "session:" + session.id, session: session, detail: session.detail))
-            } else {
-                let counts = Dictionary(grouping: members, by: \.state).mapValues(\.count)
-                let states = ActivityState.allCases.sorted { AgentFeedContent.priority($0) < AgentFeedContent.priority($1) }
-                    .filter { counts[$0] != nil }
-                let detail = states.count > 1
-                    ? states.map { AgentFeedContent.countLabel(counts[$0]!, state: $0) }.joined(separator: " · ")
-                    : ""
-                let session = AgentSession(id: "group:" + provider, provider: provider, state: states.first ?? .idle,
-                    name: "\(provider.capitalized) · \(members.count) sessions")
-                rows.append(Self(id: session.id, session: session, detail: detail))
-            }
-        }
-        return rows.sorted {
-            let lhs = AgentFeedContent.priority($0.session.state), rhs = AgentFeedContent.priority($1.session.state)
-            return lhs == rhs ? $0.id < $1.id : lhs < rhs
-        }
     }
 }
 

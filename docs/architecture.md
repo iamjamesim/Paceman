@@ -76,8 +76,11 @@ sections, with full-width pinned headings and Recent collapsed by default. Compu
 chips filter work and show connection freshness; only the current task state
 uses an active color. Activity opens pairing directly from its no-computer state
 or the filter row's add action. A task is identified by source, provider, and session, never its title.
-Task rows push a current-state page with session identity in its navigation bar,
-available response controls, and a handoff to the agent app. The phone does not infer a result from a completed turn.
+Task rows open a compact card with any available response controls. Response
+cards lead with the request; status-only cards retain task identity. A separate
+open icon on each addressable row opens the agent app.
+Authenticated Pebble handoffs use the same card with Open at the bottom because
+they bypass the list. Cards expand for longer content and accessibility text sizes. The phone does not infer a result from a completed turn.
 Activity is the primary screen. A slide-under sidebar opens Devices and Settings;
 one native navigation stack owns pushed pages and back navigation. Devices owns
 computer connections, accessories, and Live Activities. Response actions stay in

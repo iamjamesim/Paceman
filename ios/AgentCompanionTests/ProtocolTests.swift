@@ -41,14 +41,11 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(empty[0][2], 4)
     }
 
-    func testSessionTitleNormalizationAndGrouping() {
+    func testSessionTitleNormalization() {
         let titled = AgentSession(id: "one", provider: "codex", state: .working, name: "  Fix\n scrolling\u{0}  ")
         XCTAssertEqual(titled.displayName, "Fix scrolling")
         let unnamed = AgentSession(id: "two", provider: "codex", state: .working, name: " \n")
         XCTAssertEqual(unnamed.displayName, "Codex")
-        let rows = AgentDisplayRow.rows([titled, unnamed])
-        XCTAssertEqual(rows.count, 2)
-        XCTAssertTrue(rows.contains { $0.session.id == titled.id })
     }
 
     func testHandoffWireRejectsMalformedRequestsAndEchoesSequence() throws {
@@ -286,12 +283,11 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(AgentSession(id: "test", provider: "fixture", state: .working).appURL)
     }
 
-    func testRemotelyAddressableClaudeRowsRemainIndividual() {
-        let rows = AgentDisplayRow.rows([
+    func testRemotelyAddressableClaudeSessionsHaveDistinctLinks() {
+        let sessions = [
             AgentSession(id: "a", provider: "claude", state: .working, remoteSessionID: "session_a"),
-            AgentSession(id: "b", provider: "claude", state: .working, remoteSessionID: "session_b")])
-        XCTAssertEqual(rows.count, 2)
-        XCTAssertEqual(Set(rows.compactMap { $0.session.appURL?.absoluteString }),
+            AgentSession(id: "b", provider: "claude", state: .working, remoteSessionID: "session_b")]
+        XCTAssertEqual(Set(sessions.compactMap { $0.appURL?.absoluteString }),
                        ["claude://code/session_a", "claude://code/session_b"])
     }
 
@@ -991,29 +987,6 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(hookSession.detail, "paceman")
     }
 
-    func testUnnamedSessionsGroupWithoutLosingStatesOrNamedRows() {
-        let sessions = [AgentSession(id: "1", provider: "codex", state: .idle, workspaceLabel: "paceman"),
-                        AgentSession(id: "2", provider: "codex", state: .needsInput, workspaceLabel: "paceman"),
-                        AgentSession(id: "3", provider: "codex", state: .finished),
-                        AgentSession(id: "4", provider: "codex", state: .working, name: "Fix checkout"),
-                        AgentSession(id: "5", provider: "claude", state: .working)]
-        let rows = AgentDisplayRow.rows(sessions)
-        XCTAssertEqual(rows.count, 3)
-        XCTAssertEqual(rows.first?.session.displayName, "Codex · 3 sessions")
-        XCTAssertEqual(rows.first?.session.state, .needsInput)
-        XCTAssertEqual(rows.first?.detail, "1 needs input · 1 finished · 1 idle")
-        XCTAssertEqual(rows.first?.statusLabel, "1 needs input · 1 finished · 1 idle")
-        XCTAssertEqual(rows.first?.contextLabel, "")
-        XCTAssertTrue(rows.contains { $0.session.displayName == "Fix checkout" })
-        XCTAssertTrue(rows.contains { $0.session.displayName == "Claude" })
-        XCTAssertEqual(rows.map(\.id), AgentDisplayRow.rows(Array(sessions.reversed())).map(\.id))
-        XCTAssertEqual(AgentDisplayRow.rows([]).count, 0)
-        let finished = AgentDisplayRow.rows([
-            AgentSession(id: "6", provider: "codex", state: .finished),
-            AgentSession(id: "7", provider: "codex", state: .finished)])
-        XCTAssertEqual(finished.first?.session.displayName, "Codex · 2 sessions")
-        XCTAssertEqual(finished.first?.detail, "")
-    }
 
     func testFeedDistinguishesFirstUpdateFromIdleAndOlderAggregateSources() throws {
         XCTAssertEqual(AgentFeedContent.resolve(nil), .waiting)
@@ -1038,17 +1011,6 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
-    func testStatusPanelPrioritizesInputAndExcludesIdleFromActiveCounts() {
-        let sessions = [AgentSession(id: "idle", provider: "codex", state: .idle),
-                        AgentSession(id: "done", provider: "codex", state: .finished),
-                        AgentSession(id: "working", provider: "claude", state: .working),
-                        AgentSession(id: "input", provider: "codex", state: .needsInput)]
-        let content = AgentFeedContent.sessions(sessions)
-        XCTAssertEqual(content.headline, "1 needs input")
-        XCTAssertEqual(content.supportingStatus, "1 working · 1 finished")
-        XCTAssertEqual(AgentFeedContent.sessions([sessions[0]]).headline, "No active agents")
-        XCTAssertNil(AgentFeedContent.summary(.working).supportingStatus)
-    }
 
     func testWatchPresentationSeparatesUserOffFailureAndActiveRecovery() {
         func state(_ updates: Bool = true, failed: Bool = false, bluetooth: CBManagerState? = .poweredOn,

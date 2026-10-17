@@ -39,6 +39,7 @@ struct CompanionRoot: View {
     @State private var sidebarPresented = false
     @State private var workFilter: String?
     @State private var recentExpanded = false
+    @State private var selectedTask: WorkIdentity?
     #if DEBUG
     @StateObject private var samples = SampleWorkStore()
     #endif
@@ -50,15 +51,13 @@ struct CompanionRoot: View {
                 rootScreen
                     .navigationTitle(selectedSection.rawValue).navigationBarTitleDisplayMode(.inline)
                     .toolbar { rootToolbar }
-                    .navigationDestination(for: WorkIdentity.self) { identity in
-                        WorkDetail(identity: identity, model: model, presentation: presentation, inbox: model.interactions, theme: theme)
-                    }
                     .modifier(CompanionDestinations(model: model, presentation: presentation, theme: theme,
                         open: { path.append($0) }, replacePath: { path = NavigationPath($0) }))
             }
         }
-        .sheet(item: Binding(get: { model.handoff }, set: { if $0 == nil { model.dismissHandoff() } })) { request in
-            SessionHandoffSheet(model: model, presentation: presentation, request: request, theme: theme)
+        .sheet(item: taskCardSelection) { selection in
+            TaskCard(selection: selection, model: model, presentation: presentation,
+                     inbox: model.interactions, theme: theme).id(selection.id)
         }
         .tint(theme.tint)
         .preferredColorScheme(.dark)
@@ -76,7 +75,19 @@ struct CompanionRoot: View {
         .onChange(of: model.snapshots.mapValues(\.sourceName)) { _, _ in
             presentation.syncComputerNames(model.pairedSources, snapshots: model.snapshots)
         }
+        .onChange(of: model.handoff?.id) { _, id in
+            if id != nil { selectedTask = nil; sidebarPresented = false }
+        }
         .onOpenURL(perform: handleURL)
+    }
+
+    private var taskCardSelection: Binding<TaskCardSelection?> {
+        Binding(get: {
+            if let request = model.handoff { return .handoff(request) }
+            return selectedTask.map { .activity($0) }
+        }, set: { value in
+            if value == nil { selectedTask = nil; model.dismissHandoff() }
+        })
     }
 
     @ViewBuilder private var rootScreen: some View {
@@ -84,9 +95,9 @@ struct CompanionRoot: View {
             switch selectedSection {
             case .work:
                 CompanionWork(model: model, presentation: presentation, inbox: model.interactions,
-                    theme: theme, filter: $workFilter, recentExpanded: $recentExpanded) {
-                    path.append(FeedDestination.pairing)
-                }
+                    theme: theme, filter: $workFilter, recentExpanded: $recentExpanded,
+                    connectComputer: { path.append(FeedDestination.pairing) },
+                    inspectTask: { selectedTask = $0 })
             case .devices:
                 CompanionDevices(model: model, monitoring: model.monitoring, presentation: presentation,
                     theme: theme) { path.append($0) }
@@ -246,67 +257,5 @@ private struct CompanionDestinations: ViewModifier {
                 case .weather: WeatherSettings(weather: model.weather, theme: theme)
                 }
             }
-    }
-}
-
-private struct SessionHandoffSheet: View {
-    @ObservedObject var model: CompanionModel
-    @ObservedObject var presentation: PresentationModel
-    let request: PendingWatchHandoff
-    let theme: CompanionTheme
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.openURL) private var openURL
-    @State private var openFailed = false
-    @Environment(\.dynamicTypeSize) private var typeSize
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    if let target = model.handoffTarget(request) {
-                        Text(presentation.displayName(
-                            source: model.pairedSources.first { $0.sourceID == target.sourceID },
-                            snapshot: model.snapshots[target.sourceID]))
-                            .companionText(.supporting, theme: theme)
-                        AgentSessionSummary(
-                            row: AgentDisplayRow(id: "session:" + target.session.id,
-                                session: target.session, detail: target.session.detail),
-                            historical: !model.isActivityCurrent(target.sourceID), theme: theme)
-                        if let url = target.session.appURL {
-                            Button {
-                                // Re-resolve from current phone-owned data at the moment of opening.
-                                guard let current = model.handoffTarget(request)?.session.appURL, current == url else { return }
-                                openURL(current) { accepted in openFailed = !accepted }
-                            } label: {
-                                Text(target.session.appLinkTitle).font(CompanionTextRole.button.font)
-                                    .foregroundStyle(theme.canvas)
-                                    .frame(maxWidth: .infinity).padding(.vertical, 12)
-                            }.buttonStyle(.borderedProminent).tint(theme.tint)
-                        } else {
-                            Text("This agent doesn’t provide a phone link.").companionText(.body, theme: theme)
-                        }
-                        if openFailed {
-                            Text("Couldn’t open the app. Check that it’s installed on this iPhone.")
-                                .companionText(.body, theme: theme)
-                        }
-                    } else {
-                        Text("Session unavailable").companionText(.title, theme: theme)
-                        Text("This session is no longer available. Check the latest activity in Paceman.")
-                            .companionText(.body, theme: theme)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 24)
-            }
-            .background(theme.canvas).foregroundStyle(theme.ink)
-            .navigationTitle("Continue on phone").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-        }
-        .preferredColorScheme(.dark)
-        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
-        .task {
-            if let target = model.handoffTarget(request), !model.designPreview {
-                await model.refresh(sourceID: target.sourceID)
-            }
-        }
     }
 }

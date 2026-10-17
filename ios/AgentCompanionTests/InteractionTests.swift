@@ -2,6 +2,64 @@ import XCTest
 @testable import AgentCompanion
 
 final class InteractionTests: XCTestCase {
+    func testApprovalFormattingPreservesExactToolInputAndUnknownFormats() {
+        let action = "Tool: Bash\nWorking directory: /Projects/My App\n\n{\"command\":\"printf '日本語' && swift test\",\"timeout\":120}"
+        let live = ApprovalDetailContent(action)
+        XCTAssertEqual(live.explanation, "")
+        XCTAssertEqual(live.action, action)
+        let sample = ApprovalDetailContent("Verify the fix.\n\n" + action)
+        XCTAssertEqual(sample.explanation, "Verify the fix.")
+        XCTAssertEqual(sample.action, action)
+        let unknown = "Review this proposed change:\n  custom format\nDo not omit this.\n"
+        XCTAssertEqual(ApprovalDetailContent(unknown).explanation, unknown)
+        XCTAssertNil(ApprovalDetailContent(unknown).action)
+    }
+
+    func testApprovalPresentationKeepsEveryArgumentAndAmbiguousLine() {
+        let payload = "{\"command\":\"printf '日本語' && swift test\",\"timeout\":120,\"description\":\"Verify all changes\"}\n"
+        let content = ApprovalActionContent("Tool: Bash\nWorking directory: /Projects/My App\n\n" + payload)
+        XCTAssertEqual(content.tool, "Bash")
+        XCTAssertEqual(content.directory, "/Projects/My App")
+        XCTAssertEqual(content.body, payload)
+        let command = "echo one\nprintf 'two\\n'\n"
+        XCTAssertEqual(ApprovalActionContent("Working directory: /tmp\nCommand: " + command).body, command)
+        let unknown = "Custom input\nTool: this is part of the input\n"
+        XCTAssertEqual(ApprovalActionContent(unknown).body, unknown)
+        let duplicate = ApprovalActionContent("Tool: Bash\nTool: another tool\nCommand: preserve this")
+        XCTAssertEqual(duplicate.tool, "Bash")
+        XCTAssertEqual(duplicate.body, "Tool: another tool\nCommand: preserve this")
+    }
+
+    @MainActor func testCatalogPreservesDistinctSessionIdentityAndLegacyActivity() throws {
+        let model = CompanionModel(preview: true)
+        model.showHandoffPreview("handoff-codex-working")
+        let source = try XCTUnwrap(model.pairedSources.first)
+        let presentation = PresentationModel()
+        let inbox = InteractionInbox()
+        model.snapshots[source.sourceID]?.sessions = [
+            AgentSession(id: "first", provider: "codex", state: .working),
+            AgentSession(id: "second", provider: "codex", state: .working)]
+        var items = WorkCatalog.live(model: model, presentation: presentation, inbox: inbox)
+        XCTAssertEqual(items.count, 2)
+        XCTAssertEqual(Set(items.map(\.id)).count, 2)
+        XCTAssertEqual(Set(items.map { $0.session.displayName }), ["Codex"])
+        XCTAssertTrue(items.allSatisfy { !$0.aggregate && $0.group == .working })
+
+        model.snapshots[source.sourceID]?.sessions = []
+        items = WorkCatalog.live(model: model, presentation: presentation, inbox: inbox)
+        let aggregate = try XCTUnwrap(items.first)
+        XCTAssertEqual(items.count, 1)
+        XCTAssertTrue(aggregate.aggregate)
+        XCTAssertNil(aggregate.session.appURL)
+        XCTAssertEqual(aggregate.session.displayName, "Agent activity")
+        model.snapshots[source.sourceID] = Snapshot(schema: 1, sourceID: source.sourceID,
+            generation: "idle", revision: 2, sourceName: "Mac", observedAt: Date().timeIntervalSince1970,
+            changedAt: Date().timeIntervalSince1970, freshFor: 30, state: .idle, eventID: "idle", sessions: [])
+        XCTAssertTrue(WorkCatalog.live(model: model, presentation: presentation, inbox: inbox).isEmpty)
+        model.snapshots = [:]
+        XCTAssertTrue(WorkCatalog.live(model: model, presentation: presentation, inbox: inbox).isEmpty)
+    }
+
     private let sourceID = UUID().uuidString
     private func fixture() -> [String: Any] {
         ["sourceID": sourceID, "generation": UUID().uuidString, "requests": [[

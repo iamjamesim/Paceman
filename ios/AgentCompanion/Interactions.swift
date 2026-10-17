@@ -23,6 +23,51 @@ struct InputRequest: Codable, Identifiable, Equatable {
     let remainingSeconds: Double
     var id: String { requestID }
 }
+
+/// Separate known approval metadata from introductory prose without parsing,
+/// reordering, or dropping any of the proposed tool input. Unknown formats stay prose.
+struct ApprovalDetailContent {
+    let explanation: String
+    let action: String?
+    init(_ detail: String) {
+        if let boundary = detail.range(of: #"(?m)^(?:Tool: |Working directory: |Command: |\{)"#,
+                                       options: .regularExpression) {
+            explanation = String(detail[..<boundary.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            action = String(detail[boundary.lowerBound...])
+        } else {
+            explanation = detail
+            action = nil
+        }
+    }
+}
+/// Recognize only the bridge's leading metadata lines. The remaining tool input
+/// is displayed verbatim; unfamiliar or ambiguous lines remain in the action.
+struct ApprovalActionContent {
+    let body: String
+    let tool: String?
+    let directory: String?
+    init(_ action: String) {
+        var remaining = action[...]
+        var parsedTool: String?
+        var parsedDirectory: String?
+        while !remaining.isEmpty {
+            let end = remaining.firstIndex(of: "\n") ?? remaining.endIndex
+            let line = remaining[..<end]
+            if line.hasPrefix("Tool: "), parsedTool == nil {
+                parsedTool = String(line.dropFirst(6))
+            } else if line.hasPrefix("Working directory: "), parsedDirectory == nil {
+                parsedDirectory = String(line.dropFirst(19))
+            } else { break }
+            remaining = end == remaining.endIndex ? ""[...] : remaining[remaining.index(after: end)...]
+        }
+        if remaining.hasPrefix("Command: ") { remaining = remaining.dropFirst(9) }
+        else if remaining.hasPrefix("\n") { remaining = remaining.dropFirst() }
+        body = String(remaining)
+        tool = parsedTool
+        directory = parsedDirectory
+    }
+}
+
 struct InputRequests: Decodable {
     let sourceID: String
     let generation: String
@@ -89,8 +134,6 @@ struct PendingInput: Identifiable {
     let generation: String
     let request: InputRequest
     let expiresAtUptime: TimeInterval
-    let taskName: String
-    let computerName: String
     var id: String { "\(source.sourceID)/\(generation)/\(request.id)" }
 }
 
@@ -131,17 +174,14 @@ enum InputDelivery {
         do {
             let value = try await client.inputRequests(source)
             guard active, expectedEpoch == epoch, revision == revisions[source.sourceID, default: 0], !Task.isCancelled else { return }
-            let computer = ComputerPreferences.displayName(for: source.sourceID, sourceName: snapshot.sourceName, host: source.endpoint.host)
             bySource[source.sourceID] = value.requests.compactMap { request in
                 // Account conservatively for time spent fetching the request.
                 guard started + request.remainingSeconds > ProcessInfo.processInfo.systemUptime else { return nil }
                 // Never offer a response when the task cannot be matched to this source.
-                guard let session = snapshot.sessions?.first(where: { $0.id == request.sessionID && $0.provider == request.provider }) else { return nil }
+                guard snapshot.sessions?.contains(where: { $0.id == request.sessionID && $0.provider == request.provider }) == true else { return nil }
                 receipts.removeValue(forKey: WorkIdentity(sourceID: source.sourceID, sessionID: request.sessionID, provider: request.provider))
                 return PendingInput(source: source, generation: value.generation, request: request,
-                    expiresAtUptime: started + request.remainingSeconds,
-                    taskName: session.displayName,
-                    computerName: computer)
+                    expiresAtUptime: started + request.remainingSeconds)
             }
         } catch {
             guard expectedEpoch == epoch, revision == revisions[source.sourceID, default: 0] else { return }
@@ -171,11 +211,10 @@ enum InputDelivery {
                 provider: task.id == "tests" ? "codex" : "claude", sessionID: task.id,
                 kind: task.id == "tests" ? "approval" : "question",
                 title: task.id == "tests" ? "Run the tests?" : "",
-                detail: task.id == "tests" ? "Run the checkout tests to verify the redirect fix.\n\nWorking directory: /Projects/storefront\nCommand: npm test -- checkout" : "",
+                detail: task.id == "tests" ? "Working directory: /Projects/storefront\nCommand: npm test -- checkout" : "",
                 questions: task.id == "tests" ? [] : [question], remainingSeconds: 120)
             bySource[source.sourceID, default: []].append(PendingInput(source: source, generation: UUID().uuidString,
-                request: request, expiresAtUptime: .greatestFiniteMagnitude,
-                taskName: task.title, computerName: "Sample task"))
+                request: request, expiresAtUptime: .greatestFiniteMagnitude))
         }
     }
     func preview(_ source: PairedSource, kind: String = "approval", multiple: Bool = false) {
@@ -188,10 +227,7 @@ enum InputDelivery {
             title: kind == "approval" ? "Allow Bash?" : "Onboarding direction", detail: kind == "approval" ? "Working directory: /Projects/example\n\n{\"command\": \"swift test\"}" : "",
             questions: kind == "question" ? [question] : [], remainingSeconds: 120)
         bySource[source.sourceID, default: []].append(PendingInput(source: source, generation: UUID().uuidString,
-            request: request, expiresAtUptime: ProcessInfo.processInfo.systemUptime + 120,
-            taskName: ProcessInfo.processInfo.arguments.contains(where: { $0.contains("input-long") })
-                ? "Improve onboarding and review notification permissions across all connected computers" : "Improve onboarding",
-            computerName: "MacBook Pro"))
+            request: request, expiresAtUptime: ProcessInfo.processInfo.systemUptime + 120))
     }
     #endif
 }
