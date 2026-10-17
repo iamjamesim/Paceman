@@ -6,67 +6,185 @@ struct WorkIdentity: Hashable {
     let provider: String
 }
 
+extension LiveActivityRoute {
+    func task(in snapshot: Snapshot?, previouslyResolved: WorkIdentity? = nil) -> WorkIdentity? {
+        guard let snapshot, snapshot.sourceID == sourceID, snapshot.generation == generation else { return nil }
+        // Once identified in the tapped revision, follow that same task through
+        // a refresh or state change. Never substitute another session.
+        if let previous = previouslyResolved {
+            guard previous.sourceID == sourceID,
+                  snapshot.sessions?.contains(where: { $0.id == previous.sessionID && $0.provider == previous.provider }) == true
+            else { return nil }
+            return previous
+        }
+        guard snapshot.revision == revision else { return nil }
+        let matches = (snapshot.sessions ?? []).filter { $0.state.rawValue == state }
+        guard matches.count == 1, let session = matches.first else { return nil }
+        return WorkIdentity(sourceID: sourceID, sessionID: session.id, provider: session.provider)
+    }
+}
+
+/// Opaque, process-local observation order, not inferred task timestamps.
+/// Repeated snapshots and title changes never move a task. Request arrays retain
+/// source arrival order; separate computers are ordered when first seen here.
+struct WorkOrdering {
+    private var serial: UInt64 = 0
+    private var generations: [String: String] = [:]
+    private var tasks: [WorkIdentity: (state: ActivityState, order: UInt64)] = [:]
+    private var requests: [String: [String: UInt64]] = [:]
+    mutating func observe(_ snapshot: Snapshot) {
+        if let previous = generations[snapshot.sourceID], previous != snapshot.generation {
+            tasks = tasks.filter { $0.key.sourceID != snapshot.sourceID }
+            requests.removeValue(forKey: snapshot.sourceID)
+        }
+        generations[snapshot.sourceID] = snapshot.generation
+        let sessions = snapshot.sessions ?? []
+        let identities = Set(sessions.map { WorkIdentity(sourceID: snapshot.sourceID, sessionID: $0.id, provider: $0.provider) })
+        tasks = tasks.filter { $0.key.sourceID != snapshot.sourceID || identities.contains($0.key) }
+        serial += 1
+        for session in sessions {
+            let id = WorkIdentity(sourceID: snapshot.sourceID, sessionID: session.id, provider: session.provider)
+            if tasks[id]?.state != session.state { tasks[id] = (session.state, serial) }
+        }
+    }
+    mutating func observeRequests(_ values: [PendingInput], sourceID: String) {
+        var known = requests[sourceID] ?? [:]
+        let ids = Set(values.map(\.id))
+        known = known.filter { ids.contains($0.key) }
+        for request in values where known[request.id] == nil {
+            serial += 1
+            known[request.id] = serial
+        }
+        requests[sourceID] = known
+    }
+    func activityOrder(_ id: WorkIdentity) -> UInt64? { tasks[id]?.order }
+    func requestOrder(_ request: PendingInput?) -> UInt64? {
+        guard let request else { return nil }
+        return requests[request.source.sourceID]?[request.id]
+    }
+}
+
+struct WorkRowIdentity: Hashable {
+    let task: WorkIdentity
+    let phase: WorkPhase
+    let historical: Bool
+}
+
 struct WorkItem: Identifiable {
     let id: WorkIdentity
     let session: AgentSession
     let computer: String
     let historical: Bool
+    var activityOrder: UInt64? = nil
+    var requestOrder: UInt64? = nil
     var aggregate = false
-    var returnedToComputer = false
-    var response: String? = nil
+    var delivery: InputDelivery? = nil
+    var inputAvailability: InputAvailability? = nil
+    var returnedToComputer: Bool { delivery == .released }
+    var response: String? { delivery?.message }
     var request: PendingInput? = nil
-    var state: ActivityState { request != nil ? .needsInput : session.state }
-    var group: WorkGroup {
-        if historical { return .lastKnown }
-        switch state {
-        case .needsInput, .failed: return .attention
+    // Lazy sections retain moved rows by ID. A phase transition replaces the
+    // rendered row (including its animation), while task selection stays stable.
+    var rowIdentity: WorkRowIdentity { .init(task: id, phase: phase, historical: historical) }
+    var phase: WorkPhase {
+        if !historical {
+            if let request { return request.request.kind == "approval" ? .approval : .question }
+            if session.state == .needsInput {
+                if returnedToComputer { return .continued }
+                if response != nil { return .responded }
+                if inputAvailability == nil || inputAvailability == .loading || inputAvailability == .unavailable {
+                    return .resolving
+                }
+            }
+        }
+        switch session.state {
+        case .needsInput: return .attention
         case .working: return .working
-        case .finished, .idle: return .recent
+        case .finished: return .finished
+        case .failed: return .failed
+        case .idle: return .idle
         }
     }
+    var state: ActivityState { phase.activity }
+    var group: WorkGroup { historical ? .lastKnown : phase.group }
     var status: String {
-        if historical { return "Last known: \(session.state.title)" }
-        if let request { return request.request.kind == "approval" ? "Approval needed" : "Question for you" }
-        if returnedToComputer && state == .needsInput { return "Continue on computer" }
-        if response != nil && state == .needsInput { return "Response sent" }
-        return state == .needsInput ? "Needs your attention" : state.title
+        historical ? "Last known: \(phase.title)" : phase.title
     }
     var context: String {
         [session.provider.capitalized, session.detail, computer].filter { !$0.isEmpty }.joined(separator: " · ")
     }
-    var statusToken: WorkStatusToken {
-        // Delivery receipts are supporting text, never agent completion or a
-        // separate status glyph. The next source update owns the transition.
-        if !historical && state == .needsInput && request == nil && response != nil && !returnedToComputer { return .none }
-        switch state {
-        case .needsInput:
-            guard let request else { return .attention }
-            return request.request.kind == "approval" ? .approval : .question
-        case .failed: return .attention
-        case .working: return .working
-        case .finished: return .finished
-        case .idle: return .none
-        }
-    }
+    var statusToken: WorkStatusToken { phase.token }
+    var opensActivityCard: Bool { !aggregate }
     var statusDetail: String? {
+        // The section establishes that these are historical observations; the
+        // row still needs to say what was observed, without relying on a glyph.
+        if historical { return session.state == .needsInput ? "Needs attention" : session.state.title }
         if request != nil { return nil }
         if state == .needsInput && (returnedToComputer || response != nil) { return status }
+        if state == .needsInput {
+            return inputAvailability == .available || inputAvailability == .disabled ? "Continue on computer" : nil
+        }
         return state == .failed || state == .idle ? state.title : nil
     }
 
 }
 
-/// Five status marks; progress has animated and static presentations of the
-/// same shape. Selection controls and app-opening buttons are separate actions.
+/// One presentation state owns section placement, status, and the leading mark.
+/// Delivery is not completion; only a source observation can establish Finished.
+enum WorkPhase: Hashable {
+    case idle, working, approval, question, resolving, attention, failed, finished, responded, continued
+    var activity: ActivityState {
+        switch self {
+        case .idle: return .idle
+        case .working: return .working
+        case .finished: return .finished
+        case .failed: return .failed
+        default: return .needsInput
+        }
+    }
+    var group: WorkGroup {
+        switch self {
+        case .idle, .finished: return .recent
+        case .working, .responded: return .working
+        default: return .attention
+        }
+    }
+    var title: String {
+        switch self {
+        case .approval: return "Approval needed"
+        case .question: return "Question for you"
+        case .attention, .resolving: return "Needs your attention"
+        case .responded: return "Response sent"
+        case .continued: return "Continue on computer"
+        default: return activity.title
+        }
+    }
+    var token: WorkStatusToken {
+        switch self {
+        case .approval, .resolving: return .approval
+        case .question: return .question
+        case .attention, .continued: return .attention
+        case .working: return .working
+        case .responded: return .sent
+        case .failed: return .failed
+        case .finished: return .finished
+        case .idle: return .idle
+        }
+    }
+}
+
 enum WorkStatusToken: Hashable {
-    case approval, question, attention, working, finished, none
+    case approval, question, attention, working, failed, finished, idle, sent
     var symbol: String? {
         switch self {
         case .approval: return "hand.raised"
         case .question: return "questionmark.bubble"
-        case .attention: return "exclamationmark"
+        case .attention: return "exclamationmark.triangle"
+        case .failed: return "xmark.circle"
         case .finished: return "checkmark.circle"
-        case .working, .none: return nil
+        case .idle: return "ellipsis.circle"
+        case .sent: return "paperplane"
+        case .working: return nil
         }
     }
 }
@@ -75,7 +193,37 @@ enum WorkGroup: String, CaseIterable {
     case attention = "Needs you", working = "Working", recent = "Recent", lastKnown = "Last known"
 }
 
+struct WorkSectionData: Identifiable {
+    let group: WorkGroup
+    let rows: [WorkItem]
+    var id: WorkGroup { group }
+}
+
 @MainActor enum WorkCatalog {
+    static func sorted(_ items: [WorkItem]) -> [WorkItem] {
+        items.sorted { left, right in
+            let a = WorkGroup.allCases.firstIndex(of: left.group)!, b = WorkGroup.allCases.firstIndex(of: right.group)!
+            if a != b { return a < b }
+            if left.group == .attention, (left.request != nil) != (right.request != nil) {
+                return left.request != nil
+            }
+            let l = left.group == .attention ? (left.requestOrder ?? left.activityOrder) : left.activityOrder
+            let r = right.group == .attention ? (right.requestOrder ?? right.activityOrder) : right.activityOrder
+            if left.group != .lastKnown, l != r {
+                if let l, let r { return left.group == .recent ? l > r : l < r }
+                return l != nil
+            }
+            return [left.id.sourceID, left.id.provider, left.id.sessionID].lexicographicallyPrecedes(
+                [right.id.sourceID, right.id.provider, right.id.sessionID])
+        }
+    }
+    static func sections(_ items: [WorkItem]) -> [WorkSectionData] {
+        let grouped = Dictionary(grouping: items, by: \.group)
+        return WorkGroup.allCases.compactMap { group in
+            guard let rows = grouped[group], !rows.isEmpty else { return nil }
+            return WorkSectionData(group: group, rows: rows)
+        }
+    }
     static func live(model: CompanionModel, presentation: PresentationModel, inbox: InteractionInbox) -> [WorkItem] {
         model.pairedSources.flatMap { source -> [WorkItem] in
             let snapshot = model.snapshots[source.sourceID]
@@ -101,11 +249,13 @@ enum WorkGroup: String, CaseIterable {
         let connected = presentation.computerState(model: model, sourceID: source.sourceID) == .current
         let current = presentation.preview && !presentation.previewScreen.hasPrefix("handoff")
             ? connected : model.isActivityCurrent(source.sourceID)
+        let pending = connected ? inbox.items.first { $0.source.sourceID == id.sourceID && $0.request.sessionID == id.sessionID && $0.request.provider == id.provider && inbox.isCurrent($0) } : nil
         return WorkItem(id: id, session: session,
             computer: presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID]), historical: !current,
-            returnedToComputer: connected && session.state == .needsInput && inbox.receipt(for: id) == .released,
-            response: connected && session.state == .needsInput ? inbox.receipt(for: id)?.message : nil,
-            request: connected ? inbox.items.first { $0.source.sourceID == id.sourceID && $0.request.sessionID == id.sessionID && $0.request.provider == id.provider && inbox.isCurrent($0) } : nil)
+            activityOrder: inbox.ordering.activityOrder(id), requestOrder: inbox.ordering.requestOrder(pending),
+            delivery: connected && session.state == .needsInput ? inbox.receipt(for: id) : nil,
+            inputAvailability: inbox.availability[source.sourceID],
+            request: pending)
     }
 }
 
@@ -118,17 +268,14 @@ struct CompanionWork: View {
     @Binding var recentExpanded: Bool
     let connectComputer: () -> Void
     let inspectTask: (WorkIdentity) -> Void
+    let reviewTasks: ([WorkIdentity]) -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
     var items: [WorkItem] {
         let result = WorkCatalog.live(model: model, presentation: presentation, inbox: inbox)
-        return result.sorted {
-            let a = WorkGroup.allCases.firstIndex(of: $0.group)!, b = WorkGroup.allCases.firstIndex(of: $1.group)!
-            if a != b { return a < b }
-            if $0.session.displayName != $1.session.displayName { return $0.session.displayName.localizedStandardCompare($1.session.displayName) == .orderedAscending }
-            return $0.id.sourceID < $1.id.sourceID
-        }
+        return WorkCatalog.sorted(result)
     }
+
     private var visible: [WorkItem] {
         items.filter { filter == nil || $0.id.sourceID == filter }
     }
@@ -179,11 +326,8 @@ struct CompanionWork: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
                 }
-                ForEach(WorkGroup.allCases, id: \.self) { group in
-                    let rows = currentRows.filter { $0.group == group }
-                    if !rows.isEmpty {
-                        workSection(group, rows: rows)
-                    }
+                ForEach(WorkCatalog.sections(currentRows)) { section in
+                    workSection(section)
                 }
                 if !model.pairedSources.isEmpty && currentRows.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
@@ -202,34 +346,17 @@ struct CompanionWork: View {
             .refreshable { if !presentation.preview { await model.refreshAll() } }
     }
 
-    private func workSection(_ group: WorkGroup, rows: [WorkItem]) -> some View {
-        Section {
+    private func workSection(_ section: WorkSectionData) -> some View {
+        let group = section.group
+        let rows = section.rows
+        return Section {
             if group != .recent || recentExpanded {
-                ForEach(rows) { item in
-                    let layout = typeSize.isAccessibilitySize
-                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                        : AnyLayout(HStackLayout(spacing: 12))
-                    layout {
-                        if item.aggregate {
-                            WorkRow(item: item, theme: theme)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            Button { inspectTask(item.id) } label: {
-                                WorkRow(item: item, theme: theme,
-                                    showComputer: filter == nil && Set(items.map { $0.id.sourceID }).count > 1)
-                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                    .contentShape(Rectangle())
-                            }.buttonStyle(.plain)
-                                // Recreate the button label when its status changes;
-                                // a moved task must not retain the previous glyph.
-                                .id(item.statusToken)
-                        }
-                        if item.session.appURL != nil {
-                            SessionOpenButton(session: item.session, theme: theme) {
-                                items.first { $0.id == item.id }?.session
-                            }
-                        }
-                    }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 12)
+                ForEach(rows, id: \.rowIdentity) { item in
+                    WorkTaskRow(item: item, theme: theme,
+                        showComputer: filter == nil && Set(items.map { $0.id.sourceID }).count > 1,
+                        inspect: { inspectTask(item.id) },
+                        prepareToOpen: { inbox.releaseRequest(for: item.id) },
+                        currentSession: { items.first { $0.id == item.id }?.session })
                 }
             }
         } header: {
@@ -240,9 +367,25 @@ struct CompanionWork: View {
                     }.buttonStyle(.plain)
                         .accessibilityValue(recentExpanded ? "Expanded" : "Collapsed")
                         .accessibilityHint("Show or hide recent tasks")
-                } else { groupHeading(group, count: rows.contains { $0.aggregate } ? nil : rows.count) }
+                } else {
+                    let layout = typeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                        : AnyLayout(HStackLayout(spacing: 12))
+                    layout {
+                        groupHeading(group, count: rows.contains { $0.aggregate } ? nil : rows.count)
+                        if group == .attention, rows.contains(where: { $0.opensActivityCard }) {
+                            Button { reviewTasks(rows.filter(\.opensActivityCard).map(\.id)) } label: {
+                                Text("Review").font(CompanionTextRole.label.font).fixedSize(horizontal: true, vertical: false)
+                                    .foregroundStyle(theme.tint)
+                                    .padding(.horizontal, 14).padding(.vertical, 8)
+                                    .background(theme.tint.opacity(0.12), in: Capsule())
+                                    .frame(minHeight: 44).contentShape(Capsule())
+                            }.buttonStyle(.plain).accessibilityLabel("Review tasks needing you")
+                        }
+                    }
+                }
             }
-        }.id(group)
+        }
     }
 
     private func groupHeading(_ group: WorkGroup, count: Int?) -> some View {
@@ -372,35 +515,50 @@ private struct WorkSectionSurface<Content: View>: View {
     }
 }
 
+/// One row owns its separate card and agent-app hit targets.
+private struct WorkTaskRow: View {
+    let item: WorkItem
+    let theme: CompanionTheme
+    let showComputer: Bool
+    let inspect: () -> Void
+    let prepareToOpen: () -> Void
+    let currentSession: () -> AgentSession?
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        layout {
+            if !item.opensActivityCard {
+                WorkRow(item: item, theme: theme, showComputer: showComputer)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Button(action: inspect) {
+                    WorkRow(item: item, theme: theme, showComputer: showComputer)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
+            if item.session.appURL != nil {
+                SessionOpenButton(session: item.session, theme: theme,
+                    prepareToOpen: prepareToOpen, currentSession: currentSession)
+            }
+        }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 12)
+    }
+}
+
 struct WorkRow: View {
     let item: WorkItem
     let theme: CompanionTheme
     var showComputer = true
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var typeSize
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .subheadline) private var tokenSize = 16.0
     @ScaledMetric(relativeTo: .callout) private var tokenBaselineOffset = 4.0
-    private var color: Color {
-        if item.historical || (item.request == nil && item.response != nil) || item.group == .recent || item.state == .working { return theme.secondaryInk }
-        return PhoneMonitoringStatusColor.color(for: item.state.rawValue, onDark: colorScheme == .dark, fallback: theme.secondaryInk)
-    }
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            ZStack {
-                if item.statusToken == .working {
-                    if !item.historical && !reduceMotion {
-                        ProgressView().controlSize(.mini).dynamicTypeSize(.large).tint(color)
-                    } else {
-                        Circle().trim(from: 0, to: 0.75)
-                            .stroke(style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                            .rotationEffect(.degrees(-90)).foregroundStyle(color)
-                    }
-                } else if let symbol = item.statusToken.symbol {
-                    Image(systemName: symbol).font(.system(size: min(tokenSize, 24)))
-                        .foregroundStyle(color)
-                }
-            }.frame(width: min(tokenSize, 24), height: min(tokenSize, 24))
+            WorkStatusMark(item: item, theme: theme, size: min(tokenSize, 24))
+                .frame(width: min(tokenSize, 24), height: min(tokenSize, 24))
                 .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + tokenBaselineOffset }
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
@@ -417,6 +575,51 @@ struct WorkRow: View {
         }
             .accessibilityElement(children: .combine)
             .accessibilityValue(item.status)
+    }
+}
+
+struct WorkStatusMark: View {
+    let item: WorkItem
+    let theme: CompanionTheme
+    var size: CGFloat = 18
+    @Environment(\.colorScheme) private var colorScheme
+    private var color: Color {
+        if item.historical || item.phase == .resolving || (item.request == nil && item.response != nil) || item.group == .recent || item.state == .working { return theme.secondaryInk }
+        return PhoneMonitoringStatusColor.color(for: item.state.rawValue, onDark: colorScheme == .dark, fallback: theme.secondaryInk)
+    }
+    var body: some View {
+        Group {
+            if item.statusToken == .working { WorkProgressRing(color: color, animate: !item.historical) }
+            else if let symbol = item.statusToken.symbol { Image(systemName: symbol).font(.system(size: size)).foregroundStyle(color) }
+        }.accessibilityHidden(true)
+    }
+}
+
+/// The same progress mark stays still for history, Reduce Motion, and inactive
+/// scenes. A display timeline owns visual motion; there is no background timer.
+private struct WorkProgressRing: View {
+    let color: Color
+    let animate: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var visible = false
+    private var moving: Bool { animate && !reduceMotion && scenePhase == .active && visible }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !moving)) { context in
+            let turn = moving ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1) : 0
+            ZStack {
+                Circle().stroke(color.opacity(0.2), lineWidth: 1.5)
+                Circle().trim(from: 0, to: 0.75)
+                    .stroke(AngularGradient(colors: [color.opacity(0.25), color], center: .center,
+                                            startAngle: .degrees(0), endAngle: .degrees(270)),
+                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                    .rotationEffect(.degrees(turn * 360 - 90))
+            }.padding(0.75)
+        }
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
+        .accessibilityHidden(true)
     }
 }
 

@@ -6,64 +6,58 @@ struct InteractionDetail: View {
     @ObservedObject var inbox: InteractionInbox
     let theme: CompanionTheme
     var heading: TaskCardHeading? = nil
+    var context: String? = nil
     var contentTopInset: CGFloat = 16
     var openSession: SessionOpenButton? = nil
-    var preview = false
     @Environment(\.scenePhase) private var phase
     @State private var answers: [String: InputAnswer] = [:]
-    @State private var submission: InputSubmission?
-    @State private var sending = false
-    @State private var sent = false
-    @State private var retryable = false
-    @State private var message: String?
+    private var response: InputResponseState? { inbox.response(for: item) }
+    private var submission: InputSubmission? { response?.submission }
+    private var sending: Bool { response?.phase == .sending || inbox.isSubmitting(item) }
+    private var sent: Bool { response?.phase == .submitted }
+    private var retryable: Bool { response?.phase == .unconfirmed }
+    private var message: String? { response?.message }
     @FocusState private var focusedQuestion: String?
-    private var ready: Bool { item.request.questions.allSatisfy { (answers[$0.id] ?? InputAnswer()).valid(for: $0) } }
-    private var editable: Bool { submission == nil && !sending && inbox.isCurrent(item) && phase == .active }
+    private var ready: Bool {
+        item.request.questions.allSatisfy { (answers[$0.id] ?? InputAnswer()).valid(for: $0) }
+            && item.answersFitWireLimit(answers)
+    }
+    private var validationMessage: String? {
+        if answers.values.contains(where: { $0.text.unicodeScalars.count > 4096 }) {
+            return "Keep each answer to 4,096 characters or fewer."
+        }
+        return item.answersFitWireLimit(answers) ? nil : "The combined answer is too long. Shorten it to send."
+    }
+    private var editable: Bool { response == nil && !sending && inbox.isCurrent(item) && phase == .active }
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     if let heading { heading }
-                    if sent {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(submission?.action == "release" ? "Continue on your computer" : "Your response")
-                                .companionText(.prompt, theme: theme)
-                            if let submission, submission.action == "answer" {
-                                ForEach(item.request.questions) { question in
-                                    if let answer = submission.answers[question.id] {
-                                        Text(answer.text.isEmpty ? answer.selected.map { question.options[$0].label }.joined(separator: ", ") : answer.text)
-                                            .companionText(.body, theme: theme)
-                                    }
-                                }
+                    if let context { Text(context).companionText(.supporting, theme: theme) }
+                    if (item.request.kind != "question" && !item.request.title.isEmpty) || !item.request.detail.isEmpty {
+                        let directApproval = item.request.kind == "approval" && ApprovalDetailContent(item.request.detail).explanation.isEmpty
+                        VStack(alignment: .leading, spacing: directApproval ? CompanionLayout.taskPromptSpacing : 8) {
+                            if !item.request.title.isEmpty && item.request.kind != "question" {
+                                Text(item.request.title).companionText(.cardTitle, theme: theme)
+                                    .accessibilityAddTraits(.isHeader)
                             }
-                            if let submission, submission.action != "answer" && submission.action != "release" {
-                                Text(submission.action == "allowOnce" ? "Allowed once" : "Declined").companionText(.body, theme: theme)
-                            }
-                            Text("Waiting for the agent’s next update.")
-                                .companionText(.body, theme: theme)
-                        }
-                    } else {
-                        if (item.request.kind != "question" && !item.request.title.isEmpty) || !item.request.detail.isEmpty {
-                            let directApproval = item.request.kind == "approval" && ApprovalDetailContent(item.request.detail).explanation.isEmpty
-                            VStack(alignment: .leading, spacing: directApproval ? CompanionLayout.taskPromptSpacing : 8) {
-                                if !item.request.title.isEmpty && item.request.kind != "question" {
-                                    Text(item.request.title).companionText(.cardTitle, theme: theme)
-                                        .accessibilityAddTraits(.isHeader)
-                                }
-                                if !item.request.detail.isEmpty {
-                                    if item.request.kind == "approval" {
-                                        approvalDetail
-                                    } else {
-                                        Text(item.request.detail).companionText(.body, theme: theme).textSelection(.enabled)
-                                    }
+                            if !item.request.detail.isEmpty {
+                                if item.request.kind == "approval" {
+                                    approvalDetail
+                                } else {
+                                    Text(item.request.detail).companionText(.body, theme: theme).textSelection(.enabled)
                                 }
                             }
                         }
-                        ForEach(item.request.questions) { question in questionForm(question) }
-                        if let message { Text(message).companionText(.body, theme: theme) }
-                        if !sending && !retryable && !editable && message == nil {
-                            Text("This request is no longer available. Continue on your computer.").companionText(.body, theme: theme)
-                        }
+                    }
+                    ForEach(item.request.questions) { question in questionForm(question) }
+                    if editable, let validationMessage {
+                        Text(validationMessage).companionText(.body, theme: theme)
+                    }
+                    if let message { Text(message).companionText(.body, theme: theme) }
+                    if !sent && !sending && !retryable && !editable && message == nil {
+                        Text("This request is no longer available. Continue on your computer.").companionText(.body, theme: theme)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, CompanionLayout.pageInset)
@@ -84,6 +78,9 @@ struct InteractionDetail: View {
                 }
             }
         }
+        .onAppear {
+            if let submission { answers = submission.answers }
+        }
     }
 
     @ViewBuilder private var responseActions: some View {
@@ -93,7 +90,7 @@ struct InteractionDetail: View {
                     .frame(minHeight: 44)
             } else if retryable {
                 InputActionButton(title: "Retry same response", theme: theme) {
-                    if let submission { send(submission) }
+                    inbox.retry(item)
                 }.disabled(phase != .active)
             } else if editable {
                 if item.request.kind == "approval" {
@@ -102,10 +99,6 @@ struct InteractionDetail: View {
                 } else {
                     InputActionButton(title: "Send answer", theme: theme) { respond("answer") }
                         .disabled(!ready)
-                }
-                Button { respond("release") } label: {
-                    Text("Continue on computer").companionText(.body, theme: theme)
-                        .frame(minHeight: 44).contentShape(Rectangle())
                 }
             }
         }
@@ -197,31 +190,8 @@ struct InteractionDetail: View {
 
     private func respond(_ action: String) {
         guard inbox.isCurrent(item), phase == .active else { return }
-        let value = InputSubmission(generation: item.generation, requestID: item.request.id,
-            version: item.request.version, idempotencyKey: UUID().uuidString, action: action,
-            answers: action == "answer" ? answers : [:])
         focusedQuestion = nil
-        submission = value
-        send(value)
-    }
-    private func send(_ value: InputSubmission) {
-        sending = true; retryable = false; message = nil
-        Task { @MainActor in
-            defer { sending = false }
-            do {
-                if !preview { try await SourceClient().submitInput(value, source: item.source) }
-                sent = true
-                inbox.didSubmit(item, action: value.action)
-            } catch {
-                if let error = error as? HubError, case .http(let status) = error,
-                   [400, 401, 404, 409, 410, 422].contains(status) {
-                    message = "This response could not be confirmed. Check the task on your computer."
-                } else {
-                    message = "Delivery is unconfirmed. Retry the same response, or check the task on your computer."
-                    retryable = true
-                }
-            }
-        }
+        inbox.submit(item, action: action, answers: action == "answer" ? answers : [:])
     }
 }
 

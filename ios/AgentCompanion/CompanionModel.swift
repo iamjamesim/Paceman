@@ -124,11 +124,8 @@ final class CompanionModel: ObservableObject {
                     freshFor: 30, state: .idle, eventID: "1", allowance: nil,
                     sessions: [], configuredProviders: providers)
             }
-            if screen.hasPrefix("--screen=input-"), let source = pairedSources.first {
-                if !screen.contains("empty") {
-                    interactions.preview(source, kind: screen.contains("question") ? "question" : "approval", multiple: screen.contains("multiple"))
-                    if screen.contains("multiple") { interactions.preview(source) }
-                }
+            if screen == "--screen=work-review", let source = pairedSources.first {
+                interactions.previewReview(source)
             }
             #endif
         } else {
@@ -428,8 +425,9 @@ final class CompanionModel: ObservableObject {
     }
 
     private func sourceFailed(_ error: Error, sourceID: String) {
-        interactions.remove(sourceID)
         let revoked = (error as? HubError)?.isUnauthorized == true
+        if revoked { interactions.remove(sourceID) }
+        else { interactions.sourceUnavailable(sourceID) }
         errors[sourceID] = revoked ? "Access removed on this computer. Scan a new pairing code to reconnect."
             : "Source unavailable: \(error.localizedDescription)"
         status = errors[sourceID] ?? "Source unavailable"
@@ -549,6 +547,7 @@ final class CompanionModel: ObservableObject {
             let nameChanged = MonitoringComputerName.storedName(sourceID: sourceID) != displayName
             if nameChanged { MonitoringComputerName.save(displayName, for: sourceID) }
             snapshots[sourceID] = value
+            interactions.reconcile(value)
             let receivedAt = Date()
             lastContacts[sourceID] = receivedAt
             fetchedUptimes[sourceID] = ProcessInfo.processInfo.systemUptime - age
@@ -561,12 +560,13 @@ final class CompanionModel: ObservableObject {
             catch { Diagnostics.shared.record("source_cache_write_failed") }
             forwardWatchAggregate()
             if recovering { Task { await syncWatchPush() } }
+            // Resolve the visible request before unrelated ActivityKit work.
+            if foreground { await interactions.refresh(paired, snapshot: value, client: client) }
             await monitoring.reconcile(sources: pairedSources.filter { !isRevoked($0.sourceID) },
                 snapshots: snapshots, fresh: Set(pairedSources.filter { isFresh($0.sourceID) }.map(\.sourceID)))
             if nameChanged { await monitoring.refreshComputerName(sourceID) }
             Diagnostics.shared.record("snapshot_received", event: value.identity, state: value.state)
             push.recoverRegistrationIfNeeded()
-            if foreground { await interactions.refresh(paired, snapshot: value, client: client) }
             if fromPush, let identity = watchAggregate?.identity {
                 _ = await accessories.waitForDelivery(of: identity)
             }

@@ -87,7 +87,11 @@ disable, source shutdown, or a pairing-set change invalidates pending work.
 Restart never restores or replays an approval. Exact retries are deduplicated
 using prompt-free receipt hashes, bounded to 256 entries for five minutes.
 
-The phone clears its request inbox on backgrounding or connection failure and
-refetches on return. A response already submitted may finish while backgrounded;
-there is no automatic response retry or background request polling. A manual retry
-uses the same response and idempotency key. Unknown delivery stays unconfirmed.
+The phone clears actionable requests on backgrounding or connection failure and
+refetches on return. Transient fetch failures preserve in-flight or uncertain
+response envelopes for confirmation or an explicit retry with the same idempotency
+key. Backgrounding, access removal, and source generation changes clear sensitive
+request/response content. A submitted operation may finish while backgrounded;
+there is no automatic response retry or background request polling. Unknown
+delivery stays unconfirmed. A receipt can complete its open card after monitoring
+advances without overriding the task’s newer Activity state.

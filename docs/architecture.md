@@ -80,10 +80,29 @@ sections, with full-width pinned headings and Recent collapsed by default. Compu
 chips filter work and show connection freshness; only the current task state
 uses an active color. Activity opens pairing directly from its no-computer state
 or the filter row's add action. A task is identified by source, provider, and session, never its title.
-Task rows open a compact card with any available response controls. Response
-cards lead with the request; status-only cards retain task identity. A separate
-open icon on each addressable row opens the agent app.
-Authenticated Pebble handoffs use the same card with Open at the bottom because
+Needs-you rows open a compact response card. Review captures the visible Needs-you
+list in a fixed queue; Skip/Next moves explicitly and confirmed responses advance.
+Answerable requests lead Needs you in phone-observed arrival order (preserving
+source order within a fetch). Working stays in observed state-entry order; Recent
+puts newly observed state changes first. Repeated snapshots and title changes do
+not reorder tasks. These in-memory ordinals are not task timestamps; initial ties
+use source/provider/session identity. New arrivals wait for the next Review.
+An open form is pinned to its exact request, so new requests never replace a draft.
+Working, Recent, and historical rows open task details with status, computer,
+provider, project, and the available computer observation time. Snapshot time is
+not a task start or last-activity time; unavailable task timing is omitted.
+Live Activity taps open source-filtered Activity, not computer settings. A unique
+task in the displayed source revision opens its response card or task details;
+ambiguous or outdated summaries stay in the list without guessing a task.
+Response cards lead with the request and dismiss after confirmed submission outside Review;
+acknowledged responses leave Needs you, retaining a Response sent label until
+the agent updates. Idle uses a quiet ellipsis-circle; Response sent uses a static
+paper plane. Only current Working animates. A request lookup is scoped to its
+source event; loading never inherits an earlier event's native-only fallback.
+Uncertain delivery keeps the same response available for an explicit retry. A separate
+open icon on each addressable row opens the agent app and returns any still-pending
+phone request to native handling.
+Authenticated Pebble handoffs add task identity and Open at the bottom because
 they bypass the list. Cards expand for longer content and accessibility text sizes. The phone does not infer a result from a completed turn.
 Activity is the primary screen. A slide-under sidebar opens Devices and Settings;
 one native navigation stack owns pushed pages and back navigation. Devices owns

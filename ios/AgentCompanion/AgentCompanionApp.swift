@@ -38,6 +38,11 @@ struct AgentCompanionApp: App {
 
 enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, connectAccessory, accessory(String), watchPairing, pairing, reconnect(String), notifications, watchNotifications, watchWeatherSetup, watchTroubleshooting, settings, appearance, weather, diagnostics }
 
+private struct PendingActivityNavigation: Identifiable {
+    let id = UUID()
+    let route: LiveActivityRoute
+}
+
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
@@ -47,6 +52,8 @@ struct CompanionRoot: View {
     @State private var workFilter: String?
     @State private var recentExpanded = false
     @State private var selectedTask: WorkIdentity?
+    @State private var reviewQueue: TaskReviewQueue?
+    @State private var activityNavigation: PendingActivityNavigation?
     var theme: CompanionTheme { presentation.theme(dark: true) }
     var body: some View {
         CompanionSidebar(selection: $selectedSection, isPresented: $sidebarPresented,
@@ -77,17 +84,38 @@ struct CompanionRoot: View {
             presentation.syncComputerNames(model.pairedSources, snapshots: model.snapshots)
         }
         .onChange(of: model.handoff?.id) { _, id in
-            if id != nil { selectedTask = nil; sidebarPresented = false }
+            if id != nil {
+                if selectedTask != nil || reviewQueue != nil { model.dismissHandoff() }
+                else { sidebarPresented = false }
+            }
         }
         .onOpenURL(perform: handleURL)
+        .task(id: activityNavigation?.id) {
+            guard let pending = activityNavigation else { return }
+            let route = pending.route
+            let original = route.task(in: model.snapshots[route.sourceID])
+            if !presentation.preview { await model.refresh(sourceID: route.sourceID) }
+            guard !Task.isCancelled, activityNavigation?.id == pending.id,
+                  selectedSection == .work, path.isEmpty, workFilter == route.sourceID,
+                  selectedTask == nil, reviewQueue == nil, model.handoff == nil, !sidebarPresented else { return }
+            activityNavigation = nil
+            guard model.pairedSources.contains(where: { $0.sourceID == route.sourceID }),
+                  !model.revokedSources.contains(route.sourceID),
+                  let identity = route.task(in: model.snapshots[route.sourceID], previouslyResolved: original),
+                  let item = WorkCatalog.live(model: model, presentation: presentation, inbox: model.interactions)
+                    .first(where: { $0.id == identity }) else { return }
+            // Resolve the displayed task, never the first item in a review queue.
+            if item.opensActivityCard { selectedTask = identity }
+        }
     }
 
     private var taskCardSelection: Binding<TaskCardSelection?> {
         Binding(get: {
-            if let request = model.handoff { return .handoff(request) }
-            return selectedTask.map { .activity($0) }
+            if let reviewQueue { return .review(reviewQueue) }
+            if let selectedTask { return .activity(selectedTask) }
+            return model.handoff.map { .handoff($0) }
         }, set: { value in
-            if value == nil { selectedTask = nil; model.dismissHandoff() }
+            if value == nil { selectedTask = nil; reviewQueue = nil; model.dismissHandoff() }
         })
     }
 
@@ -98,7 +126,8 @@ struct CompanionRoot: View {
                 CompanionWork(model: model, presentation: presentation, inbox: model.interactions,
                     theme: theme, filter: $workFilter, recentExpanded: $recentExpanded,
                     connectComputer: { path.append(FeedDestination.pairing) },
-                    inspectTask: { selectedTask = $0 })
+                    inspectTask: { selectedTask = $0 },
+                    reviewTasks: { reviewQueue = TaskReviewQueue(tasks: $0) })
             case .devices:
                 CompanionDevices(model: model, monitoring: model.monitoring, presentation: presentation,
                     theme: theme) { path.append($0) }
@@ -184,11 +213,27 @@ struct CompanionRoot: View {
         #else
         guard url.scheme == "paceman" else { return }
         #endif
+        guard selectedTask == nil, reviewQueue == nil, model.handoff == nil else { return }
         sidebarPresented = false
+        activityNavigation = nil
+        selectedTask = nil
+        model.dismissHandoff()
+        if let route = LiveActivityRoute(url: url) {
+            selectedSection = .work
+            path = NavigationPath()
+            workFilter = model.pairedSources.contains(where: { $0.sourceID == route.sourceID }) ? route.sourceID : nil
+            recentExpanded = true
+            if workFilter != nil { activityNavigation = PendingActivityNavigation(route: route) }
+            return
+        }
         if url.host == "computer", let id = url.pathComponents.dropFirst().first,
            model.pairedSources.contains(where: { $0.sourceID == id }) {
-            selectedSection = .devices
-            path = NavigationPath([FeedDestination.otherComputer(id)])
+            // Older rendered Live Activities retain this URL until refreshed.
+            // They identify a source, not a task, so show its activity list.
+            selectedSection = .work
+            path = NavigationPath()
+            workFilter = id
+            recentExpanded = true
         } else {
             path = NavigationPath()
             if url.host == "connect" {
@@ -196,6 +241,7 @@ struct CompanionRoot: View {
                 if model.pairedSources.isEmpty { path.append(FeedDestination.pairing) }
             } else {
                 selectedSection = .work
+                workFilter = nil
             }
         }
     }

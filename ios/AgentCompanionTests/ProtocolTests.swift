@@ -641,6 +641,65 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(linux.freshUntil, 400)
     }
 
+    func testLiveActivityURLCarriesDisplayedRevisionWithoutTaskContent() throws {
+        let state = MonitoringActivity.ContentState(generation: "generation / & é", revision: 42,
+            state: "working", working: 2, needsInput: 1, finished: 0, observedAt: 100, freshUntil: 400)
+        let route = LiveActivityRoute(sourceID: "source / & é", state: state)
+        let url = try XCTUnwrap(route.url)
+        XCTAssertEqual(url.host, "activity")
+        XCTAssertEqual(LiveActivityRoute(url: url), route)
+        var normalized = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        normalized.path = "/"
+        XCTAssertEqual(LiveActivityRoute(url: try XCTUnwrap(normalized.url)), route)
+        XCTAssertEqual(route.state, "needs_input")
+        XCTAssertNil(LiveActivityRoute(url: URL(string: url.absoluteString + "&source=other")!))
+        XCTAssertNil(LiveActivityRoute(url: URL(string: "https://activity?source=x&generation=g&revision=1&state=working")!))
+        XCTAssertNil(LiveActivityRoute(url: URL(string: "\(LiveActivityRoute.scheme)://activity?source=x&generation=g&revision=oops&state=working")!))
+        XCTAssertNil(LiveActivityRoute(url: URL(string: "\(LiveActivityRoute.scheme)://computer/mac")!))
+    }
+
+    func testLiveActivitySelectsOnlyUniqueTaskInDisplayedSourceAndRevision() throws {
+        func snapshot(source: String = "mac", generation: String = "g", revision: UInt64 = 7,
+                      sessions: [AgentSession]?) -> Snapshot {
+            Snapshot(schema: 1, sourceID: source, generation: generation, revision: revision,
+                sourceName: source, observedAt: 100, changedAt: 100, freshFor: 30,
+                state: .needsInput, eventID: "7", sessions: sessions)
+        }
+        let waiting = AgentSession(id: "same-id", provider: "claude", state: .needsInput)
+        let working = AgentSession(id: "same-id", provider: "codex", state: .working)
+        let shown = snapshot(sessions: [working, waiting])
+        let route = LiveActivityRoute(sourceID: "mac", state: .init(snapshot: shown))
+        let identity = try XCTUnwrap(route.task(in: shown))
+        XCTAssertEqual(identity, WorkIdentity(sourceID: "mac", sessionID: "same-id", provider: "claude"))
+        XCTAssertNil(route.task(in: snapshot(source: "other", sessions: [waiting])))
+        XCTAssertNil(route.task(in: snapshot(generation: "restarted", sessions: [waiting])))
+        XCTAssertNil(route.task(in: snapshot(revision: 8, sessions: [waiting])))
+        XCTAssertNil(route.task(in: snapshot(sessions: [waiting, .init(id: "another", provider: "codex", state: .needsInput)])))
+        XCTAssertNil(route.task(in: snapshot(sessions: [])))
+        XCTAssertNil(route.task(in: snapshot(sessions: nil)))
+        XCTAssertNil(route.task(in: nil))
+        let resumed = AgentSession(id: "same-id", provider: "claude", state: .working)
+        XCTAssertEqual(route.task(in: snapshot(revision: 8, sessions: [resumed]), previouslyResolved: identity), identity)
+        XCTAssertNil(route.task(in: snapshot(revision: 8, sessions: [working]), previouslyResolved: identity))
+        XCTAssertNil(route.task(in: snapshot(generation: "new", sessions: [resumed]), previouslyResolved: identity))
+    }
+
+    func testLiveActivityUniqueStatusTargetsOpenTaskDetails() throws {
+        for state in [ActivityState.working, .finished, .failed, .idle] {
+            let session = AgentSession(id: "task", provider: "codex", state: state)
+            let snapshot = Snapshot(schema: 1, sourceID: "mac", generation: "g", revision: 7,
+                sourceName: "Mac", observedAt: 100, changedAt: 100, freshFor: 30,
+                state: state, eventID: "7", sessions: [session])
+            let route = LiveActivityRoute(sourceID: "mac", state: .init(snapshot: snapshot))
+            let identity = try XCTUnwrap(route.task(in: snapshot))
+            let item = WorkItem(id: identity, session: session, computer: "Mac", historical: false)
+            XCTAssertTrue(item.opensActivityCard)
+        }
+        let item = WorkItem(id: .init(sourceID: "mac", sessionID: "task", provider: "codex"),
+            session: .init(id: "task", provider: "codex", state: .needsInput), computer: "Mac", historical: true)
+        XCTAssertTrue(item.opensActivityCard)
+    }
+
     @MainActor func testNewerLiveActivityReplacesStaleCopyForSameComputer() {
         let old = MonitoringActivity.ContentState(generation: "old", revision: 20,
             state: "working", working: 1, needsInput: 0, finished: 0, observedAt: 100, freshUntil: 400)
@@ -964,6 +1023,21 @@ final class ProtocolTests: XCTestCase {
         let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture())
         XCTAssertEqual(snapshot.state, .working)
         XCTAssertNil(snapshot.sessions)
+    }
+
+    func testResponseCapabilityDecodesFromTheWireAndRoundTrips() throws {
+        for enabled in [true, false] {
+            let snapshot = try JSONDecoder().decode(Snapshot.self,
+                from: sourceFixture(["interactionsEnabled": enabled]))
+            XCTAssertEqual(snapshot.interactionsEnabled, enabled)
+            let restored = try JSONDecoder().decode(Snapshot.self, from: JSONEncoder().encode(snapshot))
+            XCTAssertEqual(restored.interactionsEnabled, enabled)
+        }
+        for extra: [String: Any] in [[:], ["interactionsEnabled": "true"], ["interactionsEnabled": 1], ["interactionsEnabled": NSNull()]] {
+            let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(extra))
+            XCTAssertNil(snapshot.interactionsEnabled, "Missing or malformed capability cannot enable responses")
+            XCTAssertEqual(snapshot.state, .working, "Optional capabilities cannot discard activity")
+        }
     }
 
     func testUnknownOrMalformedOptionalMetadataDoesNotDiscardAgentActivity() throws {

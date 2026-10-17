@@ -48,6 +48,7 @@ struct TaskCardActionLabel: View {
             .foregroundStyle(primary ? theme.canvas : theme.ink)
             .background(primary ? theme.ink : .clear, in: Capsule())
             .overlay(Capsule().strokeBorder(theme.ink.opacity(primary ? 0 : 0.18), lineWidth: 1))
+            .contentShape(Capsule())
     }
 }
 
@@ -68,6 +69,7 @@ struct CompanionButton: View {
                 Text(title).font(CompanionTextRole.button.font)
             }.frame(maxWidth: .infinity).padding(.vertical, 18)
                 .foregroundStyle(theme.canvas).background(theme.ink, in: RoundedRectangle(cornerRadius: 20))
+                .contentShape(RoundedRectangle(cornerRadius: 20))
         }.buttonStyle(.plain)
     }
 }
@@ -82,6 +84,7 @@ struct CompanionSecondaryButton: View {
                 .frame(maxWidth: .infinity).padding(.vertical, 18)
                 .foregroundStyle(theme.ink)
                 .background(theme.ink.opacity(0.07), in: RoundedRectangle(cornerRadius: 20))
+                .contentShape(RoundedRectangle(cornerRadius: 20))
         }.buttonStyle(.plain)
     }
 }

@@ -493,6 +493,7 @@ extension Snapshot {
             allowances = values.filter { $0.valid }
         } else { allowances = nil }
         configuredProviders = (try? c.decode([String].self, forKey: .configuredProviders))?.filter { ["codex", "claude"].contains($0) }
+        interactionsEnabled = try? c.decode(Bool.self, forKey: .interactionsEnabled)
     }
 }
 

@@ -61,6 +61,13 @@ final class PresentationModel: ObservableObject {
     }
     var previewOffline: Bool { ["offline", "computer-offline", "computer-usage-stale", "single-offline", "offline-empty", "claude-offline"].contains(previewScreen) }
     var previewSessions: [AgentSession] {
+        if previewScreen == "work-review" {
+            return [AgentSession(id: "review-approval", provider: "codex", state: .needsInput, name: "Fix checkout redirect", project: "storefront"),
+                    AgentSession(id: "review-question", provider: "claude", state: .needsInput, name: "Improve onboarding", project: "paceman"),
+                    AgentSession(id: "review-multiple", provider: "claude", state: .needsInput, name: "Refine watch glance", project: "paceman"),
+                    AgentSession(id: "working", provider: "codex", state: .working, name: "Improve search", project: "website"),
+                    AgentSession(id: "finished", provider: "claude", state: .finished, name: "Update setup guide", project: "paceman")]
+        }
         if ["work-many", "work-scrolled"].contains(previewScreen) {
             return (0..<18).map { index in
                 AgentSession(id: "review-\(index)", provider: index.isMultiple(of: 2) ? "codex" : "claude",
