@@ -57,55 +57,28 @@ are in [data lifecycle](data-lifecycle.md).
 
 ## Optional phone responses
 
-The source can run a separate private response socket with `--interaction-socket`.
-On Mac, `pacemanctl responses-on` registers response hooks and enables the socket
-on the next source start; `responses-off` removes those hooks and disables it.
-The installer leaves responses off unless previously enabled. Reviewed synchronous
-hooks submit one live request at a time through this socket, independently of
-activity monitoring. The phone fetches pending requests only in the foreground
-and responds through the existing authenticated private connection.
+Reviewed synchronous hooks send approvals and questions through a separate private
+socket; the phone uses the existing authenticated HTTPS connection. Responses are
+off by default and independent of monitoring. See [setup](../macos/README.md#optional-phone-responses),
+[wire contract](protocol.md#opt-in-pending-interactions), and
+[retention and recovery](data-lifecycle.md#opt-in-response-bridge).
 
-The adapter implements one-time permission decisions and question answers for
-Codex and Claude. Claude answers use `AskUserQuestion` input updates. Codex's
-blocking and async question tools are skipped after a phone answer, delivering
-that answer as feedback to the exact tool invocation through its supported
-PreToolUse decision hook. Secret questions stay on the native surface. Waiting in a response
-hook delays the native desktop prompt; release or timeout returns to native
-handling. A submission receipt is not proof that the agent consumed the answer.
+Claude supplies answers through `AskUserQuestion` input updates. Codex skips the
+blocking or async question tool and returns the answer as `PreToolUse` feedback.
+Secret Codex questions stay native. Waiting hooks delay the native prompt;
+release or timeout returns control without granting permission.
 
-## iPhone navigation
+## iPhone Activity
 
-Activity combines source-scoped tasks into Needs you, Working, Recent, and Last known
-sections, with full-width pinned headings and Recent collapsed by default. Computer
-chips filter work and show connection freshness; only the current task state
-uses an active color. Activity opens pairing directly from its no-computer state
-or the filter row's add action. A task is identified by source, provider, and session, never its title.
-Needs-you rows open a compact response card. Review captures the visible Needs-you
-list in a fixed queue; Skip/Next moves explicitly and confirmed responses advance.
-Answerable requests lead Needs you in phone-observed arrival order (preserving
-source order within a fetch). Working stays in observed state-entry order; Recent
-puts newly observed state changes first. Repeated snapshots and title changes do
-not reorder tasks. These in-memory ordinals are not task timestamps; initial ties
-use source/provider/session identity. New arrivals wait for the next Review.
-An open form is pinned to its exact request, so new requests never replace a draft.
-Working, Recent, and historical rows open task details with status, computer,
-provider, project, and the available computer observation time. Snapshot time is
-not a task start or last-activity time; unavailable task timing is omitted.
-Live Activity taps open source-filtered Activity, not computer settings. A unique
-task in the displayed source revision opens its response card or task details;
-ambiguous or outdated summaries stay in the list without guessing a task.
-Response cards lead with the request and dismiss after confirmed submission outside Review;
-acknowledged responses leave Needs you and use the normal Working presentation
-until the agent updates. The receipt remains distinct from observed agent state;
-it does not establish execution or completion. Idle uses a quiet ellipsis-circle.
-Only current Working animates. A request lookup is scoped to its
-source event; loading never inherits an earlier event's native-only fallback.
-Uncertain delivery keeps the same response available for an explicit retry. A separate
-open icon on each addressable row opens the agent app and returns any still-pending
-phone request to native handling.
-Authenticated Pebble handoffs add task identity and Open at the bottom because
-they bypass the list. Cards expand for longer content and accessibility text sizes. The phone does not infer a result from a completed turn.
-Activity is the primary screen. A slide-under sidebar opens Devices and Settings;
-one native navigation stack owns pushed pages and back navigation. Devices owns
-computer connections, accessories, and Live Activities. Response actions stay in
-a keyboard-aware bottom safe area while the request content scrolls.
+Tasks are keyed by source, provider, and session, never title. Activity owns tasks
+and responses; Devices owns connections, accessories, and Live Activities.
+Ordering is stable and phone-observed, not durable task chronology: answerable
+requests lead Needs you, Working follows state-entry order, and Recent is newest
+first. Review freezes its membership and order; new arrivals wait for the next
+Review. Each form stays pinned to its exact request. Confirmed responses dismiss
+or advance Review and use Working presentation without changing observed agent state.
+
+Live Activity taps open a unique task only when its source revision matches;
+otherwise they open source-filtered Activity. Opening the agent app releases any
+pending phone request. Detail timestamps describe the computer snapshot, not task
+progress. A completed turn does not establish a successful outcome.

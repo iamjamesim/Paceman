@@ -14,30 +14,24 @@ Prefer to build locally? Use [source setup](#build-and-install-from-source). Bot
 
 ## Optional phone responses
 
-After monitoring is working, run `pacemanctl responses-on` to prepare synchronous
-response hooks and restart the source. This prints the exact new commands to
-review. Both agents add `PermissionRequest` and `PreToolUse` response hooks;
-Codex matches `request_user_input` / `request_user_input_async`, and Claude matches
-`AskUserQuestion`. Existing
-activity hooks remain unchanged. Review the new Codex entries in **Settings →
-Hooks → User config (All projects)** and trust them yourself only after comparing
-the command. Claude reloads user hooks in a fresh session after workspace trust.
+After monitoring works, run `pacemanctl responses-on` to register response hooks
+and restart the source. Compare the printed commands with the new Codex entries
+in **Settings → Hooks → User config (All projects)** before trusting them. Claude
+reloads user hooks in a fresh session after workspace trust. Both agents add
+`PermissionRequest` and `PreToolUse`: Codex matches `request_user_input` /
+`request_user_input_async`; Claude matches `AskUserQuestion`.
 
-Unlike monitoring, response hooks send pending tool arguments, the full working
-directory, and question/choice text to paired phones over private HTTPS. These
-requests and answers stay in memory and are excluded from SQLite, push payloads,
-accessories, and diagnostics. Keep Paceman open on the phone to respond. The
-hook waits up to 60 seconds; expiry, release, or connection loss returns handling
-to the agent without approving anything. Claude updates the question's answers
-before its native tool runs. Codex skips the duplicate native question and returns
-the user's answer as feedback to that tool call; this is not a permission grant.
-Secret Codex questions remain native.
+Unlike monitoring, these hooks share pending tool arguments, full working directory,
+and question/choice text with paired phones over private HTTPS. Content stays in
+memory, outside snapshots, storage, notifications, accessories, and diagnostics.
+Keep Paceman open to respond within 60 seconds; timeout or connection loss returns
+to native handling without approving. Secret Codex questions remain native;
+[provider handling differs](../docs/architecture.md#optional-phone-responses).
 
-Check an actual question, approval, and denial in each agent: answer on
-the phone, confirm the agent consumes it, and wait for a successful finished turn.
-A submitted receipt alone does not complete this check. `pacemanctl responses-off`
-removes only response hooks, restarts the source when Sharing is on, and leaves
-monitoring and phone pairings intact. Sharing off pauses responses too.
+Verify a question, approval, and denial in each agent from the phone: confirm the
+agent consumes the response and finishes the turn. A submission receipt is insufficient.
+`pacemanctl responses-off` removes response hooks and restarts the source when
+Sharing is on, preserving monitoring and pairings. Sharing off pauses responses too.
 
 ## Review agent hooks
 

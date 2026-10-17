@@ -40,7 +40,7 @@ enum TaskCardSelection: Identifiable {
         }
     }
 
-    func shouldDismiss(item: WorkItem?, response: InputResponseState?) -> Bool {
+    func shouldDismiss(response: InputResponseState?) -> Bool {
         // Queues handle confirmed responses by advancing. Passive state changes
         // do not close details or replace a request being answered.
         if case .review = self { return false }
@@ -115,7 +115,7 @@ struct TaskCard: View {
         Binding(get: { typeSize.isAccessibilitySize ? .large : detent }, set: { detent = $0 })
     }
     private var shouldDismiss: Bool {
-        selection.shouldDismiss(item: item, response: response)
+        selection.shouldDismiss(response: response)
     }
 
     var body: some View {

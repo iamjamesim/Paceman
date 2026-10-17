@@ -725,12 +725,12 @@ final class InteractionTests: XCTestCase {
         var item = WorkItem(id: identity, session: AgentSession(id: identity.sessionID, provider: "claude", state: .needsInput),
                             computer: "Mac", historical: false, request: pending)
         XCTAssertTrue(item.opensActivityCard)
-        XCTAssertFalse(selection.shouldDismiss(item: item, response: nil))
+        XCTAssertFalse(selection.shouldDismiss(response: nil))
         for action in ["allowOnce", "deny", "answer", "release"] {
             let envelope = submission(pending, action: action)
             for phase in [InputResponsePhase.sending, .unconfirmed, .rejected, .submitted] {
                 let response = InputResponseState(item: pending, submission: envelope, startedAt: 1, phase: phase)
-                XCTAssertEqual(selection.shouldDismiss(item: item, response: response), phase == .submitted)
+                XCTAssertEqual(selection.shouldDismiss(response: response), phase == .submitted)
             }
         }
         item.request = nil
@@ -738,12 +738,9 @@ final class InteractionTests: XCTestCase {
             let status = WorkItem(id: identity, session: AgentSession(id: identity.sessionID, provider: "claude", state: state),
                                   computer: "Mac", historical: false)
             XCTAssertTrue(status.opensActivityCard, "Status rows open useful task details")
-            XCTAssertFalse(selection.shouldDismiss(item: status, response: nil), "A source transition cannot discard an open form or detail sheet")
         }
         let historical = WorkItem(id: identity, session: item.session, computer: "Mac", historical: true)
         XCTAssertTrue(historical.opensActivityCard)
-        XCTAssertFalse(selection.shouldDismiss(item: historical, response: nil))
-        XCTAssertFalse(selection.shouldDismiss(item: nil, response: nil), "Keep an explicit unavailable destination; never substitute a task")
         item.delivery = .sent
         XCTAssertTrue(item.opensActivityCard, "Acknowledged responses open task details")
         item.delivery = .released
@@ -799,7 +796,7 @@ final class InteractionTests: XCTestCase {
         for phase in [InputResponsePhase.sending, .unconfirmed, .rejected, .submitted] {
             let response = InputResponseState(item: pending, submission: submission(pending), startedAt: 1, phase: phase)
             XCTAssertEqual(TaskReviewQueue.advances(after: response), phase == .submitted)
-            XCTAssertFalse(TaskCardSelection.review(queue).shouldDismiss(item: nil, response: response))
+            XCTAssertFalse(TaskCardSelection.review(queue).shouldDismiss(response: response))
         }
         XCTAssertFalse(TaskReviewQueue.advances(after: nil), "Missing or expired requests require explicit Next")
         XCTAssertEqual(queue.current, first, "Reading live response state never changes the selected task")

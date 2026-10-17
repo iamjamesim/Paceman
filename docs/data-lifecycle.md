@@ -80,18 +80,16 @@ neither report includes credentials, prompts, computer names, or raw push tokens
 
 ## Opt-in response bridge
 
-Pending request content and answers are memory-only and excluded from snapshots,
-SQLite, APNs, accessories, and diagnostics. A live private hook connection owns
-each request. Disconnect, timeout (60 seconds by default, at most 120), provider
-disable, source shutdown, or a pairing-set change invalidates pending work.
-Restart never restores or replays an approval. Exact retries are deduplicated
-using prompt-free receipt hashes, bounded to 256 entries for five minutes.
+Requests and answers are memory-only, excluded from snapshots, SQLite, APNs,
+accessories, and diagnostics. Each request belongs to a live hook connection;
+disconnect, timeout (60 seconds by default, maximum 120), provider disable, source
+shutdown, or pairing changes invalidate it. Restart never replays approvals.
+Deduplication retains response hashes and receipt metadata, at most 256 for five minutes.
 
-The phone clears actionable requests on backgrounding or connection failure and
-refetches on return. Transient fetch failures preserve in-flight or uncertain
-response envelopes for confirmation or an explicit retry with the same idempotency
-key. Backgrounding, access removal, and source generation changes clear sensitive
-request/response content. A submitted operation may finish while backgrounded;
-there is no automatic response retry or background request polling. Unknown
-delivery stays unconfirmed. A receipt can complete its open card after monitoring
-advances without overriding the task’s newer Activity state.
+The phone clears actionable requests on connection failure and refetches on return,
+but preserves in-flight and uncertain submissions for confirmation or an explicit
+retry with the same payload and idempotency key. Backgrounding, access removal,
+and source-generation changes clear request/response content. An already-submitted
+operation may finish in the background. There are no automatic response retries
+or background polling. Late confirmations can complete the original card without
+overriding newer task state. Unknown delivery remains unconfirmed.
