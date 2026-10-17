@@ -17,9 +17,6 @@ struct TaskCard: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
     @ObservedObject var inbox: InteractionInbox
-    #if DEBUG
-    @EnvironmentObject private var samples: SampleWorkStore
-    #endif
     let theme: CompanionTheme
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var phase
@@ -30,9 +27,6 @@ struct TaskCard: View {
     private var item: WorkItem? {
         switch selection {
         case .activity(let identity):
-            #if DEBUG
-            if identity.sourceID == "samples" { return WorkCatalog.samples(samples).first { $0.id == identity } }
-            #endif
             return WorkCatalog.live(model: model, presentation: presentation, inbox: inbox).first { $0.id == identity }
         case .handoff(let request):
             guard let target = model.handoffTarget(request),
@@ -42,9 +36,13 @@ struct TaskCard: View {
         }
     }
     private var fittedHeight: CGFloat { max(160, min(480, heights.values.reduce(0, +))) }
+    private var needsAgentApp: Bool {
+        guard let item else { return false }
+        return !item.historical && item.state == .needsInput && item.response == nil && item.request == nil
+    }
     private var showsIdentity: Bool {
         if case .handoff = selection { return true }
-        return displayedRequest == nil && item?.request == nil
+        return displayedRequest == nil && item?.request == nil && !needsAgentApp
     }
     private var scrollingHeading: TaskCardHeading? {
         showsIdentity && typeSize.isAccessibilitySize ? heading : nil
@@ -60,28 +58,17 @@ struct TaskCard: View {
                     .taskCardMeasure(.header)
             }
 
-            if let item, let request = displayedRequest, phase == .active {
-                #if DEBUG
-                if item.sample {
-                    InteractionDetail(item: request, inbox: samples.sampleInbox, theme: theme,
-                        heading: scrollingHeading, contentTopInset: showsIdentity && !typeSize.isAccessibilitySize ? 16 : CompanionLayout.taskCardTopInset,
-                        sampleResponse: { try samples.respond(request, $0) }).id(request.id)
-                } else {
-                    InteractionDetail(item: request, inbox: inbox, theme: theme,
-                        heading: scrollingHeading, contentTopInset: showsIdentity && !typeSize.isAccessibilitySize ? 16 : CompanionLayout.taskCardTopInset,
-                        openSession: handoffOpen, preview: presentation.preview).id(request.id)
-                }
-                #else
+            if item != nil, let request = displayedRequest, phase == .active {
                 InteractionDetail(item: request, inbox: inbox, theme: theme,
                     heading: scrollingHeading, contentTopInset: showsIdentity && !typeSize.isAccessibilitySize ? 16 : CompanionLayout.taskCardTopInset,
-                    openSession: handoffOpen).id(request.id)
-                #endif
+                    openSession: handoffOpen, preview: presentation.preview).id(request.id)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
                         if let scrollingHeading { scrollingHeading }
                         if let item {
-                            Text(item.status).companionText(.prompt, theme: theme)
+                            Text(needsAgentApp ? continuationTitle(item) : item.status)
+                                .companionText(.prompt, theme: theme)
                             if let text = item.response ?? explanation(item) {
                                 Text(text).companionText(.body, theme: theme)
                             }
@@ -90,12 +77,14 @@ struct TaskCard: View {
                                 .companionText(.body, theme: theme)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
+                        .padding(.horizontal, CompanionLayout.pageInset)
+                        .padding(.top, showsIdentity && !typeSize.isAccessibilitySize ? 16 : CompanionLayout.taskCardTopInset)
+                        .padding(.bottom, 16)
                         .taskCardMeasure(.content)
                 }.scrollDismissesKeyboard(.interactively)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
-                        if let handoffOpen {
-                            handoffOpen.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 12)
+                        if let fallbackOpen {
+                            fallbackOpen.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
                                 .background(theme.canvas).taskCardMeasure(.actions)
                         }
                     }
@@ -136,12 +125,26 @@ struct TaskCard: View {
         return SessionOpenButton(session: item.session, theme: theme, expanded: true) { self.item?.session }
     }
 
+    private var fallbackOpen: SessionOpenButton? {
+        if let handoffOpen { return handoffOpen }
+        guard needsAgentApp, let item, item.session.appURL != nil else { return nil }
+        return SessionOpenButton(session: item.session, theme: theme, expanded: true) { self.item?.session }
+    }
+
+    private func continuationTitle(_ item: WorkItem) -> String {
+        switch item.session.provider {
+        case "codex": return "Continue in Codex"
+        case "claude": return "Continue in Claude Code"
+        default: return "Continue on your computer"
+        }
+    }
+
     private func explanation(_ item: WorkItem) -> String? {
         if item.historical { return "Last received activity from this computer. Responses are available when its connection is up to date." }
         if item.returnedToComputer { return "Continue this request on your computer." }
         if item.session.appURL == nil { return "This agent doesn’t provide a link to open on this iPhone." }
         switch item.state {
-        case .needsInput: return "Continue in the agent app. This task hasn’t provided a question or approval that can be answered here."
+        case .needsInput: return "This request can’t be answered in Paceman right now."
         case .failed: return "Open the agent app for details."
         default: return nil
         }

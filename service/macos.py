@@ -30,7 +30,7 @@ from service.codex_turns import read_codex_turn_metadata, read_codex_turn_status
 
 EVENT_STATES = {
     "started": "idle", "working": "working", "needs-input": "needs_input",
-    "question-opened": "needs_input",
+    "question-opened": "needs_input", "question-answered": "working",
     "completed": "finished", "interrupted": "idle", "ended": "idle",
 }
 ATTENTION_DELAY = 5.0
@@ -97,6 +97,7 @@ class MacSource:
         # Async questions outlive the tool call, but end with their turn.
         # A later user message can clear one while the turn is still running.
         self.pending_questions = {}
+        self.question_calls = {}
         self.published_questions = set()
 
     def __enter__(self):
@@ -195,6 +196,10 @@ class MacSource:
         except FileNotFoundError:
             pass
 
+    def _clear_questions(self, key):
+        self.question_calls.pop(key, None)
+        return self.pending_questions.pop(key, None)
+
     def receive(self, command: dict) -> bool:
         if not isinstance(command, dict) or command.get("command") != "agent-event":
             raise ValueError("Unsupported command")
@@ -227,10 +232,13 @@ class MacSource:
             if event != "ended":
                 self.titles.track(key, "codex", session)
             previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
+            tool_id = command.get("toolID")
+            if tool_id is not None and (not isinstance(tool_id, str) or not IDENTIFIER.fullmatch(tool_id)):
+                raise ValueError("Invalid tool ID")
             if event == "ended":
                 self.pending_turn_events.pop(key, None)
                 pending = self.pending_attention.pop(key, None)
-                question = self.pending_questions.pop(key, None)
+                question = self._clear_questions(key)
                 self.published_questions.discard(key)
                 self.turn_ids.pop(key, None)
                 self.confirmed_turns.pop(key, None)
@@ -253,7 +261,7 @@ class MacSource:
                         self.next_turn_recovery_at = 0.0
                     reduced = {"command": "agent-event", "session": session, "turn": turn,
                                "event": event, "hook": command.get("hook"),
-                               "workspaceLabel": workspace_label}
+                               "workspaceLabel": workspace_label, "toolID": tool_id}
                     if not batch["events"] or batch["events"][-1] != reduced:
                         batch["events"].append(reduced)
                     return False
@@ -271,10 +279,29 @@ class MacSource:
                 if (previous and previous["state"] in ("finished", "failed")
                         and (not turn or previous["turn"] == turn) and event != "completed"):
                     return False
-                if event == "question-opened":
-                    self.pending_questions[key] = (turn, self.monotonic() + ATTENTION_DELAY,
-                                                   workspace_label)
+                if event == "question-answered":
+                    pending = self.pending_questions.get(key)
+                    calls = self.question_calls.get(key, set())
+                    # Answers cannot create a session or clear another call/turn.
+                    if not previous or not pending or pending[0] != turn or previous["turn"] != turn:
+                        return False
+                    if tool_id not in calls:
+                        return False
+                    calls.remove(tool_id)
+                    if calls:
+                        return False
+                    self._clear_questions(key)
                     self.published_questions.discard(key)
+                    self._record_event(db, "codex")
+                    return self._publish(db)
+                if event == "question-opened":
+                    pending = self.pending_questions.get(key)
+                    if pending is None or pending[0] != turn:
+                        self.question_calls[key] = set()
+                        self.pending_questions[key] = (turn, self.monotonic() + ATTENTION_DELAY,
+                                                       workspace_label)
+                        self.published_questions.discard(key)
+                    self.question_calls.setdefault(key, set()).add(tool_id)
                     if previous is None:
                         db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
                                    (key, turn, "working", time.time(), workspace_label))
@@ -292,7 +319,7 @@ class MacSource:
                 self.pending_attention.pop(key, None)
                 question_cleared = False
                 if event == "completed" or command.get("hook") in ("UserPromptSubmit", "Interrupt"):
-                    question_cleared = self.pending_questions.pop(key, None) is not None
+                    question_cleared = self._clear_questions(key) is not None
                     self.published_questions.discard(key)
                 if (previous and previous["turn"] == turn and previous["state"] == EVENT_STATES[event]
                         and previous["workspace_label"] == workspace_label and not question_cleared):
@@ -354,6 +381,7 @@ class MacSource:
                 self.allowances = []
                 self.pending_attention.clear()
                 self.pending_questions.clear()
+                self.question_calls.clear()
                 self.published_questions.clear()
                 self.turn_ids.clear()
                 self.confirmed_turns.clear()
@@ -434,7 +462,7 @@ class MacSource:
                 for row in db.execute("SELECT id FROM mac_sessions WHERE state IN ('finished','failed') AND updated<=?",
                                       (time.time() - FINISHED_RETENTION,)):
                     retired += db.execute("DELETE FROM mac_sessions WHERE id=?", (row["id"],)).rowcount
-                    self.pending_questions.pop(row["id"], None)
+                    self._clear_questions(row["id"])
                     self.published_questions.discard(row["id"])
                     self.turn_ids.pop(row["id"], None)
                     self.confirmed_turns.pop(row["id"], None)
@@ -499,7 +527,7 @@ class MacSource:
                                (latest, time.time(), label, key))
                 self.pending_turn_events.pop(key, None)
                 self.pending_attention.pop(key, None)
-                self.pending_questions.pop(key, None)
+                self._clear_questions(key)
                 self.published_questions.discard(key)
                 self.confirmed_turns.pop(key, None)
                 self.turn_ids[key] = (batch["session"], latest)
@@ -539,7 +567,7 @@ class MacSource:
                 self.confirmed_turns[key] = pair[1]
                 state = "failed" if status == "failed" else "finished"
                 self.pending_attention.pop(key, None)
-                question_cleared = self.pending_questions.pop(key, None) is not None
+                question_cleared = self._clear_questions(key) is not None
                 self.published_questions.discard(key)
                 if row["state"] == state:
                     changed |= question_cleared

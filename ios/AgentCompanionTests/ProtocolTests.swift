@@ -1150,6 +1150,35 @@ final class ProtocolTests: XCTestCase {
     }
 
     @MainActor
+    func testScanWaitsForInFlightRefreshWithoutDiscardingTheCode() async throws {
+        let id = UUID().uuidString
+        var requests = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { request in
+            requests += 1
+            XCTAssertEqual(request.url?.path, "/v1/pair")
+            return (200, try JSONSerialization.data(withJSONObject: ["schema": 1, "sourceID": id,
+                "clientID": "client", "credential": "secret"]))
+        }, savePairedSources: { _ in })
+        model.pairedSources = []
+        model.busy = true
+        let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: id,
+            invitation: String(repeating: "x", count: 43), expiresAt: Date().timeIntervalSince1970 + 300)
+        let text = String(decoding: try JSONEncoder().encode(invitation), as: UTF8.self)
+        let session = ComputerPairingSession()
+        let task = Task { await session.scan(text, model: model) }
+        for _ in 0..<100 where !session.connecting { await Task.yield() }
+        XCTAssertTrue(session.connecting)
+        XCTAssertEqual(session.invitation?.sourceID, id)
+        XCTAssertEqual(requests, 0, "The refresh and credential mutation must remain serialized")
+        model.busy = false
+        let connected = await task.value
+        XCTAssertEqual(connected, id)
+        XCTAssertEqual(requests, 1)
+        XCTAssertFalse(session.connecting)
+        XCTAssertNil(session.failure)
+    }
+
+    @MainActor
     func testScanningInvalidOrExpiredCodesNeverContactsComputer() async throws {
         var requests = 0
         let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
@@ -1701,6 +1730,42 @@ final class ProtocolTests: XCTestCase {
     }
 
     @MainActor
+    func testConnectionIndicatorSurvivesTransientFailureWithoutKeepingResponsesCurrent() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://indicator.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret")
+        var mode = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            if mode == 1 || mode == 3 { throw URLError(.timedOut) }
+            if mode == 4 { return (401, Data("{}".utf8)) }
+            return (200, try self.sourceFixture(["sourceID": source.sourceID,
+                "observedAt": Date().timeIntervalSince1970 - (mode == 2 ? 45 : 0)]))
+        })
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        defer { try? FileManager.default.removeItem(at: SourceSnapshotCache.url(for: source.sourceID)) }
+        XCTAssertEqual(model.connectionState(source.sourceID), .connecting)
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertTrue(model.isFresh(source.sourceID))
+        XCTAssertEqual(model.connectionState(source.sourceID), .current)
+        let contact = model.lastContacts[source.sourceID]
+        mode = 1
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertFalse(model.isFresh(source.sourceID), "Delivery must remain unavailable after a failed fetch")
+        XCTAssertEqual(model.connectionState(source.sourceID), .current)
+        XCTAssertEqual(model.lastContacts[source.sourceID], contact, "Recovery must not renew the observation")
+        mode = 2
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertEqual(model.connectionState(source.sourceID), .checking)
+        mode = 3
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertEqual(model.connectionState(source.sourceID), .reconnecting)
+        mode = 4
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertEqual(model.connectionState(source.sourceID), .revoked)
+        XCTAssertNil(model.snapshots[source.sourceID])
+    }
+
+    @MainActor
     func testActivityDisplayLeaseSurvivesRecoveryWithoutExtendingObservation() async throws {
         let source = PairedSource(endpoint: URL(string: "https://lease.example")!,
             sourceID: UUID().uuidString, clientID: "client", credential: "secret")
@@ -1775,7 +1840,8 @@ final class ProtocolTests: XCTestCase {
 
     func testComputerConnectionStatesDistinguishRecoveryFromStaleActivity() {
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: true, failed: true, hasSnapshot: true, fresh: true), .revoked)
-        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: true, hasSnapshot: true, fresh: true), .reconnecting)
+        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: true, hasSnapshot: true, fresh: true), .current)
+        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: true, hasSnapshot: true, fresh: false), .reconnecting)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: false, fresh: false), .connecting)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: true, fresh: false), .checking)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: true, fresh: true), .current)

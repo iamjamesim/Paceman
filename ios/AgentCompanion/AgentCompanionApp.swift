@@ -8,6 +8,13 @@ struct AgentCompanionApp: App {
     @StateObject private var presentation: PresentationModel
     @Environment(\.scenePhase) private var phase
     init() {
+        #if DEBUG
+        // Retire only the old local demo state, preserving real connections.
+        UserDefaults.standard.removeObject(forKey: "show-sample-work")
+        if let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            try? FileManager.default.removeItem(at: support.appendingPathComponent("sample-work.json"))
+        }
+        #endif
         let p = PresentationModel()
         // Restoring a paired watch can schedule weather work during model initialization.
         // Register its handler before constructing the model, not in didFinishLaunching.
@@ -40,9 +47,6 @@ struct CompanionRoot: View {
     @State private var workFilter: String?
     @State private var recentExpanded = false
     @State private var selectedTask: WorkIdentity?
-    #if DEBUG
-    @StateObject private var samples = SampleWorkStore()
-    #endif
     var theme: CompanionTheme { presentation.theme(dark: true) }
     var body: some View {
         CompanionSidebar(selection: $selectedSection, isPresented: $sidebarPresented,
@@ -61,9 +65,6 @@ struct CompanionRoot: View {
         }
         .tint(theme.tint)
         .preferredColorScheme(.dark)
-        #if DEBUG
-        .environmentObject(samples)
-        #endif
         .onAppear(perform: appear)
         .onChange(of: model.pairedSources.first?.sourceID) { _, new in
             guard !presentation.preview else { return }

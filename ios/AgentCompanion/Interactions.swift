@@ -84,7 +84,6 @@ struct InputRequests: Decodable {
             guard UUID(uuidString: request.id) != nil, request.version == 1,
                   ["claude", "codex"].contains(request.provider),
                   ["approval", "question"].contains(request.kind),
-                  !(request.provider == "codex" && request.kind == "question"),
                   request.sessionID.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil, !request.title.isEmpty,
                   request.title.unicodeScalars.count <= 256, request.detail.unicodeScalars.count <= 16384,
                   request.remainingSeconds.isFinite, request.remainingSeconds > 0,
@@ -194,29 +193,6 @@ enum InputDelivery {
         bySource[item.source.sourceID]?.removeAll { $0.id == item.id }
     }
     #if DEBUG
-    func loadSamples(excluding answered: Set<String>) {
-        setForeground(true)
-        let source = PairedSource(endpoint: URL(string: "https://samples.invalid")!, sourceID: "samples", clientID: "samples", credential: "")
-        for task in SampleWorkStore.tasks where !answered.contains(task.id) {
-            let options: [InteractionOption] = task.id == "onboarding"
-                ? [.init(label: "After the first result", description: "Let people try it before asking for notification access."),
-                   .init(label: "During setup", description: "Have notifications ready for the first task.")]
-                : [.init(label: "Tasks that need me", description: "Questions and approvals."),
-                   .init(label: "Finished tasks", description: "A quiet update when work is done."),
-                   .init(label: "Running tasks", description: "A glance at ongoing work.")]
-            let question = InteractionQuestion(id: "q0",
-                prompt: task.id == "onboarding" ? "When should we ask people to enable notifications?" : "What should appear on the watch?",
-                multiple: task.id == "watch", options: options)
-            let request = InputRequest(requestID: UUID().uuidString, version: 1,
-                provider: task.id == "tests" ? "codex" : "claude", sessionID: task.id,
-                kind: task.id == "tests" ? "approval" : "question",
-                title: task.id == "tests" ? "Run the tests?" : "",
-                detail: task.id == "tests" ? "Working directory: /Projects/storefront\nCommand: npm test -- checkout" : "",
-                questions: task.id == "tests" ? [] : [question], remainingSeconds: 120)
-            bySource[source.sourceID, default: []].append(PendingInput(source: source, generation: UUID().uuidString,
-                request: request, expiresAtUptime: .greatestFiniteMagnitude))
-        }
-    }
     func preview(_ source: PairedSource, kind: String = "approval", multiple: Bool = false) {
         active = true
         let question = InteractionQuestion(id: "q0", prompt: "Which parts of onboarding should we simplify?", multiple: multiple,

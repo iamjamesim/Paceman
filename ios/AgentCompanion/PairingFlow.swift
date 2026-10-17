@@ -59,7 +59,7 @@ final class ComputerPairingSession: ObservableObject {
     }
 
     func scan(_ text: String, model: CompanionModel) async -> String? {
-        guard !connecting, !model.busy else { return nil }
+        guard !connecting else { return nil }
         do {
             let value = try JSONDecoder().decode(Invitation.self, from: Data(text.utf8))
             _ = try value.validatedURL()
@@ -72,12 +72,21 @@ final class ComputerPairingSession: ObservableObject {
     }
 
     func connect(model: CompanionModel) async -> String? {
-        guard !connecting, !model.busy, let invitation, failure == nil || failure?.canRetry == true else { return nil }
+        guard !connecting, let invitation, failure == nil || failure?.canRetry == true else { return nil }
         do { _ = try invitation.validatedURL() }
         catch { failure = .invalidCode; return nil }
         connecting = true; failure = nil
         defer { connecting = false }
         do {
+            // A status fetch can start while the camera is open. Retain the
+            // scan and wait for its operation to finish rather than dropping it.
+            if model.busy {
+                for await busy in model.$busy.values {
+                    if !busy { break }
+                }
+            }
+            try Task.checkCancellation()
+            _ = try invitation.validatedURL()
             return try await model.pair(text: text).sourceID
         } catch {
             failure = invitation.expiresAt <= Date().timeIntervalSince1970

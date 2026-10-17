@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -64,6 +66,57 @@ class InteractionHTTPTests(unittest.TestCase):
     def answer(self, listing, action='allowOnce', **extra):
         return dict(generation=listing['generation'], requestID=listing['requests'][0]['requestID'],
                     version=1, idempotencyKey='fixture-retry', action=action, **extra)
+
+    def test_installed_hook_process_consumes_http_response_and_emits_native_decision(self):
+        for provider, action in (('codex', 'allowOnce'), ('codex', 'deny'), ('codex', 'answer'),
+                                 ('claude', 'allowOnce'), ('claude', 'deny'), ('claude', 'answer')):
+            with self.subTest(provider=provider, action=action):
+                is_question = action == 'answer'
+                original = {'session_id': 'process-fixture', 'cwd': '/Projects/fixture',
+                            'hook_event_name': 'PreToolUse' if is_question else 'PermissionRequest',
+                            'tool_name': 'AskUserQuestion' if is_question else 'Bash',
+                            'tool_input': {'questions': [{'question': 'Which approach?', 'multiSelect': False,
+                                'options': [{'label': 'Small', 'description': 'Keep it simple'},
+                                            {'label': 'Large', 'description': 'More detail'}]}]}
+                                if is_question else {'command': 'echo fixture'}}
+                if is_question and provider == 'codex':
+                    original['tool_name'] = 'request_user_input'
+                    original['tool_input']['questions'][0]['id'] = 'approach'
+                process = subprocess.Popen([sys.executable, '-B', str(Path(__file__).resolve().parents[1]
+                    / 'macos/interaction_hook.py'), '--provider', provider], stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    env=dict(os.environ, PACEMAN_INTERACTION_SOCKET=str(self.listener.path)))
+                try:
+                    process.stdin.write(json.dumps(original).encode())
+                    process.stdin.close()
+                    deadline = time.monotonic() + 3
+                    listing = self.call('GET', '/v1/interactions')[1]
+                    while not listing['requests']:
+                        if time.monotonic() >= deadline:
+                            self.fail('Executable hook did not publish its request')
+                        time.sleep(.01)
+                        listing = self.call('GET', '/v1/interactions')[1]
+                    extra = {'answers': {'q0': {'selected': [0], 'text': ''}}} if is_question else {}
+                    self.assertEqual(self.call('POST', '/v1/interactions',
+                        self.answer(listing, action, **extra))[0], 200)
+                    process.wait(3)
+                    output = json.loads(process.stdout.read())['hookSpecificOutput']
+                    self.assertEqual(process.stderr.read(), b'')
+                    self.assertEqual(process.returncode, 0)
+                    if is_question and provider == 'codex':
+                        self.assertEqual(output['permissionDecision'], 'deny')
+                        feedback = json.loads(output['permissionDecisionReason'].split('\n', 1)[1])
+                        self.assertEqual(feedback, {'approach': {'question': 'Which approach?', 'answer': 'Small'}})
+                    elif is_question:
+                        self.assertEqual(output['updatedInput']['answers'], {'Which approach?': 'Small'})
+                    else:
+                        self.assertEqual(output['decision']['behavior'], 'allow' if action == 'allowOnce' else 'deny')
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait(3)
+                    process.stdout.close()
+                    process.stderr.close()
 
     def test_authorized_approval_round_trip_and_idempotent_retry(self):
         peer, original, request = self.hook()

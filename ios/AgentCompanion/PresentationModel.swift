@@ -197,9 +197,12 @@ enum ComputerConnectionState: String {
     case checking = "Checking…", revoked = "Access removed"
     static func resolve(revoked: Bool, failed: Bool, hasSnapshot: Bool, fresh: Bool) -> Self {
         if revoked { return .revoked }
+        // Ordinary recovery must not flicker the indicator while the last
+        // successful observation is still within its original freshness lease.
+        if hasSnapshot && fresh { return .current }
         if failed { return .reconnecting }
         if !hasSnapshot { return .connecting }
-        return fresh ? .current : .checking
+        return .checking
     }
 }
 

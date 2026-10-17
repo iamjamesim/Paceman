@@ -174,6 +174,14 @@ def install_hooks(path: Path | None = None, *, provider="codex"):
                 group["matcher"] = QUESTION_MATCHER
             groups.append(group)
             changed.append(event)
+    from macos.responses import enabled, updated_hooks
+    if enabled(ROOT):
+        updated = updated_hooks(document, ROOT, PYTHON, provider, True)
+        if updated != document:
+            changed.extend(event for event in ("PermissionRequest", "PreToolUse")
+                           if updated["hooks"].get(event) != document["hooks"].get(event)
+                           and event not in changed)
+            document = updated
     if not changed:
         return changed
     descriptor, name = tempfile.mkstemp(prefix=".paceman-hooks-", dir=path.parent)

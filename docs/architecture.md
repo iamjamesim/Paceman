@@ -58,14 +58,18 @@ are in [data lifecycle](data-lifecycle.md).
 ## Optional phone responses
 
 The source can run a separate private response socket with `--interaction-socket`.
-The installer does not enable it or register response hooks. Reviewed synchronous
+On Mac, `pacemanctl responses-on` registers response hooks and enables the socket
+on the next source start; `responses-off` removes those hooks and disables it.
+The installer leaves responses off unless previously enabled. Reviewed synchronous
 hooks submit one live request at a time through this socket, independently of
 activity monitoring. The phone fetches pending requests only in the foreground
 and responds through the existing authenticated private connection.
 
-The adapter implements one-time permission decisions for Codex and Claude, and
-Claude `AskUserQuestion` answers. Codex questions require a connection to the
-owning runtime and are not exposed as actionable requests. Waiting in a response
+The adapter implements one-time permission decisions and question answers for
+Codex and Claude. Claude answers use `AskUserQuestion` input updates. Codex's
+blocking and async question tools are skipped after a phone answer, delivering
+that answer as feedback to the exact tool invocation through its supported
+PreToolUse decision hook. Secret questions stay on the native surface. Waiting in a response
 hook delays the native desktop prompt; release or timeout returns to native
 handling. A submission receipt is not proof that the agent consumed the answer.
 

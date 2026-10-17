@@ -69,7 +69,6 @@
 		CAF000000000000000000001 /* AppAttestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF000000000000000000002 /* AppAttestTests.swift */; };
 		ACB000000000000000000001 /* Interactions.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF000000000000000000001 /* Interactions.swift */; };
 		ACB000000000000000000002 /* InteractionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF000000000000000000002 /* InteractionViews.swift */; };
-		ACB000000000000000000003 /* SampleWork.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF000000000000000000003 /* SampleWork.swift */; };
 		ACB000000000000000000004 /* InteractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF000000000000000000004 /* InteractionTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -205,7 +204,6 @@
 		CAF000000000000000000002 /* AppAttestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAttestTests.swift; sourceTree = "<group>"; };
 		ACF000000000000000000001 /* Interactions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Interactions.swift; sourceTree = "<group>"; };
 		ACF000000000000000000002 /* InteractionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionViews.swift; sourceTree = "<group>"; };
-		ACF000000000000000000003 /* SampleWork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SampleWork.swift; sourceTree = "<group>"; };
 		ACF000000000000000000004 /* InteractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -302,7 +300,6 @@
 				5D485593EF3F215E9037FD0C /* QRScanner.swift */,
 				73982D0A3F322D36D27475D5 /* SettingsScreen.swift */,
 				16321946EF3229AC1C8C8EF6 /* SourceClient.swift */,
-				ACF000000000000000000003 /* SampleWork.swift */,
 				ACF000000000000000000002 /* InteractionViews.swift */,
 				ACF000000000000000000001 /* Interactions.swift */,
 				11D665B35AB2977BAFF84303 /* TransportDiagnostics.swift */,
@@ -597,7 +594,6 @@
 				F9A9D3E63B8A94A6BC3C2F1A /* QRScanner.swift in Sources */,
 				6DBE70171119466D95BD38EE /* SettingsScreen.swift in Sources */,
 				09DACEC89D3557D06DF4B92C /* SourceClient.swift in Sources */,
-				ACB000000000000000000003 /* SampleWork.swift in Sources */,
 				ACB000000000000000000002 /* InteractionViews.swift in Sources */,
 				ACB000000000000000000001 /* Interactions.swift in Sources */,
 				7F6E335436455669020C4D87 /* TransportDiagnostics.swift in Sources */,

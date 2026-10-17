@@ -70,10 +70,6 @@ struct LiveActivitiesDetail: View {
 }
 
 struct CompanionSettings: View {
-    #if DEBUG
-    @EnvironmentObject private var samples: SampleWorkStore
-    @AppStorage("show-sample-work") private var showSampleWork = true
-    #endif
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
     let theme: CompanionTheme
@@ -96,11 +92,6 @@ struct CompanionSettings: View {
                 Text("Experimental")
             }.listRowBackground(theme.panel)
             Section {
-                #if DEBUG
-                Toggle("Show sample tasks", isOn: $showSampleWork)
-                Button("Reset sample tasks") { samples.resetSamples() }
-                if let error = samples.error { Text(error).companionText(.body, theme: theme) }
-                #endif
                 NavigationLink(value: FeedDestination.diagnostics) {
                     Label("Diagnostics", systemImage: "doc.text.magnifyingglass")
                 }.disabled(presentation.preview)

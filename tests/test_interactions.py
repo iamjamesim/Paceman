@@ -122,12 +122,18 @@ class BrokerTests(unittest.TestCase):
         self.assertEqual(result["status"], "submitted")
         self.assertEqual(pending.response, {"action": "release"})
 
+    def test_codex_question_uses_the_same_scoped_answer_contract(self):
+        pending = self.broker._publish(dict(question(), provider="codex"), 60)
+        self.broker.submit(response(self.broker, pending, "answer", answers={
+            "q0": {"selected": [0], "text": ""}}))
+        self.assertEqual(pending.response, {"action": "answer", "answers": {
+            "q0": {"selected": [0], "text": ""}}})
+
     def test_bounded_payloads_pending_and_prompt_free_receipts(self):
         for content in (dict(approval(), detail="x" * 16385),
                         dict(approval(), detail="secret\x00value"),
                         dict(approval(), provider=[]),
                         dict(approval(), sessionID="raw-session"),
-                        dict(question(), provider="codex"),
                         dict(question(), questions=[])):
             with self.assertRaises(BrokerError):
                 self.broker._publish(content, 60)

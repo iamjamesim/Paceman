@@ -449,6 +449,53 @@ class MacSourceTests(unittest.TestCase):
                 hook("PostToolUse", "request_user_input")
                 self.assertEqual(store.snapshot()["state"], "working")
 
+    def test_phone_answer_clears_only_its_question_and_never_reopens_a_finished_turn(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); root.chmod(0o700)
+            store = Store(root / "hub.sqlite3"); clock = [10.0]
+            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                           turn_status_reader=lambda _: {}, monotonic=lambda: clock[0]) as source:
+                source.next_allowance_at = source.next_turn_status_at = float("inf")
+                base = dict(command="agent-event", session="one", turn="1")
+                source.receive(dict(base, event="working", hook="UserPromptSubmit"))
+                for call in ("call-a", "call-b"):
+                    source.receive(dict(base, event="question-opened", toolID=call))
+                clock[0] += 6; source.tick()
+                self.assertEqual(store.snapshot()["state"], "needs_input")
+                for change in ({"turn": "old", "toolID": "call-a"}, {"toolID": "other"},
+                               {"session": "another", "toolID": "call-a"}):
+                    source.receive({**base, "event": "question-answered", **change})
+                    self.assertEqual(store.snapshot()["state"], "needs_input")
+                source.receive(dict(base, event="question-answered", toolID="call-a"))
+                self.assertEqual(store.snapshot()["state"], "needs_input")
+                source.receive(dict(base, event="question-answered", toolID="call-b"))
+                self.assertEqual(store.snapshot()["state"], "working")
+                self.assertFalse(source.pending_questions)
+                self.assertFalse(source.question_calls)
+                source.receive(dict(base, event="completed", hook="Stop"))
+                source.receive(dict(base, event="question-answered", toolID="call-b"))
+                self.assertEqual(store.snapshot()["state"], "finished")
+                self.assertEqual(len(store.snapshot()["sessions"]), 1)
+
+    def test_resumed_question_answer_recovers_with_its_original_tool_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                           turn_status_reader=lambda _: {}, turn_metadata_reader=lambda _: {
+                               "one": [{"id": "new", "status": "inProgress"},
+                                       {"id": "old", "status": "interrupted"}]}) as source:
+                source.next_allowance_at = source.next_turn_status_at = float("inf")
+                base = dict(command="agent-event", session="one")
+                source.receive(dict(base, turn="old", event="working", hook="UserPromptSubmit"))
+                source.receive(dict(base, turn="old", event="interrupted", hook="Interrupt"))
+                source.receive(dict(base, turn="new", event="question-opened", toolID="call-a"))
+                source.receive(dict(base, turn="new", event="question-answered", toolID="call-a"))
+                source._recover_turns(list(source.pending_turn_events.items()))
+                self.assertEqual(store.snapshot()["state"], "working")
+                self.assertFalse(source.pending_questions)
+                self.assertFalse(source.question_calls)
+
     def test_async_question_ends_with_completed_turn(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

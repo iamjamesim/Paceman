@@ -215,8 +215,11 @@ final class CompanionModel: ObservableObject {
     func isRevoked(_ sourceID: String) -> Bool { revokedSources.contains(sourceID) }
 
     func isFresh(_ sourceID: String) -> Bool {
-        guard !revokedSources.contains(sourceID), errors[sourceID] == nil,
-              let value = snapshots[sourceID], let uptime = fetchedUptimes[sourceID] else { return false }
+        !revokedSources.contains(sourceID) && errors[sourceID] == nil && snapshotIsFresh(sourceID)
+    }
+
+    private func snapshotIsFresh(_ sourceID: String) -> Bool {
+        guard let value = snapshots[sourceID], let uptime = fetchedUptimes[sourceID] else { return false }
         return ProcessInfo.processInfo.systemUptime - uptime < value.freshFor
     }
 
@@ -229,7 +232,7 @@ final class CompanionModel: ObservableObject {
 
     func connectionState(_ sourceID: String) -> ComputerConnectionState {
         .resolve(revoked: isRevoked(sourceID), failed: errors[sourceID] != nil,
-                 hasSnapshot: snapshots[sourceID] != nil, fresh: isFresh(sourceID))
+                 hasSnapshot: snapshots[sourceID] != nil, fresh: snapshotIsFresh(sourceID))
     }
 
     /// Decorative watch previews may reflect current activity, never cached activity.
@@ -571,7 +574,7 @@ final class CompanionModel: ObservableObject {
         } catch {
             guard epoch == sourceEpoch, !Task.isCancelled else { return .noData }
             sourceFailed(error, sourceID: sourceID)
-            Diagnostics.shared.record("source_fetch_failed")
+            Diagnostics.shared.recordError("source_fetch_failed", error: error)
             return .failed
         }
     }

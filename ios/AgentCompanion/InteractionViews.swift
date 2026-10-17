@@ -9,7 +9,6 @@ struct InteractionDetail: View {
     var contentTopInset: CGFloat = 16
     var openSession: SessionOpenButton? = nil
     var preview = false
-    var sampleResponse: ((InputSubmission) throws -> Void)? = nil
     @Environment(\.scenePhase) private var phase
     @State private var answers: [String: InputAnswer] = [:]
     @State private var submission: InputSubmission?
@@ -40,7 +39,7 @@ struct InteractionDetail: View {
                             if let submission, submission.action != "answer" && submission.action != "release" {
                                 Text(submission.action == "allowOnce" ? "Allowed once" : "Declined").companionText(.body, theme: theme)
                             }
-                            Text(sampleResponse == nil ? "Waiting for the agent’s next update." : "Saved on this phone.")
+                            Text("Waiting for the agent’s next update.")
                                 .companionText(.body, theme: theme)
                         }
                     } else {
@@ -104,11 +103,9 @@ struct InteractionDetail: View {
                     InputActionButton(title: "Send answer", theme: theme) { respond("answer") }
                         .disabled(!ready)
                 }
-                if sampleResponse == nil {
-                    Button { respond("release") } label: {
-                        Text("Continue on computer").companionText(.body, theme: theme)
-                            .frame(minHeight: 44).contentShape(Rectangle())
-                    }
+                Button { respond("release") } label: {
+                    Text("Continue on computer").companionText(.body, theme: theme)
+                        .frame(minHeight: 44).contentShape(Rectangle())
                 }
             }
         }
@@ -212,15 +209,11 @@ struct InteractionDetail: View {
         Task { @MainActor in
             defer { sending = false }
             do {
-                if let sampleResponse { try sampleResponse(value) }
-                else if !preview { try await SourceClient().submitInput(value, source: item.source) }
+                if !preview { try await SourceClient().submitInput(value, source: item.source) }
                 sent = true
                 inbox.didSubmit(item, action: value.action)
             } catch {
-                if sampleResponse != nil {
-                    message = "Your response couldn’t be saved. Try again."
-                    retryable = true
-                } else if let error = error as? HubError, case .http(let status) = error,
+                if let error = error as? HubError, case .http(let status) = error,
                    [400, 401, 404, 409, 410, 422].contains(status) {
                     message = "This response could not be confirmed. Check the task on your computer."
                 } else {

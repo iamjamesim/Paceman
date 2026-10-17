@@ -49,7 +49,8 @@ def normalize(provider, data):
                        questions=[])
         if len(request["detail"]) > 16384:
             return None
-    elif provider == "claude" and event == "PreToolUse" and tool == "AskUserQuestion":
+    elif event == "PreToolUse" and (provider == "claude" and tool == "AskUserQuestion"
+            or provider == "codex" and tool in ("request_user_input", "request_user_input_async")):
         questions = payload.get("questions")
         if not isinstance(questions, list) or not 1 <= len(questions) <= 4:
             return None
@@ -58,20 +59,36 @@ def normalize(provider, data):
         for index, question in enumerate(questions):
             if not isinstance(question, dict):
                 return None
-            prompt = question.get("question")
-            options = question.get("options")
-            multiple = question.get("multiSelect", False)
-            if (not _text(prompt, 4096) or prompt in prompts
+            if provider == "codex":
+                # Desktop async questions use title/string choices; the native
+                # blocking tool uses question/id and label/description choices.
+                prompt = question.get("title") if tool.endswith("_async") else question.get("question")
+                options = question.get("options")
+                if options is None:
+                    options = []
+                multiple = False
+                if question.get("isSecret", False) is not False:
+                    return None  # Secret input remains on the native surface.
+                if tool == "request_user_input" and not _text(question.get("id"), 160):
+                    return None
+            else:
+                prompt = question.get("question")
+                options = question.get("options")
+                multiple = question.get("multiSelect", False)
+            if (not _text(prompt, 4096) or provider == "claude" and prompt in prompts
                     or type(multiple) is not bool or not isinstance(options, list)
-                    or not 1 <= len(options) <= 16):
+                    or not (0 if provider == "codex" else 1) <= len(options) <= 16):
                 return None
             prompts.add(prompt)
             normalized_options = []
             labels = set()
             for option in options:
-                if not isinstance(option, dict):
+                if provider == "codex" and tool.endswith("_async") and isinstance(option, str):
+                    label, description = option, ""
+                elif isinstance(option, dict):
+                    label, description = option.get("label"), option.get("description", "")
+                else:
                     return None
-                label, description = option.get("label"), option.get("description", "")
                 if (not _text(label, 512) or label in labels
                         or not _text(description, 2048, empty=True)):
                     return None
@@ -79,7 +96,12 @@ def normalize(provider, data):
                 normalized_options.append({"label": label, "description": description})
             normalized.append({"id": f"q{index}", "prompt": prompt,
                                "multiple": multiple, "options": normalized_options})
-        request.update(kind="question", title="Answer Claude", detail="", questions=normalized)
+        if provider == "codex" and tool == "request_user_input":
+            ids = [q["id"] for q in questions]
+            if len(set(ids)) != len(ids):
+                return None
+        request.update(kind="question", title=f"Answer {'Codex' if provider == 'codex' else 'Claude'}",
+                       detail="", questions=normalized)
     else:
         return None
     # The transport envelope also has to fit, without truncating action details.
@@ -101,7 +123,7 @@ def native_response(provider, original, request, reply):
             decision["message"] = "Declined from Paceman."
         return {"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                        "decision": decision}}
-    if provider != "claude" or action != "answer":
+    if provider not in ("codex", "claude") or action != "answer":
         return None
     answers = reply.get("answers")
     questions = request["questions"]
@@ -124,11 +146,39 @@ def native_response(provider, original, request, reply):
         value = ", ".join(pieces)
         if text.strip():
             value = value + "\n" + text if value else text
-        native_answers[question["prompt"]] = value
+        native_answers[question["id"] if provider == "codex" else question["prompt"]] = value
+    if provider == "codex":
+        original_questions = original["tool_input"]["questions"]
+        mapped = {}
+        for index, question in enumerate(questions):
+            key = (original_questions[index]["id"] if original["tool_name"] == "request_user_input"
+                   else question["id"])
+            mapped[key] = {"question": question["prompt"], "answer": native_answers[question["id"]]}
+        # Codex has no PreToolUse tool-result override. Its supported deny
+        # feedback skips the question UI and delivers the user's actual answer
+        # to this exact tool call. It never grants a tool permission.
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+            "permissionDecision": "deny", "permissionDecisionReason":
+                "The user answered this question in Paceman. The question UI was skipped "
+                "to avoid asking twice. Continue using these user answers:\n" + _json(mapped)}}
     updated = dict(original["tool_input"])
     updated["answers"] = native_answers
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                    "permissionDecision": "allow", "updatedInput": updated}}
+
+
+def notify_answered(original):
+    """Clear only this invocation's attention; send no question or answer text."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from macos.codex_hook import deliver
+    turn, tool_id = original.get("turn_id"), original.get("tool_use_id")
+    if not _text(turn, 160) or not _text(tool_id, 160):
+        return
+    path = os.environ.get("PACEMAN_HOOK_SOCKET") or str(
+        Path.home() / "Library/Application Support/Paceman/hook.sock")
+    deliver({"command": "agent-event", "session": original["session_id"],
+             "turn": turn, "event": "question-answered", "toolID": tool_id,
+             "hook": "PacemanQuestionAnswered"}, path, "PostToolUse")
 
 
 def exchange(request):
@@ -161,6 +211,8 @@ def run(provider, input_stream, output_stream):
             if len(encoded.encode()) <= MAX_BYTES:
                 output_stream.write(encoded + "\n")
                 output_stream.flush()
+                if provider == "codex" and request["kind"] == "question":
+                    notify_answered(original)
     except (OSError, ValueError, TypeError, KeyError, RecursionError, UnicodeError):
         return
 

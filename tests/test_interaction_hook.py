@@ -90,9 +90,6 @@ class InteractionHookTests(unittest.TestCase):
 
     def test_unsupported_events_never_contact_broker(self):
         cases = [("codex", question()), ("unknown", approval())]
-        for tool in ("request_user_input", "request_user_input_async"):
-            value = question(); value["tool_name"] = tool
-            cases.append(("codex", value))
         for event in ("PostToolUse", "Stop", "SessionStart"):
             value = approval(); value["hook_event_name"] = event
             cases.append(("claude", value))
@@ -102,6 +99,72 @@ class InteractionHookTests(unittest.TestCase):
             output, exchange = self.run_hook(provider, value, {"action": "allowOnce"})
             self.assertEqual(output, "")
             exchange.assert_not_called()
+
+    def test_codex_blocking_and_async_answers_skip_duplicate_native_question(self):
+        for tool, questions in (
+            ("request_user_input", [{"id": "approach", "header": "Approach", "question": "Which café?",
+                "options": [{"label": "北", "description": "North"}, {"label": "南", "description": "South"}]}]),
+            ("request_user_input_async", [{"title": "Which café?", "options": ["北", "南"]}]),
+            ("request_user_input_async", [{"title": "Anything else?"}])):
+            value = {"session_id": "native-session", "hook_event_name": "PreToolUse",
+                     "tool_name": tool, "tool_input": {"questions": questions}}
+            for answer in ({"selected": [], "text": "près du parc"},
+                           {"selected": [1], "text": ""}) if questions[0].get("options") else (
+                               {"selected": [], "text": "près du parc"},):
+                with self.subTest(tool=tool, answer=answer), patch.object(hook, "notify_answered") as notify:
+                    output, exchange = self.run_hook("codex", value,
+                        {"action": "answer", "answers": {"q0": answer}})
+                    result = json.loads(output)["hookSpecificOutput"]
+                    self.assertEqual(result["permissionDecision"], "deny")
+                    self.assertNotIn("updatedInput", result)
+                    answers = json.loads(result["permissionDecisionReason"].split("\n", 1)[1])
+                    key = "approach" if tool == "request_user_input" else "q0"
+                    self.assertEqual(answers[key]["answer"], answer["text"] or "南")
+                    self.assertEqual(exchange.call_args.args[0]["provider"], "codex")
+                    notify.assert_called_once_with(value)
+
+    def test_codex_multiple_questions_preserve_native_ids_even_with_identical_prompts(self):
+        value = {"session_id": "native-session", "hook_event_name": "PreToolUse",
+                 "tool_name": "request_user_input", "tool_input": {"questions": [
+                     {"id": "first", "question": "Which?", "options": None},
+                     {"id": "second", "question": "Which?", "options": None}]}}
+        with patch.object(hook, "notify_answered"):
+            output, _ = self.run_hook("codex", value, {"action": "answer", "answers": {
+                "q0": {"text": "A"}, "q1": {"text": "B"}}})
+        answers = json.loads(json.loads(output)["hookSpecificOutput"]["permissionDecisionReason"].split("\n", 1)[1])
+        self.assertEqual(answers, {"first": {"question": "Which?", "answer": "A"},
+                                   "second": {"question": "Which?", "answer": "B"}})
+
+    def test_question_completion_notification_contains_only_invocation_metadata(self):
+        original = {"session_id": "native-session", "turn_id": "turn-1", "tool_use_id": "call-1",
+                    "tool_input": {"questions": [{"title": "Private question"}]}}
+        with patch("macos.codex_hook.deliver") as deliver:
+            hook.notify_answered(original)
+        message = deliver.call_args.args[0]
+        self.assertEqual(message, {"command": "agent-event", "session": "native-session",
+            "turn": "turn-1", "event": "question-answered", "toolID": "call-1",
+            "hook": "PacemanQuestionAnswered"})
+        self.assertNotIn("Private question", json.dumps(message))
+        with patch("macos.codex_hook.deliver") as deliver:
+            hook.notify_answered({"session_id": "native-session"})
+            deliver.assert_not_called()
+
+    def test_codex_secret_malformed_and_duplicate_questions_stay_native(self):
+        base = {"session_id": "native-session", "hook_event_name": "PreToolUse",
+                "tool_name": "request_user_input", "tool_input": {"questions": [
+                    {"id": "choice", "question": "Which?", "options": None}]}}
+        for change in ({"isSecret": True}, {"options": False}, {"id": ""}, {"question": ""}):
+            value = copy.deepcopy(base); value["tool_input"]["questions"][0].update(change)
+            output, exchange = self.run_hook("codex", value, {"action": "answer"})
+            self.assertEqual(output, "")
+            exchange.assert_not_called()
+        value = copy.deepcopy(base)
+        value["tool_input"]["questions"].append({"id": "choice", "question": "Another?"})
+        self.assertIsNone(hook.normalize("codex", value))
+        for reply in (None, {"action": "release"}, {"action": "deny"},
+                      {"action": "answer", "answers": {"wrong": {"text": "yes"}}}):
+            output, _ = self.run_hook("codex", base, reply)
+            self.assertEqual(output, "")
 
     def test_unavailable_release_and_malformed_reply_fall_back_silently(self):
         for reply in (None, [], {}, {"action": "release"}, {"action": "allow"},

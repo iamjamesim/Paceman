@@ -5,7 +5,9 @@ and Pebble computer/session cards share a five-minute lease from the source
 observation; a temporary link failure does not shorten it.
 After expiry, activity is Last known and stops animating. The shorter snapshot
 lease governs connection status and forwarding new activity alerts, not display
-color. Reconnection fetches the latest state rather than replaying missed events.
+color. A transient fetch failure does not flicker the connection indicator while
+that snapshot lease remains valid; response controls still clear immediately.
+Reconnection fetches the latest state rather than replaying missed events.
 Normal computer removal confirms computer-side revocation before
 clearing the saved connection. An unreachable computer offers **Forget** to clear
 the iPhone connection without claiming remote revocation. Relay cleanup is
@@ -89,6 +91,3 @@ The phone clears its request inbox on backgrounding or connection failure and
 refetches on return. A response already submitted may finish while backgrounded;
 there is no automatic response retry or background request polling. A manual retry
 uses the same response and idempotency key. Unknown delivery stays unconfirmed.
-
-Development builds include sample Work tasks whose answers stay in a separate
-protected local file. Reset sample tasks clears only those sample responses.

@@ -58,8 +58,7 @@ def _request(value):
     if value["provider"] not in ("codex", "claude") or value["kind"] not in ("approval", "question"):
         raise BrokerError("invalid_request")
     if (not isinstance(value["sessionID"], str)
-            or not re.fullmatch(r"[0-9a-f]{64}", value["sessionID"])
-            or value["provider"] == "codex" and value["kind"] == "question"):
+            or not re.fullmatch(r"[0-9a-f]{64}", value["sessionID"])):
         raise BrokerError("invalid_request")
     result = {"provider": value["provider"], "sessionID": _identifier(value["sessionID"]),
               "kind": value["kind"], "title": _text(value["title"], 256),

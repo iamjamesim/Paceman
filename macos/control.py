@@ -20,6 +20,7 @@ from service.network import ensure_private_route
 from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint
 from macos.paths import installed_app
+from macos import responses
 
 ROOT = Path.home() / "Library/Application Support/Paceman"
 PLIST = Path.home() / "Library/LaunchAgents/ai.paceman.source.plist"
@@ -88,6 +89,7 @@ def status():
             value["clients"] = Store.client_list(db)
     value["running"] = bool(value.get("running")) and 0 <= time.time() - value.get("updatedAt", 0) < 20
     value["sharingEnabled"] = not (ROOT / "sharing-paused").exists()
+    value["phoneResponsesEnabled"] = responses.enabled(ROOT)
     value["computerName"] = socket.gethostname().split(".")[0]
     providers = configured_providers(ROOT)
     value["configuredProviders"] = providers
@@ -204,7 +206,7 @@ def configure_agents(providers):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "support", "pair", "share-on", "share-off", "restart", "remove-access", "uninstall", "agents"))
+    parser.add_argument("command", choices=("status", "support", "pair", "share-on", "share-off", "restart", "remove-access", "uninstall", "agents", "responses-on", "responses-off"))
     parser.add_argument("--client-id")
     parser.add_argument("--providers", nargs="*", choices=PROVIDERS)
     parser.add_argument("--yes", action="store_true", help="Confirm complete Mac uninstall")
@@ -228,6 +230,22 @@ def main():
             print("Agent settings updated. Review the selected agents’ Paceman hook commands, then start a fresh local task.")
         elif args.command == "pair":
             pairing()
+        elif args.command in ("responses-on", "responses-off"):
+            active = args.command == "responses-on"
+            changes = responses.configure(ROOT, sys.executable, active)
+            try:
+                if changes and not (ROOT / "sharing-paused").exists():
+                    launch("kickstart", "-k", service_target())
+            except (OSError, subprocess.SubprocessError):
+                responses.restore(changes)
+                raise
+            if active:
+                print("Phone responses enabled. Review and trust the new synchronous hooks in your agents before testing.")
+                print("These hooks share pending tool arguments, working directory, questions and choices with paired phones over private HTTPS; content is not saved.")
+                for provider in configured_providers(ROOT):
+                    print(f"{provider}: {responses.command(ROOT, sys.executable, provider)}")
+            else:
+                print("Phone responses disabled. Activity monitoring hooks remain installed.")
         elif args.command in ("share-on", "share-off"):
             sharing(args.command == "share-on")
         elif args.command == "restart":

@@ -75,7 +75,7 @@ final class InteractionTests: XCTestCase {
         let data = try JSONSerialization.data(withJSONObject: value)
         XCTAssertEqual(try InputRequests.decode(data, sourceID: sourceID).requests.count, 1)
         XCTAssertThrowsError(try InputRequests.decode(data, sourceID: "another-source"))
-        for change in ["provider": "codex", "remainingSeconds": 0, "sessionID": "not-hashed", "version": 2] as [String: Any] {
+        for change in ["provider": "unknown", "remainingSeconds": 0, "sessionID": "not-hashed", "version": 2] as [String: Any] {
             var invalid = value
             var requests = try XCTUnwrap(invalid["requests"] as? [[String: Any]])
             requests[0][change.key] = change.value
@@ -86,6 +86,17 @@ final class InteractionTests: XCTestCase {
         let requests = try XCTUnwrap(value["requests"] as? [[String: Any]])
         duplicated["requests"] = requests + requests
         XCTAssertThrowsError(try InputRequests.decode(JSONSerialization.data(withJSONObject: duplicated), sourceID: sourceID))
+    }
+    func testCodexQuestionsUseTheSameCardsAndValidationAsClaude() throws {
+        var value = fixture()
+        var requests = try XCTUnwrap(value["requests"] as? [[String: Any]])
+        requests[0]["provider"] = "codex"
+        requests[0]["questions"] = [["id": "q0", "prompt": "What should change?", "multiple": false,
+                                     "options": []]]
+        value["requests"] = requests
+        let decoded = try InputRequests.decode(JSONSerialization.data(withJSONObject: value), sourceID: sourceID)
+        XCTAssertEqual(decoded.requests[0].provider, "codex")
+        XCTAssertTrue(InputAnswer(text: "Keep it simple").valid(for: decoded.requests[0].questions[0]))
     }
     func testQuestionAnswersRequireOneValidModeAndRespectCardinality() {
         let single = InteractionQuestion(id: "q0", prompt: "Which?", multiple: false,
@@ -148,60 +159,97 @@ final class InteractionTests: XCTestCase {
         XCTAssertTrue(inbox.items.isEmpty)
     }
 
-    #if DEBUG
-    @MainActor func testSampleResponsesSurviveRelaunchAndResetWithoutNetwork() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let url = directory.appendingPathComponent("sample-work.json")
-        let store = SampleWorkStore(url: url)
-        let item = try XCTUnwrap(store.sampleInbox.items.first { $0.request.sessionID == "onboarding" })
-        let answer = InputSubmission(generation: item.generation, requestID: item.request.id, version: 1,
-            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(text: "After the first result")])
-        try store.respond(item, answer)
-        let restored = SampleWorkStore(url: url)
-        XCTAssertEqual(restored.contents.sampleResponses["onboarding"], "After the first result")
-        XCTAssertFalse(restored.sampleInbox.items.contains { $0.request.sessionID == "onboarding" })
-        restored.resetSamples()
-        XCTAssertEqual(restored.sampleInbox.items.count, 3)
-        XCTAssertTrue(SampleWorkStore(url: url).contents.sampleResponses.isEmpty)
+    @MainActor func testTaskStatusAndSectionsStayConsistentAcrossLiveTransitions() throws {
+        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: "mac",
+                                  clientID: "client", credential: "fixture")
+        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "codex",
+            sessionID: "session", kind: "approval", title: "Allow Bash?", detail: "", questions: [], remainingSeconds: 60)
+        let pending = PendingInput(source: source, generation: UUID().uuidString, request: request,
+                                   expiresAtUptime: ProcessInfo.processInfo.systemUptime + 60)
+        func item(_ state: ActivityState, historical: Bool = false, request: PendingInput? = nil,
+                  response: String? = nil) -> WorkItem {
+            WorkItem(id: .init(sourceID: "mac", sessionID: "session", provider: "codex"),
+                session: AgentSession(id: "session", provider: "codex", state: state),
+                computer: "Mac", historical: historical, response: response, request: request)
+        }
+        let approval = item(.working, request: pending)
+        XCTAssertEqual(approval.group, .attention)
+        XCTAssertEqual(approval.statusToken, .approval)
+        let sent = item(.needsInput, response: InputDelivery.sent.message)
+        XCTAssertEqual(sent.group, .attention, "Submission is not agent completion")
+        XCTAssertEqual(sent.statusToken, .none)
+        XCTAssertEqual(sent.statusDetail, "Response sent")
+        let running = item(.working)
+        XCTAssertEqual(running.group, .working)
+        XCTAssertEqual(running.statusToken, .working)
+        let finished = item(.finished)
+        XCTAssertEqual(finished.group, .recent)
+        XCTAssertEqual(finished.statusToken, .finished)
+        let failed = item(.failed)
+        XCTAssertEqual(failed.group, .attention)
+        XCTAssertEqual(failed.statusToken, .attention)
+        XCTAssertEqual(failed.statusDetail, "Failed")
+        XCTAssertEqual(item(.idle).statusToken, .none)
+        XCTAssertEqual(item(.idle).statusDetail, "Idle")
+        let stale = item(.working, historical: true)
+        XCTAssertEqual(stale.group, .lastKnown)
+        XCTAssertEqual(stale.statusToken, .working)
+        for state in ActivityState.allCases {
+            for historical in [false, true] {
+                for response in [nil, InputDelivery.sent.message] as [String?] {
+                    let row = item(state, historical: historical, response: response)
+                    if row.group == .working { XCTAssertEqual(row.statusToken, .working) }
+                    if state == .finished { XCTAssertEqual(row.statusToken, .finished) }
+                    let nextRequest = item(state, historical: historical, request: pending, response: response)
+                    XCTAssertEqual(nextRequest.state, .needsInput)
+                    XCTAssertEqual(nextRequest.statusToken, .approval, "A previous receipt must not hide a new request")
+                }
+            }
+        }
+        let question = InputRequest(requestID: UUID().uuidString, version: 1, provider: "codex",
+            sessionID: "session", kind: "question", title: "Question", detail: "",
+            questions: [.init(id: "q0", prompt: "Which approach?", multiple: false, options: [])], remainingSeconds: 60)
+        let questionInput = PendingInput(source: source, generation: UUID().uuidString, request: question,
+                                        expiresAtUptime: ProcessInfo.processInfo.systemUptime + 60)
+        XCTAssertEqual(item(.working, request: questionInput).statusToken, .question)
     }
+
     @MainActor func testWorkIdentityGroupingAndReceiptLifecycle() throws {
         let session = AgentSession(id: "same-session", provider: "claude", state: .needsInput, name: "Same title")
         let first = WorkItem(id: .init(sourceID: "first", sessionID: session.id, provider: session.provider), session: session, computer: "Mac", historical: false)
         var second = WorkItem(id: .init(sourceID: "second", sessionID: session.id, provider: session.provider), session: session, computer: "Mac", historical: true)
         XCTAssertNotEqual(first.id, second.id)
         XCTAssertEqual(first.group, .attention)
+        XCTAssertEqual(first.statusToken, .attention)
         XCTAssertEqual(second.group, .lastKnown)
         second.response = "Response sent"
         XCTAssertEqual(second.group, .lastKnown)
-        let store = SampleWorkStore(url: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString))
-        let inbox = store.sampleInbox
-        let pending = try XCTUnwrap(inbox.items.first)
+        let inbox = InteractionInbox()
+        inbox.setForeground(true)
+        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: "first",
+                                  clientID: "fixture-client", credential: "fixture")
+        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: session.provider,
+            sessionID: session.id, kind: "question", title: "Choose", detail: "",
+            questions: [.init(id: "q0", prompt: "Which approach?", multiple: false, options: [])], remainingSeconds: 60)
+        let pending = PendingInput(source: source, generation: UUID().uuidString, request: request,
+                                   expiresAtUptime: ProcessInfo.processInfo.systemUptime + 60)
         let id = WorkIdentity(sourceID: pending.source.sourceID, sessionID: pending.request.sessionID, provider: pending.request.provider)
         inbox.didSubmit(pending, action: "release")
         XCTAssertEqual(inbox.receipt(for: id), .released)
         let returned = WorkItem(id: id, session: session, computer: "Mac", historical: false,
             returnedToComputer: true, response: InputDelivery.released.message)
         XCTAssertEqual(returned.group, .attention)
+        XCTAssertEqual(returned.statusToken, .attention)
         XCTAssertEqual(returned.status, "Continue on computer")
+        var submitted = first
+        submitted.response = InputDelivery.sent.message
+        XCTAssertEqual(submitted.group, .attention)
+        XCTAssertEqual(submitted.statusToken, .none)
+        XCTAssertEqual(submitted.status, "Response sent")
         inbox.remove(pending.source.sourceID)
         XCTAssertNil(inbox.receipt(for: id))
     }
 
-    @MainActor func testUnreadableSampleResponsesAreNotOverwritten() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: url) }
-        let original = Data("invalid".utf8)
-        try original.write(to: url)
-        let store = SampleWorkStore(url: url)
-        store.error = nil
-        let item = try XCTUnwrap(store.sampleInbox.items.first)
-        let response = InputSubmission(generation: item.generation, requestID: item.request.id, version: 1,
-            idempotencyKey: UUID().uuidString, action: "deny", answers: [:])
-        XCTAssertThrowsError(try store.respond(item, response))
-        XCTAssertEqual(try Data(contentsOf: url), original)
-    }
-    #endif
 
 }
 

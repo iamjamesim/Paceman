@@ -12,6 +12,33 @@ macOS may show notifications about login and background items. You can manage th
 
 Prefer to build locally? Use [source setup](#build-and-install-from-source). Both installation paths continue with hook review and iPhone pairing below.
 
+## Optional phone responses
+
+After monitoring is working, run `pacemanctl responses-on` to prepare synchronous
+response hooks and restart the source. This prints the exact new commands to
+review. Both agents add `PermissionRequest` and `PreToolUse` response hooks;
+Codex matches `request_user_input` / `request_user_input_async`, and Claude matches
+`AskUserQuestion`. Existing
+activity hooks remain unchanged. Review the new Codex entries in **Settings →
+Hooks → User config (All projects)** and trust them yourself only after comparing
+the command. Claude reloads user hooks in a fresh session after workspace trust.
+
+Unlike monitoring, response hooks send pending tool arguments, the full working
+directory, and question/choice text to paired phones over private HTTPS. These
+requests and answers stay in memory and are excluded from SQLite, push payloads,
+accessories, and diagnostics. Keep Paceman open on the phone to respond. The
+hook waits up to 60 seconds; expiry, release, or connection loss returns handling
+to the agent without approving anything. Claude updates the question's answers
+before its native tool runs. Codex skips the duplicate native question and returns
+the user's answer as feedback to that tool call; this is not a permission grant.
+Secret Codex questions remain native.
+
+Check an actual question, approval, and denial in each agent: answer on
+the phone, confirm the agent consumes it, and wait for a successful finished turn.
+A submitted receipt alone does not complete this check. `pacemanctl responses-off`
+removes only response hooks, restarts the source when Sharing is on, and leaves
+monitoring and phone pairings intact. Sharing off pauses responses too.
+
 ## Review agent hooks
 
 Review each selected agent before checking phone delivery. Paceman shows the exact command for this installation in its setup window.

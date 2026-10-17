@@ -13,14 +13,11 @@ struct WorkItem: Identifiable {
     let historical: Bool
     var aggregate = false
     var returnedToComputer = false
-    var sample = false
     var response: String? = nil
     var request: PendingInput? = nil
-    var state: ActivityState { request != nil && response == nil ? .needsInput : session.state }
+    var state: ActivityState { request != nil ? .needsInput : session.state }
     var group: WorkGroup {
         if historical { return .lastKnown }
-        if returnedToComputer { return .attention }
-        if response != nil { return .recent }
         switch state {
         case .needsInput, .failed: return .attention
         case .working: return .working
@@ -29,13 +26,48 @@ struct WorkItem: Identifiable {
     }
     var status: String {
         if historical { return "Last known: \(session.state.title)" }
-        if returnedToComputer { return "Continue on computer" }
-        if response != nil { return sample ? "Response saved" : "Response sent" }
         if let request { return request.request.kind == "approval" ? "Approval needed" : "Question for you" }
+        if returnedToComputer && state == .needsInput { return "Continue on computer" }
+        if response != nil && state == .needsInput { return "Response sent" }
         return state == .needsInput ? "Needs your attention" : state.title
     }
     var context: String {
         [session.provider.capitalized, session.detail, computer].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+    var statusToken: WorkStatusToken {
+        // Delivery receipts are supporting text, never agent completion or a
+        // separate status glyph. The next source update owns the transition.
+        if !historical && state == .needsInput && request == nil && response != nil && !returnedToComputer { return .none }
+        switch state {
+        case .needsInput:
+            guard let request else { return .attention }
+            return request.request.kind == "approval" ? .approval : .question
+        case .failed: return .attention
+        case .working: return .working
+        case .finished: return .finished
+        case .idle: return .none
+        }
+    }
+    var statusDetail: String? {
+        if request != nil { return nil }
+        if state == .needsInput && (returnedToComputer || response != nil) { return status }
+        return state == .failed || state == .idle ? state.title : nil
+    }
+
+}
+
+/// Five status marks; progress has animated and static presentations of the
+/// same shape. Selection controls and app-opening buttons are separate actions.
+enum WorkStatusToken: Hashable {
+    case approval, question, attention, working, finished, none
+    var symbol: String? {
+        switch self {
+        case .approval: return "hand.raised"
+        case .question: return "questionmark.bubble"
+        case .attention: return "exclamationmark"
+        case .finished: return "checkmark.circle"
+        case .working, .none: return nil
+        }
     }
 }
 
@@ -75,34 +107,12 @@ enum WorkGroup: String, CaseIterable {
             response: connected && session.state == .needsInput ? inbox.receipt(for: id)?.message : nil,
             request: connected ? inbox.items.first { $0.source.sourceID == id.sourceID && $0.request.sessionID == id.sessionID && $0.request.provider == id.provider && inbox.isCurrent($0) } : nil)
     }
-    #if DEBUG
-    static func samples(_ store: SampleWorkStore) -> [WorkItem] {
-        let items = SampleWorkStore.tasks.map { task in
-            let provider = task.id == "tests" ? "codex" : "claude"
-            return WorkItem(id: WorkIdentity(sourceID: "samples", sessionID: task.id, provider: provider),
-                session: AgentSession(id: task.id, provider: provider, state: .needsInput, name: task.title, project: task.id == "tests" ? "storefront" : "paceman"),
-                computer: "Sample Mac", historical: false, sample: true,
-                response: store.contents.sampleResponses[task.id],
-                request: store.sampleInbox.items.first { $0.request.sessionID == task.id })
-        }
-        return items + [WorkItem(id: .init(sourceID: "samples", sessionID: "running", provider: "codex"),
-            session: AgentSession(id: "running", provider: "codex", state: .working, name: "Improve search", project: "website"),
-            computer: "Sample Mac", historical: false, sample: true),
-            WorkItem(id: .init(sourceID: "samples", sessionID: "finished", provider: "claude"),
-            session: AgentSession(id: "finished", provider: "claude", state: .finished, name: "Update the setup guide", project: "paceman"),
-            computer: "Sample Mac", historical: false, sample: true)]
-    }
-    #endif
 }
 
 struct CompanionWork: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
     @ObservedObject var inbox: InteractionInbox
-    #if DEBUG
-    @EnvironmentObject private var samples: SampleWorkStore
-    #endif
-    @AppStorage("show-sample-work") private var showSamples = true
     let theme: CompanionTheme
     @Binding var filter: String?
     @Binding var recentExpanded: Bool
@@ -111,10 +121,7 @@ struct CompanionWork: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
     var items: [WorkItem] {
-        var result = WorkCatalog.live(model: model, presentation: presentation, inbox: inbox)
-        #if DEBUG
-        if showSamples && !presentation.preview { result += WorkCatalog.samples(samples) }
-        #endif
+        let result = WorkCatalog.live(model: model, presentation: presentation, inbox: inbox)
         return result.sorted {
             let a = WorkGroup.allCases.firstIndex(of: $0.group)!, b = WorkGroup.allCases.firstIndex(of: $1.group)!
             if a != b { return a < b }
@@ -126,9 +133,6 @@ struct CompanionWork: View {
         items.filter { filter == nil || $0.id.sourceID == filter }
     }
     private var hasComputerFilters: Bool {
-        #if DEBUG
-        if showSamples && !presentation.preview { return true }
-        #endif
         return !model.pairedSources.isEmpty
     }
     private var awaitingActivity: Bool {
@@ -149,13 +153,13 @@ struct CompanionWork: View {
         .toolbarBackground(.hidden, for: .navigationBar)
         .foregroundStyle(theme.ink).navigationTitle("Activity").navigationBarTitleDisplayMode(.inline)
         .onChange(of: model.pairedSources.map(\.sourceID)) { _, ids in
-            if let filter, filter != "samples", !ids.contains(filter) { self.filter = nil }
+            if let filter, !ids.contains(filter) { self.filter = nil }
         }
-        .onChange(of: showSamples) { _, value in if !value && filter == "samples" { filter = nil } }
     }
 
     private var taskList: some View {
-        ScrollView {
+        let currentRows = visible
+        return ScrollView {
             LazyVStack(spacing: 0, pinnedViews: typeSize.isAccessibilitySize ? [] : [.sectionHeaders]) {
                 if hasComputerFilters && typeSize.isAccessibilitySize { computerFilters }
                 if model.pairedSources.isEmpty {
@@ -176,12 +180,12 @@ struct CompanionWork: View {
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
                 }
                 ForEach(WorkGroup.allCases, id: \.self) { group in
-                    let rows = visible.filter { $0.group == group }
+                    let rows = currentRows.filter { $0.group == group }
                     if !rows.isEmpty {
                         workSection(group, rows: rows)
                     }
                 }
-                if !model.pairedSources.isEmpty && visible.isEmpty {
+                if !model.pairedSources.isEmpty && currentRows.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(awaitingActivity ? "No activity received yet" : filter == nil ? "No tasks to show" : "No tasks on this computer")
                             .companionText(.title, theme: theme)
@@ -216,6 +220,9 @@ struct CompanionWork: View {
                                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                                     .contentShape(Rectangle())
                             }.buttonStyle(.plain)
+                                // Recreate the button label when its status changes;
+                                // a moved task must not retain the previous glyph.
+                                .id(item.statusToken)
                         }
                         if item.session.appURL != nil {
                             SessionOpenButton(session: item.session, theme: theme) {
@@ -235,7 +242,7 @@ struct CompanionWork: View {
                         .accessibilityHint("Show or hide recent tasks")
                 } else { groupHeading(group, count: rows.contains { $0.aggregate } ? nil : rows.count) }
             }
-        }
+        }.id(group)
     }
 
     private func groupHeading(_ group: WorkGroup, count: Int?) -> some View {
@@ -256,7 +263,6 @@ struct CompanionWork: View {
 
     private var filterName: String {
         guard let filter else { return "All computers" }
-        if filter == "samples" { return "Sample Mac" }
         guard let source = model.pairedSources.first(where: { $0.sourceID == filter }) else { return "All computers" }
         return presentation.displayName(source: source, snapshot: model.snapshots[filter])
     }
@@ -270,9 +276,6 @@ struct CompanionWork: View {
                         Text(presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID]) + " · " + (presentation.computerState(model: model, sourceID: source.sourceID) == .current ? "Up to date" : "Unavailable"))
                             .tag(Optional(source.sourceID))
                     }
-                    #if DEBUG
-                    if showSamples && !presentation.preview { Text("Sample Mac").tag(Optional("samples")) }
-                    #endif
                 }
                 if !model.pairedSources.isEmpty {
                     Button("Connect a computer", systemImage: "plus", action: connectComputer)
@@ -302,9 +305,6 @@ struct CompanionWork: View {
                                 }
                             }
                     }
-                    #if DEBUG
-                    if showSamples && !presentation.preview { computerChip("Sample Mac", id: "samples") }
-                    #endif
                     if !model.pairedSources.isEmpty {
                         Button(action: connectComputer) {
                             Image(systemName: "plus").font(.body)
@@ -344,7 +344,7 @@ struct CompanionWork: View {
                 .background(filter == id ? theme.ink.opacity(0.07) : Color.clear, in: Capsule())
         }.buttonStyle(.plain)
             .accessibilityAddTraits(filter == id ? .isSelected : [])
-            .accessibilityValue(state?.rawValue ?? (id == "samples" ? "Sample computer" : ""))
+            .accessibilityValue(state?.rawValue ?? "")
     }
 
 }
@@ -381,29 +381,22 @@ struct WorkRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .subheadline) private var tokenSize = 16.0
     @ScaledMetric(relativeTo: .callout) private var tokenBaselineOffset = 4.0
-    private var symbol: String {
-        if item.returnedToComputer { return "arrow.up.forward.circle" }
-        if item.response != nil { return "checkmark.circle" }
-        switch item.state {
-        case .needsInput:
-            guard let request = item.request else { return "exclamationmark.circle" }
-            return request.request.kind == "approval" ? "hand.raised" : "questionmark.bubble"
-        case .failed: return "xmark.circle"
-        case .working: return "ellipsis.circle"
-        case .finished: return "checkmark.circle"
-        case .idle: return "circle"
-        }
-    }
     private var color: Color {
-        if item.historical || item.response != nil || item.group == .recent || item.state == .working { return theme.secondaryInk }
+        if item.historical || (item.request == nil && item.response != nil) || item.group == .recent || item.state == .working { return theme.secondaryInk }
         return PhoneMonitoringStatusColor.color(for: item.state.rawValue, onDark: colorScheme == .dark, fallback: theme.secondaryInk)
     }
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             ZStack {
-                if item.state == .working && !item.historical && !reduceMotion {
-                    ProgressView().controlSize(.mini).dynamicTypeSize(.large).tint(color)
-                } else {
+                if item.statusToken == .working {
+                    if !item.historical && !reduceMotion {
+                        ProgressView().controlSize(.mini).dynamicTypeSize(.large).tint(color)
+                    } else {
+                        Circle().trim(from: 0, to: 0.75)
+                            .stroke(style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90)).foregroundStyle(color)
+                    }
+                } else if let symbol = item.statusToken.symbol {
                     Image(systemName: symbol).font(.system(size: min(tokenSize, 24)))
                         .foregroundStyle(color)
                 }
@@ -413,10 +406,10 @@ struct WorkRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.session.displayName).companionText(.body, theme: theme)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                Text(item.aggregate ? item.computer : [item.request != nil && item.response == nil ? (item.request?.request.kind == "approval" ? "Approval" : "Question") : nil,
+                Text(item.aggregate ? item.computer : [item.request != nil ? (item.request?.request.kind == "approval" ? "Approval" : "Question") : nil,
                       item.session.provider.capitalized, item.session.detail,
                       showComputer ? item.computer : nil,
-                      item.returnedToComputer || item.response != nil ? item.status : nil]
+                      item.statusDetail]
                     .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                     .companionText(.supporting, theme: theme)
                     .fixedSize(horizontal: false, vertical: true)
