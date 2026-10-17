@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum CompanionSection: String, CaseIterable {
     case work = "Activity", devices = "Devices", settings = "Settings"
@@ -42,10 +43,11 @@ struct CompanionSidebar<Content: View>: View {
                 sidebar
                     .frame(width: width)
                     .accessibilityHidden(!isPresented)
-                    .allowsHitTesting(isPresented)
+                    .allowsHitTesting(isPresented && !dragging)
                 content
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .background(theme.canvas.ignoresSafeArea(.container))
+                    .allowsHitTesting(!isPresented && !dragging)
                     .accessibilityHidden(isPresented)
                     .overlay {
                         if progress > 0 {
@@ -63,7 +65,30 @@ struct CompanionSidebar<Content: View>: View {
                     .shadow(color: .black.opacity(0.20 * progress), radius: 24, x: -8 * sign)
                     .offset(x: sign * offset)
             }
-            .simultaneousGesture(revealGesture(width: width, screenWidth: geometry.size.width))
+            .gesture(SidebarPanGesture(
+                enabled: phase == .active && (canReveal || isPresented),
+                shouldBegin: { start, velocity in
+                    SidebarGesturePolicy(canReveal: canReveal, isPresented: isPresented,
+                        rightToLeft: direction == .rightToLeft, screenWidth: geometry.size.width)
+                        .canBegin(start: start, velocity: velocity)
+                },
+                changed: { dx in
+                    dragging = true
+                    translation = sign * dx
+                },
+                ended: { projected in
+                    guard dragging else { return }
+                    let destination = (isPresented ? width : 0) + sign * projected
+                    withAnimation(animation) {
+                        isPresented = destination > width / 2
+                        translation = 0
+                        dragging = false
+                    }
+                },
+                cancelled: {
+                    guard dragging else { return }
+                    withAnimation(animation) { translation = 0; dragging = false }
+                }))
             .mask { Rectangle().ignoresSafeArea(.container) }
         }
         .background(theme.canvas.ignoresSafeArea())
@@ -142,29 +167,79 @@ struct CompanionSidebar<Content: View>: View {
         }
     }
 
-    private func revealGesture(width: CGFloat, screenWidth: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 16)
-            .onChanged { value in
-                let dx = sign * value.translation.width
-                let start = direction == .rightToLeft ? screenWidth - value.startLocation.x : value.startLocation.x
-                guard isPresented || (canReveal && start <= 24) else { return }
-                guard dragging || abs(dx) > abs(value.translation.height) * 1.2 else { return }
-                dragging = true
-                translation = dx
-            }
-            .onEnded { value in
-                guard dragging else { return }
-                let projected = (isPresented ? width : 0) + sign * value.predictedEndTranslation.width
-                withAnimation(animation) {
-                    isPresented = projected > width / 2
-                    translation = 0
-                    dragging = false
-                }
-            }
-    }
-
     private func close() {
         withAnimation(animation) { isPresented = false; translation = 0; dragging = false }
+    }
+}
+
+struct SidebarGesturePolicy {
+    let canReveal: Bool
+    let isPresented: Bool
+    let rightToLeft: Bool
+    let screenWidth: CGFloat
+
+    func canBegin(start: CGPoint, velocity: CGPoint) -> Bool {
+        guard abs(velocity.x) > abs(velocity.y) * 1.2 else { return false }
+        let dx = rightToLeft ? -velocity.x : velocity.x
+        let leadingStart = rightToLeft ? screenWidth - start.x : start.x
+        return isPresented ? dx < 0 : canReveal && leadingStart >= 0 && leadingStart <= 24 && dx > 0
+    }
+}
+
+/// Reject unrelated pans before recognition. Once a sidebar pan begins, UIKit
+/// cancels the touch delivered to any row beneath it instead of sharing the drag.
+private struct SidebarPanGesture: UIGestureRecognizerRepresentable {
+    var enabled: Bool
+    var shouldBegin: (CGPoint, CGPoint) -> Bool
+    var changed: (CGFloat) -> Void
+    var ended: (CGFloat) -> Void
+    var cancelled: () -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator(configuration: self, converter: converter)
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = UIPanGestureRecognizer()
+        pan.maximumNumberOfTouches = 1
+        pan.cancelsTouchesInView = true
+        pan.delegate = context.coordinator
+        pan.isEnabled = enabled
+        return pan
+    }
+
+    func updateUIGestureRecognizer(_ pan: UIPanGestureRecognizer, context: Context) {
+        context.coordinator.configuration = self
+        pan.isEnabled = enabled
+    }
+
+    func handleUIGestureRecognizerAction(_ pan: UIPanGestureRecognizer, context: Context) {
+        let dx = context.converter.localTranslation?.x ?? 0
+        switch pan.state {
+        case .began, .changed: changed(dx)
+        case .ended: ended(dx + (context.converter.localVelocity?.x ?? 0) * 0.2)
+        case .cancelled, .failed: cancelled()
+        default: break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var configuration: SidebarPanGesture
+        let converter: CoordinateSpaceConverter
+        init(configuration: SidebarPanGesture, converter: CoordinateSpaceConverter) {
+            self.configuration = configuration
+            self.converter = converter
+        }
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            let location = converter.localLocation
+            let translation = converter.localTranslation ?? .zero
+            let start = CGPoint(x: location.x - translation.x, y: location.y - translation.y)
+            return configuration.enabled && configuration.shouldBegin(start, converter.localVelocity ?? .zero)
+        }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            false
+        }
     }
 }
 

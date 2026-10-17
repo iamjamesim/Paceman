@@ -147,6 +147,35 @@ final class InteractionTests: XCTestCase {
 
 }
 
+final class SidebarGestureTests: XCTestCase {
+    func testClosedSidebarLeavesScrollingAndPushedBackNavigationAlone() {
+        let root = SidebarGesturePolicy(canReveal: true, isPresented: false, rightToLeft: false, screenWidth: 393)
+        XCTAssertTrue(root.canBegin(start: CGPoint(x: 12, y: 300), velocity: CGPoint(x: 200, y: 20)))
+        XCTAssertFalse(root.canBegin(start: CGPoint(x: 100, y: 300), velocity: CGPoint(x: 200, y: 20)), "Interior horizontal scrolling belongs to content")
+        XCTAssertFalse(root.canBegin(start: CGPoint(x: 12, y: 300), velocity: CGPoint(x: 20, y: 200)), "Vertical scrolling belongs to content")
+        XCTAssertFalse(root.canBegin(start: CGPoint(x: 12, y: 300), velocity: CGPoint(x: -200, y: 20)))
+        let pushed = SidebarGesturePolicy(canReveal: false, isPresented: false, rightToLeft: false, screenWidth: 393)
+        XCTAssertFalse(pushed.canBegin(start: CGPoint(x: 12, y: 300), velocity: CGPoint(x: 200, y: 20)), "Native back navigation owns pushed pages")
+    }
+
+    func testOpenSidebarAcceptsOnlyHorizontalClosingPans() {
+        let open = SidebarGesturePolicy(canReveal: true, isPresented: true, rightToLeft: false, screenWidth: 393)
+        XCTAssertTrue(open.canBegin(start: CGPoint(x: 350, y: 300), velocity: CGPoint(x: -200, y: 20)))
+        XCTAssertTrue(open.canBegin(start: CGPoint(x: 100, y: 300), velocity: CGPoint(x: -200, y: 20)))
+        XCTAssertFalse(open.canBegin(start: CGPoint(x: 100, y: 300), velocity: CGPoint(x: 20, y: 200)))
+        XCTAssertFalse(open.canBegin(start: CGPoint(x: 100, y: 300), velocity: CGPoint(x: 200, y: 20)))
+    }
+
+    func testRightToLeftSidebarUsesTheOppositeEdgeAndDirection() {
+        let root = SidebarGesturePolicy(canReveal: true, isPresented: false, rightToLeft: true, screenWidth: 393)
+        XCTAssertTrue(root.canBegin(start: CGPoint(x: 380, y: 300), velocity: CGPoint(x: -200, y: 20)))
+        XCTAssertFalse(root.canBegin(start: CGPoint(x: 12, y: 300), velocity: CGPoint(x: -200, y: 20)))
+        XCTAssertFalse(root.canBegin(start: CGPoint(x: 380, y: 300), velocity: CGPoint(x: 200, y: 20)))
+        let open = SidebarGesturePolicy(canReveal: true, isPresented: true, rightToLeft: true, screenWidth: 393)
+        XCTAssertTrue(open.canBegin(start: CGPoint(x: 100, y: 300), velocity: CGPoint(x: 200, y: 20)))
+    }
+}
+
 private final class InteractionURLProtocol: URLProtocol {
     static var start: ((InteractionURLProtocol) -> Void)?
     override class func canInit(with request: URLRequest) -> Bool { true }

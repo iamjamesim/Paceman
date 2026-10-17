@@ -287,7 +287,7 @@ struct CompanionWork: View {
                             Image(systemName: "plus").font(.body)
                                 .frame(minWidth: 44, minHeight: 44)
                                 .foregroundStyle(theme.tint)
-                                .background(theme.ink.opacity(0.04), in: Circle())
+                                .contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityLabel("Connect a computer")
                     }
                 }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 8)
@@ -462,7 +462,7 @@ struct WorkDetail: View {
                             }
                         } else {
                             Text("Task no longer available").companionText(.title, theme: theme)
-                            Text("Return to Work for the latest activity.").companionText(.body, theme: theme)
+                            Text("Return to Activity for current tasks.").companionText(.body, theme: theme)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
