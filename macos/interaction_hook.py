@@ -11,10 +11,12 @@ import os
 from pathlib import Path
 import socket
 import sys
+import time
 
 # Direct hooks run from the installed macos directory, outside the package root.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from service.interactions import RESPONSE_TIMEOUT_SECONDS
+from service.diagnostics import DeliveryDiagnostics, fingerprint
 
 
 MAX_BYTES = 64 * 1024
@@ -200,15 +202,28 @@ def exchange(request):
 
 
 def run(provider, input_stream, output_stream):
+    socket_path = os.environ.get("PACEMAN_INTERACTION_SOCKET") or str(
+        Path.home() / "Library/Application Support/Paceman/interaction.sock")
+    diagnostics = DeliveryDiagnostics(Path(socket_path).parent / "delivery-diagnostics.jsonl")
+    started = time.monotonic()
+    fields = {"provider": provider}
     try:
         raw = input_stream.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES:
             return
         original = json.loads(raw)
+        if isinstance(original, dict) and _text(original.get("session_id"), 512):
+            session_id = hashlib.sha256(f"{provider}:{original['session_id']}".encode()).hexdigest()
+            fields["sessionFingerprint"] = fingerprint(session_id)
+        diagnostics.record("hook_received", **fields)
         request = normalize(provider, original)
         if request is None:
+            diagnostics.record("hook_unsupported", **fields)
             return
+        fields["kind"] = request["kind"]
         response = native_response(provider, original, request, exchange(request))
+        diagnostics.record("hook_returned", outcome="native" if response is None else "responded",
+                           durationMs=int((time.monotonic() - started) * 1000), **fields)
         if response is not None:
             encoded = _json(response)
             if len(encoded.encode()) <= MAX_BYTES:
@@ -216,7 +231,9 @@ def run(provider, input_stream, output_stream):
                 output_stream.flush()
                 if provider == "codex" and request["kind"] == "question":
                     notify_answered(original)
-    except (OSError, ValueError, TypeError, KeyError, RecursionError, UnicodeError):
+    except (OSError, ValueError, TypeError, KeyError, RecursionError, UnicodeError) as error:
+        diagnostics.record("hook_failed", errorNumber=getattr(error, "errno", None),
+                           durationMs=int((time.monotonic() - started) * 1000), **fields)
         return
 
 

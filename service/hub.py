@@ -438,7 +438,7 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, address, store: Store, adapter=None, desktop_status=None,
-                 relay_url=None, relay_credential_hash=None, interactions=None):
+                 relay_url=None, relay_credential_hash=None, interactions=None, diagnostics=None):
         self.store = store
         self.adapter = adapter
         self.desktop_status = desktop_status
@@ -446,6 +446,7 @@ class Server(ThreadingHTTPServer):
         self.relay_credential_hash = relay_credential_hash
         self.interaction_lock = threading.RLock()
         self.interactions = interactions
+        self.diagnostics = diagnostics
         self.interaction_access = self.interaction_access_state()
         self.started = time.monotonic()
         self.pair_attempts: list[float] = []
@@ -498,23 +499,45 @@ class Handler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
         self.connection.settimeout(5)
+        self._trace_started = time.monotonic()
 
     def log_message(self, *_):
         # Request bodies, URLs, credentials, and invitation values never logged.
         pass
 
+    def _begin_trace(self):
+        self._trace_started = time.monotonic()
+        self._record_http("http_received")
+
+    def _record_http(self, stage, **fields):
+        operation = {"/v1/snapshot": "snapshot", "/v1/interactions":
+                     "submit" if self.command == "POST" else "requests"}.get(self.path)
+        if self.server.diagnostics is not None and operation is not None:
+            self.server.diagnostics.record(stage, operation=operation,
+                traceID=self.headers.get("X-Paceman-Trace-ID"),
+                durationMs=int((time.monotonic() - self._trace_started) * 1000), **fields)
+
     def reply(self, status: int, payload: dict):
         data = json.dumps(payload, separators=(",", ":")).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            self._record_http("http_disconnected", httpStatus=status)
+            raise
+        fields = {"httpStatus": status}
+        if self.path == "/v1/interactions" and self.command == "GET" and isinstance(payload.get("requests"), list):
+            fields["pendingCount"] = len(payload["requests"])
+        self._record_http("http_replied", **fields)
 
     def do_GET(self):
+        self._begin_trace()
         if self.path not in ("/v1/snapshot", "/v1/push", "/v1/interactions"):
             self.reply(404, {"error": "not_found"})
             return
@@ -544,6 +567,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200 if value else 401, value or {"error": "unauthorized"})
             return
     def do_POST(self):
+        self._begin_trace()
         if self.path == "/v1/interactions":
             from service.interactions import BrokerError
             prefix, _, token = self.headers.get("Authorization", "").partition(" ")
@@ -690,6 +714,11 @@ def main():
             server = stack.enter_context(Server(("127.0.0.1", args.port), store,
                                                 relay_url=relay_url,
                                                 relay_credential_hash=relay_credential_hash))
+            from service.diagnostics import DeliveryDiagnostics
+            # Keep source and hook events together on the Mac. Other sources
+            # retain their own private data directory.
+            diagnostic_root = args.data_dir.parent if args.source == "macos" else args.data_dir
+            server.diagnostics = DeliveryDiagnostics(diagnostic_root / "delivery-diagnostics.jsonl")
             if args.source == "omarchy":
                 from service.omarchy import OmarchySource
                 from omarchy.agents import configured_providers
@@ -724,7 +753,8 @@ def main():
             if args.interaction_socket:
                 from service.interactions import InteractionBroker, ResponseListener
                 server.interactions = InteractionBroker(provider_enabled=lambda provider:
-                    provider in getattr(server.adapter, "providers", ("codex", "claude")))
+                    provider in getattr(server.adapter, "providers", ("codex", "claude")),
+                    diagnostics=server.diagnostics)
                 server.interaction_access = server.interaction_access_state()
                 stack.callback(server.interactions.close)
                 stack.enter_context(ResponseListener(server.interactions, args.interaction_socket))

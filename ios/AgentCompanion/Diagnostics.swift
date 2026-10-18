@@ -72,12 +72,21 @@ final class Diagnostics {
             "durationMs": Int(metrics.taskInterval.duration * 1000),
             "transactions": metrics.transactionMetrics.count,
         ]
+        if let traceID = task.originalRequest?.value(forHTTPHeaderField: "X-Paceman-Trace-ID"),
+           UUID(uuidString: traceID) != nil { entry["traceID"] = traceID }
         if let transaction = metrics.transactionMetrics.last {
+            entry["httpStatus"] = (transaction.response as? HTTPURLResponse)?.statusCode
             entry["reusedConnection"] = transaction.isReusedConnection
             entry["protocol"] = transaction.networkProtocolName
             entry["cellular"] = transaction.isCellular
             entry["requestStarted"] = transaction.requestStartDate != nil
             entry["responseStarted"] = transaction.responseStartDate != nil
+            entry["dnsStarted"] = transaction.domainLookupStartDate != nil
+            entry["dnsFinished"] = transaction.domainLookupEndDate != nil
+            entry["connectStarted"] = transaction.connectStartDate != nil
+            entry["connectFinished"] = transaction.connectEndDate != nil
+            entry["tlsStarted"] = transaction.secureConnectionStartDate != nil
+            entry["tlsFinished"] = transaction.secureConnectionEndDate != nil
             for (name, start, end) in [
                 ("dnsMs", transaction.domainLookupStartDate, transaction.domainLookupEndDate),
                 ("connectMs", transaction.connectStartDate, transaction.connectEndDate),
@@ -89,6 +98,14 @@ final class Diagnostics {
         }
         // Phase timings only: no addresses, headers, credentials, or request content.
         append(entry)
+    }
+
+    func recordInteractionFetch(sourceID: String, received: [InputRequest], matchedCount: Int, duration: TimeInterval) {
+        append(["at": Date().timeIntervalSince1970, "uptime": ProcessInfo.processInfo.systemUptime,
+                "stage": "interaction_fetch_received", "sourceSupportID": fingerprint(sourceID),
+                "receivedCount": received.count, "matchedCount": matchedCount,
+                "requestFingerprints": received.map { fingerprint($0.requestID) },
+                "durationMs": Int(max(0, duration) * 1000)])
     }
 
     func recordLiveActivityStartToken(_ token: Data?, stage: String) {

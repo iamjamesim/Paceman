@@ -368,6 +368,10 @@ final class SourceClient {
     }
 
     private func response(_ request: URLRequest, maximumBytes: Int = 65536) async throws -> Data {
+        var request = request
+        if let path = request.url?.path, ["/v1/snapshot", "/v1/interactions"].contains(path) {
+            request.setValue(UUID().uuidString, forHTTPHeaderField: "X-Paceman-Trace-ID")
+        }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw HubError.message("Invalid server response") }
         guard http.statusCode == 200 else {

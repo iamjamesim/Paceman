@@ -586,6 +586,11 @@ final class InteractionTests: XCTestCase {
         let retryTask = inbox.retry(item)
         XCTAssertEqual(inbox.response(for: item)?.submission, original, "Retry preserves action, answers, and idempotency key")
         await fulfillment(of: [retryStarted], timeout: 2)
+        let traces = try requests.map {
+            try XCTUnwrap($0.request.value(forHTTPHeaderField: "X-Paceman-Trace-ID"))
+        }
+        XCTAssertTrue(traces.allSatisfy { UUID(uuidString: $0) != nil })
+        XCTAssertNotEqual(traces[0], traces[1], "Each HTTP attempt has its own trace; the decision's idempotency key stays unchanged")
         let confirmed = expectation(description: "Receipt accepted")
         let confirmationObserver = inbox.$responses.sink { values in
             if values[item.id]?.phase == .submitted { confirmed.fulfill() }

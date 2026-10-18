@@ -12,6 +12,7 @@ import time
 import unittest
 
 from service.hub import Server, Store
+from service.diagnostics import DeliveryDiagnostics
 from service.interactions import InteractionBroker, ResponseListener
 from macos.interaction_hook import normalize, native_response
 from tests.identity import device
@@ -24,9 +25,11 @@ class InteractionHTTPTests(unittest.TestCase):
         root = Path(self.temp.name)
         self.store = Store(root / 'source.db')
         self.client = self.store.redeem(self.store.invite('https://example.test')['invitation'], device=device())
-        self.broker = InteractionBroker()
+        self.diagnostics = DeliveryDiagnostics(root / 'delivery-diagnostics.jsonl')
+        self.broker = InteractionBroker(diagnostics=self.diagnostics)
         self.listener = self.enterContext(ResponseListener(self.broker, root / 'input.sock'))
-        self.server = self.enterContext(Server(('127.0.0.1', 0), self.store, interactions=self.broker))
+        self.server = self.enterContext(Server(('127.0.0.1', 0), self.store, interactions=self.broker,
+                                              diagnostics=self.diagnostics))
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
         self.thread.start()
         self.addCleanup(self.stop)
@@ -35,14 +38,42 @@ class InteractionHTTPTests(unittest.TestCase):
         self.server.shutdown()
         self.thread.join(2)
 
-    def call(self, method, path, payload=None, authorized=True):
+    def call(self, method, path, payload=None, authorized=True, trace_id=None):
         connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=2)
         self.addCleanup(connection.close)
         headers = {'Authorization': 'Bearer ' + self.client['credential']} if authorized else {}
+        if trace_id is not None:
+            headers['X-Paceman-Trace-ID'] = trace_id
         body = json.dumps(payload) if payload is not None else None
         connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         return response.status, json.loads(response.read())
+
+    def test_trace_distinguishes_empty_expired_inbox_from_failed_fetch(self):
+        self.hook()
+        trace = 'c9b86b49-fbd9-4acf-90b7-461265034bae'
+        status, before = self.call('GET', '/v1/interactions', trace_id=trace)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(before['requests']), 1)
+        self.broker._clock = lambda: time.monotonic() + 601
+        status, after = self.call('GET', '/v1/interactions', trace_id=trace)
+        self.assertEqual((status, after['requests']), (200, []))
+        entries = [json.loads(line) for line in self.diagnostics.path.read_text().splitlines()]
+        releases = [e for e in entries if e['stage'] == 'request_released']
+        self.assertEqual([e['reason'] for e in releases], ['deadline'])
+        replies = [e for e in entries if e['stage'] == 'http_replied']
+        self.assertEqual([e['pendingCount'] for e in replies], [1, 0])
+        self.assertTrue(all(e['traceID'] == trace and e['httpStatus'] == 200 for e in replies))
+        encoded = json.dumps(entries)
+        for private in ['echo fixture', 'local-fixture', self.client['credential'], 'Allow Bash']:
+            self.assertNotIn(private, encoded)
+
+    def test_unauthorized_fetch_logs_status_without_credential(self):
+        status, _ = self.call('GET', '/v1/snapshot', authorized=False, trace_id='private invalid value')
+        self.assertEqual(status, 401)
+        entries = [json.loads(line) for line in self.diagnostics.path.read_text().splitlines()]
+        self.assertEqual(entries[-1]['httpStatus'], 401)
+        self.assertNotIn('traceID', entries[-1])
 
     def hook(self, provider='codex', question=False):
         original = {'hook_event_name': 'PreToolUse' if question else 'PermissionRequest',

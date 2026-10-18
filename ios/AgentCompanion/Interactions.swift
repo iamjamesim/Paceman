@@ -364,7 +364,8 @@ struct InputResponseState {
             bySource[source.sourceID] = pending
             reconcile(snapshot)
             availability[source.sourceID] = .available
-            Diagnostics.shared.record("interaction_fetch_received", sourceID: source.sourceID,
+            Diagnostics.shared.recordInteractionFetch(sourceID: source.sourceID,
+                received: value.requests, matchedCount: pending.count,
                 duration: ProcessInfo.processInfo.systemUptime - started)
         } catch {
             guard !Task.isCancelled, expectedEpoch == epoch, revision == revisions[source.sourceID, default: 0] else { return }

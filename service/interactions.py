@@ -23,6 +23,8 @@ import threading
 import time
 import uuid
 
+from service.diagnostics import fingerprint as support_fingerprint
+
 
 MAX_WIRE_BYTES = 65536
 RESPONSE_TIMEOUT_SECONDS = 600
@@ -97,7 +99,7 @@ class _Pending:
 
 
 class InteractionBroker:
-    def __init__(self, clock=time.monotonic, provider_enabled=None):
+    def __init__(self, clock=time.monotonic, provider_enabled=None, diagnostics=None):
         self.generation = str(uuid.uuid4())
         self._clock = clock
         self._lock = threading.RLock()
@@ -105,6 +107,13 @@ class InteractionBroker:
         self._receipts = OrderedDict()
         self._closed = False
         self._provider_enabled = provider_enabled or (lambda provider: True)
+        self.diagnostics = diagnostics
+
+    def _record(self, stage, request, **fields):
+        if self.diagnostics is not None:
+            self.diagnostics.record(stage, provider=request["provider"], kind=request["kind"],
+                requestFingerprint=support_fingerprint(request["requestID"]),
+                sessionFingerprint=support_fingerprint(request["sessionID"]), **fields)
 
     def _enabled(self, provider):
         try:
@@ -115,15 +124,18 @@ class InteractionBroker:
     def _prune(self):
         now = self._clock()
         for request_id, pending in list(self._pending.items()):
-            if pending.deadline <= now or not self._enabled(pending.public["provider"]):
-                self._release(request_id)
+            if pending.deadline <= now:
+                self._release(request_id, "deadline")
+            elif not self._enabled(pending.public["provider"]):
+                self._release(request_id, "provider_disabled")
         for request_id, receipt in list(self._receipts.items()):
             if receipt[0] <= now:
                 del self._receipts[request_id]
 
-    def _release(self, request_id):
+    def _release(self, request_id, reason="hook_disconnected"):
         pending = self._pending.pop(request_id, None)
         if pending:
+            self._record("request_released", pending.public, reason=reason)
             pending.response = {"action": "release"}
             pending.ready.set()
 
@@ -143,6 +155,7 @@ class InteractionBroker:
             normalized.update(requestID=request_id, version=1)
             pending = _Pending(normalized, self._clock() + timeout)
             self._pending[request_id] = pending
+            self._record("request_published", normalized, pendingCount=len(self._pending))
             return pending
 
     def _cancel(self, pending):
@@ -197,6 +210,8 @@ class InteractionBroker:
             if receipt:
                 if receipt[1:3] != (key, fingerprint):
                     raise BrokerError("response_conflict", 409)
+                if self.diagnostics is not None:
+                    self.diagnostics.record("response_replayed", requestFingerprint=support_fingerprint(request_id))
                 return dict(receipt[3])
             pending = self._pending.get(request_id)
             if pending is None:
@@ -221,20 +236,21 @@ class InteractionBroker:
             while len(self._receipts) > 256:
                 self._receipts.popitem(last=False)
             pending.ready.set()
+            self._record("response_submitted", request)
             return dict(result)
 
-    def cancel_all(self):
+    def cancel_all(self, reason="access_changed"):
         """Invalidate phone credentials/config-era requests without reopening any."""
         with self._lock:
             for request_id in list(self._pending):
-                self._release(request_id)
+                self._release(request_id, reason)
             self._receipts.clear()
             self.generation = str(uuid.uuid4())
 
     def close(self):
         with self._lock:
             self._closed = True
-            self.cancel_all()
+            self.cancel_all("shutdown")
 
 
 class _Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
@@ -302,7 +318,10 @@ class _Handler(socketserver.BaseRequestHandler):
             if select.select([connection], [], [], 0)[0]:
                 return
             response = pending.response or response
-        except (BrokerError, ValueError, TypeError, OSError, OverflowError, RecursionError):
+        except BrokerError as error:
+            if broker.diagnostics is not None:
+                broker.diagnostics.record("request_rejected", reason=error.code)
+        except (ValueError, TypeError, OSError, OverflowError, RecursionError):
             pass
         finally:
             if pending is not None:

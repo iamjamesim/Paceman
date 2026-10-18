@@ -32,6 +32,10 @@ def question():
 
 
 class InteractionHookTests(unittest.TestCase):
+    def setUp(self):
+        # Unit tests must never write to an installed user's diagnostics.
+        self.diagnostics = self.enterContext(patch.object(hook, "DeliveryDiagnostics")).return_value
+
     def run_hook(self, provider, data, reply=None, error=None):
         raw = data if isinstance(data, bytes) else json.dumps(data).encode()
         output = io.StringIO()
