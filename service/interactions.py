@@ -1,4 +1,4 @@
-"""Ephemeral, opt-in responses to live agent hook invocations.
+"""Ephemeral responses to live agent hook invocations.
 
 An HTTP receipt confirms submission to Paceman, never agent consumption. The
 private socket lifetime owns each request; neither requests nor answers persist.

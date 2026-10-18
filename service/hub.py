@@ -709,7 +709,7 @@ def main():
     run = sub.add_parser("serve")
     run.add_argument("--port", type=int, default=8765)
     run.add_argument("--interaction-socket", type=Path,
-                     help="Opt-in private response hook socket")
+                     help="Private response hook socket (automatic for Mac sources)")
     run.add_argument("--source", choices=("synthetic", "omarchy", "macos"), default="synthetic")
     run.add_argument("--status-file", type=Path, help="Private desktop status JSON (optional)")
     run.add_argument("--relay-config", type=Path, help="Installed relay config, when notifications use a relay")
@@ -733,9 +733,7 @@ def main():
     sub.add_parser("cancel-schedule")
     args = parser.parse_args()
     if args.command == "serve" and args.source == "macos" and args.interaction_socket is None:
-        from macos.responses import enabled
-        if enabled(args.data_dir.parent):
-            args.interaction_socket = args.data_dir.parent / "interaction.sock"
+        args.interaction_socket = args.data_dir.parent / "interaction.sock"
     store = Store(args.data_dir / "hub.sqlite3")
     if args.command == "serve":
         from contextlib import ExitStack

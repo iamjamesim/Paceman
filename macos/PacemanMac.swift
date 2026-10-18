@@ -44,6 +44,7 @@ private struct SourceStatus: Decodable {
     var providerCounts: [String: [String: Int]]? = nil
     var missingHooksByProvider: [String: [String]]? = nil
     var hookCommands: [String: String]? = nil
+    var responseHookCommands: [String: String]? = nil
     var lastAgentEventByProvider: [String: Double]? = nil
     var selectedProviders: [String] { configuredProviders ?? ["codex"] }
     func providerLabel(_ provider: String, selected: Bool? = nil) -> String {
@@ -657,7 +658,7 @@ private struct InstallationView: View {
                 .font(.title2.weight(.semibold))
             if InstalledBuild.isInApplications && !model.needsNotificationRepair {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Monitor activity from:").font(.headline)
+                    Text("Use Paceman with:").font(.headline)
                     ForEach(["codex", "claude"], id: \.self) { provider in
                         Toggle(model.status.providerLabel(provider, selected: model.setupProviders.contains(provider)), isOn: Binding(
                             get: { model.setupProviders.contains(provider) },
@@ -667,8 +668,8 @@ private struct InstallationView: View {
                     Text("During setup, you’ll:")
                     BulletList(items: [
                         "**Start Paceman at login** to track agent activity in the background and send updates automatically.",
-                        "**Review agent hooks** that send activity events to Paceman.",
-                        "**Connect your iPhone** to receive Live Activity updates.",
+                        "**Review agent hooks** that share activity, questions, and approvals with Paceman.",
+                        "**Connect your iPhone** to follow tasks and respond.",
                     ])
                 }
                 Text("macOS may show notifications about Paceman’s login and background items.")
@@ -780,10 +781,11 @@ private struct HookReviewView: View {
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("2. Review Paceman’s hooks").font(.headline)
-                        Text(provider == "codex" ? "Expand “Hook 1” under each of the 8 events. Trust it only if the command matches:"
-                             : "Check the Paceman command under each of the 12 events. Claude runs configured hooks in trusted workspaces; there is no separate acceptance step for each hook.")
+                        Text(provider == "codex" ? "Expand the Paceman rows under each of the 8 events. Codex labels them “Hook 1”. PreToolUse and PermissionRequest also have a response command; review both. Trust only commands that match below."
+                             : "Check Paceman’s commands under each of the 12 events, including the response command in PreToolUse and PermissionRequest. Claude runs configured hooks in trusted workspaces; there is no separate acceptance step for each hook.")
                             .fixedSize(horizontal: false, vertical: true)
                         if let command = model.status.hookCommands?[provider] ?? (provider == "codex" ? model.status.hookCommand : nil) {
+                            Text("Activity").font(.callout.weight(.medium))
                             Text(command).font(.system(.callout, design: .monospaced))
                                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -791,6 +793,13 @@ private struct HookReviewView: View {
                         } else {
                             Text(model.hasReadStatus ? "The installed command is unavailable. Run Paceman setup again." : "Loading hook details…")
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let command = model.status.responseHookCommands?[provider] {
+                            Text("Questions and approvals · PreToolUse, PermissionRequest").font(.callout.weight(.medium))
+                            Text(command).font(.system(.callout, design: .monospaced))
+                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                         }
                         DisclosureGroup("Event reference (\(provider == "codex" ? 8 : 12))") {
                             VStack(alignment: .leading, spacing: 10) {
@@ -803,9 +812,11 @@ private struct HookReviewView: View {
                             }.padding(.top, 8)
                         }.id(provider)
                         Text(provider == "claude"
-                             ? "Hooks send lifecycle metadata, optional project labels, and a Remote Control session ID when available. They exclude prompts, replies, transcripts, tool arguments, and full paths. Labels may appear on your Lock Screen."
-                             : "Hooks send event names, task and turn IDs, and optional project labels. They exclude prompts, replies, transcripts, tool arguments, and full paths. Labels may appear on your Lock Screen.")
+                             ? "Activity hooks send lifecycle metadata, project labels, and a Remote Control session ID when available. Labels may appear on your Lock Screen."
+                             : "Activity hooks send event names, task and turn IDs, and project labels. Labels may appear on your Lock Screen.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text("Response hooks share pending questions, choices, tool arguments, and the working directory with your paired phones. This content stays in memory and is not included in notifications or diagnostics. Conversation history is not shared.")
+                            .font(.callout).fixedSize(horizontal: false, vertical: true)
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         Text("3. Check activity").font(.headline)
@@ -1022,7 +1033,7 @@ private struct ManagementView: View {
                     }
                     Divider()
                     Text("Agents").font(.headline)
-                    Text("Monitor agent activity.")
+                    Text("Share activity, questions, and approvals.")
                         .font(.caption).foregroundStyle(.secondary)
                     ForEach(["codex", "claude"], id: \.self) { provider in
                         Toggle(model.status.providerLabel(provider), isOn: Binding(

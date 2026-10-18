@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in synchronous input bridge. No configuration or monitoring changes.
+"""Synchronous input bridge for configured agents. No configuration changes.
 
 No output means the provider should continue its native interaction. Hook input
 and decisions are never logged; original question payloads stay in this process.

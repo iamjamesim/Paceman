@@ -473,7 +473,7 @@ Implementations: [source API](../service/hub.py),
 [ESP32 ANCS client](../firmware/esp32-watch/firmware/main/watch_ancs.c), and
 [Pebble accessory service](../firmware/pebble-time-2/src/paceman_service.c).
 
-## Opt-in pending interactions
+## Pending interactions
 
 Snapshot `interactionsEnabled: true` advertises response support; absence preserves
 monitoring-only behavior. Both endpoints use the paired bearer credential.
@@ -493,4 +493,4 @@ monitoring-only behavior. Both endpoints use the paired bearer credential.
 The separate private socket accepts newline JSON `{request, timeoutSeconds}` and
 returns one action/answers object. Limits: 64 KiB per request or HTTP submission,
 32 concurrent requests, four questions and 16 options per question. See
-[retention and expiry](data-lifecycle.md#opt-in-response-bridge).
+[retention and expiry](data-lifecycle.md#response-bridge).

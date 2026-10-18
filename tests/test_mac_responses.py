@@ -1,145 +1,103 @@
-import copy
 import json
-import os
 from pathlib import Path
+import plistlib
 import shlex
-import subprocess
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from macos import control, install, responses, uninstall
+from macos import agents, control, install, responses, uninstall
 
 
 class ResponseSetupTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (self.root / 'agents.json').write_text(json.dumps({'providers': ['codex', 'claude']}))
+        library = self.root / 'lib/macos'
+        library.mkdir(parents=True)
+        for name in ('codex_hook.py', 'claude_hook.py', 'interaction_hook.py'):
+            (library / name).touch()
         self.paths = {p: self.root / f'{p}.json' for p in ('codex', 'claude')}
-        self.enterContext(patch.object(responses, 'hook_path', side_effect=lambda p, **_: self.paths[p]))
+        for module in (agents, control):
+            self.enterContext(patch.object(module, 'hook_path', side_effect=lambda p, **_: self.paths[p]))
+        self.enterContext(patch.multiple(install, ROOT=self.root, PYTHON=sys.executable))
+        self.enterContext(patch.multiple(control, ROOT=self.root, PLIST=self.root / 'source.plist'))
+        self.enterContext(patch.object(uninstall, 'ROOT', self.root))
 
-    def test_opt_in_preserves_observers_foreign_hooks_and_trust_definitions(self):
-        original = {'custom': 'keep', 'hooks': {'PermissionRequest': [
-            {'matcher': 'Bash', 'hooks': [{'type': 'command', 'command': '/bin/echo foreign'}]},
-            {'hooks': [{'type': 'command', 'command': "python3 observer.py", 'timeout': 3}]}]}}
-        for path in self.paths.values():
-            path.write_text(json.dumps(original))
-        before = copy.deepcopy(original)
-        self.assertFalse(responses.enabled(self.root))
-        changes = responses.configure(self.root, sys.executable, True)
-        self.assertTrue(responses.enabled(self.root))
-        self.assertEqual(len(changes), 3)
+    def test_normal_setup_includes_responses_for_each_selected_agent(self):
         for provider, path in self.paths.items():
-            value = json.loads(path.read_text())
-            self.assertEqual(value['custom'], 'keep')
-            self.assertEqual(value['hooks']['PermissionRequest'][:2], before['hooks']['PermissionRequest'])
-            hook = value['hooks']['PermissionRequest'][-1]['hooks'][0]
-            self.assertEqual(shlex.split(hook['command']), [sys.executable, '-B',
-                str(self.root / 'lib/macos/interaction_hook.py'), '--provider', provider])
-            self.assertEqual(hook['timeout'], 605)
-            self.assertNotIn('async', hook)
-            question_hook = value['hooks']['PreToolUse'][-1]['hooks'][0]
-            self.assertEqual(question_hook['timeout'], hook['timeout'])
-            self.assertNotIn('async', question_hook)
-            if provider == 'claude':
-                self.assertEqual(value['hooks']['PreToolUse'][-1]['matcher'], '^AskUserQuestion$')
-            else:
-                self.assertEqual(value['hooks']['PreToolUse'][-1]['matcher'], '^request_user_input(_async)?$')
-        mtimes = {p: path.stat().st_mtime_ns for p, path in self.paths.items()}
-        self.assertEqual(responses.configure(self.root, sys.executable, True), [])
-        self.assertEqual(mtimes, {p: path.stat().st_mtime_ns for p, path in self.paths.items()})
-        responses.configure(self.root, sys.executable, False)
-        self.assertFalse(responses.enabled(self.root))
-        for path in self.paths.values():
-            value = json.loads(path.read_text())
-            self.assertEqual(value['hooks']['PermissionRequest'], original['hooks']['PermissionRequest'])
-
-    def test_validate_all_before_changing_any_agent(self):
-        self.paths['codex'].write_text('{}')
-        self.paths['claude'].write_text('{broken')
-        with self.assertRaises(ValueError):
-            responses.configure(self.root, sys.executable, True)
-        self.assertEqual(self.paths['codex'].read_text(), '{}')
-        self.assertFalse(responses.enabled(self.root))
-        self.paths['claude'].write_text('{"disableAllHooks":true}')
-        with self.assertRaisesRegex(ValueError, 'disableAllHooks'):
-            responses.configure(self.root, sys.executable, True)
-        self.assertEqual(self.paths['codex'].read_text(), '{}')
-
-    def test_failed_write_restores_prior_files(self):
-        for path in self.paths.values():
-            path.write_text('{}')
-        write = responses._write
-        calls = []
-        def fail_second(path, data, mode=0o600):
-            calls.append(path)
-            if len(calls) == 2:
-                raise OSError('disk failure')
-            return write(path, data, mode)
-        with patch.object(responses, '_write', side_effect=fail_second):
-            with self.assertRaises(OSError):
-                responses.configure(self.root, sys.executable, True)
-        self.assertEqual([p.read_text() for p in self.paths.values()], ['{}', '{}'])
-        self.assertFalse(responses.enabled(self.root))
-
-    def test_provider_removal_and_uninstall_remove_only_owned_responses(self):
-        responses.configure(self.root, sys.executable, True)
-        (self.root / 'agents.json').write_text(json.dumps({'providers': ['codex']}))
-        responses.configure(self.root, sys.executable, True)
-        self.assertFalse(json.loads(self.paths['claude'].read_text())['hooks']['PermissionRequest'])
-        path = self.paths['codex']
-        value = json.loads(path.read_text())
-        value['hooks']['PermissionRequest'][0]['hooks'].append({'type': 'command', 'command': '/bin/echo keep'})
-        path.write_text(json.dumps(value))
-        with patch.object(uninstall, 'ROOT', self.root):
-            cleaned = uninstall.cleaned_hooks(path)
-        self.assertEqual(cleaned['hooks']['PermissionRequest'], [{'hooks': [
-            {'type': 'command', 'command': '/bin/echo keep'}]}])
-
-    def test_symbolic_link_settings_or_marker_are_not_replaced(self):
-        target = self.root / 'real-config'
-        target.write_text('{}')
-        self.paths['codex'].symlink_to(target)
-        with self.assertRaisesRegex(ValueError, 'ownership'):
-            responses.configure(self.root, sys.executable, True)
-        self.assertEqual(target.read_text(), '{}')
-        self.paths['codex'].unlink()
-        (self.root / 'responses-enabled').symlink_to(target)
-        self.assertFalse(responses.enabled(self.root))
-        with self.assertRaisesRegex(ValueError, 'symbolic link'):
-            responses.configure(self.root, sys.executable, True)
-        self.assertFalse(self.paths['codex'].exists())
-
-    def test_restart_failure_rolls_back_hook_definitions_and_setting(self):
-        with patch.object(control, 'ROOT', self.root), \
-                patch.object(sys, 'argv', ['pacemanctl', 'responses-on']), \
-                patch.object(control, 'launch', side_effect=subprocess.CalledProcessError(1, 'launchctl')), \
-                patch.object(sys, 'stderr'):
-            with self.assertRaises(SystemExit):
-                control.main()
-        self.assertFalse(responses.enabled(self.root))
-        self.assertFalse(any(path.exists() for path in self.paths.values()))
-
-    def test_sharing_paused_stays_paused_when_enabling(self):
-        (self.root / 'sharing-paused').write_text('paused\n')
-        with patch.object(control, 'ROOT', self.root), \
-                patch.object(sys, 'argv', ['pacemanctl', 'responses-on']), \
-                patch.object(control, 'launch') as launch, patch('builtins.print'):
-            control.main()
-        launch.assert_not_called()
-        self.assertTrue(responses.enabled(self.root))
-        self.assertTrue((self.root / 'sharing-paused').exists())
-
-    def test_install_preserves_opt_in_for_new_selected_provider_and_repeats_without_changes(self):
-        (self.root / 'responses-enabled').write_text('enabled\n')
-        with patch.object(install, 'ROOT', self.root), patch.object(install, 'PYTHON', sys.executable):
-            for provider, path in self.paths.items():
+            with self.subTest(provider=provider):
                 install.install_hooks(path, provider=provider)
                 document = json.loads(path.read_text())
-                matching = [h for g in document['hooks']['PermissionRequest'] for h in g['hooks']
-                            if responses.owns_hook(h, self.root, provider)]
-                self.assertEqual(len(matching), 1)
+                for event in ('PreToolUse', 'PermissionRequest'):
+                    matches = [item for group in document['hooks'][event] for item in group['hooks']
+                               if responses.owns_hook(item, self.root, provider)]
+                    self.assertEqual(len(matches), 1)
+                    self.assertEqual(shlex.split(matches[0]['command']), [sys.executable, '-B',
+                        str(self.root / 'lib/macos/interaction_hook.py'), '--provider', provider])
+                    self.assertEqual(matches[0]['timeout'], 605)
+                    self.assertNotIn('async', matches[0])
+                self.assertEqual(control.missing_hooks(provider=provider), [])
+
+    def test_reinstall_preserves_foreign_hooks_and_usable_reviewed_commands(self):
+        foreign = {'matcher': 'Bash', 'hooks': [{'type': 'command', 'command': '/bin/echo foreign'}]}
+        next_python = self.root / 'new python'
+        next_python.symlink_to(sys.executable)
+        for provider, path in self.paths.items():
+            path.write_text(json.dumps({'keep': True, 'hooks': {'PermissionRequest': [foreign]}}))
+            install.install_hooks(path, provider=provider)
+            before, modified = path.read_bytes(), path.stat().st_mtime_ns
+            with patch.object(install, 'PYTHON', str(next_python)):
                 self.assertEqual(install.install_hooks(path, provider=provider), [])
+            self.assertEqual(path.read_bytes(), before)
+            self.assertEqual(path.stat().st_mtime_ns, modified)
+            self.assertEqual(json.loads(before)['hooks']['PermissionRequest'][0], foreign)
+
+    def test_missing_or_disabled_response_hooks_require_setup_repair(self):
+        for provider, path in self.paths.items():
+            with self.subTest(provider=provider):
+                install.install_hooks(path, provider=provider)
+                document = json.loads(path.read_text())
+                document['hooks']['PermissionRequest'] = [group for group in document['hooks']['PermissionRequest']
+                    if not any(responses.owns_hook(item, self.root, provider) for item in group['hooks'])]
+                document['hooks']['PreToolUse'][-1]['hooks'][0]['async'] = True
+                path.write_text(json.dumps(document))
+                self.assertEqual(set(control.missing_hooks(provider=provider)), {'PermissionRequest', 'PreToolUse'})
+                self.assertEqual(set(install.install_hooks(path, provider=provider)), {'PermissionRequest', 'PreToolUse'})
+                self.assertEqual(control.missing_hooks(provider=provider), [])
+
+    def test_agent_removal_removes_both_hook_types_and_preserves_other_handlers(self):
+        control.configure_agents(['codex', 'claude'])
+        path = self.paths['claude']
+        document = json.loads(path.read_text())
+        foreign = {'type': 'command', 'command': '/bin/echo keep'}
+        document['hooks']['PermissionRequest'][-1]['hooks'].append(foreign)
+        path.write_text(json.dumps(document))
+        with patch.object(control, 'launch') as launch:
+            control.configure_agents(['codex'])
+            launch.assert_not_called()
+        cleaned = json.loads(path.read_text())
+        self.assertEqual(cleaned['hooks']['PermissionRequest'], [{'hooks': [foreign]}])
+        self.assertTrue(all(not groups for event, groups in cleaned['hooks'].items() if event != 'PermissionRequest'))
+        self.assertEqual(control.missing_hooks(provider='codex'), [])
+
+    def test_global_hook_disable_is_preserved_and_reported(self):
+        for provider, path in self.paths.items():
+            path.write_text('{"disableAllHooks":true}')
+            install.install_hooks(path, provider=provider)
+            self.assertTrue(json.loads(path.read_text())['disableAllHooks'])
+            self.assertTrue(control.missing_hooks(provider=provider))
+
+    def test_setup_status_and_instructions_show_the_actual_response_command(self):
+        plist = self.root / 'source.plist'
+        plist.write_bytes(plistlib.dumps({'ProgramArguments': ['/app/background', '/different/python', str(self.root)]}))
+        for provider, path in self.paths.items():
+            install.install_hooks(path, provider=provider)
+        result = control.status()
+        for provider in self.paths:
+            expected = responses.command(self.root, sys.executable, provider)
+            self.assertEqual(result['responseHookCommands'][provider], expected)
+            with patch('builtins.print') as output:
+                install.print_response_review_steps(provider)
+            output.assert_any_call('     ' + expected)

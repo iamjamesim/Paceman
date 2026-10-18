@@ -1,6 +1,6 @@
 # Architecture
 
-Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, groups tasks across computers by attention and activity, and forwards current activity to compatible Bluetooth accessories. Ordinary monitoring does not transmit prompts, agent replies, or tool arguments. The opt-in response bridge shares pending approvals and questions over the authenticated connection without copying conversation history.
+Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, groups tasks across computers by attention and activity, and forwards current activity to compatible Bluetooth accessories. Ordinary monitoring does not transmit prompts, agent replies, or tool arguments. Mac response hooks share pending approvals and questions over the authenticated connection without copying conversation history.
 
 Individual session rows include an optional provider title. Codex titles come from metadata-only App Server reads; Claude titles come from explicit local `custom-title` / `ai-title` records. Prompt previews are never used as titles. Titles travel over private HTTPS to the phone and, on compatible Pebble firmware, owner-authenticated BLE; APNs activity payloads stay aggregate.
 
@@ -55,13 +55,14 @@ Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
 are in [data lifecycle](data-lifecycle.md).
 
-## Optional phone responses
+## Phone responses
 
 Reviewed synchronous hooks send approvals and questions through a separate private
 socket; the phone uses the existing authenticated HTTPS connection. Responses are
-off by default and independent of monitoring. See [setup](../macos/README.md#optional-phone-responses),
-[wire contract](protocol.md#opt-in-pending-interactions), and
-[retention and recovery](data-lifecycle.md#opt-in-response-bridge).
+prepared with activity hooks during normal Mac setup for selected agents; Sharing
+pauses both. See [setup](../macos/README.md#phone-responses),
+[wire contract](protocol.md#pending-interactions), and
+[retention and recovery](data-lifecycle.md#response-bridge).
 
 Claude supplies answers through `AskUserQuestion` input updates. Codex skips the
 blocking or async question tool and returns the answer as `PreToolUse` feedback.

@@ -21,6 +21,7 @@ from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint
 from macos.paths import installed_app
 from macos import responses
+from service.interactions import RESPONSE_TIMEOUT_SECONDS
 
 ROOT = Path.home() / "Library/Application Support/Paceman"
 PLIST = Path.home() / "Library/LaunchAgents/ai.paceman.source.plist"
@@ -35,7 +36,7 @@ def missing_hooks(config_path: Path | None = None, script_path: Path | None = No
         return list(events)
     try:
         document = json.loads(config_path.read_text())
-        if provider == "claude" and document.get("disableAllHooks") is True:
+        if document.get("disableAllHooks") is True:
             return list(events)
         groups_by_event = document.get("hooks", {})
         if not isinstance(groups_by_event, dict):
@@ -43,13 +44,18 @@ def missing_hooks(config_path: Path | None = None, script_path: Path | None = No
     except (OSError, ValueError, AttributeError):
         return list(events)
 
-    def installed(item):
+    def installed(item, *, response=False):
         if not isinstance(item, dict) or item.get("type") != "command":
             return False
         try:
             arguments = shlex.split(item.get("command", ""))
         except (TypeError, ValueError):
             return False
+        if response:
+            return (len(arguments) == 5 and arguments[1:] == ["-B", str(script_path.with_name("interaction_hook.py")),
+                    "--provider", provider] and Path(arguments[0]).is_file()
+                    and script_path.with_name("interaction_hook.py").is_file()
+                    and item.get("timeout") == RESPONSE_TIMEOUT_SECONDS + 5)
         return (len(arguments) in (2, 3) and arguments[-1] == str(script_path)
                 and (len(arguments) == 2 or arguments[1] == "-B")
                 and Path(arguments[0]).is_file())
@@ -57,13 +63,22 @@ def missing_hooks(config_path: Path | None = None, script_path: Path | None = No
     missing = []
     for event in events:
         groups = groups_by_event.get(event, [])
-        if not isinstance(groups, list) or not any(
+        observer = isinstance(groups, list) and any(
             isinstance(group, dict) and isinstance(group.get("hooks"), list)
             and (provider != "claude" or group.get("matcher") in (None, "", "*", ".*"))
             and (provider != "codex" or event != "PreToolUse" or group.get("matcher") == QUESTION_MATCHER)
             and any(installed(item) and not item.get("if") and not item.get("async") and not item.get("asyncRewake") for item in group["hooks"])
             for group in groups
-        ):
+        )
+        responder = event not in ("PreToolUse", "PermissionRequest") or isinstance(groups, list) and any(
+            isinstance(group, dict) and isinstance(group.get("hooks"), list)
+            and (group.get("matcher") in (None, "", "*", ".*") if event == "PermissionRequest"
+                 else group.get("matcher") == ("^AskUserQuestion$" if provider == "claude" else QUESTION_MATCHER))
+            and any(installed(item, response=True) and not item.get("if") and not item.get("async")
+                    and not item.get("asyncRewake") for item in group["hooks"])
+            for group in groups
+        )
+        if not observer or not responder:
             missing.append(event)
     return missing
 
@@ -89,7 +104,6 @@ def status():
             value["clients"] = Store.client_list(db)
     value["running"] = bool(value.get("running")) and 0 <= time.time() - value.get("updatedAt", 0) < 20
     value["sharingEnabled"] = not (ROOT / "sharing-paused").exists()
-    value["phoneResponsesEnabled"] = responses.enabled(ROOT)
     value["computerName"] = socket.gethostname().split(".")[0]
     providers = configured_providers(ROOT)
     value["configuredProviders"] = providers
@@ -103,6 +117,8 @@ def status():
             value["hookCommands"] = {p: installed_hook_command(p, ROOT) or shlex.quote(arguments[1]) + " -B " +
                                     shlex.quote(str(ROOT / f"lib/macos/{p}_hook.py")) for p in providers}
             value["hookCommand"] = value["hookCommands"].get("codex")
+            value["responseHookCommands"] = {p: installed_hook_command(p, ROOT, response=True)
+                or responses.command(ROOT, arguments[1], p) for p in providers}
     except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
         pass
     return value
@@ -206,7 +222,7 @@ def configure_agents(providers):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "support", "pair", "share-on", "share-off", "restart", "remove-access", "uninstall", "agents", "responses-on", "responses-off"))
+    parser.add_argument("command", choices=("status", "support", "pair", "share-on", "share-off", "restart", "remove-access", "uninstall", "agents"))
     parser.add_argument("--client-id")
     parser.add_argument("--providers", nargs="*", choices=PROVIDERS)
     parser.add_argument("--yes", action="store_true", help="Confirm complete Mac uninstall")
@@ -230,22 +246,6 @@ def main():
             print("Agent settings updated. Review the selected agents’ Paceman hook commands, then start a fresh local task.")
         elif args.command == "pair":
             pairing()
-        elif args.command in ("responses-on", "responses-off"):
-            active = args.command == "responses-on"
-            changes = responses.configure(ROOT, sys.executable, active)
-            try:
-                if changes and not (ROOT / "sharing-paused").exists():
-                    launch("kickstart", "-k", service_target())
-            except (OSError, subprocess.SubprocessError):
-                responses.restore(changes)
-                raise
-            if active:
-                print("Phone responses enabled. Review and trust the new synchronous hooks in your agents before testing.")
-                print("These hooks share pending tool arguments, working directory, questions and choices with paired phones over private HTTPS; content is not saved.")
-                for provider in configured_providers(ROOT):
-                    print(f"{provider}: {responses.command(ROOT, sys.executable, provider)}")
-            else:
-                print("Phone responses disabled. Activity monitoring hooks remain installed.")
         elif args.command in ("share-on", "share-off"):
             sharing(args.command == "share-on")
         elif args.command == "restart":

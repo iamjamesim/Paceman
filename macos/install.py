@@ -174,14 +174,13 @@ def install_hooks(path: Path | None = None, *, provider="codex"):
                 group["matcher"] = QUESTION_MATCHER
             groups.append(group)
             changed.append(event)
-    from macos.responses import enabled, updated_hooks
-    if enabled(ROOT):
-        updated = updated_hooks(document, ROOT, PYTHON, provider, True)
-        if updated != document:
-            changed.extend(event for event in ("PermissionRequest", "PreToolUse")
-                           if updated["hooks"].get(event) != document["hooks"].get(event)
-                           and event not in changed)
-            document = updated
+    from macos.responses import updated_hooks
+    updated = updated_hooks(document, ROOT, PYTHON, provider)
+    if updated != document:
+        changed.extend(event for event in ("PermissionRequest", "PreToolUse")
+                       if updated["hooks"].get(event) != document["hooks"].get(event)
+                       and event not in changed)
+        document = updated
     if not changed:
         return changed
     descriptor, name = tempfile.mkstemp(prefix=".paceman-hooks-", dir=path.parent)
@@ -627,8 +626,8 @@ def print_claude_review_steps(wrapper: Path):
     print("     " + (installed_hook_command("claude", ROOT) or f"{shlex.quote(PYTHON)} -B {shlex.quote(str(ROOT / 'lib/macos/claude_hook.py'))}"))
     for event, purpose in CLAUDE_PURPOSES:
         print(f"     {event}: {purpose}")
-    print("  Only lifecycle metadata, an optional project label and Remote Control session ID leave the hook.")
-    print("  No prompts, replies, transcript contents or tool arguments are sent.")
+    print("  Activity hooks send lifecycle metadata, an optional project label and Remote Control session ID.")
+    print_response_review_steps("claude")
     print("  Activity requires Claude Code 2.1.196+; specific session links require 2.1.199+ with Remote Control.")
     print("  Hook reference: https://code.claude.com/docs/en/hooks#the-hooks-menu")
     print("  Send a prompt in a fresh local Claude session and verify lastAgentEventByProvider.claude.")
@@ -648,6 +647,7 @@ def print_hook_review_steps(wrapper: Path):
     print("  The script sends event names, opaque session/turn IDs, and an optional")
     print("  short project label to the private local Paceman socket; no prompts,")
     print("  replies, transcripts, tool arguments, or project paths.")
+    print_response_review_steps("codex")
     print("  The user decides whether to trust each Paceman row individually.")
     print("  Do not choose Trust all or bypass review.")
     print("  Stay with the user, then send a short prompt in a fresh saved local task")
@@ -659,6 +659,14 @@ def print_hook_review_steps(wrapper: Path):
     print("  Resolve confirmed leftovers from the check before handoff; preserve real user sessions.")
     print("  Unresolved cleanup means setup remains partial.")
     print(f"  Until review and this check succeed, setup is partial. Full steps: {REPO / 'macos/README.md'}")
+
+
+def print_response_review_steps(provider):
+    from macos.responses import command
+    print("  PreToolUse and PermissionRequest also include this response command; review both Paceman commands:")
+    print("     " + (installed_hook_command(provider, ROOT, response=True) or command(ROOT, PYTHON, provider)))
+    print("  Response hooks share pending questions, choices, tool arguments and the working directory")
+    print("  with paired phones over private HTTPS. This content stays in memory; no conversation history is shared.")
 
 
 if __name__ == "__main__":

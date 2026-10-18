@@ -85,7 +85,7 @@ neither report includes credentials, prompts, computer names, or raw push tokens
 The source's bounded `delivery-diagnostics.jsonl` records HTTP attempt IDs, timings,
 statuses and hook lifecycle reasons; the phone records matching IDs and request counts.
 
-## Opt-in response bridge
+## Response bridge
 
 Requests and answers are memory-only, excluded from snapshots, SQLite, APNs,
 accessories, and diagnostics. Each request belongs to a live hook connection;

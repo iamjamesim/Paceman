@@ -10,7 +10,9 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
+from service import hub
 from service.hub import Server, Store
 from service.diagnostics import DeliveryDiagnostics
 from service.interactions import InteractionBroker, ResponseListener
@@ -74,6 +76,37 @@ class InteractionHTTPTests(unittest.TestCase):
         entries = [json.loads(line) for line in self.diagnostics.path.read_text().splitlines()]
         self.assertEqual(entries[-1]['httpStatus'], 401)
         self.assertNotIn('traceID', entries[-1])
+
+    def test_mac_startup_advertises_responses_without_extra_configuration(self):
+        root = Path(self.temp.name) / 'normal-install'
+        root.mkdir(mode=0o700)
+        store = Store(root / 'data/hub.sqlite3')
+        paired = store.redeem(store.invite('https://example.test')['invitation'], device=device())
+
+        def verify(server, **_):
+            self.assertIsNotNone(server.interactions)
+            self.assertTrue((root / 'interaction.sock').is_socket())
+            server.daemon_threads = False  # Teardown joins the real HTTP handler.
+            receiver = threading.Thread(target=server.handle_request, daemon=True)
+            receiver.start()
+            connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=2)
+            try:
+                connection.request('GET', '/v1/snapshot', headers={'Authorization': 'Bearer ' + paired['credential']})
+                response = connection.getresponse()
+                self.assertEqual(response.status, 200)
+                self.assertTrue(json.loads(response.read())['interactionsEnabled'])
+            finally:
+                connection.close()
+                receiver.join(2)
+            self.assertFalse(receiver.is_alive())
+
+        with patch.object(sys, 'argv', ['paceman-source', '--data-dir', str(root / 'data'),
+                'serve', '--source', 'macos', '--port', '0']), \
+                patch.object(Server, 'serve_forever', autospec=True, side_effect=verify) as serve, \
+                patch('builtins.print'):
+            hub.main()
+        serve.assert_called_once()
+        self.assertFalse((root / 'interaction.sock').exists())
 
     def hook(self, provider='codex', question=False):
         original = {'hook_event_name': 'PreToolUse' if question else 'PermissionRequest',
