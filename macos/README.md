@@ -12,23 +12,13 @@ macOS may show notifications about login and background items. You can manage th
 
 Prefer to build locally? Use [source setup](#build-and-install-from-source). Both installation paths continue with hook review and iPhone pairing below.
 
-## Phone responses
-
-Normal setup prepares activity and response hooks for each selected agent. There
-is no separate enablement step. Review both commands below; Sharing pauses both.
-Response hooks share pending questions, choices, tool arguments and the working
-directory with paired phones over private HTTPS. This content stays in memory,
-outside snapshots, notifications, accessories and diagnostics; conversation history
-is not shared.
-
-Keep Paceman open to respond within ten minutes. Timeout or hook disconnection
-returns to native handling without approving. Secret Codex questions remain native.
-Verify a question, approval and denial in each agent: confirm the agent consumes
-the response and finishes its turn. A submission receipt is insufficient.
-
 ## Review agent hooks
 
-Review each selected agent before checking phone delivery. Paceman shows both installed commands in its setup window.
+Normal setup prepares activity, questions and approvals for each selected agent.
+Review both installed commands shown in Paceman. Activity sends task IDs, states
+and project labels. Questions send their text and choices; approvals send the
+tool name, arguments and working directory. Your answers and decisions return
+to the agent. Sharing pauses all of this.
 
 ### Codex
 
@@ -64,7 +54,7 @@ remains partial.
 
 The command shown in setup uses this installation’s Python runtime, the `-B` flag, and the hook script in your Mac user account. It is generated for your installation. Compare the full command in every Paceman row; don’t run it in a terminal or trust unrelated hooks.
 
-Activity hooks send event names, opaque task and turn IDs, and an optional short project label to Paceman’s private local socket. Claude activity hooks also send the Remote Control session ID when available, so the iPhone can open that chat. These activity commands don’t send prompts, replies, transcripts, tool arguments, or full paths. The response command in `PreToolUse` and `PermissionRequest` supplies the pending content described above. Project labels may appear on your iPhone Lock Screen. Separately, the source reads explicit provider title metadata for individual session rows on the phone and compatible Pebble firmware; it never substitutes prompt previews.
+Project labels may appear on your iPhone Lock Screen. Session titles come from provider metadata; see [data flow](../docs/architecture.md).
 
 </details>
 
@@ -103,12 +93,8 @@ shown by your installation:
 | `StopFailure` | Show a failed main turn. |
 | `SessionEnd` | Remove a closed session. |
 
-The activity commands forward lifecycle names, opaque IDs, hashed tool/server names and an
-optional short project label to Paceman's private local socket. With Remote
-Control active on Claude Code 2.1.199+, they also send its remote session ID so
-the phone can open the specific session. They do not send
-prompts, replies, transcripts, tool arguments/results or full paths. They make no
-Claude approval decisions. Project labels may appear on your iPhone Lock Screen. Separately, the source reads explicit provider title metadata for individual session rows on the phone and compatible Pebble firmware; it never substitutes prompt previews.
+With Remote Control active on Claude Code 2.1.199+, activity also includes its
+remote session ID so the phone can open the specific session.
 
 Keep Paceman's review window open, start a **fresh local Claude session** in the
 interface you use, and submit a prompt. Verify `lastAgentEventByProvider.claude`
@@ -136,6 +122,11 @@ Apple Watch delivery](../docs/architecture.md#watches).
 4. On your iPhone, open **Paceman → Connect computer → Scan QR code to connect** and scan the code on your Mac. Paceman connects automatically and opens that computer.
 
 Codes expire after five minutes; choose **New code** if needed. Keep the pairing code private.
+
+Verify a question, approval and denial in each agent from the phone. Confirm the
+agent consumes the response; a submission receipt is insufficient. Keep Paceman
+open to answer within ten minutes. Timeout or hook disconnection returns to the
+agent without approving. Secret Codex questions stay in Codex.
 
 <details>
 <summary>Private Tailscale connection</summary>

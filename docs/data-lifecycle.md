@@ -85,14 +85,14 @@ neither report includes credentials, prompts, computer names, or raw push tokens
 The source's bounded `delivery-diagnostics.jsonl` records HTTP attempt IDs, timings,
 statuses and hook lifecycle reasons; the phone records matching IDs and request counts.
 
-## Response bridge
+## Questions and approvals
 
 Requests and answers are memory-only, excluded from snapshots, SQLite, APNs,
 accessories, and diagnostics. Each request belongs to a live hook connection;
 disconnect, timeout (up to ten minutes), provider disable, source
 shutdown, or pairing changes invalidate it. Restart never replays approvals.
-An approval can remain pending in the agent after its hook ends; the hook bridge
-cannot recover or answer that native prompt.
+An approval can remain pending in the agent after its hook ends; Paceman cannot
+recover or answer that native prompt.
 Deduplication retains response hashes and receipt metadata, at most 256 for five minutes.
 
 The phone clears actionable requests on connection failure and refetches on return,

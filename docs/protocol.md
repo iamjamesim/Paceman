@@ -475,8 +475,8 @@ Implementations: [source API](../service/hub.py),
 
 ## Pending interactions
 
-Snapshot `interactionsEnabled: true` advertises response support; absence preserves
-monitoring-only behavior. Both endpoints use the paired bearer credential.
+Snapshot `interactionsEnabled: true` advertises these endpoints; sources that omit
+it provide activity only. Both endpoints use the paired bearer credential.
 
 - `GET /v1/interactions`: returns `sourceID`, broker `generation`, and `requests`.
   Requests contain `requestID`, `version: 1`, provider, canonical hashed `sessionID`,
@@ -493,4 +493,4 @@ monitoring-only behavior. Both endpoints use the paired bearer credential.
 The separate private socket accepts newline JSON `{request, timeoutSeconds}` and
 returns one action/answers object. Limits: 64 KiB per request or HTTP submission,
 32 concurrent requests, four questions and 16 options per question. See
-[retention and expiry](data-lifecycle.md#response-bridge).
+[retention and expiry](data-lifecycle.md#questions-and-approvals).

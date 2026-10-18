@@ -1,6 +1,8 @@
 # Architecture
 
-Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, groups tasks across computers by attention and activity, and forwards current activity to compatible Bluetooth accessories. Ordinary monitoring does not transmit prompts, agent replies, or tool arguments. Mac response hooks share pending approvals and questions over the authenticated connection without copying conversation history.
+Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, groups tasks across computers by attention and activity, and forwards current activity to compatible Bluetooth accessories.
+
+Activity updates carry task identity and state, plus available titles, project labels and Codex usage. On Mac, questions send text and choices to the phone; approvals send the tool name, arguments and working directory. Answers and decisions return to the waiting agent hook. The phone does not request chat history; text inside a question or tool argument is included as supplied.
 
 Individual session rows include an optional provider title. Codex titles come from metadata-only App Server reads; Claude titles come from explicit local `custom-title` / `ai-title` records. Prompt previews are never used as titles. Titles travel over private HTTPS to the phone and, on compatible Pebble firmware, owner-authenticated BLE; APNs activity payloads stay aggregate.
 
@@ -55,19 +57,17 @@ Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
 are in [data lifecycle](data-lifecycle.md).
 
-## Phone responses
+## Questions and approvals
 
-Reviewed synchronous hooks send approvals and questions through a separate private
-socket; the phone uses the existing authenticated HTTPS connection. Responses are
-prepared with activity hooks during normal Mac setup for selected agents; Sharing
-pauses both. See [setup](../macos/README.md#phone-responses),
-[wire contract](protocol.md#pending-interactions), and
-[retention and recovery](data-lifecycle.md#response-bridge).
+Normal Mac [setup](../macos/README.md#review-agent-hooks) prepares the hooks for
+selected agents. Sharing pauses activity, questions and approvals.
 
 Claude supplies answers through `AskUserQuestion` input updates. Codex skips the
 blocking or async question tool and returns the answer as `PreToolUse` feedback.
 Secret Codex questions stay native. Waiting hooks delay the native prompt;
 release or timeout returns control without granting permission.
+See the [wire contract](protocol.md#pending-interactions) and
+[request lifecycle](data-lifecycle.md#questions-and-approvals).
 
 ## iPhone Activity
 
