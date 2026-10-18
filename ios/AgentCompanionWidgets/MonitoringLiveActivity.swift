@@ -110,7 +110,7 @@ private struct MonitoringCard: View {
                 .foregroundStyle(palette.ink.opacity(0.82))
                 Spacer(minLength: 0)
                 if state.sessionCount > 1 {
-                    Text("\(state.sessionCount) tasks")
+                    Text("\(state.sessionCount) sessions")
                         .fixedSize()
                         .foregroundStyle(palette.muted)
                 }

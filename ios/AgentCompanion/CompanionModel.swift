@@ -829,7 +829,7 @@ extension CompanionModel {
     func handleWatchWork(_ message: [String: Any]) async -> [String: Any] {
         func encoded<T: Encodable>(_ value: T) -> [String: Any] {
             guard let data = try? JSONEncoder().encode(value), data.count <= 60_000 else {
-                return ["error": "Review this task on iPhone."]
+                return ["error": "Review this session on iPhone."]
             }
             return ["data": data]
         }
@@ -860,7 +860,17 @@ extension CompanionModel {
                     }
                 }
                 return encoded(WatchWorkSnapshot(tasks: Array(values.prefix(128)), computers: sources.count,
-                    unavailable: sources.filter { !snapshotIsFresh($0.sourceID) || errors[$0.sourceID] != nil }.count))
+                    unavailable: sources.filter { !snapshotIsFresh($0.sourceID) || errors[$0.sourceID] != nil }.count,
+                    sources: sources.map { source in
+                        let snapshot = snapshots[source.sourceID]
+                        return WatchWorkSource(sourceID: source.sourceID,
+                            name: ComputerPreferences.displayName(for: source.sourceID,
+                                sourceName: snapshot?.sourceName, host: source.endpoint.host),
+                            generation: snapshot?.generation, revision: snapshot?.revision,
+                            stateCounts: snapshot?.sessions.map { sessions in
+                                Dictionary(grouping: sessions, by: { $0.state.rawValue }).mapValues(\.count)
+                            })
+                    }))
             }
             guard let sourceID = message["sourceID"] as? String,
                   let source = pairedSources.first(where: { $0.sourceID == sourceID }), !isRevoked(sourceID) else {
@@ -875,7 +885,7 @@ extension CompanionModel {
                 let requests = try await client.inputRequests(source)
                 guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID),
                       snapshot.sessions?.contains(where: { $0.id == sessionID && $0.provider == provider }) == true else {
-                    return ["error": "No response is available. Check the task on your computer."]
+                    return ["error": "No response is available. Check the session on your computer."]
                 }
                 guard let request = requests.requests.first(where: { $0.sessionID == sessionID && $0.provider == provider }) else {
                     if let item = watchRequests.values.first(where: {
@@ -887,16 +897,16 @@ extension CompanionModel {
                             remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
                             submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
                     }
-                    return ["error": "No response is available. Check the task on your computer."]
+                    return ["error": "No response is available. Check the session on your computer."]
                 }
                 guard started + request.remainingSeconds > ProcessInfo.processInfo.systemUptime else {
-                    return ["error": "This request expired. Check the task on your computer."]
+                    return ["error": "This request expired. Check the session on your computer."]
                 }
                 let item = PendingInput(source: source, generation: requests.generation, request: request,
                     expiresAtUptime: started + request.remainingSeconds)
                 // A request keeps one exact submission across lost Watch replies.
                 guard watchRequests.count < 256 || watchRequests[item.id] != nil else {
-                    return ["error": "Review this task on iPhone."]
+                    return ["error": "Review this session on iPhone."]
                 }
                 watchRequests[item.id] = item
                 return encoded(WatchWorkPrompt(generation: requests.generation, request: request,
@@ -909,20 +919,20 @@ extension CompanionModel {
                 let id = "\(sourceID)/\(submission.generation)/\(submission.requestID)"
                 guard let item = watchRequests[id], submission.valid(for: item.request),
                       watchSubmissions[id] == nil || watchSubmissions[id] == submission else {
-                    return ["error": "This request changed or expired. Check the task on your computer."]
+                    return ["error": "This request changed or expired. Check the session on your computer."]
                 }
                 watchSubmissions[id] = submission
                 do {
                     try await client.submitInput(submission, source: source)
                     guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID) else {
-                        return ["error": "Connections changed. Check the task on your computer."]
+                        return ["error": "Connections changed. Check the session on your computer."]
                     }
                     interactions.didSubmit(item, submission: submission)
                     watchConfirmed.insert(item.id)
                     return ["submitted": true]
                 } catch {
                     if case HubError.http(let status) = error, [400, 401, 404, 409, 410, 422].contains(status) {
-                        return ["error": "This request is no longer available. Check the task on your computer."]
+                        return ["error": "This request is no longer available. Check the session on your computer."]
                     }
                     return ["unconfirmed": true]
                 }

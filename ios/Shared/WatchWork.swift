@@ -73,6 +73,30 @@ struct WatchWorkSnapshot: Codable {
     let tasks: [WatchWorkTask]
     let computers: Int
     let unavailable: Int
+    var sources: [WatchWorkSource]? = nil
+}
+
+struct WatchWorkSource: Codable {
+    let sourceID: String
+    let name: String
+    let generation: String?
+    let revision: UInt64?
+    var stateCounts: [String: Int]? = nil
+}
+
+extension LiveActivityRoute {
+    /// A Live Activity summarizes one computer. Never select a different
+    /// session merely because it is the only one waiting after a newer event.
+    func watchSession(in snapshot: WatchWorkSnapshot, at date: Date = Date()) -> WatchWorkTask? {
+        guard let source = snapshot.sources?.first(where: { $0.sourceID == sourceID }),
+              source.generation == generation, source.revision == revision,
+              source.stateCounts?[state] == 1 else { return nil }
+        let matches = snapshot.tasks.filter {
+            $0.sourceID == sourceID && $0.state == state && !$0.historical(at: date)
+                && $0.sessionID != "aggregate"
+        }
+        return matches.count == 1 ? matches.first : nil
+    }
 }
 
 struct WatchWorkPrompt: Codable {

@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        DAB000000000000000000011 = {isa = PBXBuildFile; fileRef = DAF000000000000000000011; };
+        DAB000000000000000000012 = {isa = PBXBuildFile; fileRef = DAF000000000000000000011; };
+        DAB000000000000000000013 = {isa = PBXBuildFile; fileRef = DAF000000000000000000011; };
         DAB000000000000000000001 = {isa = PBXBuildFile; fileRef = DAF000000000000000000001; };
         DAB000000000000000000002 = {isa = PBXBuildFile; fileRef = DAF000000000000000000001; };
 		ACB000000000000000000005 /* CompanionSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF000000000000000000005 /* CompanionSidebar.swift */; };
@@ -142,6 +145,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+        DAF000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/LiveActivityRoute.swift; sourceTree = "<group>"; };
         DAF000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/WatchWork.swift; sourceTree = "<group>"; };
 		ACF000000000000000000005 /* CompanionSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSidebar.swift; sourceTree = "<group>"; };
 		ACF000000000000000000006 /* TaskCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCard.swift; sourceTree = "<group>"; };
@@ -332,6 +336,7 @@
 			children = (
 				AAA000000000000000000003 /* PacemanWatchApp.swift */,
                 DAF000000000000000000001 /* ../Shared/WatchWork.swift */,
+                DAF000000000000000000011 /* ../Shared/LiveActivityRoute.swift */,
 				AAA000000000000000000004 /* ../Shared/WatchAllowanceSnapshot.swift */,
 				AAA00000000000000000000B /* Assets.xcassets */,
 				F0A00000000000000000000D /* ../Resources/Sounds/PacemanInput.wav */,
@@ -563,6 +568,7 @@
 				28491F44D7954F10A7811A27 /* MonitoringWatchCard.swift in Sources */,
 				F2E4C04882C6027046BD5713 /* ../Shared/CompanionTheme.swift in Sources */,
 				18AA2CC889D4BFF46EBE99FC /* ../Shared/MonitoringActivity.swift in Sources */,
+                DAB000000000000000000013 /* LiveActivityRoute.swift in Sources */,
 				6115E8A8D215A5DC9742A9BD /* ../Shared/PacemanMark.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -601,6 +607,7 @@
 				ACB000000000000000000002 /* InteractionViews.swift in Sources */,
 				ACB000000000000000000001 /* Interactions.swift in Sources */,
                 DAB000000000000000000001 /* WatchWork.swift in Sources */,
+                DAB000000000000000000011 /* LiveActivityRoute.swift in Sources */,
 				7F6E335436455669020C4D87 /* TransportDiagnostics.swift in Sources */,
 				8C40CDC910BF7112B1737D7F /* WatchLink.swift in Sources */,
 				F61079DCD2F16853DBF4558A /* WeatherSettings.swift in Sources */,
@@ -618,6 +625,7 @@
 			files = (
 				BBB000000000000000000003 /* PacemanWatchApp.swift in Sources */,
                 DAB000000000000000000002 /* WatchWork.swift in Sources */,
+                DAB000000000000000000012 /* LiveActivityRoute.swift in Sources */,
 				BBB000000000000000000004 /* ../Shared/WatchAllowanceSnapshot.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -862,6 +870,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacemanWatch/Info.plist;
 				IOS_COMPANION_BUNDLE_ID = ai.paceman.app.dev;
+                PACEMAN_URL_SCHEME = "paceman-dev";
 				PACEMAN_DISPLAY_NAME = "Paceman Dev";
 				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.dev.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -889,6 +898,7 @@
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PacemanWatch/Info.plist;
 				IOS_COMPANION_BUNDLE_ID = ai.paceman.app;
+                PACEMAN_URL_SCHEME = paceman;
 				PACEMAN_DISPLAY_NAME = Paceman;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.paceman.app.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";

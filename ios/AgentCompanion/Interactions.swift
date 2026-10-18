@@ -400,8 +400,8 @@ struct InputResponseState {
                 guard var response = self.responses[item.id] else { return }
                 response.phase = definitive ? .rejected : .unconfirmed
                 response.message = definitive
-                    ? "This response could not be confirmed. Check the task on your computer."
-                    : "Delivery is unconfirmed. Retry the same response, or check the task on your computer."
+                    ? "This response could not be confirmed. Check the session on your computer."
+                    : "Delivery is unconfirmed. Retry the same response, or check the session on your computer."
                 self.responses[item.id] = response
             }
         }

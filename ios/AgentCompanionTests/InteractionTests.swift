@@ -1454,3 +1454,81 @@ extension InteractionTests {
         XCTAssertFalse(WatchWorkPrompt(generation: "g", request: multiple, remainingSeconds: 60).supportsWatchAnswer)
     }
 }
+
+extension InteractionTests {
+    func testWatchLiveActivityResolvesOnlyUniqueFreshSessionInDisplayedRevision() {
+        let route = LiveActivityRoute(sourceID: "mac", generation: "g", revision: 7, state: "needs_input")
+        let now = Date(timeIntervalSince1970: 100)
+        func session(_ id: String = "one", source: String = "mac", state: String = "needs_input",
+                     until: Double = 400) -> WatchWorkTask {
+            WatchWorkTask(sourceID: source, sessionID: id, provider: "codex", title: "A session",
+                computer: "Mac", state: state, freshUntil: until)
+        }
+        func snapshot(_ tasks: [WatchWorkTask], source: String = "mac", generation: String = "g",
+                      revision: UInt64 = 7, count: Int = 1) -> WatchWorkSnapshot {
+            WatchWorkSnapshot(tasks: tasks, computers: 1, unavailable: 0,
+                sources: [WatchWorkSource(sourceID: source, name: "Mac", generation: generation,
+                    revision: revision, stateCounts: ["needs_input": count])])
+        }
+        XCTAssertEqual(route.watchSession(in: snapshot([session()]), at: now)?.sessionID, "one")
+        XCTAssertNil(route.watchSession(in: snapshot([session()], source: "other"), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session()], generation: "new"), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session()], revision: 8), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session(until: 100)]), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session(state: "working")]), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session("aggregate")]), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session(), session("two")], count: 2), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session()], count: 2), at: now),
+            "Truncated session lists must not look uniquely resolvable")
+        XCTAssertNil(route.watchSession(in: WatchWorkSnapshot(tasks: [session()], computers: 1, unavailable: 0), at: now),
+            "Older phones without revision metadata can only open the scoped list")
+        XCTAssertEqual(route.watchSession(in: snapshot([session(), session("two", source: "other")]), at: now)?.sessionID, "one")
+    }
+
+    @MainActor func testWatchSnapshotIncludesFullCountsForSafeLaunchResolution() async throws {
+        let source = refreshSource("watch-launch")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        var snapshot = try XCTUnwrap(JSONSerialization.jsonObject(with: refreshSnapshot(source, revision: 8,
+            state: "needs_input")) as? [String: Any])
+        snapshot["sessions"] = (0..<40).map { index in
+            ["id": String(format: "%064x", index), "provider": "claude", "state": "needs_input"]
+        }
+        let data = try JSONSerialization.data(withJSONObject: snapshot)
+        InteractionURLProtocol.start = { transport in transport.finish(data) }
+        defer {
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+        }
+        let response = await model.handleWatchWork(["operation": "tasks"])
+        let result = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(response["data"] as? Data))
+        XCTAssertEqual(result.tasks.count, 32)
+        let metadata = try XCTUnwrap(result.sources?.first)
+        XCTAssertEqual(metadata.sourceID, source.sourceID)
+        XCTAssertEqual(metadata.revision, 8)
+        XCTAssertEqual(metadata.generation, source.sourceID)
+        XCTAssertEqual(metadata.stateCounts?["needs_input"], 40)
+        let route = LiveActivityRoute(sourceID: source.sourceID, generation: source.sourceID, revision: 8, state: "needs_input")
+        XCTAssertNil(route.watchSession(in: result))
+        XCTAssertFalse(String(decoding: try XCTUnwrap(response["data"] as? Data), as: UTF8.self).contains("credential"))
+    }
+}
+
+extension InteractionTests {
+    func testWatchApprovalAllowsOnlyOneTimeDecisionOrRelease() {
+        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "codex",
+            sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Run tests?",
+            detail: "Command: swift test", questions: [], remainingSeconds: 60)
+        for action in ["allowOnce", "deny", "release", "allow", "allowAlways", "answer"] {
+            let submission = InputSubmission(generation: "g", requestID: request.id, version: 1,
+                idempotencyKey: UUID().uuidString, action: action, answers: [:])
+            XCTAssertEqual(submission.valid(for: request), ["allowOnce", "deny", "release"].contains(action))
+        }
+        let malformed = InputSubmission(generation: "g", requestID: request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "allowOnce", answers: ["q0": InputAnswer(text: "yes")])
+        XCTAssertFalse(malformed.valid(for: request))
+    }
+}

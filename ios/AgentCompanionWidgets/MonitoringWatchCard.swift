@@ -23,7 +23,7 @@ struct MonitoringWatchCard: View {
     }
     private var detail: String? {
         if state.hasMixedStates { return compactSessionSummary }
-        let parts = [state.sessionCount > 1 ? "\(state.sessionCount) tasks" : nil,
+        let parts = [state.sessionCount > 1 ? "\(state.sessionCount) sessions" : nil,
                      contextLabel].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

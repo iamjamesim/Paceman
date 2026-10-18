@@ -311,7 +311,7 @@ struct CompanionWork: View {
                 if model.pairedSources.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Your work, wherever it runs").companionText(.title, theme: theme)
-                        Text("Connect your computer to follow Codex and Claude tasks here.")
+                        Text("Connect your computer to follow Codex and Claude sessions here.")
                             .companionText(.body, theme: theme)
                         Button(action: connectComputer) {
                             Text("Connect a computer").font(CompanionTextRole.button.font)
@@ -330,9 +330,9 @@ struct CompanionWork: View {
                 }
                 if !model.pairedSources.isEmpty && currentRows.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(awaitingActivity ? "No activity received yet" : filter == nil ? "No tasks to show" : "No tasks on this computer")
+                        Text(awaitingActivity ? "No activity received yet" : filter == nil ? "No sessions to show" : "No sessions on this computer")
                             .companionText(.title, theme: theme)
-                        Text(awaitingActivity ? "Activity will appear when your computer connects." : "Tasks appear when an agent starts working.")
+                        Text(awaitingActivity ? "Activity will appear when your computer connects." : "Sessions appear when an agent starts working.")
                             .companionText(.body, theme: theme)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
@@ -365,7 +365,7 @@ struct CompanionWork: View {
                         groupHeading(group, count: rows.contains { $0.aggregate } ? nil : rows.count)
                     }.buttonStyle(.plain)
                         .accessibilityValue(recentExpanded ? "Expanded" : "Collapsed")
-                        .accessibilityHint("Show or hide recent tasks")
+                        .accessibilityHint("Show or hide recent sessions")
                 } else {
                     let layout = typeSize.isAccessibilitySize
                         ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
@@ -379,7 +379,7 @@ struct CompanionWork: View {
                                     .padding(.horizontal, 14).padding(.vertical, 8)
                                     .background(theme.tint.opacity(0.12), in: Capsule())
                                     .frame(minHeight: 44).contentShape(Capsule())
-                            }.buttonStyle(.plain).accessibilityLabel("Review tasks needing you")
+                            }.buttonStyle(.plain).accessibilityLabel("Review sessions needing you")
                         }
                     }
                 }
@@ -398,7 +398,7 @@ struct CompanionWork: View {
             Spacer(minLength: 0)
         }.frame(minHeight: group == .recent ? 44 : 32).contentShape(Rectangle())
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(count.map { "\(group.rawValue), \($0) \($0 == 1 ? "task" : "tasks")" } ?? group.rawValue)
+            .accessibilityLabel(count.map { "\(group.rawValue), \($0) \($0 == 1 ? "session" : "sessions")" } ?? group.rawValue)
             .accessibilityAddTraits(.isHeader)
 
     }

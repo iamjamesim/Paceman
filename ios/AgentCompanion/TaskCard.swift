@@ -146,7 +146,7 @@ struct TaskCard: View {
                                 Text(text).companionText(.body, theme: theme)
                             }
                         } else {
-                            Text("This session is no longer available. Return to Activity for current tasks.")
+                            Text("This session is no longer available. Return to Activity for current sessions.")
                                 .companionText(.body, theme: theme)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
@@ -210,7 +210,7 @@ struct TaskCard: View {
         VStack(alignment: .leading, spacing: 8) {
           HStack(spacing: 12) {
             Text(review.progress).companionText(.supporting, theme: theme).monospacedDigit()
-                .accessibilityLabel("Task \(review.progress)")
+                .accessibilityLabel("Session \(review.progress)")
             Spacer(minLength: 0)
             Button(review.hasNext ? (displayedRequest.map { inbox.isCurrent($0) } == true && response == nil ? "Skip" : "Next") : "Done") {
                 advanceReview()
@@ -269,7 +269,7 @@ struct TaskCard: View {
                 detailRow("Agent", symbol: "terminal", value: item.session.provider == "claude" ? "Claude Code" : item.session.provider.capitalized)
             }
             if item.historical {
-                Text("Last received activity. This task’s current status is unavailable.")
+                Text("Last received activity. This session’s current status is unavailable.")
                     .companionText(.body, theme: theme)
             }
         }
