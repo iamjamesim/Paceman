@@ -400,7 +400,14 @@ class Store:
     def tick(self, now: float | None = None):
         now = time.time() if now is None else now
         with self.connect() as db:
+            # Live sources have no synthetic schedule to advance. Their reads
+            # must not compete with hook and push writers for a write lock.
+            mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
+            if mode and mode[0] != "synthetic":
+                return
             db.execute("BEGIN IMMEDIATE")
+            # Setup can switch sources after the initial read. Recheck under
+            # the transaction before firing any synthetic events.
             mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
             if mode and mode[0] != "synthetic":
                 return
@@ -451,7 +458,35 @@ class Server(ThreadingHTTPServer):
         self.started = time.monotonic()
         self.pair_attempts: list[float] = []
         self.pair_lock = threading.Lock()
+        self._maintenance_wake = threading.Event()
+        self._maintenance_stop = threading.Event()
+        self._maintenance_error = None
         super().__init__(address, Handler)
+
+    def serve_forever(self, poll_interval=0.5):
+        self._maintenance_stop.clear()
+        self._maintenance_wake.clear()
+        self._maintenance_error = None
+        worker = threading.Thread(target=self._maintain, daemon=True)
+        worker.start()
+        try:
+            super().serve_forever(poll_interval=poll_interval)
+        finally:
+            self._maintenance_stop.set()
+            self._maintenance_wake.set()
+            worker.join()
+
+    def _maintain(self):
+        while True:
+            self._maintenance_wake.wait()
+            self._maintenance_wake.clear()
+            if self._maintenance_stop.is_set():
+                return
+            try:
+                self._run_maintenance()
+            except Exception as error:
+                self._maintenance_error = error
+                return
 
     def interaction_access_state(self):
         with self.store.connect() as db:
@@ -484,6 +519,14 @@ class Server(ThreadingHTTPServer):
             return self.interactions.submit(payload)
 
     def service_actions(self):
+        # The accept loop must not wait for adapter/database/status-file locks.
+        # One owned worker coalesces maintenance ticks instead of accumulating
+        # jobs or threads when a hook or another writer is slow.
+        if self._maintenance_error is not None:
+            raise self._maintenance_error
+        self._maintenance_wake.set()
+
+    def _run_maintenance(self):
         # Scheduled events occur without a client request, essential for lock tests.
         self.store.tick()
         if self.adapter is not None:

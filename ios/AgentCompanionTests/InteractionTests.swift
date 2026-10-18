@@ -242,6 +242,42 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
+    @MainActor func testForegroundPollsKeepOneSlowRequestAcrossMultiplePollIntervals() async throws {
+        let source = refreshSource("recovering")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        let started = expectation(description: "one owned request")
+        var pending: InteractionURLProtocol?
+        var starts = 0
+        var stops = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                starts += 1
+                pending = transport
+                if starts == 1 { started.fulfill() }
+            }
+        }
+        InteractionURLProtocol.stop = { _ in stops += 1 }
+        defer {
+            model.setForeground(false)
+            InteractionURLProtocol.start = nil
+            InteractionURLProtocol.stop = nil
+        }
+        model.setForeground(true)
+        await fulfillment(of: [started], timeout: 2)
+        try await Task.sleep(nanoseconds: 11_000_000_000)
+        let joined = Task { await model.refresh(sourceID: source.sourceID, fromPush: true) }
+        await Task.yield()
+        XCTAssertEqual(starts, 1)
+        XCTAssertEqual(stops, 0)
+        pending?.finish(refreshSnapshot(source))
+        let result = await joined.value
+        XCTAssertEqual(result, .newData)
+        XCTAssertNil(model.errors[source.sourceID])
+    }
+
     @MainActor func testPushPromotesForegroundFetchAcrossBackgroundTransition() async throws {
         try await checkBackgroundOwnerPreservesForegroundFetch(fromWatch: false)
     }

@@ -118,8 +118,9 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
 final class SourceClient {
     private let session: URLSession
     init(configuration: URLSessionConfiguration = .ephemeral) {
-        configuration.timeoutIntervalForRequest = 5
-        configuration.timeoutIntervalForResource = 12
+        // Polls join owned status reads; the poll interval is not a deadline.
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 120
         configuration.waitsForConnectivity = false
         configuration.httpCookieStorage = nil
         session = URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
