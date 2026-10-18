@@ -53,6 +53,11 @@ window in Codex Limit and Codex Reset. Older or empty data from another computer
 cannot erase that reading.
 
 WatchConnectivity also supplies the paired-computer list and cached readings.
+The Watch app opens to tasks grouped by attention, work, and history; Codex usage
+remains available separately. Task reads and lightweight responses use interactive
+WatchConnectivity messages through the paired iPhone. One-time approvals and
+single-question answers use the existing opt-in response bridge; larger forms
+continue on iPhone or computer. This path requires a reachable iPhone and computer.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
 are in [data lifecycle](data-lifecycle.md).

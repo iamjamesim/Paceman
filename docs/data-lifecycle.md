@@ -88,7 +88,9 @@ statuses and hook lifecycle reasons; the phone records matching IDs and request 
 ## Questions and approvals
 
 Requests and answers are memory-only, excluded from snapshots, SQLite, APNs,
-accessories, and diagnostics. Each request belongs to a live hook connection;
+BLE accessories, and diagnostics. Apple Watch fetches them through live
+WatchConnectivity replies, never application context or queued transfers.
+Each request belongs to a live hook connection;
 disconnect, timeout (up to ten minutes), provider disable, source
 shutdown, or pairing changes invalidate it. Restart never replays approvals.
 An approval can remain pending in the agent after its hook ends; Paceman cannot
@@ -102,3 +104,9 @@ and source-generation changes clear request/response content. An already-submitt
 operation may finish in the background. There are no automatic response retries
 or background polling. Late confirmations can complete the original card without
 overriding newer task state. Unknown delivery remains unconfirmed.
+
+Watch forms clear sensitive content on backgrounding and refetch when active.
+The phone retains Watch-issued requests and exact submissions in RAM until their
+original deadlines (at most ten minutes, bounded to 256 requests), allowing an
+explicit identical retry after a lost reply or reopened form. Pairing changes
+clear this state; responses are never retried automatically.

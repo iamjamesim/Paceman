@@ -55,7 +55,7 @@ struct MonitoringActivity: ActivityAttributes {
             if failedCount > 0 { return failedCount == 1 ? "Failed" : "\(failedCount) failed" }
             if working > 0 { return working == 1 ? "Working" : "\(working) working" }
             if finished > 0 { return finished == 1 ? "Finished" : "\(finished) finished" }
-            return "No active sessions"
+            return "No active tasks"
         }
         var headline: String {
             if let provider = attentionProvider {
@@ -72,7 +72,7 @@ struct MonitoringActivity: ActivityAttributes {
             case "failed": "Failed"
             case "working": "Working"
             case "finished": "Finished"
-            default: "No active sessions"
+            default: "No active tasks"
             }
         }
         var hasMixedStates: Bool {

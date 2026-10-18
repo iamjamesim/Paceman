@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        DAB000000000000000000001 = {isa = PBXBuildFile; fileRef = DAF000000000000000000001; };
+        DAB000000000000000000002 = {isa = PBXBuildFile; fileRef = DAF000000000000000000001; };
 		ACB000000000000000000005 /* CompanionSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF000000000000000000005 /* CompanionSidebar.swift */; };
 		ACB000000000000000000006 /* TaskCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACF000000000000000000006 /* TaskCard.swift */; };
 		09DACEC89D3557D06DF4B92C /* SourceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16321946EF3229AC1C8C8EF6 /* SourceClient.swift */; };
@@ -140,6 +142,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+        DAF000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/WatchWork.swift; sourceTree = "<group>"; };
 		ACF000000000000000000005 /* CompanionSidebar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionSidebar.swift; sourceTree = "<group>"; };
 		ACF000000000000000000006 /* TaskCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCard.swift; sourceTree = "<group>"; };
 		031E47700CF4F7D578075936 /* AgentCompanionWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentCompanionWidgets.swift; sourceTree = "<group>"; };
@@ -328,6 +331,7 @@
 			isa = PBXGroup;
 			children = (
 				AAA000000000000000000003 /* PacemanWatchApp.swift */,
+                DAF000000000000000000001 /* ../Shared/WatchWork.swift */,
 				AAA000000000000000000004 /* ../Shared/WatchAllowanceSnapshot.swift */,
 				AAA00000000000000000000B /* Assets.xcassets */,
 				F0A00000000000000000000D /* ../Resources/Sounds/PacemanInput.wav */,
@@ -596,6 +600,7 @@
 				09DACEC89D3557D06DF4B92C /* SourceClient.swift in Sources */,
 				ACB000000000000000000002 /* InteractionViews.swift in Sources */,
 				ACB000000000000000000001 /* Interactions.swift in Sources */,
+                DAB000000000000000000001 /* WatchWork.swift in Sources */,
 				7F6E335436455669020C4D87 /* TransportDiagnostics.swift in Sources */,
 				8C40CDC910BF7112B1737D7F /* WatchLink.swift in Sources */,
 				F61079DCD2F16853DBF4558A /* WeatherSettings.swift in Sources */,
@@ -612,6 +617,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				BBB000000000000000000003 /* PacemanWatchApp.swift in Sources */,
+                DAB000000000000000000002 /* WatchWork.swift in Sources */,
 				BBB000000000000000000004 /* ../Shared/WatchAllowanceSnapshot.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

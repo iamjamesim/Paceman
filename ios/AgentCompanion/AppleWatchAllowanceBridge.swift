@@ -1,11 +1,13 @@
 import Foundation
+import UIKit
 import WatchConnectivity
 
-/// Only bounded usage readings and paired source IDs cross to watchOS. No source credentials do.
+/// Cached usage travels in application context; task/request content uses live replies only.
 final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
     static let shared = AppleWatchAllowanceBridge()
     private var pending: [String: Any] = ["schema": 1]
     var onWatchPushToken: ((String, String, Int, Bool) -> Void)?
+    var onWorkMessage: (@MainActor ([String: Any]) async -> [String: Any])?
 
     private override init() {
         super.init()
@@ -61,6 +63,23 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
                  replyHandler: @escaping ([String: Any]) -> Void) {
         if receiveWatchPushToken(message) {
             replyHandler(["accepted": true])
+            return
+        }
+        if message["watchWork"] as? Int == 1 {
+            Task { @MainActor in
+                var operation: Task<[String: Any], Never>?
+                let background = UIApplication.shared.beginBackgroundTask(withName: "Apple Watch response") {
+                    operation?.cancel()
+                }
+                defer {
+                    if background != .invalid { UIApplication.shared.endBackgroundTask(background) }
+                }
+                let work = Task { @MainActor in
+                    await self.onWorkMessage?(message) ?? ["error": "Open Paceman on iPhone to connect."]
+                }
+                operation = work
+                replyHandler(await work.value)
+            }
             return
         }
         replyHandler(["accepted": false])

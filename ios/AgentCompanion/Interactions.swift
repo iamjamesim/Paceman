@@ -1,29 +1,6 @@
 import Foundation
 import Combine
 
-struct InteractionOption: Codable, Equatable {
-    let label: String
-    let description: String
-}
-struct InteractionQuestion: Codable, Identifiable, Equatable {
-    let id: String
-    let prompt: String
-    let multiple: Bool
-    let options: [InteractionOption]
-}
-struct InputRequest: Codable, Identifiable, Equatable {
-    let requestID: String
-    let version: Int
-    let provider: String
-    let sessionID: String
-    let kind: String
-    let title: String
-    let detail: String
-    let questions: [InteractionQuestion]
-    let remainingSeconds: Double
-    var id: String { requestID }
-}
-
 /// Separate known approval metadata from introductory prose without parsing,
 /// reordering, or dropping any of the proposed tool input. Unknown formats stay prose.
 struct ApprovalDetailContent {
@@ -142,29 +119,6 @@ struct InputRequests: Decodable {
             }
         }
         return value
-    }
-}
-struct InputAnswer: Codable, Equatable {
-    var selected: [Int] = []
-    var text: String = ""
-    func valid(for question: InteractionQuestion) -> Bool {
-        let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return text.unicodeScalars.count <= 4096 && Set(selected).count == selected.count
-            && selected.allSatisfy { question.options.indices.contains($0) }
-            && (question.multiple || selected.count <= 1)
-            && (hasText != !selected.isEmpty)
-    }
-}
-struct InputSubmission: Codable, Equatable {
-    let generation: String
-    let requestID: String
-    let version: Int
-    let idempotencyKey: String
-    let action: String
-    let answers: [String: InputAnswer]
-    var fitsWireLimit: Bool {
-        guard let data = try? JSONEncoder().encode(self) else { return false }
-        return data.count <= 65536
     }
 }
 struct InputReceipt: Decodable {

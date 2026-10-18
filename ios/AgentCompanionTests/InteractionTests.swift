@@ -1329,3 +1329,128 @@ private final class InteractionURLProtocol: URLProtocol {
     override func startLoading() { Self.start?(self) }
     override func stopLoading() { Self.stop?(self) }
 }
+
+extension InteractionTests {
+    @MainActor func testWatchResponseKeepsExactSubmissionAcrossLostReplyAndReopening() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
+            clientID: "client", credential: "private-fixture")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
+        model.pairedSources = [source]
+        let listing = fixture()
+        let listingData = try JSONSerialization.data(withJSONObject: listing)
+        let snapshotData = refreshSnapshot(source, state: "needs_input", interactions: true)
+        let requestMessage: [String: Any] = ["operation": "request", "sourceID": sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude"]
+        var envelope: InputSubmission?
+        var posts = 0
+        var loseReceipt = true
+        var resolved = false
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.httpMethod == "POST" {
+                    posts += 1
+                    if loseReceipt {
+                        transport.client?.urlProtocol(transport, didFailWithError: URLError(.networkConnectionLost))
+                    } else if let envelope {
+                        resolved = true
+                        transport.finish(try! JSONSerialization.data(withJSONObject: ["status": "submitted",
+                            "generation": envelope.generation, "requestID": envelope.requestID, "version": 1]))
+                    }
+                } else if transport.request.url?.path == "/v1/snapshot" { transport.finish(snapshotData) }
+                else if resolved {
+                    transport.finish(try! JSONSerialization.data(withJSONObject: ["sourceID": self.sourceID,
+                        "generation": listing["generation"]!, "requests": []]))
+                } else { transport.finish(listingData) }
+            }
+        }
+        defer { InteractionURLProtocol.start = nil }
+        let response = await model.handleWatchWork(requestMessage)
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(response["data"] as? Data))
+        let value = InputSubmission(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        envelope = value
+        let payload: [String: Any] = ["operation": "submit", "sourceID": sourceID,
+            "submission": try JSONEncoder().encode(value)]
+        let uncertain = await model.handleWatchWork(payload)
+        XCTAssertEqual(uncertain["unconfirmed"] as? Bool, true)
+        let reopened = await model.handleWatchWork(requestMessage)
+        let pending = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reopened["data"] as? Data))
+        XCTAssertEqual(pending.submission, value)
+        XCTAssertEqual(pending.submitted, false)
+        let changed = InputSubmission(generation: value.generation, requestID: value.requestID, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [1])])
+        let rejected = await model.handleWatchWork(["operation": "submit", "sourceID": sourceID,
+            "submission": try JSONEncoder().encode(changed)])
+        XCTAssertNotNil(rejected["error"])
+        XCTAssertEqual(posts, 1)
+        loseReceipt = false
+        let confirmed = await model.handleWatchWork(payload)
+        XCTAssertEqual(confirmed["submitted"] as? Bool, true)
+        XCTAssertEqual(posts, 2)
+        let receipt = await model.handleWatchWork(requestMessage)
+        let saved = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(receipt["data"] as? Data))
+        XCTAssertEqual(saved.submitted, true)
+        XCTAssertEqual(saved.submission, value)
+        model.pairedSources = []
+        let removed = await model.handleWatchWork(payload)
+        XCTAssertNotNil(removed["error"])
+        XCTAssertEqual(posts, 2, "Removed access cannot submit a cached response")
+    }
+
+    @MainActor func testWatchRejectsUnmatchedTaskAndDisabledResponses() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
+            clientID: "client", credential: "fixture")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
+        model.pairedSources = [source]
+        var enabled = false
+        var interactionReads = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.path == "/v1/snapshot" {
+                    transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: enabled))
+                } else {
+                    interactionReads += 1
+                    transport.finish(try! JSONSerialization.data(withJSONObject: self.fixture()))
+                }
+            }
+        }
+        defer { InteractionURLProtocol.start = nil }
+        let message: [String: Any] = ["operation": "request", "sourceID": sourceID,
+            "sessionID": String(repeating: "b", count: 64), "provider": "claude"]
+        let disabled = await model.handleWatchWork(message)
+        XCTAssertNotNil(disabled["error"])
+        XCTAssertEqual(interactionReads, 0)
+        enabled = true
+        let unmatched = await model.handleWatchWork(message)
+        XCTAssertNotNil(unmatched["error"])
+        XCTAssertNil(unmatched["data"], "A response form must match the exact task identity")
+    }
+
+    func testWatchAnswerValidationAndActivityLease() throws {
+        let data = try JSONSerialization.data(withJSONObject: fixture())
+        let request = try XCTUnwrap(InputRequests.decode(data, sourceID: sourceID).requests.first)
+        for answers in [["q0": InputAnswer(selected: [0])], ["q0": InputAnswer(text: "After the first result")]] {
+            let submission = InputSubmission(generation: "generation", requestID: request.id, version: 1,
+                idempotencyKey: UUID().uuidString, action: "answer", answers: answers)
+            XCTAssertTrue(submission.valid(for: request))
+        }
+        for answers in [[:], ["other": InputAnswer(selected: [0])], ["q0": InputAnswer(selected: [2])],
+                        ["q0": InputAnswer(selected: [0], text: "Both")], ["q0": InputAnswer(selected: [0, 1])]] {
+            let submission = InputSubmission(generation: "generation", requestID: request.id, version: 1,
+                idempotencyKey: UUID().uuidString, action: "answer", answers: answers)
+            XCTAssertFalse(submission.valid(for: request))
+        }
+        let task = WatchWorkTask(sourceID: sourceID, sessionID: request.sessionID, provider: "claude",
+            title: "Task", computer: "Mac", state: "needs_input", freshUntil: 300)
+        XCTAssertFalse(task.historical(at: Date(timeIntervalSince1970: 299)))
+        XCTAssertTrue(task.historical(at: Date(timeIntervalSince1970: 300)))
+        XCTAssertTrue(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60).supportsWatchAnswer)
+        let multiple = InputRequest(requestID: request.id, version: 1, provider: "claude", sessionID: request.sessionID,
+            kind: "question", title: "Questions", detail: "", questions: request.questions + request.questions, remainingSeconds: 60)
+        XCTAssertFalse(WatchWorkPrompt(generation: "g", request: multiple, remainingSeconds: 60).supportsWatchAnswer)
+    }
+}

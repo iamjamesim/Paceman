@@ -259,6 +259,14 @@ phone changes that list and its revision. Pushes must match the revision and an
 allowed source. `observedAt` orders complete snapshots within each source,
 including removals; each reading keeps its original `updatedAt` and reset time.
 A source cannot clear another source's cache.
+
+Interactive Watch messages use `watchWork: 1` and an `operation`: `tasks` reads
+task metadata, `request` selects an exact `sourceID`/`provider`/`sessionID`, and
+`submit` carries the existing `InputSubmission` as JSON `Data`. Replies carry
+JSON `data`, a confirmed `submitted: true`, `unconfirmed: true`, or a user-facing
+`error`. A reopened request can carry its original `submission` and receipt.
+This content is never placed in application context or queued transfers.
+
 Example background push:
 
 ```json

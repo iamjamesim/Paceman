@@ -12,8 +12,33 @@ struct PacemanWatchApp: App {
 
     var body: some Scene {
         WindowGroup {
-            TimelineView(.periodic(from: .now, by: 60)) { context in
-                ScrollView {
+            NavigationStack {
+                Group {
+                    #if DEBUG
+                    if let scenario = WatchWorkPreview.scenario, WatchWorkPreview.detailScenarios.contains(scenario) {
+                        WatchTaskView(store: store, task: WatchWorkPreview.task)
+                    } else {
+                        activity
+                    }
+                    #else
+                    activity
+                    #endif
+                }
+                .navigationTitle("Paceman")
+                .tint(accent)
+                #if DEBUG
+                .transformEnvironment(\.dynamicTypeSize) { size in
+                    if ProcessInfo.processInfo.arguments.contains("--work-accessibility-preview") { size = .accessibility3 }
+                }
+                #endif
+            }
+        }
+    }
+
+    private var activity: some View {
+        WatchActivityView(store: store) {
+            ScrollView {
+                TimelineView(.periodic(from: .now, by: 60)) { context in
                     VStack(alignment: .leading, spacing: 20) {
                         let summaries = store.usage.summaries(at: context.date)
                         if summaries.isEmpty { setupSummary }
@@ -21,13 +46,9 @@ struct PacemanWatchApp: App {
                             if allowance.available(at: context.date) { allowanceSummary(allowance, at: context.date) }
                             else { expiredSummary(allowance, at: context.date) }
                         }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
+                    }.padding(.horizontal, 12)
                 }
-            }
-
+            }.navigationTitle("Codex usage")
         }
     }
 
@@ -120,6 +141,7 @@ final class WatchPushDelegate: NSObject, WKApplicationDelegate {
 final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
     static let shared = WatchAllowanceStore()
     @Published private(set) var usage = WatchUsageState.load()
+    @Published private(set) var phoneReachable = false
     private var pushTokenMessage: [String: Any]?
 
     override init() {
@@ -188,11 +210,350 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
                  error: Error?) {
         if activationState == .activated {
             self.session(session, didReceiveApplicationContext: session.receivedApplicationContext)
-            DispatchQueue.main.async { self.sendPushToken() }
+            DispatchQueue.main.async {
+                self.phoneReachable = session.isReachable
+                self.sendPushToken()
+            }
         }
     }
 
     func sessionReachabilityDidChange(_ session: WCSession) {
-        DispatchQueue.main.async { self.sendPushToken() }
+        DispatchQueue.main.async {
+            self.phoneReachable = session.isReachable
+            self.sendPushToken()
+        }
     }
 }
+
+extension WatchAllowanceStore {
+    func workMessage(_ payload: [String: Any]) async throws -> [String: Any] {
+        #if DEBUG
+        if let result = try WatchWorkPreview.reply(payload) { return result }
+        #endif
+        guard WCSession.default.activationState == .activated, WCSession.default.isReachable else {
+            throw WatchWorkError.message("Connect to your iPhone to review tasks and respond.")
+        }
+        var message = payload
+        message["watchWork"] = 1
+        return try await withCheckedThrowingContinuation { continuation in
+            WCSession.default.sendMessage(message) { result in
+                if let error = result["error"] as? String {
+                    continuation.resume(throwing: payload["operation"] as? String == "submit"
+                        ? WatchWorkError.rejected(error) : WatchWorkError.message(error))
+                } else if result["data"] is Data || result["submitted"] as? Bool == true
+                            || result["unconfirmed"] as? Bool == true {
+                    continuation.resume(returning: result)
+                } else {
+                    continuation.resume(throwing: WatchWorkError.message("Update Paceman on iPhone and Apple Watch."))
+                }
+            } errorHandler: { _ in
+                continuation.resume(throwing: WatchWorkError.message("Connection lost. Check Paceman on iPhone."))
+            }
+        }
+    }
+}
+
+enum WatchWorkError: LocalizedError {
+    case message(String), rejected(String)
+    var errorDescription: String? { switch self { case .message(let value): value; case .rejected(let value): value } }
+}
+
+private struct WatchActivityView<Usage: View>: View {
+    @ObservedObject var store: WatchAllowanceStore
+    @ViewBuilder let usage: () -> Usage
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var snapshot: WatchWorkSnapshot?
+    @State private var error: String?
+    @State private var loading = false
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            List {
+                if let error { Text(error).font(.body) }
+                if let snapshot {
+                    ForEach(["Needs you", "Working", "Recent", "Last known"], id: \.self) { section in
+                        let tasks = snapshot.tasks.filter { group($0, at: context.date) == section }
+                        if !tasks.isEmpty {
+                            Section(section) {
+                                ForEach(tasks) { task in
+                                    NavigationLink {
+                                        WatchTaskView(store: store, task: task)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(task.title).font(.headline).lineLimit(3)
+                                            Text([task.provider.capitalized, task.computer].filter { !$0.isEmpty }.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
+                                            if section == "Recent" || section == "Last known" || task.state == "failed" {
+                                                Text(task.status).font(.caption).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if snapshot.tasks.isEmpty {
+                        Text(snapshot.computers == 0 ? "Connect a computer in Paceman on iPhone."
+                            : snapshot.unavailable > 0 ? "No activity received. Check Paceman on iPhone." : "No active tasks")
+                    } else if snapshot.unavailable > 0 {
+                        Text("Some computers are unavailable.").font(.caption)
+                    }
+                } else if loading { ProgressView("Loading Activity") }
+                Section {
+                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }.disabled(loading)
+                    NavigationLink("Codex usage", destination: usage)
+                }
+            }
+        }
+        .task { await refresh() }
+        .onChange(of: store.phoneReachable) { _, reachable in
+            if reachable, scenePhase == .active { Task { await refresh() } }
+        }
+        .onChange(of: scenePhase) { _, value in
+            if value == .active { Task { await refresh() } }
+            else if value == .background { snapshot = nil; error = nil }
+        }
+    }
+
+    private func group(_ task: WatchWorkTask, at date: Date) -> String {
+        if task.historical(at: date) { return "Last known" }
+        switch task.state {
+        case "needs_input", "failed": return "Needs you"
+        case "working": return "Working"
+        default: return "Recent"
+        }
+    }
+
+    @MainActor private func refresh() async {
+        guard !loading else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            let result = try await store.workMessage(["operation": "tasks"])
+            guard scenePhase == .active, let data = result["data"] as? Data else { return }
+            snapshot = try JSONDecoder().decode(WatchWorkSnapshot.self, from: data)
+            error = nil
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+private struct WatchTaskView: View {
+    @ObservedObject var store: WatchAllowanceStore
+    let task: WatchWorkTask
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var prompt: WatchWorkPrompt?
+    @State private var deadline: TimeInterval = 0
+    @State private var selected: Set<Int> = []
+    @State private var text = ""
+    @State private var submission: InputSubmission?
+    @State private var sending = false
+    @State private var submitted = false
+    @State private var unconfirmed = false
+    @State private var error: String?
+    @State private var confirmAllow = false
+    @State private var rejected = false
+    @State private var epoch = UUID()
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(task.computer).font(.caption).foregroundStyle(.secondary)
+                    Text(task.title).font(.headline).fixedSize(horizontal: false, vertical: true)
+                    if submitted {
+                        Label("Response sent", systemImage: "checkmark.circle")
+                        Text(submission?.action == "release" ? "Continue on your computer." : "Waiting for the agent’s next update.").font(.body)
+                    } else if rejected {
+                        Text("Check the task on your computer.")
+                    } else if let prompt {
+                        if ProcessInfo.processInfo.systemUptime >= deadline {
+                            Text(unconfirmed ? "Delivery is unconfirmed. Check the task on your computer."
+                                : "This request expired. Check the task on your computer.")
+                        } else {
+                            requestContent(prompt)
+                                .disabled(sending || submission != nil)
+                            if unconfirmed {
+                                Text("Delivery is unconfirmed. Retry the same response or check your computer.")
+                                Button("Retry response") { Task { await send() } }.disabled(sending)
+                            }
+                        }
+                    } else {
+                        Text(task.historical(at: Date()) ? "Last known: \(task.status)" : task.status)
+                        if sending { ProgressView() }
+                    }
+                    if let error { Text(error).font(.body) }
+                    if prompt == nil, error != nil, !submitted, !rejected,
+                       task.state == "needs_input", !task.historical(at: Date()) {
+                        Button("Check again") { Task { await load() } }.disabled(sending)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+            }
+        }
+        .navigationTitle("Task")
+        .task { await load() }
+        .onChange(of: store.phoneReachable) { _, reachable in
+            if reachable, prompt == nil, !submitted, scenePhase == .active {
+                Task { await load() }
+            } else if !reachable, submission == nil, !submitted, task.state == "needs_input" {
+                epoch = UUID()
+                prompt = nil
+                selected = []
+                text = ""
+                error = "Reconnect to your iPhone to respond."
+            }
+        }
+        .onChange(of: scenePhase) { _, value in
+            if value == .background {
+                epoch = UUID()
+                prompt = nil
+                submission = nil
+                selected = []
+                text = ""
+                error = nil
+                confirmAllow = false
+            } else if value == .active, prompt == nil, !submitted, !sending {
+                Task { await load() }
+            }
+        }
+        .confirmationDialog("Allow this action once?", isPresented: $confirmAllow, titleVisibility: .visible) {
+            Button("Allow once") { respond("allowOnce") }
+        }
+    }
+
+    @ViewBuilder private func requestContent(_ prompt: WatchWorkPrompt) -> some View {
+        let request = prompt.request
+        if !["Question", "Question for you"].contains(request.title) {
+            Text(request.title).font(.headline)
+        }
+        if !request.detail.isEmpty {
+            Text(request.detail).font(.body).fixedSize(horizontal: false, vertical: true)
+        }
+        if !prompt.supportsWatchAnswer {
+            Text("Review these questions in Paceman on iPhone.")
+        } else if request.kind == "approval" {
+            Button("Allow once") { confirmAllow = true }.buttonStyle(.borderedProminent)
+            Button("Deny", role: .destructive) { respond("deny") }
+        } else if let question = request.questions.first {
+            Text(question.prompt).font(.body)
+            ForEach(question.options.indices, id: \.self) { index in
+                let option = question.options[index]
+                Button {
+                    if selected.contains(index) { selected.remove(index) }
+                    else if question.multiple { selected.insert(index) }
+                    else { selected = [index] }
+                    text = ""
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label(option.label, systemImage: selected.contains(index) ? "checkmark.circle.fill" : "circle")
+                        if !option.description.isEmpty { Text(option.description).font(.caption) }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            TextField("Your answer", text: $text)
+                .onChange(of: text) { _, value in if !value.isEmpty { selected = [] } }
+            Button("Send answer") { respond("answer") }
+                .buttonStyle(.borderedProminent)
+                .disabled(!InputAnswer(selected: selected.sorted(), text: text).valid(for: question))
+        }
+        Button("Continue on computer") { respond("release") }
+    }
+
+    @MainActor private func load() async {
+        guard task.state == "needs_input", !task.historical(at: Date()), !sending else { return }
+        error = nil
+        sending = true
+        defer { sending = false }
+        let started = ProcessInfo.processInfo.systemUptime
+        let expectedEpoch = epoch
+        do {
+            let result = try await store.workMessage(["operation": "request", "sourceID": task.sourceID,
+                "sessionID": task.sessionID, "provider": task.provider])
+            guard scenePhase != .background, expectedEpoch == epoch, let data = result["data"] as? Data else { return }
+            let value = try JSONDecoder().decode(WatchWorkPrompt.self, from: data)
+            prompt = value
+            submission = value.submission
+            submitted = value.submitted == true
+            unconfirmed = value.submission != nil && !submitted
+            rejected = false
+            deadline = started + value.remainingSeconds
+        } catch {
+            guard scenePhase != .background, expectedEpoch == epoch else { return }
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func respond(_ action: String) {
+        guard let prompt, submission == nil, ProcessInfo.processInfo.systemUptime < deadline else { return }
+        var answers: [String: InputAnswer] = [:]
+        if action == "answer", let question = prompt.request.questions.first {
+            answers[question.id] = InputAnswer(selected: selected.sorted(), text: text)
+        }
+        let value = InputSubmission(generation: prompt.generation, requestID: prompt.request.id,
+            version: prompt.request.version, idempotencyKey: UUID().uuidString, action: action, answers: answers)
+        guard value.valid(for: prompt.request) else { return }
+        submission = value
+        Task { await send() }
+    }
+
+    @MainActor private func send() async {
+        guard let submission, !sending else { return }
+        sending = true
+        let expectedEpoch = epoch
+        defer { sending = false }
+        do {
+            let data = try JSONEncoder().encode(submission)
+            let result = try await store.workMessage(["operation": "submit", "sourceID": task.sourceID, "submission": data])
+            guard scenePhase != .background, expectedEpoch == epoch else { return }
+            submitted = result["submitted"] as? Bool == true
+            unconfirmed = !submitted
+            error = nil
+        } catch {
+            guard scenePhase != .background, expectedEpoch == epoch else { return }
+            if case WatchWorkError.rejected = error { rejected = true; unconfirmed = false }
+            else { unconfirmed = true }
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+#if DEBUG
+private enum WatchWorkPreview {
+    static var scenario: String? {
+        ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--work-preview=") }.map { String($0.dropFirst(15)) }
+    }
+    static let detailScenarios = ["approval", "question", "multiple", "long-question", "expired-request", "unconfirmed"]
+    static var task: WatchWorkTask {
+        WatchWorkTask(sourceID: "preview", sessionID: "task", provider: "codex", title: "Simplify onboarding",
+            computer: "MacBook Pro", state: "needs_input", freshUntil: Date().timeIntervalSince1970 + 300)
+    }
+    static func reply(_ payload: [String: Any]) throws -> [String: Any]? {
+        guard let scenario else { return nil }
+        if scenario == "disconnected" { throw WatchWorkError.message("Connect to your iPhone to review tasks and respond.") }
+        func encoded<T: Encodable>(_ value: T) throws -> [String: Any] { ["data": try JSONEncoder().encode(value)] }
+        if payload["operation"] as? String == "tasks" {
+            let now = Date().timeIntervalSince1970
+            let tasks = [task] + ["working", "finished", "failed"].enumerated().map { index, state in
+                WatchWorkTask(sourceID: "preview", sessionID: "task-\(index)", provider: index == 0 ? "claude" : "codex",
+                    title: scenario == "long" ? "Review accessibility and notifications throughout the entire onboarding experience" : ["Update the Watch app", "Run regression tests", "Build the release"][index],
+                    computer: index == 0 ? "Development workstation" : "MacBook Pro", state: state,
+                    freshUntil: now + (scenario == "stale" ? -600 : 300))
+            }
+            let values = scenario == "stale" ? tasks.dropFirst().map { $0 } : tasks
+            return try encoded(WatchWorkSnapshot(tasks: ["empty", "setup"].contains(scenario) ? [] : values,
+                computers: scenario == "setup" ? 0 : 2, unavailable: scenario == "stale" ? 2 : 0))
+        }
+        if payload["operation"] as? String == "submit" { return scenario == "unconfirmed" ? ["unconfirmed": true] : ["submitted": true] }
+        let question = InteractionQuestion(id: "q0", prompt: scenario == "long-question"
+            ? "When should we ask people to enable notifications, so they understand the benefit before granting access?"
+            : "When should we ask for notifications?", multiple: false,
+            options: [.init(label: "After the first result", description: "Let people try Paceman first."),
+                      .init(label: "During setup", description: "Ready for the first task.")])
+        let request = InputRequest(requestID: "preview", version: 1, provider: "codex", sessionID: "task",
+            kind: scenario == "approval" ? "approval" : "question", title: scenario == "approval" ? "Run the tests?" : "Question for you",
+            detail: scenario == "approval" ? "Tool: Bash\nWorking directory: /Projects/Paceman\nCommand: swift test" : "",
+            questions: scenario == "approval" ? [] : scenario == "multiple" ? [question, .init(id: "q1", prompt: "Which screens?", multiple: true, options: [])] : [question], remainingSeconds: 120)
+        return try encoded(WatchWorkPrompt(generation: "preview", request: request, remainingSeconds: scenario == "expired-request" ? -1 : 120))
+    }
+}
+#endif

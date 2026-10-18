@@ -54,6 +54,9 @@ final class CompanionModel: ObservableObject {
     private var changeObserver: AnyCancellable?
     private var weatherObservers: [String: AnyCancellable] = [:]
     private var lastWatchRelayRequested = false
+    private var watchRequests: [String: PendingInput] = [:]
+    private var watchSubmissions: [String: InputSubmission] = [:]
+    private var watchConfirmed: Set<String> = []
 
     init(preview: Bool = false, push: PushCoordinator? = nil, client: SourceClient = SourceClient(),
          savePairedSources: (([PairedSource]) throws -> Void)? = nil) {
@@ -170,6 +173,10 @@ final class CompanionModel: ObservableObject {
             Task { @MainActor in await self?.refreshAll(fromWatch: true) }
         }
         if !preview {
+            AppleWatchAllowanceBridge.shared.onWorkMessage = { [weak self] message in
+                guard let self else { return ["error": "Open Paceman on iPhone to connect."] }
+                return await self.handleWatchWork(message)
+            }
             AppleWatchAllowanceBridge.shared.onWatchPushToken = { [weak self] token, environment, usageSchema, multipleSources in
                 guard let self,
                       Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String == environment else { return }
@@ -658,6 +665,9 @@ final class CompanionModel: ObservableObject {
 
     private func invalidateRefreshes() {
         sourceEpoch = UUID()
+        watchRequests.removeAll()
+        watchSubmissions.removeAll()
+        watchConfirmed.removeAll()
         cancelSourceRefreshes()
     }
 
@@ -812,3 +822,114 @@ extension CompanionModel {
     }
 }
 #endif
+
+extension CompanionModel {
+    /// Watch-initiated reads use background-owned fetches, without activating the
+    /// phone's foreground response inbox or placing sensitive content in a queue.
+    func handleWatchWork(_ message: [String: Any]) async -> [String: Any] {
+        func encoded<T: Encodable>(_ value: T) -> [String: Any] {
+            guard let data = try? JSONEncoder().encode(value), data.count <= 60_000 else {
+                return ["error": "Review this task on iPhone."]
+            }
+            return ["data": data]
+        }
+        let epoch = sourceEpoch
+        let uptime = ProcessInfo.processInfo.systemUptime
+        watchRequests = watchRequests.filter { _, item in
+            item.expiresAtUptime > uptime && !isRevoked(item.source.sourceID)
+                && pairedSources.contains(where: { $0.sourceID == item.source.sourceID })
+        }
+        watchSubmissions = watchSubmissions.filter { key, _ in watchRequests[key] != nil }
+        watchConfirmed = watchConfirmed.intersection(watchRequests.keys)
+        do {
+            if message["operation"] as? String == "tasks" {
+                let tasks = pairedSources.filter { !isRevoked($0.sourceID) }
+                    .compactMap { startRefresh($0, fromWatch: true) }
+                for task in tasks { _ = await task.value }
+                guard !Task.isCancelled, epoch == sourceEpoch else { return ["error": "Connections changed. Refresh Activity."] }
+                let sources = pairedSources.filter { !isRevoked($0.sourceID) }
+                let values = sources.flatMap { source -> [WatchWorkTask] in
+                    guard let snapshot = snapshots[source.sourceID] else { return [] }
+                    let name = ComputerPreferences.displayName(for: source.sourceID,
+                        sourceName: snapshot.sourceName, host: source.endpoint.host)
+                    let sessions = snapshot.sessions ?? [AgentSession(id: "aggregate", provider: "", state: snapshot.state)]
+                    return sessions.filter { $0.state != .idle }.prefix(32).map {
+                        WatchWorkTask(sourceID: source.sourceID, sessionID: $0.id, provider: $0.provider,
+                            title: $0.title ?? ($0.provider.isEmpty ? "Computer activity" : $0.displayName),
+                            computer: name, state: $0.state.rawValue, freshUntil: snapshot.activityFreshUntil)
+                    }
+                }
+                return encoded(WatchWorkSnapshot(tasks: Array(values.prefix(128)), computers: sources.count,
+                    unavailable: sources.filter { !snapshotIsFresh($0.sourceID) || errors[$0.sourceID] != nil }.count))
+            }
+            guard let sourceID = message["sourceID"] as? String,
+                  let source = pairedSources.first(where: { $0.sourceID == sourceID }), !isRevoked(sourceID) else {
+                return ["error": "This computer is no longer connected."]
+            }
+            if message["operation"] as? String == "request" {
+                guard let sessionID = message["sessionID"] as? String,
+                      let provider = message["provider"] as? String else { return ["error": "Refresh Activity."] }
+                let started = ProcessInfo.processInfo.systemUptime
+                let snapshot = try await client.snapshot(source)
+                guard snapshot.interactionsEnabled == true else { return ["error": "Continue on your computer. Phone responses are off."] }
+                let requests = try await client.inputRequests(source)
+                guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID),
+                      snapshot.sessions?.contains(where: { $0.id == sessionID && $0.provider == provider }) == true else {
+                    return ["error": "No response is available. Check the task on your computer."]
+                }
+                guard let request = requests.requests.first(where: { $0.sessionID == sessionID && $0.provider == provider }) else {
+                    if let item = watchRequests.values.first(where: {
+                        $0.source.sourceID == sourceID && $0.generation == requests.generation
+                            && $0.request.sessionID == sessionID && $0.request.provider == provider
+                            && watchSubmissions[$0.id] != nil
+                    }) {
+                        return encoded(WatchWorkPrompt(generation: item.generation, request: item.request,
+                            remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
+                            submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
+                    }
+                    return ["error": "No response is available. Check the task on your computer."]
+                }
+                guard started + request.remainingSeconds > ProcessInfo.processInfo.systemUptime else {
+                    return ["error": "This request expired. Check the task on your computer."]
+                }
+                let item = PendingInput(source: source, generation: requests.generation, request: request,
+                    expiresAtUptime: started + request.remainingSeconds)
+                // A request keeps one exact submission across lost Watch replies.
+                guard watchRequests.count < 256 || watchRequests[item.id] != nil else {
+                    return ["error": "Review this task on iPhone."]
+                }
+                watchRequests[item.id] = item
+                return encoded(WatchWorkPrompt(generation: requests.generation, request: request,
+                    remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
+                    submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
+            }
+            if message["operation"] as? String == "submit",
+               let data = message["submission"] as? Data, data.count <= 65536 {
+                let submission = try JSONDecoder().decode(InputSubmission.self, from: data)
+                let id = "\(sourceID)/\(submission.generation)/\(submission.requestID)"
+                guard let item = watchRequests[id], submission.valid(for: item.request),
+                      watchSubmissions[id] == nil || watchSubmissions[id] == submission else {
+                    return ["error": "This request changed or expired. Check the task on your computer."]
+                }
+                watchSubmissions[id] = submission
+                do {
+                    try await client.submitInput(submission, source: source)
+                    guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID) else {
+                        return ["error": "Connections changed. Check the task on your computer."]
+                    }
+                    interactions.didSubmit(item, submission: submission)
+                    watchConfirmed.insert(item.id)
+                    return ["submitted": true]
+                } catch {
+                    if case HubError.http(let status) = error, [400, 401, 404, 409, 410, 422].contains(status) {
+                        return ["error": "This request is no longer available. Check the task on your computer."]
+                    }
+                    return ["unconfirmed": true]
+                }
+            }
+        } catch {
+            return ["error": "Couldn’t reach the computer. Check Paceman on iPhone."]
+        }
+        return ["error": "Update Paceman on iPhone and Apple Watch."]
+    }
+}
