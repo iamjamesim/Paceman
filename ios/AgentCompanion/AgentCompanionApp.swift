@@ -43,7 +43,7 @@ struct CompanionRoot: View {
     @State private var selectedSection: CompanionSection = .work
     @State private var sidebarPresented = false
     @State private var workFilter: String?
-    @State private var recentExpanded = false
+    @State private var recentExpanded = true
     @State private var selectedTask: WorkIdentity?
     @State private var reviewQueue: TaskReviewQueue?
     @State private var activityNavigation: PendingActivityNavigation?
