@@ -261,7 +261,7 @@ struct WorkSectionData: Identifiable {
         return WorkItem(id: id, session: session,
             computer: computer, historical: !current,
             activityOrder: inbox.ordering.activityOrder(id), requestOrder: inbox.ordering.requestOrder(pending),
-            delivery: connected && session.state == .needsInput ? inbox.receipt(for: id) ?? model.watchDelivery(for: id) : nil,
+            delivery: current && session.state == .needsInput ? inbox.receipt(for: id) ?? model.watchDelivery(for: id) : nil,
             inputAvailability: inbox.availability[source.sourceID],
             request: pending)
     }

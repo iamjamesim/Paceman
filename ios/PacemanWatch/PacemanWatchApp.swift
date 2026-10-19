@@ -4,31 +4,32 @@ import WatchKit
 import WidgetKit
 import OSLog
 
+private enum WatchPalette {
+    static let tint = Color(red: 1, green: 0.8, blue: 0.4)
+}
+
 @main
 struct PacemanWatchApp: App {
     @WKApplicationDelegateAdaptor(WatchPushDelegate.self) private var pushDelegate
     @StateObject private var store = WatchAllowanceStore.shared
     @Environment(\.scenePhase) private var scenePhase
     // Ayu dark is the iPhone app's default glance palette.
-    private let accent = Color(red: 1, green: 0.8, blue: 0.4)
+    private let accent = WatchPalette.tint
     private let launchLog = Logger(subsystem: "ai.paceman.watch", category: "ActivityLaunch")
-    @State private var path: [WatchDestination] = []
+    @State private var path: [WatchDestination] = {
+        #if DEBUG
+        if let scenario = WatchWorkPreview.scenario, WatchWorkPreview.detailScenarios.contains(scenario) {
+            return [.session(WatchWorkPreview.task)]
+        }
+        #endif
+        return []
+    }()
     @State private var launch: WatchActivityLaunch?
 
     var body: some Scene {
         WindowGroup {
             NavigationStack(path: $path) {
-                Group {
-                    #if DEBUG
-                    if let scenario = WatchWorkPreview.scenario, WatchWorkPreview.detailScenarios.contains(scenario) {
-                        WatchTaskView(store: store, task: WatchWorkPreview.task)
-                    } else {
-                        activity
-                    }
-                    #else
-                    activity
-                    #endif
-                }
+                activity
                 .navigationDestination(for: WatchDestination.self) { destination in
                     switch destination {
                     case .session(let session): WatchTaskView(store: store, task: session)
@@ -43,7 +44,7 @@ struct PacemanWatchApp: App {
             }
             .tint(accent)
             .onChange(of: scenePhase) { _, phase in
-                if phase == .background { store.cancelActivationWaits() }
+                if phase == .background { store.cancelActivationWaits(); store.clearWork() }
             }
             .onOpenURL { url in
                 guard let route = LiveActivityRoute(url: url) else { return }
@@ -185,6 +186,9 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var usage = WatchUsageState.load()
     @Published private(set) var phoneReachable = false
     @Published private(set) var workRevision = 0
+    @Published private(set) var workSnapshot: WatchWorkSnapshot?
+    private var workCache = WatchWorkCache()
+    private var workEpoch = UUID()
     private let workActivation = WatchWorkActivation()
     private var pushTokenMessage: [String: Any]?
 
@@ -279,13 +283,31 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
 }
 
 extension WatchAllowanceStore {
+    @MainActor func clearWork() {
+        workEpoch = UUID()
+        workCache.clear()
+        workSnapshot = nil
+    }
+
+    @MainActor private func acceptWorkReply(_ result: [String: Any], operation: String?) {
+        let data = result["workSnapshot"] as? Data
+            ?? (["tasks", "cachedTasks", "refreshTasks"].contains(operation ?? "") ? result["data"] as? Data : nil)
+        if let data, let value = try? JSONDecoder().decode(WatchWorkSnapshot.self, from: data), workCache.accept(value) {
+            workSnapshot = workCache.snapshot
+        }
+    }
+
     @MainActor func cancelActivationWaits() {
         workActivation.complete(.failure(CancellationError()))
     }
 
     @MainActor func workMessage(_ payload: [String: Any]) async throws -> [String: Any] {
+        let epoch = workEpoch
         #if DEBUG
-        if let result = try WatchWorkPreview.reply(payload) { return result }
+        if let result = try WatchWorkPreview.reply(payload) {
+            acceptWorkReply(result, operation: payload["operation"] as? String)
+            return result
+        }
         #endif
         try await workActivation.wait(activated: WCSession.default.activationState == .activated)
         try Task.checkCancellation()
@@ -294,7 +316,7 @@ extension WatchAllowanceStore {
         }
         var message = payload
         message["watchWork"] = 1
-        return try await withCheckedThrowingContinuation { continuation in
+        let result: [String: Any] = try await withCheckedThrowingContinuation { continuation in
             WCSession.default.sendMessage(message) { result in
                 if let error = result["error"] as? String {
                     continuation.resume(throwing: payload["operation"] as? String == "submit"
@@ -309,6 +331,9 @@ extension WatchAllowanceStore {
                 continuation.resume(throwing: WatchWorkError.message("Connection lost. Check Paceman on iPhone."))
             }
         }
+        try Task.checkCancellation()
+        if workEpoch == epoch { acceptWorkReply(result, operation: payload["operation"] as? String) }
+        return result
     }
 }
 
@@ -332,7 +357,7 @@ private struct WatchActivityView: View {
     let clearScope: () -> Void
     let openSession: (WatchWorkTask, UUID) -> Void
     @Environment(\.scenePhase) private var scenePhase
-    @State private var snapshot: WatchWorkSnapshot?
+    private var snapshot: WatchWorkSnapshot? { store.workSnapshot }
     @State private var error: String?
     @State private var loading = false
     @State private var visible = false
@@ -416,7 +441,7 @@ private struct WatchActivityView: View {
                 refreshID = UUID()
                 cacheReadID = UUID()
                 loading = false
-                snapshot = nil
+                store.clearWork()
                 error = nil
             }
         }
@@ -445,10 +470,8 @@ private struct WatchActivityView: View {
             if let route { message["sourceID"] = route.sourceID }
             let result = try await store.workMessage(message)
             guard !Task.isCancelled, refreshID == id, scenePhase == .active,
-                  let data = result["data"] as? Data else { return }
-            let value = try JSONDecoder().decode(WatchWorkSnapshot.self, from: data)
+                  result["data"] is Data, let value = store.workSnapshot else { return }
             cacheReadID = UUID()
-            snapshot = value
             error = nil
             if let launch, consumedLaunchID != launch.id {
                 consumedLaunchID = launch.id
@@ -466,8 +489,7 @@ private struct WatchActivityView: View {
         do {
             let result = try await store.workMessage(["operation": "cachedTasks"])
             guard !Task.isCancelled, cacheReadID == id, scenePhase == .active,
-                  let data = result["data"] as? Data else { return }
-            snapshot = try JSONDecoder().decode(WatchWorkSnapshot.self, from: data)
+                  result["data"] is Data else { return }
             error = nil
         } catch {
             // The explicit refresh reports transport failures. A change hint
@@ -480,10 +502,12 @@ private struct WatchTaskView: View {
     @ObservedObject var store: WatchAllowanceStore
     let task: WatchWorkTask
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismiss) private var dismiss
     @State private var prompt: WatchWorkPrompt?
     @State private var deadline: TimeInterval = 0
     @State private var selected: Set<Int> = []
     @State private var text = ""
+    @State private var writing = false
     @State private var submission: InputSubmission?
     @State private var sending = false
     @State private var submitted = false
@@ -493,33 +517,39 @@ private struct WatchTaskView: View {
     @State private var rejected = false
     @State private var epoch = UUID()
 
+    private var canSendAnswer: Bool {
+        guard submission == nil, !sending, !rejected, let prompt, prompt.supportsWatchAnswer,
+              prompt.request.kind == "question", let question = prompt.request.questions.first,
+              ProcessInfo.processInfo.systemUptime < deadline else { return false }
+        return InputAnswer(selected: selected.sorted(), text: text).valid(for: question)
+    }
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(task.computer).font(.caption).foregroundStyle(.secondary)
-                    Text(task.title).font(.headline).fixedSize(horizontal: false, vertical: true)
-                    if submitted {
-                        Label("Response sent", systemImage: "checkmark.circle")
-                        Text(submission?.action == "release" ? "Continue on your computer." : "Waiting for the agent’s next update.").font(.body)
-                    } else if rejected {
-                        Text("Check the session on your computer.")
-                    } else if let prompt {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let prompt, !submitted, !rejected {
                         if ProcessInfo.processInfo.systemUptime >= deadline {
                             Text(unconfirmed ? "Delivery is unconfirmed. Check the session on your computer."
                                 : "This request expired. Check the session on your computer.")
                         } else {
-                            requestContent(prompt)
-                                .disabled(sending || submission != nil)
+                            requestContent(prompt).disabled(sending || submission != nil)
                             if unconfirmed {
                                 Text("Delivery is unconfirmed. Retry the same response or check your computer.")
                                 Button("Retry response") { Task { await send() } }.disabled(sending)
                             }
                         }
                     } else {
-                        Text(task.historical(at: Date()) ? "Last known: \(task.status)" : task.status)
-                        if sending { ProgressView() }
+                        Text(task.title).font(.headline).fixedSize(horizontal: false, vertical: true)
+                        if submitted {
+                            Label("Response sent", systemImage: "checkmark.circle")
+                        } else if rejected {
+                            Text("Check the session on your computer.")
+                        } else {
+                            Text(task.historical(at: Date()) ? "Last known: \(task.status)" : task.status)
+                        }
                     }
+                    if sending { ProgressView(submission == nil ? "Loading request" : "Sending response") }
                     if let error { Text(error).font(.body) }
                     if prompt == nil, error != nil, !submitted, !rejected,
                        task.state == "needs_input", !task.historical(at: Date()) {
@@ -527,10 +557,12 @@ private struct WatchTaskView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 10).padding(.bottom, 8)
             }
+
         }
-        .navigationTitle("Session")
+        .navigationTitle(prompt?.request.kind == "question" ? "Question" : prompt?.request.kind == "approval" ? "Approval" : "Session")
+        .toolbarTitleDisplayMode(.inline)
         .task { await load() }
         .onChange(of: store.phoneReachable) { _, reachable in
             if reachable, prompt == nil, !submitted, scenePhase == .active {
@@ -540,6 +572,7 @@ private struct WatchTaskView: View {
                 prompt = nil
                 selected = []
                 text = ""
+                writing = false
                 error = "Reconnect to your iPhone to respond."
             }
         }
@@ -550,6 +583,7 @@ private struct WatchTaskView: View {
                 submission = nil
                 selected = []
                 text = ""
+                writing = false
                 error = nil
                 confirmAllow = false
             } else if value == .active, prompt == nil, !submitted, !sending {
@@ -563,40 +597,92 @@ private struct WatchTaskView: View {
 
     @ViewBuilder private func requestContent(_ prompt: WatchWorkPrompt) -> some View {
         let request = prompt.request
-        if !["Question", "Question for you"].contains(request.title) {
-            Text(request.title).font(.headline)
-        }
-        if !request.detail.isEmpty {
-            Text(request.detail).font(.body).fixedSize(horizontal: false, vertical: true)
-        }
-        if !prompt.supportsWatchAnswer {
-            Text("Review these questions in Paceman on iPhone.")
-        } else if request.kind == "approval" {
-            Button("Allow once") { confirmAllow = true }.buttonStyle(.borderedProminent)
-            Button("Deny", role: .destructive) { respond("deny") }
+        if request.kind == "approval" {
+            approvalContent(request)
+            Button("Allow once") { confirmAllow = true }.buttonStyle(.borderedProminent).foregroundStyle(.black)
+            Button("Decline", role: .destructive) { respond("deny") }
+        } else if !prompt.supportsWatchAnswer {
+            Text("Answer these questions in Paceman on iPhone.")
         } else if let question = request.questions.first {
-            Text(question.prompt).font(.body)
-            ForEach(question.options.indices, id: \.self) { index in
-                let option = question.options[index]
-                Button {
-                    if selected.contains(index) { selected.remove(index) }
-                    else if question.multiple { selected.insert(index) }
-                    else { selected = [index] }
-                    text = ""
-                } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Label(option.label, systemImage: selected.contains(index) ? "checkmark.circle.fill" : "circle")
-                        if !option.description.isEmpty { Text(option.description).font(.caption) }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+            Text(question.prompt).font(.headline).fixedSize(horizontal: false, vertical: true)
+            if !request.detail.isEmpty, request.detail != question.prompt {
+                Text(request.detail).font(.body).fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(spacing: 8) {
+                ForEach(question.options.indices, id: \.self) { index in
+                    let option = question.options[index]
+                    let chosen = selected.contains(index)
+                    Button {
+                        if chosen { selected.remove(index) }
+                        else if question.multiple { selected.insert(index) }
+                        else { selected = [index] }
+                        text = ""
+                        writing = false
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: question.multiple ? (chosen ? "checkmark.square.fill" : "square")
+                                : (chosen ? "largecircle.fill.circle" : "circle"))
+                                .foregroundStyle(chosen ? WatchPalette.tint : .secondary)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(option.label).font(.body)
+                                if !option.description.isEmpty {
+                                    Text(option.description).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(10).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .background(chosen ? WatchPalette.tint.opacity(0.16) : Color.primary.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: 12))
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(chosen ? .isSelected : [])
                 }
             }
-            TextField("Your answer", text: $text)
-                .onChange(of: text) { _, value in if !value.isEmpty { selected = [] } }
-            Button("Send answer") { respond("answer") }
-                .buttonStyle(.borderedProminent)
-                .disabled(!InputAnswer(selected: selected.sorted(), text: text).valid(for: question))
+            if question.options.isEmpty || writing {
+                TextField("Your answer", text: $text)
+                    .onChange(of: text) { _, value in if !value.isEmpty { selected = [] } }
+            } else {
+                Button("Write an answer") { writing = true; selected = [] }
+                    .buttonStyle(.plain).font(.body)
+            }
+            if canSendAnswer {
+                Button("Send answer") { respond("answer") }
+                    .buttonStyle(.borderedProminent).foregroundStyle(.black)
+            }
         }
-        Button("Continue on computer") { respond("release") }
+    }
+
+    @ViewBuilder private func approvalContent(_ request: InputRequest) -> some View {
+        let content = ApprovalDetailContent(request.detail)
+        let action = content.action.map(ApprovalActionContent.init)
+        Text(action?.title(request.title) ?? request.title).font(.headline)
+        if !content.explanation.isEmpty { Text(content.explanation).font(.body) }
+        if let action {
+            if let reason = action.explanation, reason != content.explanation { Text(reason).font(.body) }
+            if !action.body.isEmpty { approvalCode(action.body) }
+            if let arguments = action.otherArguments {
+                Text("Other arguments").font(.headline)
+                approvalCode(arguments)
+            }
+            if let tool = action.tool, action.kind == .tool, request.title != "Allow \(tool)?" {
+                Text("Tool: " + tool).font(.caption).foregroundStyle(.secondary)
+            }
+            if let directory = action.directory {
+                Text(directory).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityLabel("Working directory: " + directory)
+            }
+        }
+    }
+
+    private func approvalCode(_ value: String) -> some View {
+        Text(value).font(.system(.body, design: .monospaced))
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 
     @MainActor private func load() async {
@@ -648,6 +734,7 @@ private struct WatchTaskView: View {
             submitted = result["submitted"] as? Bool == true
             unconfirmed = !submitted
             error = nil
+            if submitted { dismiss() }
         } catch {
             guard scenePhase != .background, expectedEpoch == epoch else { return }
             if case WatchWorkError.rejected = error { rejected = true; unconfirmed = false }
@@ -662,7 +749,8 @@ private enum WatchWorkPreview {
     static var scenario: String? {
         ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--work-preview=") }.map { String($0.dropFirst(15)) }
     }
-    static let detailScenarios = ["approval", "question", "multiple", "long-question", "expired-request", "unconfirmed"]
+    static let detailScenarios = ["approval", "approval-json", "approval-unknown", "question", "multiple", "long-question", "long-option", "expired-request", "unconfirmed"]
+    static var responseSent = false
     static var task: WatchWorkTask {
         WatchWorkTask(sourceID: "preview", sessionID: "task", provider: "codex", title: "Simplify onboarding",
             computer: "MacBook Pro", state: "needs_input", freshUntil: Date().timeIntervalSince1970 + 300)
@@ -681,6 +769,10 @@ private enum WatchWorkPreview {
                     freshUntil: now + (scenario == "stale" ? -600 : 300))
             }
             var values = scenario == "stale" ? tasks.dropFirst().map { $0 } : tasks
+            if responseSent, !values.isEmpty {
+                values[0].presentationStatus = "Working"
+                values[0].presentationGroup = "Working"
+            }
             if scenario == "ambiguous" {
                 values.append(WatchWorkTask(sourceID: "preview", sessionID: "another", provider: "claude",
                     title: "Review notification wording", computer: "MacBook Pro", state: "needs_input", freshUntil: now + 300))
@@ -694,16 +786,24 @@ private enum WatchWorkPreview {
             return try encoded(WatchWorkSnapshot(tasks: values, computers: sources.count,
                 unavailable: scenario == "stale" ? 2 : 0, sources: sources))
         }
-        if payload["operation"] as? String == "submit" { return scenario == "unconfirmed" ? ["unconfirmed": true] : ["submitted": true] }
+        if payload["operation"] as? String == "submit" {
+            if scenario == "unconfirmed" { return ["unconfirmed": true] }
+            responseSent = true
+            var reply: [String: Any] = ["submitted": true]
+            reply["workSnapshot"] = try self.reply(["operation": "cachedTasks"])?["data"]
+            return reply
+        }
         let question = InteractionQuestion(id: "q0", prompt: scenario == "long-question"
             ? "When should we ask people to enable notifications, so they understand the benefit before granting access?"
             : "When should we ask for notifications?", multiple: false,
-            options: [.init(label: "After the first result", description: "Let people try Paceman first."),
+            options: [.init(label: scenario == "long-option" ? "Homepage https://paceman.ai opens on the hero with the tagline and TestFlight button" : "After the first result", description: scenario == "long-option" ? "" : "Let people try Paceman first."),
                       .init(label: "During setup", description: "Ready for the first task.")])
-        let approval = ["approval", "live-approval"].contains(scenario)
+        let approval = scenario.hasPrefix("approval") || scenario == "live-approval"
         let request = InputRequest(requestID: "preview", version: 1, provider: "codex", sessionID: "task",
             kind: approval ? "approval" : "question", title: approval ? "Run the tests?" : "Question for you",
-            detail: approval ? "Tool: Bash\nWorking directory: /Projects/Paceman\nCommand: swift test" : "",
+            detail: scenario == "approval-json" ? "Tool: Bash\nWorking directory: /Projects/Paceman\n\n{\"command\":\"swift test --filter WatchWorkTests\",\"description\":\"Verify the Watch response flow.\",\"timeout\":120000}"
+                : scenario == "approval-unknown" ? "Tool: mcp__review__inspect\n\n{\"description\":\"Keep this exact tool input.\",\"mode\":\"review\"}"
+                : approval ? "Tool: Bash\nWorking directory: /Projects/Paceman\nCommand: swift test" : "",
             questions: approval ? [] : scenario == "multiple" ? [question, .init(id: "q1", prompt: "Which screens?", multiple: true, options: [])] : [question], remainingSeconds: 120)
         return try encoded(WatchWorkPrompt(generation: "preview", request: request, remainingSeconds: scenario == "expired-request" ? -1 : 120))
     }

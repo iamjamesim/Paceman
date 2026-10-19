@@ -1509,6 +1509,16 @@ extension InteractionTests {
         XCTAssertEqual(watch.status, "Working")
         XCTAssertEqual(watch.group(at: Date()), try phone().group.rawValue)
         XCTAssertEqual(watch.state, "needs_input", "Native routing still checks the exact observed state")
+        let receiptList = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(sent["workSnapshot"] as? Data))
+        XCTAssertEqual(receiptList.tasks.first?.group(at: Date()), "Working", "The acknowledgement carries the phone's new list without another source read")
+        let snapshot = try XCTUnwrap(model.snapshots[sourceID])
+        let duringConnectionGap = WorkCatalog.item(session: try XCTUnwrap(snapshot.sessions?.first), source: source,
+            model: model, inbox: model.interactions, computer: "Test", connected: false, current: true)
+        XCTAssertEqual(duringConnectionGap.group, .working, "A short connection lease cannot undo an accepted answer")
+        let historical = WorkCatalog.item(session: try XCTUnwrap(snapshot.sessions?.first), source: source,
+            model: model, inbox: model.interactions, computer: "Test", connected: false, current: false)
+        XCTAssertEqual(historical.group, .lastKnown)
+
         let historicalDate = Date(timeIntervalSince1970: watch.freshUntil + 1)
         XCTAssertEqual(watch.group(at: historicalDate), "Last known")
         XCTAssertEqual(watch.status(at: historicalDate), "Needs attention", "History describes the source observation, not a stale receipt")

@@ -89,6 +89,30 @@ struct WatchWorkSnapshot: Codable, Equatable {
     let computers: Int
     let unavailable: Int
     var sources: [WatchWorkSource]? = nil
+    var projectionGeneration: String? = nil
+    var projectionRevision: UInt64? = nil
+}
+
+/// Interactive replies can cross in flight. A delayed pre-answer list must
+/// never undo the phone's newer response presentation. This cache stays in RAM.
+struct WatchWorkCache {
+    private(set) var snapshot: WatchWorkSnapshot?
+    private var retiredGenerations: Set<String> = []
+
+    @discardableResult mutating func accept(_ value: WatchWorkSnapshot) -> Bool {
+        if let generation = value.projectionGeneration {
+            guard !retiredGenerations.contains(generation) else { return false }
+            if let current = snapshot, let previous = current.projectionGeneration {
+                if generation == previous {
+                    guard value.projectionRevision ?? 0 >= current.projectionRevision ?? 0 else { return false }
+                } else { retiredGenerations.insert(previous) }
+            }
+        } else if snapshot?.projectionGeneration != nil { return false }
+        snapshot = value
+        return true
+    }
+
+    mutating func clear() { snapshot = nil; retiredGenerations.removeAll() }
 }
 
 struct WatchWorkSource: Codable, Equatable {

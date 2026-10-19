@@ -21,6 +21,12 @@ struct AgentCompanionApp: App {
         WindowGroup {
             CompanionRoot(model: model, presentation: presentation)
                 .onChange(of: phase, initial: true) { _, value in
+                    #if DEBUG
+                    if presentation.preview, value == .active,
+                       ProcessInfo.processInfo.arguments.contains("--watch-live-review") {
+                        Task { await model.monitoring.reviewWatchLaunch() }
+                    }
+                    #endif
                     guard !presentation.preview else { return }
                     model.setForeground(value == .active)
                     if value == .active { Task { await PushCoordinator.shared.sync() } }

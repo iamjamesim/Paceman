@@ -55,6 +55,9 @@ per-computer fetch owner, with a five-second recency gate and demand-driven fail
 delays capped at one minute; it creates no background polling loop. Live change
 hints read only the phone cache. Requests and accepted responses affect both
 presentations; newer requests and source state changes retire earlier overlays.
+An accepted answer remains Working within the activity lease even if the shorter
+connection lease expires. Its acknowledgement updates the Watch's RAM-only list;
+older interactive replies cannot restore the previous Needs you presentation.
 
 - A source with no snapshot says `No activity received yet`; expired activity
   appears as `Last known:`.

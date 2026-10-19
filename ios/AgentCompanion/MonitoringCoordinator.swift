@@ -518,3 +518,26 @@ enum LiveActivityPreferences {
         defaults.removeObject(forKey: key(sourceID))
     }
 }
+
+#if DEBUG
+extension MonitoringCoordinator {
+    /// Local ActivityKit fixture for testing the native Smart Stack tap, including
+    /// app association. It never registers APNs or touches a paired source.
+    func reviewWatchLaunch() async {
+        for activity in Activity<MonitoringActivity>.activities where activity.attributes.sourceID == "preview" {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
+        guard !ProcessInfo.processInfo.arguments.contains("--end-watch-live-review") else { return }
+        let now = Date().timeIntervalSince1970
+        let state = MonitoringActivity.ContentState(generation: "preview", revision: 7, state: "needs_input",
+            working: 0, needsInput: 1, finished: 0, observedAt: now, freshUntil: now + 300,
+            providers: ["codex"])
+        do {
+            _ = try Activity<MonitoringActivity>.request(
+                attributes: MonitoringActivity(sourceID: "preview", sourceName: "Watch launch review"),
+                content: ActivityContent(state: state, staleDate: Date(timeIntervalSince1970: state.freshUntil)))
+            Diagnostics.shared.record("watch_launch_review_started")
+        } catch { Diagnostics.shared.recordError("watch_launch_review_failed", error: error) }
+    }
+}
+#endif

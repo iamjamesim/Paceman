@@ -62,6 +62,9 @@ final class CompanionModel: ObservableObject {
     private var watchRequests: [String: PendingInput] = [:]
     private var watchSubmissions: [String: InputSubmission] = [:]
     private var watchConfirmed: Set<String> = []
+    private let workProjectionGeneration = UUID().uuidString
+    private var workProjectionRevision: UInt64 = 0
+    private var previousWorkProjection: WatchWorkSnapshot?
     private var watchTracking: [String: (generation: String, state: ActivityState?, active: Bool)] = [:]
 
     init(preview: Bool = false, push: PushCoordinator? = nil, client: SourceClient = SourceClient(),
@@ -727,6 +730,9 @@ final class CompanionModel: ObservableObject {
     }
 
     private func scheduleMonitoringRefresh() {
+        // Preview models exercise source transport without registering real Live
+        // Activities or sending their fixtures to the notification service.
+        guard !designPreview else { return }
         monitoringRefreshPending = true
         guard monitoringRefresh == nil else { return }
         monitoringRefresh = Task { [weak self] in
@@ -857,7 +863,7 @@ extension CompanionModel {
                     presentationGroup: item.phase.group.rawValue)
             }
         }
-        return WatchWorkSnapshot(tasks: Array(values.prefix(128)), computers: sources.count,
+        var result = WatchWorkSnapshot(tasks: Array(values.prefix(128)), computers: sources.count,
             unavailable: sources.filter { !snapshotIsFresh($0.sourceID) || errors[$0.sourceID] != nil }.count,
             sources: sources.map { source in
                 let snapshot = snapshots[source.sourceID]
@@ -869,6 +875,13 @@ extension CompanionModel {
                         Dictionary(grouping: sessions, by: { $0.state.rawValue }).mapValues(\.count)
                     })
             })
+        if previousWorkProjection != result {
+            previousWorkProjection = result
+            workProjectionRevision &+= 1
+        }
+        result.projectionGeneration = workProjectionGeneration
+        result.projectionRevision = workProjectionRevision
+        return result
     }
 
     private var storedHandoff: PendingWatchHandoff? {
@@ -1101,7 +1114,9 @@ extension CompanionModel {
                     }
                     watchConfirmed.insert(item.id)
                     publishWatchWork()
-                    return ["submitted": true]
+                    var reply: [String: Any] = ["submitted": true]
+                    if let data = encoded(watchWorkSnapshot())["data"] as? Data { reply["workSnapshot"] = data }
+                    return reply
                 } catch {
                     if case HubError.http(let status) = error, [400, 401, 404, 409, 410, 422].contains(status) {
                         if interactions.lifecycleID == inboxLifecycle {

@@ -59,6 +59,29 @@ import Foundation
         }
         try await activation.wait(activated: false, timeout: .seconds(1))
         try await recovery.value
+        // The list read before an answer can arrive after its acknowledgement.
+        var cache = WatchWorkCache()
+        let pending = WatchWorkTask(sourceID: "mac", sessionID: "task", provider: "codex", title: "Task",
+            computer: "Mac", state: "needs_input", freshUntil: Date().timeIntervalSince1970 + 300,
+            presentationStatus: "Question for you", presentationGroup: "Needs you")
+        var sent = pending
+        sent.presentationStatus = "Working"
+        sent.presentationGroup = "Working"
+        let before = WatchWorkSnapshot(tasks: [pending], computers: 1, unavailable: 0,
+            projectionGeneration: "phone", projectionRevision: 1)
+        let after = WatchWorkSnapshot(tasks: [sent], computers: 1, unavailable: 0,
+            projectionGeneration: "phone", projectionRevision: 2)
+        precondition(cache.accept(before))
+        precondition(cache.accept(after))
+        precondition(!cache.accept(before))
+        precondition(cache.snapshot?.tasks.first?.group(at: Date()) == "Working")
+        var restarted = before
+        restarted.projectionGeneration = "restarted-phone"
+        precondition(cache.accept(restarted))
+        precondition(!cache.accept(after), "Old process replies cannot undo a new phone projection")
+        cache.clear()
+        precondition(cache.snapshot == nil)
+        precondition(cache.accept(before), "Background clearing resets the RAM-only cache")
         print("watch work transitions passed")
     }
 }

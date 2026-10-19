@@ -265,6 +265,10 @@ session metadata, `request` selects an exact `sourceID`/`provider`/`sessionID`, 
 `submit` carries the existing `InputSubmission` as JSON `Data`. Replies carry
 JSON `data`, a confirmed `submitted: true`, `unconfirmed: true`, or a user-facing
 `error`. A reopened request can carry its original `submission` and receipt.
+Confirmed submissions may also include `workSnapshot` JSON `Data`, using the
+same phone-derived list as task reads. Optional `projectionGeneration` and
+`projectionRevision` order these list replies, including request/receipt changes
+within one source revision; a delayed pre-answer reply cannot undo a newer list.
 This content is never placed in application context or queued transfers.
 Session replies optionally include paired `sources` with display name, generation,
 revision, and complete `stateCounts`. Watch launch routing uses these counts and
