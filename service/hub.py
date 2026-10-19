@@ -400,7 +400,14 @@ class Store:
     def tick(self, now: float | None = None):
         now = time.time() if now is None else now
         with self.connect() as db:
+            # Live sources have no synthetic schedule to advance. Their reads
+            # must not compete with hook and push writers for a write lock.
+            mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
+            if mode and mode[0] != "synthetic":
+                return
             db.execute("BEGIN IMMEDIATE")
+            # Setup can switch sources after the initial read. Recheck under
+            # the transaction before firing any synthetic events.
             mode = db.execute("SELECT value FROM metadata WHERE key='mode'").fetchone()
             if mode and mode[0] != "synthetic":
                 return
@@ -438,22 +445,93 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, address, store: Store, adapter=None, desktop_status=None,
-                 relay_url=None, relay_credential_hash=None):
+                 relay_url=None, relay_credential_hash=None, interactions=None, diagnostics=None):
         self.store = store
         self.adapter = adapter
         self.desktop_status = desktop_status
         self.relay_url = relay_url
         self.relay_credential_hash = relay_credential_hash
+        self.interaction_lock = threading.RLock()
+        self.interactions = interactions
+        self.diagnostics = diagnostics
+        self.interaction_access = self.interaction_access_state()
         self.started = time.monotonic()
         self.pair_attempts: list[float] = []
         self.pair_lock = threading.Lock()
+        self._maintenance_wake = threading.Event()
+        self._maintenance_stop = threading.Event()
+        self._maintenance_error = None
         super().__init__(address, Handler)
 
+    def serve_forever(self, poll_interval=0.5):
+        self._maintenance_stop.clear()
+        self._maintenance_wake.clear()
+        self._maintenance_error = None
+        worker = threading.Thread(target=self._maintain, daemon=True)
+        worker.start()
+        try:
+            super().serve_forever(poll_interval=poll_interval)
+        finally:
+            self._maintenance_stop.set()
+            self._maintenance_wake.set()
+            worker.join()
+
+    def _maintain(self):
+        while True:
+            self._maintenance_wake.wait()
+            self._maintenance_wake.clear()
+            if self._maintenance_stop.is_set():
+                return
+            try:
+                self._run_maintenance()
+            except Exception as error:
+                self._maintenance_error = error
+                return
+
+    def interaction_access_state(self):
+        with self.store.connect() as db:
+            clients = tuple(row[0] for row in db.execute("SELECT hash FROM clients ORDER BY hash"))
+        providers = tuple(getattr(self.adapter, "providers", ("codex", "claude")))
+        return clients, providers
+
+    def check_interaction_access(self):
+        if self.interactions is None:
+            return
+        with self.interaction_lock:
+            state = self.interaction_access_state()
+            if state != self.interaction_access:
+                self.interactions.cancel_all()
+                self.interaction_access = state
+
+    def submit_interaction(self, token, payload):
+        from service.interactions import BrokerError
+        # Serialize authorization and consumption against revocation, including
+        # revocation from the desktop's separate process. No network IO in this lock.
+        with self.interaction_lock, self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            clients = tuple(row[0] for row in db.execute("SELECT hash FROM clients ORDER BY hash"))
+            state = clients, tuple(getattr(self.adapter, "providers", ("codex", "claude")))
+            if state != self.interaction_access:
+                self.interactions.cancel_all()
+                self.interaction_access = state
+            if digest(token) not in clients:
+                raise BrokerError("unauthorized", 401)
+            return self.interactions.submit(payload)
+
     def service_actions(self):
+        # The accept loop must not wait for adapter/database/status-file locks.
+        # One owned worker coalesces maintenance ticks instead of accumulating
+        # jobs or threads when a hook or another writer is slow.
+        if self._maintenance_error is not None:
+            raise self._maintenance_error
+        self._maintenance_wake.set()
+
+    def _run_maintenance(self):
         # Scheduled events occur without a client request, essential for lock tests.
         self.store.tick()
         if self.adapter is not None:
             self.adapter.tick()
+        self.check_interaction_access()
         if self.desktop_status is not None:
             self.desktop_status.publish(self.adapter)
 
@@ -464,24 +542,46 @@ class Handler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
         self.connection.settimeout(5)
+        self._trace_started = time.monotonic()
 
     def log_message(self, *_):
         # Request bodies, URLs, credentials, and invitation values never logged.
         pass
 
+    def _begin_trace(self):
+        self._trace_started = time.monotonic()
+        self._record_http("http_received")
+
+    def _record_http(self, stage, **fields):
+        operation = {"/v1/snapshot": "snapshot", "/v1/interactions":
+                     "submit" if self.command == "POST" else "requests"}.get(self.path)
+        if self.server.diagnostics is not None and operation is not None:
+            self.server.diagnostics.record(stage, operation=operation,
+                traceID=self.headers.get("X-Paceman-Trace-ID"),
+                durationMs=int((time.monotonic() - self._trace_started) * 1000), **fields)
+
     def reply(self, status: int, payload: dict):
         data = json.dumps(payload, separators=(",", ":")).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            self._record_http("http_disconnected", httpStatus=status)
+            raise
+        fields = {"httpStatus": status}
+        if self.path == "/v1/interactions" and self.command == "GET" and isinstance(payload.get("requests"), list):
+            fields["pendingCount"] = len(payload["requests"])
+        self._record_http("http_replied", **fields)
 
     def do_GET(self):
-        if self.path not in ("/v1/snapshot", "/v1/push"):
+        self._begin_trace()
+        if self.path not in ("/v1/snapshot", "/v1/push", "/v1/interactions"):
             self.reply(404, {"error": "not_found"})
             return
         prefix, _, token = self.headers.get("Authorization", "").partition(" ")
@@ -489,16 +589,48 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(401, {"error": "unauthorized"})
             return
         if self.path == "/v1/snapshot":
-            self.reply(200, self.server.store.snapshot())
+            snapshot = self.server.store.snapshot()
+            if self.server.interactions is not None:
+                snapshot["interactionsEnabled"] = True
+            self.reply(200, snapshot)
             self.server.store.client_fetched(token)
             if self.server.desktop_status is not None:
                 self.server.desktop_status.phone_fetched()
+            return
+        if self.path == "/v1/interactions":
+            if self.server.interactions is None:
+                self.reply(404, {"error": "not_found"})
+            else:
+                self.server.check_interaction_access()
+                self.reply(200, {"sourceID": self.server.store.metadata("source_id"),
+                                 **self.server.interactions.pending()})
             return
         if self.path == "/v1/push":
             value = self.server.store.push_device(token)
             self.reply(200 if value else 401, value or {"error": "unauthorized"})
             return
     def do_POST(self):
+        self._begin_trace()
+        if self.path == "/v1/interactions":
+            from service.interactions import BrokerError
+            prefix, _, token = self.headers.get("Authorization", "").partition(" ")
+            if prefix != "Bearer" or not self.server.store.authorized(token):
+                self.reply(401, {"error": "unauthorized"})
+                return
+            if self.server.interactions is None:
+                self.reply(404, {"error": "not_found"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 65536 or self.headers.get("Transfer-Encoding"):
+                    raise ValueError()
+                payload = json.loads(self.rfile.read(length))
+                self.reply(200, self.server.submit_interaction(token, payload))
+            except BrokerError as error:
+                self.reply(error.status, {"error": error.code})
+            except (ValueError, TypeError, AttributeError, TimeoutError, RecursionError):
+                self.reply(400, {"error": "invalid_request"})
+            return
         if self.path in ("/v1/push", "/v1/live-activity", "/v1/watch-push"):
             prefix, _, token = self.headers.get("Authorization", "").partition(" ")
             if prefix != "Bearer" or not self.server.store.authorized(token):
@@ -558,6 +690,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/v1/client":
             prefix, _, token = self.headers.get("Authorization", "").partition(" ")
             revoked = self.server.store.revoke_self(token) if prefix == "Bearer" else False
+            self.server.check_interaction_access()
             self.reply(200 if revoked else 401, {"revoked": True} if revoked else {"error": "unauthorized"})
             return
         if self.path != "/v1/push":
@@ -575,6 +708,8 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("serve")
     run.add_argument("--port", type=int, default=8765)
+    run.add_argument("--interaction-socket", type=Path,
+                     help="Private response hook socket (automatic for Mac sources)")
     run.add_argument("--source", choices=("synthetic", "omarchy", "macos"), default="synthetic")
     run.add_argument("--status-file", type=Path, help="Private desktop status JSON (optional)")
     run.add_argument("--relay-config", type=Path, help="Installed relay config, when notifications use a relay")
@@ -597,6 +732,8 @@ def main():
     sub.add_parser("events")
     sub.add_parser("cancel-schedule")
     args = parser.parse_args()
+    if args.command == "serve" and args.source == "macos" and args.interaction_socket is None:
+        args.interaction_socket = args.data_dir.parent / "interaction.sock"
     store = Store(args.data_dir / "hub.sqlite3")
     if args.command == "serve":
         from contextlib import ExitStack
@@ -618,6 +755,11 @@ def main():
             server = stack.enter_context(Server(("127.0.0.1", args.port), store,
                                                 relay_url=relay_url,
                                                 relay_credential_hash=relay_credential_hash))
+            from service.diagnostics import DeliveryDiagnostics
+            # Keep source and hook events together on the Mac. Other sources
+            # retain their own private data directory.
+            diagnostic_root = args.data_dir.parent if args.source == "macos" else args.data_dir
+            server.diagnostics = DeliveryDiagnostics(diagnostic_root / "delivery-diagnostics.jsonl")
             if args.source == "omarchy":
                 from service.omarchy import OmarchySource
                 from omarchy.agents import configured_providers
@@ -649,6 +791,14 @@ def main():
                 server.desktop_status = DesktopStatus(args.status_file, store)
                 server.desktop_status.publish(server.adapter, force=True)
                 stack.callback(server.desktop_status.publish, server.adapter, stopped=True, force=True)
+            if args.interaction_socket:
+                from service.interactions import InteractionBroker, ResponseListener
+                server.interactions = InteractionBroker(provider_enabled=lambda provider:
+                    provider in getattr(server.adapter, "providers", ("codex", "claude")),
+                    diagnostics=server.diagnostics)
+                server.interaction_access = server.interaction_access_state()
+                stack.callback(server.interactions.close)
+                stack.enter_context(ResponseListener(server.interactions, args.interaction_socket))
             print(f"{args.source.title()} source listening on 127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever(poll_interval=0.25)

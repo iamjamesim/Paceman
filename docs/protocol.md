@@ -472,3 +472,25 @@ Implementations: [source API](../service/hub.py),
 [iPhone watch link](../ios/AgentCompanion/WatchLink.swift),
 [ESP32 ANCS client](../firmware/esp32-watch/firmware/main/watch_ancs.c), and
 [Pebble accessory service](../firmware/pebble-time-2/src/paceman_service.c).
+
+## Pending interactions
+
+Snapshot `interactionsEnabled: true` advertises these endpoints; sources that omit
+it provide activity only. Both endpoints use the paired bearer credential.
+
+- `GET /v1/interactions`: returns `sourceID`, broker `generation`, and `requests`.
+  Requests contain `requestID`, `version: 1`, provider, canonical hashed `sessionID`,
+  kind (`approval` or `question`), title, detail, questions, and monotonic
+  `remainingSeconds`. Questions contain `id`, `prompt`, `multiple`, and `options`
+  with label/description. Request IDs identify hook invocations, not tools or titles.
+- `POST /v1/interactions`: supplies generation, requestID, version, idempotencyKey,
+  and action (`allowOnce`, `deny`, `answer`, `release`). Answers map question IDs to
+  `{selected: [option indices], text}`. First valid response wins; identical retries
+  return the same `submitted` receipt. Stale requests or conflicting retries return
+  409. A receipt confirms submission, not agent consumption. Release resumes native
+  handling without a decision. Access invalidation changes the broker generation.
+
+The separate private socket accepts newline JSON `{request, timeoutSeconds}` and
+returns one action/answers object. Limits: 64 KiB per request or HTTP submission,
+32 concurrent requests, four questions and 16 options per question. See
+[retention and expiry](data-lifecycle.md#questions-and-approvals).

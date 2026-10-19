@@ -67,14 +67,18 @@ def main():
         # returns before the answer, so its attention has a distinct lifecycle.
         if data.get("hook_event_name") == "PreToolUse":
             tool = data.get("tool_name")
-            event = ("question-opened" if tool == "request_user_input_async"
-                     else "needs-input" if tool == "request_user_input" else None)
+            event = "question-opened" if tool in ("request_user_input", "request_user_input_async") else None
+        if data.get("hook_event_name") == "PostToolUse" and data.get("tool_name") == "request_user_input":
+            event = "question-answered"
         session = data.get("session_id")
         turn = data.get("turn_id") or ""
         if event and isinstance(session, str):
             path = Path(os.environ.get("PACEMAN_HOOK_SOCKET", str(Path.home() / "Library/Application Support/Paceman/hook.sock")))
             message = {"command": "agent-event", "session": session, "turn": turn,
                        "event": event, "hook": data["hook_event_name"]}
+            tool_id = data.get("tool_use_id")
+            if isinstance(tool_id, str) and 0 < len(tool_id) <= 160:
+                message["toolID"] = tool_id
             if label := workspace_label(data.get("cwd")):
                 message["workspaceLabel"] = label
             deliver(message, path, data["hook_event_name"])

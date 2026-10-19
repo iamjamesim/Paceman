@@ -14,14 +14,18 @@ Prefer to build locally? Use [source setup](#build-and-install-from-source). Bot
 
 ## Review agent hooks
 
-Review each selected agent before checking phone delivery. Paceman shows the exact command for this installation in its setup window.
+Normal setup prepares activity, questions and approvals for each selected agent.
+Review both installed commands shown in Paceman. Activity sends task IDs, states
+and project labels. Questions send their text and choices; approvals send the
+tool name, arguments and working directory. Your answers and decisions return
+to the agent. Sharing pauses all of this.
 
 ### Codex
 
 Hooks let Codex send activity events to Paceman. Review them yourself before trusting them:
 
 1. In Codex, open **Settings → Hooks → User config (All projects)**.
-2. Expand **Hook 1** under each of the eight events listed in Paceman. Click **Trust** only if the command matches the one in Paceman’s setup window.
+2. Expand the Paceman rows, labelled **Hook 1**, under the eight events listed in Paceman. `PreToolUse` and `PermissionRequest` also have a response command. Review both against the commands in Paceman’s setup window before trusting them.
 3. Start a **new saved local Codex task** in the interface you use on this Mac and send a short prompt. Paceman should show **A new Codex event reached Paceman.** Wait for a successful reply and confirm Paceman shows the task as **Finished**.
 
 Keep Paceman’s hook-review window open while checking. If you use the Codex CLI, enter `/hooks` or select **Review hooks** at startup instead.
@@ -50,15 +54,16 @@ remains partial.
 
 The command shown in setup uses this installation’s Python runtime, the `-B` flag, and the hook script in your Mac user account. It is generated for your installation. Compare the full command in every Paceman row; don’t run it in a terminal or trust unrelated hooks.
 
-The hooks send event names, opaque task and turn IDs, and an optional short project label to Paceman’s private local socket. Claude hooks also send the Remote Control session ID when available, so the iPhone can open that chat. They don’t send prompts, replies, transcripts, tool arguments, or full paths. Project labels may appear on your iPhone Lock Screen. Separately, the source reads explicit provider title metadata for individual session rows on the phone and compatible Pebble firmware; it never substitutes prompt previews.
+Project labels may appear on your iPhone Lock Screen. Session titles come from provider metadata; see [data flow](../docs/architecture.md).
 
 </details>
 
 ### Claude Code
 
 Use Claude Code **2.1.196 or later**. Paceman adds twelve observer commands to
-`~/.claude/settings.json` (or the saved `CLAUDE_CONFIG_DIR`) and preserves unrelated
-hooks and settings. In the CLI, `/hooks` is a read-only list of loaded hooks. In
+`~/.claude/settings.json` (or the saved `CLAUDE_CONFIG_DIR`), plus response commands
+in `PreToolUse` and `PermissionRequest`, preserving unrelated hooks and settings.
+In the CLI, `/hooks` is a read-only list of loaded hooks. In
 VS Code, use **/ → Customize → Hooks** (Claude Code 2.1.269+); for local desktop Code sessions,
 inspect the same user settings. Hooks run after workspace trust; there is no
 separate acceptance step for each hook. See [Claude's hook reference](https://code.claude.com/docs/en/hooks#the-hooks-menu).
@@ -88,12 +93,8 @@ shown by your installation:
 | `StopFailure` | Show a failed main turn. |
 | `SessionEnd` | Remove a closed session. |
 
-The commands forward lifecycle names, opaque IDs, hashed tool/server names and an
-optional short project label to Paceman's private local socket. With Remote
-Control active on Claude Code 2.1.199+, they also send its remote session ID so
-the phone can open the specific session. They do not send
-prompts, replies, transcripts, tool arguments/results or full paths. They make no
-Claude approval decisions. Project labels may appear on your iPhone Lock Screen. Separately, the source reads explicit provider title metadata for individual session rows on the phone and compatible Pebble firmware; it never substitutes prompt previews.
+With Remote Control active on Claude Code 2.1.199+, activity also includes its
+remote session ID so the phone can open the specific session.
 
 Keep Paceman's review window open, start a **fresh local Claude session** in the
 interface you use, and submit a prompt. Verify `lastAgentEventByProvider.claude`
@@ -121,6 +122,11 @@ Apple Watch delivery](../docs/architecture.md#watches).
 4. On your iPhone, open **Paceman → Connect computer → Scan QR code to connect** and scan the code on your Mac. Paceman connects automatically and opens that computer.
 
 Codes expire after five minutes; choose **New code** if needed. Keep the pairing code private.
+
+Verify a question, approval and denial in each agent from the phone. Confirm the
+agent consumes the response; a submission receipt is insufficient. Keep Paceman
+open to answer within ten minutes. Timeout or hook disconnection returns to the
+agent without approving. Secret Codex questions stay in Codex.
 
 <details>
 <summary>Private Tailscale connection</summary>

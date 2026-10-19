@@ -34,9 +34,9 @@ def hook_path(provider, *, home=None, root=None):
             claude_config_dir(root, home=home) / 'settings.json')
 
 
-def installed_hook_command(provider, root):
+def installed_hook_command(provider, root, *, response=False):
     """Show the actual retained command, which may use an older interpreter."""
-    script = str(root / f"lib/macos/{provider}_hook.py")
+    script = str(root / ("lib/macos/interaction_hook.py" if response else f"lib/macos/{provider}_hook.py"))
     try:
         hooks = json.loads(hook_path(provider, root=root).read_text()).get('hooks', {})
         for groups in hooks.values():
@@ -46,8 +46,10 @@ def installed_hook_command(provider, root):
                         continue
                     command = item.get('command', '')
                     arguments = shlex.split(command)
-                    if (len(arguments) in (2, 3) and arguments[-1] == script
-                            and (len(arguments) == 2 or arguments[1] == '-B')):
+                    matches = (len(arguments) == 5 and arguments[1:] == ['-B', script, '--provider', provider]
+                        if response else len(arguments) in (2, 3) and arguments[-1] == script
+                        and (len(arguments) == 2 or arguments[1] == '-B'))
+                    if matches:
                         return command
     except (OSError, ValueError, TypeError, AttributeError):
         pass

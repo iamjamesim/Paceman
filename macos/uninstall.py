@@ -15,6 +15,7 @@ from service.push import revoke_relay_source
 from service.network import remove_owned_route
 
 from macos.agents import hook_path
+from macos.responses import owns_hook
 from macos.install import APP, LABEL, PLIST, PUSH_LABEL, PUSH_PLIST, ROOT
 
 HOOKS = Path.home() / ".codex/hooks.json"
@@ -43,7 +44,8 @@ def cleaned_hooks(path: Path | None = None, *, provider="codex"):
                     arguments = shlex.split(hook.get("command", "")) if isinstance(hook, dict) else []
                 except (TypeError, ValueError):
                     arguments = []
-                if len(arguments) in (2, 3) and arguments[-1] == script:
+                if (len(arguments) in (2, 3) and arguments[-1] == script
+                        or owns_hook(hook, ROOT, provider)):
                     changed = True
                 else:
                     kept.append(hook)

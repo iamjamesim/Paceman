@@ -64,7 +64,7 @@ struct ComputerDetail: View {
                 CompanionRule(theme: theme)
                 DeviceRemovalButton(title: removing ? "Removing…" : "Remove computer", theme: theme) { remove = true }
                     .disabled(removing || paired == nil).allowsHitTesting(!presentation.preview)
-            }.padding(.horizontal, 24).padding(.bottom, 32)
+            }.padding(.horizontal, CompanionLayout.pageInset).padding(.bottom, 32)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
             .alert("Display name", isPresented: $rename) {
@@ -190,7 +190,7 @@ struct AccessoriesScreen: View {
                 }
                 CompanionButton(title: "Connect accessory", theme: theme, action: connect)
                 Text("Experimental").font(.caption).foregroundStyle(theme.secondaryInk)
-            }.padding(.horizontal, 24).padding(.vertical, 24)
+            }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 24)
         }.foregroundStyle(theme.ink).background(theme.canvas)
             .navigationTitle("Accessories").navigationBarTitleDisplayMode(.inline)
     }
@@ -221,7 +221,7 @@ struct WatchIntroduction: View {
                     }.buttonStyle(.plain)
                     CompanionRule(theme: theme)
                 }
-            }.padding(.horizontal, 24).padding(.bottom, 32)
+            }.padding(.horizontal, CompanionLayout.pageInset).padding(.bottom, 32)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Connect accessory").navigationBarTitleDisplayMode(.inline)
     }
@@ -336,15 +336,15 @@ struct WatchDetail: View {
                 } else {
                     pairingGuide
                 }
-            }.padding(.horizontal, 24).padding(.bottom, 32)
+            }.padding(.horizontal, CompanionLayout.pageInset).padding(.bottom, 32)
         }.safeAreaInset(edge: .bottom) {
             if !paired {
                 pairingActions
-                    .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
+                    .padding(.horizontal, CompanionLayout.pageInset).padding(.top, 16).padding(.bottom, 12)
                     .background(theme.canvas)
             } else if justPaired || (preview && previewComplete) {
                 pairingCompletionActions
-                    .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
+                    .padding(.horizontal, CompanionLayout.pageInset).padding(.top, 16).padding(.bottom, 12)
                     .background(theme.canvas)
             }
         }.foregroundStyle(theme.ink).background(theme.canvas)
@@ -676,7 +676,7 @@ struct WatchUpdateTroubleshooting: View {
                     Text("Don’t swipe Paceman away from the app switcher.")
                 }.companionText(.body, theme: theme)
                     .padding(.top, 2)
-            }.padding(.horizontal, 24).padding(.vertical, 28)
+            }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 28)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Watch updates").navigationBarTitleDisplayMode(.inline)
             .task { if !preview { await push.sync() } }

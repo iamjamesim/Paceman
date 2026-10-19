@@ -1,6 +1,8 @@
 # Architecture
 
-Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, presents each computer separately, and forwards current activity to compatible Bluetooth accessories. Current activity monitoring does not transmit prompts, agent replies, or tool arguments.
+Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, groups tasks across computers by attention and activity, and forwards current activity to compatible Bluetooth accessories.
+
+Activity updates carry task identity and state, plus available titles, project labels and Codex usage. On Mac, questions send text and choices to the phone; approvals send the tool name, arguments and working directory. Answers and decisions return to the waiting agent hook. The phone does not request chat history; text inside a question or tool argument is included as supplied.
 
 Individual session rows include an optional provider title. Codex titles come from metadata-only App Server reads; Claude titles come from explicit local `custom-title` / `ai-title` records. Prompt previews are never used as titles. Titles travel over private HTTPS to the phone and, on compatible Pebble firmware, owner-authenticated BLE; APNs activity payloads stay aggregate.
 
@@ -54,3 +56,30 @@ WatchConnectivity also supplies the paired-computer list and cached readings.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
 are in [data lifecycle](data-lifecycle.md).
+
+## Questions and approvals
+
+Normal Mac [setup](../macos/README.md#review-agent-hooks) prepares the hooks for
+selected agents. Sharing pauses activity, questions and approvals.
+
+Claude supplies answers through `AskUserQuestion` input updates. Codex skips the
+blocking or async question tool and returns the answer as `PreToolUse` feedback.
+Secret Codex questions stay native. Waiting hooks delay the native prompt;
+release or timeout returns control without granting permission.
+See the [wire contract](protocol.md#pending-interactions) and
+[request lifecycle](data-lifecycle.md#questions-and-approvals).
+
+## iPhone Activity
+
+Tasks are keyed by source, provider, and session, never title. Activity owns tasks
+and responses; Devices owns connections, accessories, and Live Activities.
+Ordering is stable and phone-observed, not durable task chronology: answerable
+requests lead Needs you, Working follows state-entry order, and Recent is newest
+first. Review freezes its membership and order; new arrivals wait for the next
+Review. Each form stays pinned to its exact request. Confirmed responses dismiss
+or advance Review and use Working presentation without changing observed agent state.
+
+Live Activity taps open a unique task only when its source revision matches;
+otherwise they open source-filtered Activity. Opening the agent app releases any
+pending phone request. Detail timestamps describe the computer snapshot, not task
+progress. A completed turn does not establish a successful outcome.

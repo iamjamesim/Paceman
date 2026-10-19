@@ -57,13 +57,13 @@ struct WeatherSettings: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 24).padding(.top, 28)
+            .padding(.horizontal, CompanionLayout.pageInset).padding(.top, 28)
         }
         .foregroundStyle(theme.ink).background(theme.canvas)
         .safeAreaInset(edge: .bottom) {
             if !typeSize.isAccessibilitySize {
                 setupActions
-                    .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
+                    .padding(.horizontal, CompanionLayout.pageInset).padding(.top, 16).padding(.bottom, 12)
                     .background(theme.canvas)
             }
         }

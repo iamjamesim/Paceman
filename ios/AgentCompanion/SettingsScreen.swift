@@ -54,7 +54,7 @@ struct LiveActivitiesDetail: View {
                     .background(theme.ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 20))
                     .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(theme.ink.opacity(0.07), lineWidth: 0.5))
                 }
-            }.padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 32)
+            }.padding(.horizontal, CompanionLayout.pageInset).padding(.top, 24).padding(.bottom, 32)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Live Activities").navigationBarTitleDisplayMode(.inline)
     }

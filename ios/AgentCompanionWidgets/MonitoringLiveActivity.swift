@@ -9,7 +9,7 @@ struct MonitoringLiveActivity: Widget {
             MonitoringLockScreen(context: context)
                 .activityBackgroundTint(palette.background)
                 .activitySystemActionForegroundColor(palette.ink)
-                .widgetURL(computerURL(context.attributes.sourceID))
+                .widgetURL(LiveActivityRoute(sourceID: context.attributes.sourceID, state: context.state).url)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.bottom) {
@@ -48,18 +48,11 @@ struct MonitoringLiveActivity: Widget {
                     .frame(width: 18, height: 18)
                     .foregroundStyle(context.isStale ? palette.muted : PhoneMonitoringStatusColor.color(for: context.state.dominantState, onDark: true, fallback: palette.muted))
             }
-            .widgetURL(computerURL(context.attributes.sourceID))
+            .widgetURL(LiveActivityRoute(sourceID: context.attributes.sourceID, state: context.state).url)
         }
         .supplementalActivityFamilies([.small])
     }
 
-    private func computerURL(_ sourceID: String) -> URL? {
-        #if DEBUG
-        URL(string: "paceman-dev://computer/\(sourceID)")
-        #else
-        URL(string: "paceman://computer/\(sourceID)")
-        #endif
-    }
 }
 
 private struct MonitoringLockScreen: View {

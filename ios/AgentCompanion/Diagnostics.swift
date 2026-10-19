@@ -18,12 +18,15 @@ final class Diagnostics {
         url = current
     }
     func record(_ stage: String, event: String? = nil, state: ActivityState? = nil,
-                revision: UInt32? = nil, sequence: UInt32? = nil, contentAvailable: Bool? = nil) {
+                revision: UInt32? = nil, sequence: UInt32? = nil, contentAvailable: Bool? = nil,
+                sourceID: String? = nil, duration: TimeInterval? = nil) {
         // Fixed labels, state enums and counters only; never payload text,
         // credentials, URLs, or localized error descriptions.
         var entry: [String: Any] = ["at": Date().timeIntervalSince1970,
                                   "uptime": ProcessInfo.processInfo.systemUptime, "stage": stage]
         if let event { entry["eventFingerprint"] = fingerprint(event) }
+        if let sourceID { entry["sourceSupportID"] = fingerprint(sourceID) }
+        if let duration { entry["durationMs"] = Int(max(0, duration) * 1000) }
         if let state { entry["state"] = state.rawValue }
         if let revision { entry["watchRevision"] = revision }
         if let sequence { entry["notificationSequence"] = sequence }
@@ -37,7 +40,7 @@ final class Diagnostics {
         append(entry)
     }
 
-    func recordError(_ stage: String, error: Error?) {
+    func recordError(_ stage: String, error: Error?, sourceID: String? = nil, duration: TimeInterval? = nil) {
         let nsError = error as NSError?
         var entry: [String: Any] = [
             "at": Date().timeIntervalSince1970,
@@ -46,6 +49,8 @@ final class Diagnostics {
             "errorDomain": nsError?.domain ?? "unknown",
             "errorCode": nsError?.code ?? 0,
         ]
+        if let sourceID { entry["sourceSupportID"] = fingerprint(sourceID) }
+        if let duration { entry["durationMs"] = Int(max(0, duration) * 1000) }
         if let hubError = error as? HubError, case let .http(status) = hubError {
             entry["httpStatus"] = status
         }
@@ -54,6 +59,53 @@ final class Diagnostics {
 
     func recordBluetoothError(_ stage: String, error: Error?) {
         recordError(stage, error: error)
+    }
+
+    func recordSourceTransport(task: URLSessionTask, metrics: URLSessionTaskMetrics) {
+        guard let url = task.originalRequest?.url, let host = url.host,
+              ["/v1/snapshot", "/v1/interactions"].contains(url.path) else { return }
+        var entry: [String: Any] = [
+            "at": Date().timeIntervalSince1970, "stage": "source_transport",
+            "endpointSupportID": fingerprint(host),
+            "operation": url.path == "/v1/snapshot" ? "snapshot" :
+                task.originalRequest?.httpMethod == "POST" ? "submit" : "requests",
+            "durationMs": Int(metrics.taskInterval.duration * 1000),
+            "transactions": metrics.transactionMetrics.count,
+        ]
+        if let traceID = task.originalRequest?.value(forHTTPHeaderField: "X-Paceman-Trace-ID"),
+           UUID(uuidString: traceID) != nil { entry["traceID"] = traceID }
+        if let transaction = metrics.transactionMetrics.last {
+            entry["httpStatus"] = (transaction.response as? HTTPURLResponse)?.statusCode
+            entry["reusedConnection"] = transaction.isReusedConnection
+            entry["protocol"] = transaction.networkProtocolName
+            entry["cellular"] = transaction.isCellular
+            entry["requestStarted"] = transaction.requestStartDate != nil
+            entry["responseStarted"] = transaction.responseStartDate != nil
+            entry["dnsStarted"] = transaction.domainLookupStartDate != nil
+            entry["dnsFinished"] = transaction.domainLookupEndDate != nil
+            entry["connectStarted"] = transaction.connectStartDate != nil
+            entry["connectFinished"] = transaction.connectEndDate != nil
+            entry["tlsStarted"] = transaction.secureConnectionStartDate != nil
+            entry["tlsFinished"] = transaction.secureConnectionEndDate != nil
+            for (name, start, end) in [
+                ("dnsMs", transaction.domainLookupStartDate, transaction.domainLookupEndDate),
+                ("connectMs", transaction.connectStartDate, transaction.connectEndDate),
+                ("tlsMs", transaction.secureConnectionStartDate, transaction.secureConnectionEndDate),
+                ("responseWaitMs", transaction.requestEndDate, transaction.responseStartDate)
+            ] {
+                if let start, let end { entry[name] = Int(max(0, end.timeIntervalSince(start)) * 1000) }
+            }
+        }
+        // Phase timings only: no addresses, headers, credentials, or request content.
+        append(entry)
+    }
+
+    func recordInteractionFetch(sourceID: String, received: [InputRequest], matchedCount: Int, duration: TimeInterval) {
+        append(["at": Date().timeIntervalSince1970, "uptime": ProcessInfo.processInfo.systemUptime,
+                "stage": "interaction_fetch_received", "sourceSupportID": fingerprint(sourceID),
+                "receivedCount": received.count, "matchedCount": matchedCount,
+                "requestFingerprints": received.map { fingerprint($0.requestID) },
+                "durationMs": Int(max(0, duration) * 1000)])
     }
 
     func recordLiveActivityStartToken(_ token: Data?, stage: String) {

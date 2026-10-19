@@ -5,7 +5,9 @@ and Pebble computer/session cards share a five-minute lease from the source
 observation; a temporary link failure does not shorten it.
 After expiry, activity is Last known and stops animating. The shorter snapshot
 lease governs connection status and forwarding new activity alerts, not display
-color. Reconnection fetches the latest state rather than replaying missed events.
+color. A transient fetch failure does not flicker the connection indicator while
+that snapshot lease remains valid; response controls still clear immediately.
+Reconnection fetches the latest state rather than replaying missed events.
 Normal computer removal confirms computer-side revocation before
 clearing the saved connection. An unreachable computer offers **Forget** to clear
 the iPhone connection without claiming remote revocation. Relay cleanup is
@@ -43,6 +45,11 @@ Phone-side Remove accessory removes access; it does not reset watch ownership.
 
 ## Freshness and recovery
 
+Foreground status refreshes run independently per computer. Request lookups and
+Live Activity registration do not block them; concurrent status hints share one
+fetch per computer. Leaving the foreground cancels foreground-only reads, preserving
+fetches owned by push or Watch callbacks and submitted responses.
+
 - A source with no snapshot says `No activity received yet`; expired activity
   appears as `Last known:`.
 - Each Codex usage window retains its original observation and reset times; after reset it
@@ -75,3 +82,23 @@ shares its bounded local diagnostic log with a current connection snapshot. The
 Mac menu app saves a report with source and hook status plus recent notification
 outcomes. Both use the same hashed source support ID for matching reports;
 neither report includes credentials, prompts, computer names, or raw push tokens.
+The source's bounded `delivery-diagnostics.jsonl` records HTTP attempt IDs, timings,
+statuses and hook lifecycle reasons; the phone records matching IDs and request counts.
+
+## Questions and approvals
+
+Requests and answers are memory-only, excluded from snapshots, SQLite, APNs,
+accessories, and diagnostics. Each request belongs to a live hook connection;
+disconnect, timeout (up to ten minutes), provider disable, source
+shutdown, or pairing changes invalidate it. Restart never replays approvals.
+An approval can remain pending in the agent after its hook ends; Paceman cannot
+recover or answer that native prompt.
+Deduplication retains response hashes and receipt metadata, at most 256 for five minutes.
+
+The phone clears actionable requests on connection failure and refetches on return,
+but preserves in-flight and uncertain submissions for confirmation or an explicit
+retry with the same payload and idempotency key. Backgrounding, access removal,
+and source-generation changes clear request/response content. An already-submitted
+operation may finish in the background. There are no automatic response retries
+or background polling. Late confirmations can complete the original card without
+overriding newer task state. Unknown delivery remains unconfirmed.

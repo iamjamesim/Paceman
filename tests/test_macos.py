@@ -1,4 +1,4 @@
-from contextlib import closing
+from contextlib import closing, ExitStack
 import json
 import os
 from pathlib import Path
@@ -20,6 +20,7 @@ from service.codex_turns import read_codex_turn_statuses
 from service.hub import Store
 from service.macos import FINISHED_RETENTION, MacSource
 from service.push import live_notification
+from macos import codex_hook
 from macos.codex_hook import workspace_label
 
 
@@ -449,6 +450,53 @@ class MacSourceTests(unittest.TestCase):
                 hook("PostToolUse", "request_user_input")
                 self.assertEqual(store.snapshot()["state"], "working")
 
+    def test_phone_answer_clears_only_its_question_and_never_reopens_a_finished_turn(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); root.chmod(0o700)
+            store = Store(root / "hub.sqlite3"); clock = [10.0]
+            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                           turn_status_reader=lambda _: {}, monotonic=lambda: clock[0]) as source:
+                source.next_allowance_at = source.next_turn_status_at = float("inf")
+                base = dict(command="agent-event", session="one", turn="1")
+                source.receive(dict(base, event="working", hook="UserPromptSubmit"))
+                for call in ("call-a", "call-b"):
+                    source.receive(dict(base, event="question-opened", toolID=call))
+                clock[0] += 6; source.tick()
+                self.assertEqual(store.snapshot()["state"], "needs_input")
+                for change in ({"turn": "old", "toolID": "call-a"}, {"toolID": "other"},
+                               {"session": "another", "toolID": "call-a"}):
+                    source.receive({**base, "event": "question-answered", **change})
+                    self.assertEqual(store.snapshot()["state"], "needs_input")
+                source.receive(dict(base, event="question-answered", toolID="call-a"))
+                self.assertEqual(store.snapshot()["state"], "needs_input")
+                source.receive(dict(base, event="question-answered", toolID="call-b"))
+                self.assertEqual(store.snapshot()["state"], "working")
+                self.assertFalse(source.pending_questions)
+                self.assertFalse(source.question_calls)
+                source.receive(dict(base, event="completed", hook="Stop"))
+                source.receive(dict(base, event="question-answered", toolID="call-b"))
+                self.assertEqual(store.snapshot()["state"], "finished")
+                self.assertEqual(len(store.snapshot()["sessions"]), 1)
+
+    def test_resumed_question_answer_recovers_with_its_original_tool_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); root.chmod(0o700)
+            store = Store(root / "hub.sqlite3")
+            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                           turn_status_reader=lambda _: {}, turn_metadata_reader=lambda _: {
+                               "one": [{"id": "new", "status": "inProgress"},
+                                       {"id": "old", "status": "interrupted"}]}) as source:
+                source.next_allowance_at = source.next_turn_status_at = float("inf")
+                base = dict(command="agent-event", session="one")
+                source.receive(dict(base, turn="old", event="working", hook="UserPromptSubmit"))
+                source.receive(dict(base, turn="old", event="interrupted", hook="Interrupt"))
+                source.receive(dict(base, turn="new", event="question-opened", toolID="call-a"))
+                source.receive(dict(base, turn="new", event="question-answered", toolID="call-a"))
+                source._recover_turns(list(source.pending_turn_events.items()))
+                self.assertEqual(store.snapshot()["state"], "working")
+                self.assertFalse(source.pending_questions)
+                self.assertFalse(source.question_calls)
+
     def test_async_question_ends_with_completed_turn(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -553,22 +601,44 @@ class MacSourceTests(unittest.TestCase):
                 self.assertEqual(store.snapshot()["state"], "working")
 
     def test_terminal_hook_retries_during_source_restart(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
             root = Path(temporary)
             root.chmod(0o700)
             store = Store(root / "hub.sqlite3")
-            process = subprocess.Popen([sys.executable, "macos/codex_hook.py"],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, env={"PACEMAN_HOOK_SOCKET": str(root / "hook.sock")})
-            process.stdin.write(json.dumps({"hook_event_name": "Stop", "session_id": "one",
-                                            "turn_id": "1"}))
-            process.stdin.close()
-            time.sleep(.2)
-            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None):
-                self.assertEqual(process.wait(timeout=2), 0)
-                with process.stdout, process.stderr:
-                    self.assertEqual(json.loads(process.stdout.read()), {"continue": True})
-                self.assertEqual(store.snapshot()["state"], "finished")
+
+            def restart(delay):
+                self.assertEqual(delay, .1)
+                stack.enter_context(MacSource(store, socket_path=root / "hook.sock",
+                                              allowance_reader=lambda: None))
+
+            # Start the receiver only after a real failed connection. Control
+            # the retry clock so runner scheduling cannot exhaust its budget.
+            with patch.object(codex_hook, "time") as clock:
+                clock.monotonic.return_value = 0.0
+                clock.sleep.side_effect = restart
+                codex_hook.deliver(dict(command="agent-event", session="one", turn="1",
+                                        event="completed", hook="Stop"), root / "hook.sock", "Stop")
+                clock.sleep.assert_called_once_with(.1)
+            self.assertEqual(store.snapshot()["state"], "finished")
+
+    def test_hook_retry_budget_is_bounded_and_only_for_terminal_events(self):
+        for event in ("Stop", "Interrupt", "SessionEnd", "UserPromptSubmit"):
+            with self.subTest(event=event), patch.object(codex_hook, "time") as clock, \
+                    patch.object(codex_hook.socket, "socket") as socket_factory:
+                now = [0.0]
+
+                def advance(delay):
+                    now[0] += delay
+
+                clock.monotonic.side_effect = lambda: now[0]
+                clock.sleep.side_effect = advance
+                connection = socket_factory.return_value.__enter__.return_value
+                connection.connect.side_effect = FileNotFoundError()
+                codex_hook.deliver({}, Path("missing.sock"), event)
+                self.assertEqual(now[0], 1.0 if event in codex_hook.TERMINAL_HOOKS else 0.0)
+                self.assertEqual(socket_factory.call_count, clock.sleep.call_count + 1)
+                if event not in codex_hook.TERMINAL_HOOKS:
+                    clock.sleep.assert_not_called()
 
     def test_workspace_label_prefers_repository_root_without_a_path(self):
         with tempfile.TemporaryDirectory() as temporary:

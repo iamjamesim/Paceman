@@ -16,6 +16,7 @@ class ClaudeInstallTests(unittest.TestCase):
         (self.root/"lib/macos").mkdir(parents=True)
         (self.root/"lib/macos/claude_hook.py").touch()
         (self.root/"lib/macos/codex_hook.py").touch()
+        (self.root/"lib/macos/interaction_hook.py").touch()
         self.enterContext(patch.object(Path,"home",return_value=self.home))
         self.enterContext(patch.dict(os.environ,{"CLAUDE_CONFIG_DIR":""}))
         self.enterContext(patch.multiple(install,ROOT=self.root,PYTHON=sys.executable))

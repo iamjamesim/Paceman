@@ -1,15 +1,27 @@
 import SwiftUI
 
+enum CompanionLayout {
+    static let pageInset: CGFloat = 20
+    static let actionMinimumHeight: CGFloat = 56
+    static let actionVerticalInset: CGFloat = 16
+    static let taskCardTopInset: CGFloat = 32
+    static let taskPromptSpacing: CGFloat = 16
+}
+
 /// Shared text roles: required guidance stays primary, regardless of setup state.
 enum CompanionTextRole {
-    case title, body, label, supporting, link, button
+    case title, cardTitle, body, code, label, supporting, link, button, action, sectionTitle, prompt
     var font: Font {
         switch self {
         case .title: return .title2.weight(.semibold)
+        case .cardTitle: return .title3.weight(.semibold)
+        case .sectionTitle, .prompt: return .headline
         case .body: return .callout
+        case .code: return .callout.monospaced()
         case .label, .link: return .callout.weight(.medium)
         case .supporting: return .subheadline
         case .button: return .body.weight(.semibold)
+        case .action: return .body.weight(.medium)
         }
     }
 }
@@ -22,15 +34,27 @@ extension View {
     }
 }
 
+/// One visual treatment for task decisions and agent-app handoffs.
+struct TaskCardActionLabel: View {
+    let title: String
+    let theme: CompanionTheme
+    var primary = true
+    var body: some View {
+        Text(title).font(CompanionTextRole.action.font)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, CompanionLayout.actionVerticalInset).padding(.horizontal, 16)
+            .frame(minHeight: CompanionLayout.actionMinimumHeight)
+            .foregroundStyle(primary ? theme.canvas : theme.ink)
+            .background(primary ? theme.ink : .clear, in: Capsule())
+            .overlay(Capsule().strokeBorder(theme.ink.opacity(primary ? 0 : 0.18), lineWidth: 1))
+            .contentShape(Capsule())
+    }
+}
+
 struct CompanionCanvas: View {
     let theme: CompanionTheme
     var body: some View { theme.canvas.ignoresSafeArea() }
-}
-
-struct Eyebrow: View {
-    let text: String
-    let theme: CompanionTheme
-    var body: some View { Text(text.uppercased()).font(.caption2.weight(.semibold)).tracking(2.0).foregroundStyle(theme.secondaryInk) }
 }
 
 struct CompanionButton: View {
@@ -45,6 +69,7 @@ struct CompanionButton: View {
                 Text(title).font(CompanionTextRole.button.font)
             }.frame(maxWidth: .infinity).padding(.vertical, 18)
                 .foregroundStyle(theme.canvas).background(theme.ink, in: RoundedRectangle(cornerRadius: 20))
+                .contentShape(RoundedRectangle(cornerRadius: 20))
         }.buttonStyle(.plain)
     }
 }
@@ -59,6 +84,7 @@ struct CompanionSecondaryButton: View {
                 .frame(maxWidth: .infinity).padding(.vertical, 18)
                 .foregroundStyle(theme.ink)
                 .background(theme.ink.opacity(0.07), in: RoundedRectangle(cornerRadius: 20))
+                .contentShape(RoundedRectangle(cornerRadius: 20))
         }.buttonStyle(.plain)
     }
 }
@@ -87,20 +113,6 @@ struct CompanionExternalLink: View {
 struct CompanionRule: View {
     let theme: CompanionTheme
     var body: some View { Rectangle().fill(theme.ink.opacity(0.14)).frame(height: 0.5) }
-}
-
-struct StatusPill: View {
-    let text: String
-    let theme: CompanionTheme
-    var active = false
-    var body: some View {
-        HStack(spacing: 6) {
-            Circle().fill(active ? theme.tint : theme.ink.opacity(0.35)).frame(width: 5, height: 5)
-            Text(text).font(.caption2.weight(.medium))
-        }.padding(.horizontal, 10).padding(.vertical, 7)
-            .background(theme.ink.opacity(0.05), in: Capsule())
-            .overlay(Capsule().strokeBorder(theme.ink.opacity(0.08), lineWidth: 0.5))
-    }
 }
 
 /// A miniature dark Live Activity card with the same status-robot artwork used

@@ -104,6 +104,11 @@ enum PairedSourceOrder {
 
 final class NoRedirect: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask,
+                    didFinishCollecting metrics: URLSessionTaskMetrics) {
+        Diagnostics.shared.recordSourceTransport(task: task, metrics: metrics)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(nil)
@@ -113,12 +118,15 @@ final class NoRedirect: NSObject, URLSessionTaskDelegate {
 final class SourceClient {
     private let session: URLSession
     init(configuration: URLSessionConfiguration = .ephemeral) {
-        configuration.timeoutIntervalForRequest = 5
-        configuration.timeoutIntervalForResource = 12
+        // Polls join owned status reads; the poll interval is not a deadline.
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 120
         configuration.waitsForConnectivity = false
         configuration.httpCookieStorage = nil
         session = URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
     }
+
+    deinit { session.invalidateAndCancel() }
 
     func pair(_ invitation: Invitation, device: ClientDevice, previous: PairedSource? = nil) async throws -> PairedSource {
         let origin = try invitation.validatedURL()
@@ -172,6 +180,28 @@ final class SourceClient {
             try await relayCall(source, path: "v2/clients/self", method: "DELETE", fields: [:])
         } catch let error as HubError where error.isUnauthorized {
             // The source may already have removed this client's relay record.
+        }
+    }
+
+    func inputRequests(_ source: PairedSource) async throws -> InputRequests {
+        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/interactions"))
+        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
+        let data = try await response(request, maximumBytes: 2_200_000)
+        return try InputRequests.decode(data, sourceID: source.sourceID)
+    }
+
+    func submitInput(_ value: InputSubmission, source: PairedSource) async throws {
+        var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/interactions"))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(value)
+        guard (request.httpBody?.count ?? 0) <= 65536 else { throw HubError.message("Response is too long.") }
+        let data = try await response(request)
+        let receipt = try JSONDecoder().decode(InputReceipt.self, from: data)
+        guard receipt.status == "submitted", receipt.generation == value.generation,
+              receipt.requestID == value.requestID, receipt.version == value.version else {
+            throw HubError.message("The computer did not confirm this response.")
         }
     }
 
@@ -338,13 +368,17 @@ final class SourceClient {
         }
     }
 
-    private func response(_ request: URLRequest) async throws -> Data {
+    private func response(_ request: URLRequest, maximumBytes: Int = 65536) async throws -> Data {
+        var request = request
+        if let path = request.url?.path, ["/v1/snapshot", "/v1/interactions"].contains(path) {
+            request.setValue(UUID().uuidString, forHTTPHeaderField: "X-Paceman-Trace-ID")
+        }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw HubError.message("Invalid server response") }
         guard http.statusCode == 200 else {
             throw HubError.http(http.statusCode)
         }
-        guard data.count <= 65536 else { throw HubError.message("Status response too large") }
+        guard data.count <= maximumBytes else { throw HubError.message("Status response too large") }
         return data
     }
 }

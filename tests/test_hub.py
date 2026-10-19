@@ -57,6 +57,23 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(a["changedAt"], b["changedAt"])
         self.assertEqual(a["state"], "needs_input")
 
+    def test_live_snapshot_reads_committed_state_while_another_writer_is_pending(self):
+        for mode in ("macos", "omarchy"):
+            with self.subTest(mode=mode):
+                with self.store.connect() as db:
+                    db.execute("INSERT OR REPLACE INTO metadata VALUES ('mode',?)", (mode,))
+                before = self.store.snapshot()
+                with self.store.connect() as writer:
+                    writer.execute("BEGIN IMMEDIATE")
+                    writer.execute("INSERT INTO events(at,state,label) VALUES (?,?,?)",
+                                   (time.time(), "working", "Pending hook update"))
+                    # A read needs only the committed snapshot, not the
+                    # writer's lock or its uncommitted event.
+                    during = self.store.snapshot()
+                    self.assertEqual(during["revision"], before["revision"])
+                    self.assertEqual(during["state"], before["state"])
+                self.assertGreater(self.store.snapshot()["revision"], before["revision"])
+
     def test_event_history_is_bounded_without_resetting_snapshot_or_push_cursor(self):
         from service.push import Worker
         from tests.test_push import FakeSender
@@ -144,6 +161,28 @@ class HTTPTests(unittest.TestCase):
         self.server.server_close()
         self.worker.join(timeout=2)
         self.temp.cleanup()
+
+    def test_slow_maintenance_does_not_block_request_acceptance_or_start_more_workers(self):
+        entered, release = threading.Event(), threading.Event()
+        calls = []
+
+        class SlowAdapter:
+            def tick(self):
+                calls.append(threading.get_ident())
+                entered.set()
+                release.wait(5)
+
+        self.server.adapter = SlowAdapter()
+        self.addCleanup(release.set)
+        try:
+            self.assertTrue(entered.wait(2))
+            # The maintenance worker is held until after these replies. An
+            # accept-loop lock would make the requests time out instead.
+            for _ in range(3):
+                self.assertEqual(self.request("GET", "/v1/snapshot")[0], 401)
+            self.assertEqual(len(calls), 1)
+        finally:
+            release.set()
 
     def request(self, method, path, body=None, token=None):
         client = http.client.HTTPConnection(*self.server.server_address, timeout=2)

@@ -41,14 +41,11 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(empty[0][2], 4)
     }
 
-    func testSessionTitleNormalizationAndGrouping() {
+    func testSessionTitleNormalization() {
         let titled = AgentSession(id: "one", provider: "codex", state: .working, name: "  Fix\n scrolling\u{0}  ")
         XCTAssertEqual(titled.displayName, "Fix scrolling")
         let unnamed = AgentSession(id: "two", provider: "codex", state: .working, name: " \n")
         XCTAssertEqual(unnamed.displayName, "Codex")
-        let rows = AgentDisplayRow.rows([titled, unnamed])
-        XCTAssertEqual(rows.count, 2)
-        XCTAssertTrue(rows.contains { $0.session.id == titled.id })
     }
 
     func testHandoffWireRejectsMalformedRequestsAndEchoesSequence() throws {
@@ -286,12 +283,11 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(AgentSession(id: "test", provider: "fixture", state: .working).appURL)
     }
 
-    func testRemotelyAddressableClaudeRowsRemainIndividual() {
-        let rows = AgentDisplayRow.rows([
+    func testRemotelyAddressableClaudeSessionsHaveDistinctLinks() {
+        let sessions = [
             AgentSession(id: "a", provider: "claude", state: .working, remoteSessionID: "session_a"),
-            AgentSession(id: "b", provider: "claude", state: .working, remoteSessionID: "session_b")])
-        XCTAssertEqual(rows.count, 2)
-        XCTAssertEqual(Set(rows.compactMap { $0.session.appURL?.absoluteString }),
+            AgentSession(id: "b", provider: "claude", state: .working, remoteSessionID: "session_b")]
+        XCTAssertEqual(Set(sessions.compactMap { $0.appURL?.absoluteString }),
                        ["claude://code/session_a", "claude://code/session_b"])
     }
 
@@ -645,6 +641,65 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(linux.freshUntil, 400)
     }
 
+    func testLiveActivityURLCarriesDisplayedRevisionWithoutTaskContent() throws {
+        let state = MonitoringActivity.ContentState(generation: "generation / & é", revision: 42,
+            state: "working", working: 2, needsInput: 1, finished: 0, observedAt: 100, freshUntil: 400)
+        let route = LiveActivityRoute(sourceID: "source / & é", state: state)
+        let url = try XCTUnwrap(route.url)
+        XCTAssertEqual(url.host, "activity")
+        XCTAssertEqual(LiveActivityRoute(url: url), route)
+        var normalized = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        normalized.path = "/"
+        XCTAssertEqual(LiveActivityRoute(url: try XCTUnwrap(normalized.url)), route)
+        XCTAssertEqual(route.state, "needs_input")
+        XCTAssertNil(LiveActivityRoute(url: URL(string: url.absoluteString + "&source=other")!))
+        XCTAssertNil(LiveActivityRoute(url: URL(string: "https://activity?source=x&generation=g&revision=1&state=working")!))
+        XCTAssertNil(LiveActivityRoute(url: URL(string: "\(LiveActivityRoute.scheme)://activity?source=x&generation=g&revision=oops&state=working")!))
+        XCTAssertNil(LiveActivityRoute(url: URL(string: "\(LiveActivityRoute.scheme)://computer/mac")!))
+    }
+
+    func testLiveActivitySelectsOnlyUniqueTaskInDisplayedSourceAndRevision() throws {
+        func snapshot(source: String = "mac", generation: String = "g", revision: UInt64 = 7,
+                      sessions: [AgentSession]?) -> Snapshot {
+            Snapshot(schema: 1, sourceID: source, generation: generation, revision: revision,
+                sourceName: source, observedAt: 100, changedAt: 100, freshFor: 30,
+                state: .needsInput, eventID: "7", sessions: sessions)
+        }
+        let waiting = AgentSession(id: "same-id", provider: "claude", state: .needsInput)
+        let working = AgentSession(id: "same-id", provider: "codex", state: .working)
+        let shown = snapshot(sessions: [working, waiting])
+        let route = LiveActivityRoute(sourceID: "mac", state: .init(snapshot: shown))
+        let identity = try XCTUnwrap(route.task(in: shown))
+        XCTAssertEqual(identity, WorkIdentity(sourceID: "mac", sessionID: "same-id", provider: "claude"))
+        XCTAssertNil(route.task(in: snapshot(source: "other", sessions: [waiting])))
+        XCTAssertNil(route.task(in: snapshot(generation: "restarted", sessions: [waiting])))
+        XCTAssertNil(route.task(in: snapshot(revision: 8, sessions: [waiting])))
+        XCTAssertNil(route.task(in: snapshot(sessions: [waiting, .init(id: "another", provider: "codex", state: .needsInput)])))
+        XCTAssertNil(route.task(in: snapshot(sessions: [])))
+        XCTAssertNil(route.task(in: snapshot(sessions: nil)))
+        XCTAssertNil(route.task(in: nil))
+        let resumed = AgentSession(id: "same-id", provider: "claude", state: .working)
+        XCTAssertEqual(route.task(in: snapshot(revision: 8, sessions: [resumed]), previouslyResolved: identity), identity)
+        XCTAssertNil(route.task(in: snapshot(revision: 8, sessions: [working]), previouslyResolved: identity))
+        XCTAssertNil(route.task(in: snapshot(generation: "new", sessions: [resumed]), previouslyResolved: identity))
+    }
+
+    func testLiveActivityUniqueStatusTargetsOpenTaskDetails() throws {
+        for state in [ActivityState.working, .finished, .failed, .idle] {
+            let session = AgentSession(id: "task", provider: "codex", state: state)
+            let snapshot = Snapshot(schema: 1, sourceID: "mac", generation: "g", revision: 7,
+                sourceName: "Mac", observedAt: 100, changedAt: 100, freshFor: 30,
+                state: state, eventID: "7", sessions: [session])
+            let route = LiveActivityRoute(sourceID: "mac", state: .init(snapshot: snapshot))
+            let identity = try XCTUnwrap(route.task(in: snapshot))
+            let item = WorkItem(id: identity, session: session, computer: "Mac", historical: false)
+            XCTAssertTrue(item.opensActivityCard)
+        }
+        let item = WorkItem(id: .init(sourceID: "mac", sessionID: "task", provider: "codex"),
+            session: .init(id: "task", provider: "codex", state: .needsInput), computer: "Mac", historical: true)
+        XCTAssertTrue(item.opensActivityCard)
+    }
+
     @MainActor func testNewerLiveActivityReplacesStaleCopyForSameComputer() {
         let old = MonitoringActivity.ContentState(generation: "old", revision: 20,
             state: "working", working: 1, needsInput: 0, finished: 0, observedAt: 100, freshUntil: 400)
@@ -970,6 +1025,21 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(snapshot.sessions)
     }
 
+    func testResponseCapabilityDecodesFromTheWireAndRoundTrips() throws {
+        for enabled in [true, false] {
+            let snapshot = try JSONDecoder().decode(Snapshot.self,
+                from: sourceFixture(["interactionsEnabled": enabled]))
+            XCTAssertEqual(snapshot.interactionsEnabled, enabled)
+            let restored = try JSONDecoder().decode(Snapshot.self, from: JSONEncoder().encode(snapshot))
+            XCTAssertEqual(restored.interactionsEnabled, enabled)
+        }
+        for extra: [String: Any] in [[:], ["interactionsEnabled": "true"], ["interactionsEnabled": 1], ["interactionsEnabled": NSNull()]] {
+            let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(extra))
+            XCTAssertNil(snapshot.interactionsEnabled, "Missing or malformed capability cannot enable responses")
+            XCTAssertEqual(snapshot.state, .working, "Optional capabilities cannot discard activity")
+        }
+    }
+
     func testUnknownOrMalformedOptionalMetadataDoesNotDiscardAgentActivity() throws {
         for extra: [String: Any] in [
             ["futureMetadata": ["kind": "example"]],
@@ -991,29 +1061,6 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(hookSession.detail, "paceman")
     }
 
-    func testUnnamedSessionsGroupWithoutLosingStatesOrNamedRows() {
-        let sessions = [AgentSession(id: "1", provider: "codex", state: .idle, workspaceLabel: "paceman"),
-                        AgentSession(id: "2", provider: "codex", state: .needsInput, workspaceLabel: "paceman"),
-                        AgentSession(id: "3", provider: "codex", state: .finished),
-                        AgentSession(id: "4", provider: "codex", state: .working, name: "Fix checkout"),
-                        AgentSession(id: "5", provider: "claude", state: .working)]
-        let rows = AgentDisplayRow.rows(sessions)
-        XCTAssertEqual(rows.count, 3)
-        XCTAssertEqual(rows.first?.session.displayName, "Codex · 3 sessions")
-        XCTAssertEqual(rows.first?.session.state, .needsInput)
-        XCTAssertEqual(rows.first?.detail, "1 needs input · 1 finished · 1 idle")
-        XCTAssertEqual(rows.first?.statusLabel, "1 needs input · 1 finished · 1 idle")
-        XCTAssertEqual(rows.first?.contextLabel, "")
-        XCTAssertTrue(rows.contains { $0.session.displayName == "Fix checkout" })
-        XCTAssertTrue(rows.contains { $0.session.displayName == "Claude" })
-        XCTAssertEqual(rows.map(\.id), AgentDisplayRow.rows(Array(sessions.reversed())).map(\.id))
-        XCTAssertEqual(AgentDisplayRow.rows([]).count, 0)
-        let finished = AgentDisplayRow.rows([
-            AgentSession(id: "6", provider: "codex", state: .finished),
-            AgentSession(id: "7", provider: "codex", state: .finished)])
-        XCTAssertEqual(finished.first?.session.displayName, "Codex · 2 sessions")
-        XCTAssertEqual(finished.first?.detail, "")
-    }
 
     func testFeedDistinguishesFirstUpdateFromIdleAndOlderAggregateSources() throws {
         XCTAssertEqual(AgentFeedContent.resolve(nil), .waiting)
@@ -1038,17 +1085,6 @@ final class ProtocolTests: XCTestCase {
         }
     }
 
-    func testStatusPanelPrioritizesInputAndExcludesIdleFromActiveCounts() {
-        let sessions = [AgentSession(id: "idle", provider: "codex", state: .idle),
-                        AgentSession(id: "done", provider: "codex", state: .finished),
-                        AgentSession(id: "working", provider: "claude", state: .working),
-                        AgentSession(id: "input", provider: "codex", state: .needsInput)]
-        let content = AgentFeedContent.sessions(sessions)
-        XCTAssertEqual(content.headline, "1 needs input")
-        XCTAssertEqual(content.supportingStatus, "1 working · 1 finished")
-        XCTAssertEqual(AgentFeedContent.sessions([sessions[0]]).headline, "No active agents")
-        XCTAssertNil(AgentFeedContent.summary(.working).supportingStatus)
-    }
 
     func testWatchPresentationSeparatesUserOffFailureAndActiveRecovery() {
         func state(_ updates: Bool = true, failed: Bool = false, bluetooth: CBManagerState? = .poweredOn,
@@ -1185,6 +1221,35 @@ final class ProtocolTests: XCTestCase {
             XCTAssertFalse(model.busy)
             XCTAssertNil(session.failure)
         }
+    }
+
+    @MainActor
+    func testScanWaitsForInFlightRefreshWithoutDiscardingTheCode() async throws {
+        let id = UUID().uuidString
+        var requests = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { request in
+            requests += 1
+            XCTAssertEqual(request.url?.path, "/v1/pair")
+            return (200, try JSONSerialization.data(withJSONObject: ["schema": 1, "sourceID": id,
+                "clientID": "client", "credential": "secret"]))
+        }, savePairedSources: { _ in })
+        model.pairedSources = []
+        model.busy = true
+        let invitation = Invitation(schema: 1, endpoint: "https://test.example", sourceID: id,
+            invitation: String(repeating: "x", count: 43), expiresAt: Date().timeIntervalSince1970 + 300)
+        let text = String(decoding: try JSONEncoder().encode(invitation), as: UTF8.self)
+        let session = ComputerPairingSession()
+        let task = Task { await session.scan(text, model: model) }
+        for _ in 0..<100 where !session.connecting { await Task.yield() }
+        XCTAssertTrue(session.connecting)
+        XCTAssertEqual(session.invitation?.sourceID, id)
+        XCTAssertEqual(requests, 0, "The refresh and credential mutation must remain serialized")
+        model.busy = false
+        let connected = await task.value
+        XCTAssertEqual(connected, id)
+        XCTAssertEqual(requests, 1)
+        XCTAssertFalse(session.connecting)
+        XCTAssertNil(session.failure)
     }
 
     @MainActor
@@ -1739,6 +1804,42 @@ final class ProtocolTests: XCTestCase {
     }
 
     @MainActor
+    func testConnectionIndicatorSurvivesTransientFailureWithoutKeepingResponsesCurrent() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://indicator.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret")
+        var mode = 0
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: stubClient { _ in
+            if mode == 1 || mode == 3 { throw URLError(.timedOut) }
+            if mode == 4 { return (401, Data("{}".utf8)) }
+            return (200, try self.sourceFixture(["sourceID": source.sourceID,
+                "observedAt": Date().timeIntervalSince1970 - (mode == 2 ? 45 : 0)]))
+        })
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        defer { try? FileManager.default.removeItem(at: SourceSnapshotCache.url(for: source.sourceID)) }
+        XCTAssertEqual(model.connectionState(source.sourceID), .connecting)
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertTrue(model.isFresh(source.sourceID))
+        XCTAssertEqual(model.connectionState(source.sourceID), .current)
+        let contact = model.lastContacts[source.sourceID]
+        mode = 1
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertFalse(model.isFresh(source.sourceID), "Delivery must remain unavailable after a failed fetch")
+        XCTAssertEqual(model.connectionState(source.sourceID), .current)
+        XCTAssertEqual(model.lastContacts[source.sourceID], contact, "Recovery must not renew the observation")
+        mode = 2
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertEqual(model.connectionState(source.sourceID), .checking)
+        mode = 3
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertEqual(model.connectionState(source.sourceID), .reconnecting)
+        mode = 4
+        _ = await model.refresh(sourceID: source.sourceID)
+        XCTAssertEqual(model.connectionState(source.sourceID), .revoked)
+        XCTAssertNil(model.snapshots[source.sourceID])
+    }
+
+    @MainActor
     func testActivityDisplayLeaseSurvivesRecoveryWithoutExtendingObservation() async throws {
         let source = PairedSource(endpoint: URL(string: "https://lease.example")!,
             sourceID: UUID().uuidString, clientID: "client", credential: "secret")
@@ -1813,7 +1914,8 @@ final class ProtocolTests: XCTestCase {
 
     func testComputerConnectionStatesDistinguishRecoveryFromStaleActivity() {
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: true, failed: true, hasSnapshot: true, fresh: true), .revoked)
-        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: true, hasSnapshot: true, fresh: true), .reconnecting)
+        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: true, hasSnapshot: true, fresh: true), .current)
+        XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: true, hasSnapshot: true, fresh: false), .reconnecting)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: false, fresh: false), .connecting)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: true, fresh: false), .checking)
         XCTAssertEqual(ComputerConnectionState.resolve(revoked: false, failed: false, hasSnapshot: true, fresh: true), .current)
