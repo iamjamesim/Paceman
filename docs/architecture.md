@@ -53,14 +53,9 @@ window in Codex Limit and Codex Reset. Older or empty data from another computer
 cannot erase that reading.
 
 WatchConnectivity also supplies the paired-computer list and cached readings.
-The Watch app opens to agent sessions grouped by attention, work, and history;
-Codex usage remains available in complications. Session reads and lightweight responses use interactive
-WatchConnectivity messages through the paired iPhone. The list shows the phone's
-cached activity while computers refresh independently. While visible, it requests
-updates every five seconds; live hints also refresh it as the phone receives data.
-Leaving the screen or backgrounding stops those requests. Questions and one-time
-approvals use the existing response bridge. Task details and blocked requests
-can continue on iPhone. This path requires a reachable iPhone and computer.
+The Watch app uses the phone's session presentation and supports questions,
+one-time approvals and continuation on iPhone through live WatchConnectivity.
+Codex usage remains available in complications.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
 are in [data lifecycle](data-lifecycle.md).
@@ -79,9 +74,7 @@ See the [wire contract](protocol.md#pending-interactions) and
 
 ## iPhone Activity
 
-Activity rows represent agent sessions, keyed by source, provider, and session,
-never title. Finished describes the last completed turn, not completion of the
-whole conversation or a successful outcome. Activity owns sessions
+Sessions are keyed by source, provider, and session ID, never title. Activity owns sessions
 and responses; Devices owns connections, accessories, and Live Activities.
 Ordering is stable and phone-observed, not durable task chronology: answerable
 requests lead Needs you, Working follows state-entry order, and Recent is newest
@@ -89,10 +82,8 @@ first. Review freezes its membership and order; new arrivals wait for the next
 Review. Each form stays pinned to its exact request. Confirmed responses dismiss
 or advance Review and use Working presentation without changing observed agent state.
 
-Live Activity taps open a unique session only when its source generation
-and revision match; otherwise they open source-filtered Activity. On Apple Watch,
-the app opts in to native launch and refreshes through iPhone before resolving the
-fresh session. A launch without usable context opens Activity. An open Watch response
-form is preserved across another Live Activity tap. Opening the agent app releases
-any pending phone request. Detail timestamps describe the computer snapshot,
-not session progress.
+Live Activity taps open a unique session only when its source generation and
+revision match; otherwise they open source-filtered Activity. Watch resolves through
+iPhone and preserves an open response form across another tap. Opening the agent
+app releases any pending phone request. Detail timestamps describe the computer
+snapshot, not session progress. A completed turn does not establish a successful outcome.

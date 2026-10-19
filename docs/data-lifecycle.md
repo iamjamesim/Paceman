@@ -49,15 +49,10 @@ Foreground status refreshes run independently per computer. Request lookups and
 Live Activity registration do not block them; concurrent status hints share one
 fetch per computer. Leaving the foreground cancels foreground-only reads, preserving
 fetches owned by push or Watch callbacks and submitted responses.
-While the phone is foregrounded, Apple Watch list reads use its derived Activity
-presentation without extra source reads. Background Watch demand shares the same
-per-computer fetch owner, with a five-second recency gate and demand-driven failure
-delays capped at one minute; it creates no background polling loop. Live change
-hints read only the phone cache. Requests and accepted responses affect both
-presentations; newer requests and source state changes retire earlier overlays.
-An accepted answer remains Working within the activity lease even if the shorter
-connection lease expires. Its acknowledgement updates the Watch's RAM-only list;
-older interactive replies cannot restore the previous Needs you presentation.
+Visible Watch screens use the same Activity presentation and per-computer refresh
+owner; background phone reads are demand-driven, without a polling loop. Accepted
+answers remain Working within the activity lease; older list replies cannot undo
+that presentation.
 
 - A source with no snapshot says `No activity received yet`; expired activity
   appears as `Last known:`.
@@ -97,7 +92,7 @@ statuses and hook lifecycle reasons; the phone records matching IDs and request 
 ## Questions and approvals
 
 Requests and answers are memory-only, excluded from snapshots, SQLite, APNs,
-BLE accessories, and diagnostics. Apple Watch fetches them through live
+BLE accessories, and diagnostics. Apple Watch receives them only through live
 WatchConnectivity replies, never application context or queued transfers.
 Each request belongs to a live hook connection;
 disconnect, timeout (up to ten minutes), provider disable, source
@@ -114,8 +109,6 @@ operation may finish in the background. There are no automatic response retries
 or background polling. Late confirmations can complete the original card without
 overriding newer task state. Unknown delivery remains unconfirmed.
 
-Watch forms clear sensitive content on backgrounding and refetch when active.
-The phone retains Watch-issued requests and exact submissions in RAM until their
-original deadlines (at most ten minutes, bounded to 256 requests), allowing an
-explicit identical retry after a lost reply or reopened form. Pairing changes
-clear this state; responses are never retried automatically.
+Watch forms clear on backgrounding. The phone retains up to 256 Watch requests
+and exact submissions in RAM until their original deadlines; pairing changes clear
+them. Reopened forms can retry the same submission explicitly.

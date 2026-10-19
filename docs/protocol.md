@@ -260,28 +260,18 @@ allowed source. `observedAt` orders complete snapshots within each source,
 including removals; each reading keeps its original `updatedAt` and reset time.
 A source cannot clear another source's cache.
 
-Interactive Watch messages use `watchWork: 1` and an `operation`: `tasks` reads
-session metadata, `request` selects an exact `sourceID`/`provider`/`sessionID`, and
-`submit` carries the existing `InputSubmission` as JSON `Data`. Replies carry
-JSON `data`, a confirmed `submitted: true`, `unconfirmed: true`, or a user-facing
-`error`. A reopened request can carry its original `submission` and receipt.
-Confirmed submissions may also include `workSnapshot` JSON `Data`, using the
-same phone-derived list as task reads. Optional `projectionGeneration` and
-`projectionRevision` order these list replies, including request/receipt changes
-within one source revision; a delayed pre-answer reply cannot undo a newer list.
-This content is never placed in application context or queued transfers.
-Session replies optionally include paired `sources` with display name, generation,
-revision, and complete `stateCounts`. Watch launch routing uses these counts and
-the displayed revision to avoid selecting a session from a newer or truncated list.
-Task metadata can include `project`, computer-snapshot `observedAt`, and the
-phone's `presentationSymbol`. Questions use one submission for all answers.
+Interactive Watch messages use `watchWork: 1` and an `operation`. `cachedTasks`
+reads the phone's list; `refreshTasks` requests source refreshes without waiting;
+`tasks` waits for them. `request` selects an exact `sourceID`/`provider`/`sessionID`;
+`submit` carries an `InputSubmission` as JSON `Data`. Replies use JSON `data`,
+`submitted: true`, `unconfirmed: true`, or `error`; confirmations can include
+`workSnapshot`. Optional `projectionGeneration` and `projectionRevision` order list
+replies. [Shared types](../ios/Shared/WatchWork.swift) define the payloads.
 
-`continueOnPhone` optionally selects the same exact task identity. The reply's
-`handoff` uses results 1–3 from [session handoff](#accessory-session-handoff);
-`selectionAvailable: false` means current Activity was prepared instead of a
-removed task. The phone validates its OS-paired Watch identity and resolves the
-destination itself. Only the opaque, expiring selection is retained; request
-content still uses live replies. Opening the agent app remains a phone action.
+`continueOnPhone` returns `handoff` results 1–3 from
+[session handoff](#accessory-session-handoff); `selectionAvailable: false` prepares
+Activity instead of a removed session. Storage and retry rules are defined in
+[data lifecycle](data-lifecycle.md#questions-and-approvals).
 
 Example background push:
 
