@@ -21,6 +21,9 @@ struct PacemanWatchApp: App {
         if let scenario = WatchWorkPreview.scenario, WatchWorkPreview.detailScenarios.contains(scenario) {
             return [.session(WatchWorkPreview.task)]
         }
+        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--usage-preview=") }) {
+            return [.usage]
+        }
         #endif
         return []
     }()
@@ -36,13 +39,13 @@ struct PacemanWatchApp: App {
                     case .usage: usage
                     }
                 }
-                #if DEBUG
-                .transformEnvironment(\.dynamicTypeSize) { size in
-                    if ProcessInfo.processInfo.arguments.contains("--work-accessibility-preview") { size = .accessibility3 }
-                }
-                #endif
             }
             .tint(accent)
+            #if DEBUG
+            .transformEnvironment(\.dynamicTypeSize) { size in
+                if ProcessInfo.processInfo.arguments.contains("--work-accessibility-preview") { size = .accessibility3 }
+            }
+            #endif
             .onChange(of: scenePhase) { _, phase in
                 if phase == .background { store.cancelActivationWaits(); store.clearWork() }
             }
@@ -304,6 +307,9 @@ extension WatchAllowanceStore {
     @MainActor func workMessage(_ payload: [String: Any]) async throws -> [String: Any] {
         let epoch = workEpoch
         #if DEBUG
+        if WatchWorkPreview.scenario == "loading" {
+            try await Task.sleep(for: .seconds(60))
+        }
         if let result = try WatchWorkPreview.reply(payload) {
             acceptWorkReply(result, operation: payload["operation"] as? String)
             return result
@@ -507,7 +513,6 @@ private struct WatchTaskView: View {
     @State private var deadline: TimeInterval = 0
     @State private var selected: Set<Int> = []
     @State private var text = ""
-    @State private var writing = false
     @State private var submission: InputSubmission?
     @State private var sending = false
     @State private var submitted = false
@@ -572,7 +577,6 @@ private struct WatchTaskView: View {
                 prompt = nil
                 selected = []
                 text = ""
-                writing = false
                 error = "Reconnect to your iPhone to respond."
             }
         }
@@ -583,7 +587,6 @@ private struct WatchTaskView: View {
                 submission = nil
                 selected = []
                 text = ""
-                writing = false
                 error = nil
                 confirmAllow = false
             } else if value == .active, prompt == nil, !submitted, !sending {
@@ -617,7 +620,6 @@ private struct WatchTaskView: View {
                         else if question.multiple { selected.insert(index) }
                         else { selected = [index] }
                         text = ""
-                        writing = false
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Image(systemName: question.multiple ? (chosen ? "checkmark.square.fill" : "square")
@@ -641,13 +643,9 @@ private struct WatchTaskView: View {
                     .accessibilityAddTraits(chosen ? .isSelected : [])
                 }
             }
-            if question.options.isEmpty || writing {
-                TextField("Your answer", text: $text)
-                    .onChange(of: text) { _, value in if !value.isEmpty { selected = [] } }
-            } else {
-                Button("Write an answer") { writing = true; selected = [] }
-                    .buttonStyle(.plain).font(.body)
-            }
+            TextField("Your answer", text: $text)
+                .accessibilityLabel("Your answer: " + question.prompt)
+                .onChange(of: text) { _, value in if !value.isEmpty { selected = [] } }
             if canSendAnswer {
                 Button("Send answer") { respond("answer") }
                     .buttonStyle(.borderedProminent).foregroundStyle(.black)
@@ -749,11 +747,12 @@ private enum WatchWorkPreview {
     static var scenario: String? {
         ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--work-preview=") }.map { String($0.dropFirst(15)) }
     }
-    static let detailScenarios = ["approval", "approval-json", "approval-unknown", "question", "multiple", "long-question", "long-option", "expired-request", "unconfirmed"]
+    static let detailScenarios = ["approval", "approval-json", "approval-unknown", "question", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
     static var responseSent = false
     static var task: WatchWorkTask {
-        WatchWorkTask(sourceID: "preview", sessionID: "task", provider: "codex", title: "Simplify onboarding",
-            computer: "MacBook Pro", state: "needs_input", freshUntil: Date().timeIntervalSince1970 + 300)
+        let state = ["working-detail": "working", "finished-detail": "finished", "failed-detail": "failed", "idle-detail": "idle", "historical-detail": "working"][scenario ?? ""] ?? "needs_input"
+        return WatchWorkTask(sourceID: "preview", sessionID: "task", provider: "codex", title: "Simplify onboarding",
+            computer: "MacBook Pro", state: state, freshUntil: Date().timeIntervalSince1970 + (scenario == "historical-detail" ? -600 : 300))
     }
     static func reply(_ payload: [String: Any]) throws -> [String: Any]? {
         guard let scenario else { return nil }
@@ -777,14 +776,14 @@ private enum WatchWorkPreview {
                 values.append(WatchWorkTask(sourceID: "preview", sessionID: "another", provider: "claude",
                     title: "Review notification wording", computer: "MacBook Pro", state: "needs_input", freshUntil: now + 300))
             }
-            if ["empty", "setup"].contains(scenario) { values = [] }
+            if ["empty", "setup", "waiting"].contains(scenario) { values = [] }
             let sources = scenario == "setup" ? [] : ["preview", "other"].map { id in
                 WatchWorkSource(sourceID: id, name: id == "preview" ? "MacBook Pro" : "Development workstation",
-                    generation: "preview", revision: 7,
+                    generation: scenario == "waiting" ? nil : "preview", revision: scenario == "waiting" ? nil : 7,
                     stateCounts: Dictionary(grouping: values.filter { $0.sourceID == id }, by: \.state).mapValues(\.count))
             }
             return try encoded(WatchWorkSnapshot(tasks: values, computers: sources.count,
-                unavailable: scenario == "stale" ? 2 : 0, sources: sources))
+                unavailable: ["stale", "waiting"].contains(scenario) ? 2 : scenario == "partial" ? 1 : 0, sources: sources))
         }
         if payload["operation"] as? String == "submit" {
             if scenario == "unconfirmed" { return ["unconfirmed": true] }
@@ -804,7 +803,8 @@ private enum WatchWorkPreview {
             detail: scenario == "approval-json" ? "Tool: Bash\nWorking directory: /Projects/Paceman\n\n{\"command\":\"swift test --filter WatchWorkTests\",\"description\":\"Verify the Watch response flow.\",\"timeout\":120000}"
                 : scenario == "approval-unknown" ? "Tool: mcp__review__inspect\n\n{\"description\":\"Keep this exact tool input.\",\"mode\":\"review\"}"
                 : approval ? "Tool: Bash\nWorking directory: /Projects/Paceman\nCommand: swift test" : "",
-            questions: approval ? [] : scenario == "multiple" ? [question, .init(id: "q1", prompt: "Which screens?", multiple: true, options: [])] : [question], remainingSeconds: 120)
+            questions: approval ? [] : scenario == "multiple" ? [question, .init(id: "q1", prompt: "Which screens?", multiple: true, options: [])]
+                : scenario == "free-text" ? [.init(id: "q0", prompt: "What should we improve next?", multiple: false, options: [])] : [question], remainingSeconds: 120)
         return try encoded(WatchWorkPrompt(generation: "preview", request: request, remainingSeconds: scenario == "expired-request" ? -1 : 120))
     }
 }
