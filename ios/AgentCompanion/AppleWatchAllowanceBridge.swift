@@ -1,6 +1,7 @@
 import Foundation
 import UIKit
 import WatchConnectivity
+import CryptoKit
 
 /// Cached usage travels in application context; task/request content uses live replies only.
 final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
@@ -9,6 +10,21 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
     private var lastWorkSnapshot: WatchWorkSnapshot?
     var onWatchPushToken: ((String, String, Int, Bool) -> Void)?
     var onWorkMessage: (@MainActor ([String: Any]) async -> [String: Any])?
+    var onWatchStateChanged: (@MainActor () -> Void)?
+
+    // Activation can still be restoring on a cold phone launch. Defer a stored
+    // selection until the platform reports whether its paired Watch is available.
+    var taskHandoffAvailable: Bool? {
+        guard WCSession.isSupported() else { return false }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return nil }
+        return session.isPaired && session.isWatchAppInstalled
+    }
+
+    var taskHandoffIdentity: String? {
+        guard taskHandoffAvailable == true, let directory = WCSession.default.watchDirectoryURL else { return nil }
+        return SHA256.hash(data: Data(directory.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
 
     private override init() {
         super.init()
@@ -94,7 +110,7 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
     @MainActor private func performWork(_ message: [String: Any]) async -> [String: Any] {
         let started = ProcessInfo.processInfo.systemUptime
         let requestedOperation = message["operation"] as? String ?? "unknown"
-        let label = ["tasks", "cachedTasks", "refreshTasks", "request", "submit"].contains(requestedOperation)
+        let label = ["tasks", "cachedTasks", "refreshTasks", "request", "submit", "continueOnPhone"].contains(requestedOperation)
             ? requestedOperation : "unknown"
         Diagnostics.shared.record("apple_watch_\(label)_received")
         var operation: Task<[String: Any], Never>?
@@ -139,12 +155,12 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
                  error: Error?) {
         if activationState == .activated {
             self.session(session, didReceiveApplicationContext: session.receivedApplicationContext)
-            DispatchQueue.main.async { self.sendCurrent(force: true) }
+            DispatchQueue.main.async { self.sendCurrent(force: true); self.onWatchStateChanged?() }
         }
     }
 
     func sessionWatchStateDidChange(_ session: WCSession) {
-        DispatchQueue.main.async { self.sendCurrent(force: true) }
+        DispatchQueue.main.async { self.sendCurrent(force: true); self.onWatchStateChanged?() }
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}

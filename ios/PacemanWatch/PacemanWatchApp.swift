@@ -21,22 +21,22 @@ struct PacemanWatchApp: App {
         if let scenario = WatchWorkPreview.scenario, WatchWorkPreview.detailScenarios.contains(scenario) {
             return [.session(WatchWorkPreview.task)]
         }
-        if ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("--usage-preview=") }) {
-            return [.usage]
-        }
         #endif
         return []
     }()
-    @State private var launch: WatchActivityLaunch?
 
     var body: some Scene {
         WindowGroup {
             NavigationStack(path: $path) {
-                activity
+                WatchActivityView(store: store, launch: nil) { _, _ in }
                 .navigationDestination(for: WatchDestination.self) { destination in
                     switch destination {
                     case .session(let session): WatchTaskView(store: store, task: session)
-                    case .usage: usage
+                    case .activity(let launch):
+                        WatchActivityView(store: store, launch: launch) { session, launchID in
+                            guard path.last == .activity(launch), launch.id == launchID else { return }
+                            path.append(.session(session))
+                        }
                     }
                 }
             }
@@ -72,98 +72,10 @@ struct PacemanWatchApp: App {
     private func openActivity(_ route: LiveActivityRoute?) {
         // An external tap must not discard the request currently being answered.
         if let last = path.last, case .session(let session) = last, session.state == "needs_input" { return }
-        path = []
-        launch = WatchActivityLaunch(route: route)
+        path = route.map { [.activity(WatchActivityLaunch(route: $0))] } ?? []
     }
 
-    private var activity: some View {
-        WatchActivityView(store: store, launch: launch, clearScope: { launch = nil }) { session, launchID in
-            guard path.isEmpty, launch?.id == launchID else { return }
-            path = [.session(session)]
-        }
-    }
 
-    private var usage: some View {
-        ScrollView {
-            TimelineView(.periodic(from: .now, by: 60)) { context in
-                VStack(alignment: .leading, spacing: 20) {
-                    let summaries = store.usage.summaries(at: context.date)
-                    if summaries.isEmpty { setupSummary }
-                    ForEach(summaries, id: \.provider) { allowance in
-                        if allowance.available(at: context.date) { allowanceSummary(allowance, at: context.date) }
-                        else { expiredSummary(allowance, at: context.date) }
-                    }
-                }.padding(.horizontal, 12)
-            }
-        }.navigationTitle("Codex usage")
-    }
-
-    private func allowanceSummary(_ allowance: WatchAllowanceSnapshot, at date: Date) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("\(Image(systemName: "gauge.with.needle"))  \(allowance.providerName) · \(allowance.limitTitle)")
-                .font(.headline)
-                .fontWeight(.semibold)
-                .foregroundStyle(accent)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-
-            HStack(alignment: .firstTextBaseline, spacing: 0) {
-                Text("Reset \(allowance.resetCountdownDetailed(at: date))")
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                Spacer(minLength: 4)
-                Text("\(allowance.remaining)%")
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .font(.body)
-            .monospacedDigit()
-
-            Gauge(value: Double(allowance.remaining), in: 0...100) {
-                EmptyView()
-            }
-            .gaugeStyle(.accessoryLinearCapacity)
-            .tint(accent.opacity(allowance.cached(at: date) ? 0.55 : 1))
-            .padding(.vertical, 3)
-            .accessibilityHidden(true)
-
-            Text(updatedLabel(since: allowance.updatedAt, at: date))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .padding(.top, 8)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(allowance.providerName) \(allowance.limitTitle), \(allowance.remaining) percent remaining, resets in \(allowance.resetCountdownDetailedSpoken(at: date)), updated \(Date(timeIntervalSince1970: allowance.updatedAt).formatted())")
-    }
-
-    private func updatedLabel(since timestamp: TimeInterval, at date: Date) -> String {
-        let age = max(0, Int(date.timeIntervalSince1970 - timestamp))
-        if age < 60 { return "Updated just now" }
-        if age < 3_600 { return "Updated \(age / 60)m ago" }
-        if age < 86_400 { return "Updated \(age / 3_600)h ago" }
-        return "Updated \(age / 86_400)d ago"
-    }
-
-    private func expiredSummary(_ allowance: WatchAllowanceSnapshot, at date: Date) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(allowance.providerName)
-                .font(.caption).foregroundStyle(.secondary)
-            Text("Waiting for new limit")
-                .font(.headline)
-            if date.timeIntervalSince1970 - allowance.resetsAt > 1_800 {
-                Text("Check Paceman on iPhone.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var setupSummary: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("No Codex limit yet")
-                .font(.headline)
-            Text("Open Paceman on iPhone to connect a computer using Codex. Claude usage limits are not supported.")
-                .font(.footnote).foregroundStyle(.secondary)
-        }
-    }
 }
 
 final class WatchPushDelegate: NSObject, WKApplicationDelegate {
@@ -328,7 +240,7 @@ extension WatchAllowanceStore {
                     continuation.resume(throwing: payload["operation"] as? String == "submit"
                         ? WatchWorkError.rejected(error) : WatchWorkError.message(error))
                 } else if result["data"] is Data || result["submitted"] as? Bool == true
-                            || result["unconfirmed"] as? Bool == true {
+                            || result["unconfirmed"] as? Bool == true || result["handoff"] is Int {
                     continuation.resume(returning: result)
                 } else {
                     continuation.resume(throwing: WatchWorkError.message("Update Paceman on iPhone and Apple Watch."))
@@ -349,10 +261,10 @@ enum WatchWorkError: LocalizedError {
 }
 
 private enum WatchDestination: Hashable {
-    case session(WatchWorkTask), usage
+    case session(WatchWorkTask), activity(WatchActivityLaunch)
 }
 
-private struct WatchActivityLaunch: Identifiable, Equatable {
+private struct WatchActivityLaunch: Identifiable, Hashable {
     let id = UUID()
     let route: LiveActivityRoute?
 }
@@ -360,7 +272,6 @@ private struct WatchActivityLaunch: Identifiable, Equatable {
 private struct WatchActivityView: View {
     @ObservedObject var store: WatchAllowanceStore
     let launch: WatchActivityLaunch?
-    let clearScope: () -> Void
     let openSession: (WatchWorkTask, UUID) -> Void
     @Environment(\.scenePhase) private var scenePhase
     private var snapshot: WatchWorkSnapshot? { store.workSnapshot }
@@ -377,50 +288,37 @@ private struct WatchActivityView: View {
     private var sessions: [WatchWorkTask] {
         (snapshot?.tasks ?? []).filter { route == nil || $0.sourceID == route?.sourceID }
     }
+    private var receivedActivity: Bool {
+        if route != nil { return source?.generation != nil }
+        guard let snapshot else { return false }
+        return snapshot.sources.map { $0.contains { $0.generation != nil } } ?? (snapshot.unavailable == 0)
+    }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            List {
-                if let error { Text(error).font(.body) }
-                if let snapshot {
-                    ForEach(["Needs you", "Working", "Recent", "Last known"], id: \.self) { section in
-                        let tasks = sessions.filter { group($0, at: context.date) == section }
-                        if !tasks.isEmpty {
-                            Section(section) {
-                                ForEach(tasks) { task in
-                                    NavigationLink(value: WatchDestination.session(task)) {
-                                        VStack(alignment: .leading, spacing: 4) {
-                                            Text(task.title).font(.headline).lineLimit(3)
-                                            Text([task.provider.capitalized, route == nil ? task.computer : ""].filter { !$0.isEmpty }.joined(separator: " · ")).font(.caption2).foregroundStyle(.secondary)
-                                            if section == "Recent" || section == "Last known" || task.state == "failed" {
-                                                Text(task.status).font(.caption).foregroundStyle(.secondary)
-                                            }
+            Group {
+                if sessions.isEmpty {
+                    activityState
+                } else {
+                    List {
+                        ForEach(["Needs you", "Working", "Recent", "Last known"], id: \.self) { section in
+                            let tasks = sessions.filter { group($0, at: context.date) == section }
+                            if !tasks.isEmpty {
+                                Section(section) {
+                                    ForEach(tasks) { task in
+                                        NavigationLink(value: WatchDestination.session(task)) {
+                                            WatchActivityRow(task: task, showComputer: route == nil, date: context.date)
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                    if sessions.isEmpty {
-                        if route != nil {
-                            Text(source == nil ? "This computer is no longer connected."
-                                : source?.generation == nil ? "No activity received from this computer yet."
-                                : "No sessions to show for this computer.")
-                        } else {
-                            Text(snapshot.computers == 0 ? "Connect a computer in Paceman on iPhone."
-                                : snapshot.unavailable > 0 ? "No activity received. Check Paceman on iPhone." : "No active sessions")
-                        }
-                    } else if snapshot.unavailable > 0, route == nil {
-                        Text("Some computers are unavailable.").font(.caption)
-                    }
-                } else if loading { ProgressView("Loading Activity") }
-                Section {
-                    if route != nil { Button("All activity", action: clearScope) }
-                    NavigationLink("Codex usage", value: WatchDestination.usage)
                 }
             }
         }
-        .navigationTitle(route == nil ? "Paceman" : source?.name ?? "Computer activity")
+        .navigationTitle(route == nil ? Text("Paceman")
+            : Text("\(Image(systemName: "laptopcomputer")) \(source?.name ?? "Activity")"))
         .onAppear { visible = true }
         .task(id: scenePhase == .active && visible ? refreshID : nil) {
             guard scenePhase == .active, visible else { return }
@@ -461,6 +359,33 @@ private struct WatchActivityView: View {
 
     private func group(_ task: WatchWorkTask, at date: Date) -> String {
         task.group(at: date)
+    }
+
+    private var activityState: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                if snapshot == nil, error == nil {
+                    ProgressView().fixedSize()
+                    Text("Loading activity")
+                } else if let snapshot {
+                    Text(snapshot.computers == 0 ? "Connect Paceman"
+                        : route != nil && source == nil ? "Activity unavailable"
+                        : !receivedActivity ? "No activity received" : "No active sessions")
+                        .font(.headline)
+                    if snapshot.computers == 0 || !receivedActivity {
+                        WatchPhoneContinuation(store: store)
+                    }
+                } else {
+                    Text("Activity unavailable").font(.headline)
+                    WatchPhoneContinuation(store: store)
+                }
+            }
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 12)
+        }
+        .defaultScrollAnchor(.center, for: .alignment)
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     @MainActor private func refresh() async {
@@ -504,6 +429,31 @@ private struct WatchActivityView: View {
     }
 }
 
+private struct WatchActivityRow: View {
+    let task: WatchWorkTask
+    let showComputer: Bool
+    let date: Date
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(task.title).font(.body).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: task.symbol(at: date))
+                    .foregroundStyle(task.historical(at: date) || task.group(at: date) != "Needs you" ? Color.secondary : WatchPalette.tint)
+                    .accessibilityHidden(true)
+                Text([task.providerName, showComputer ? task.computer : ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                    .foregroundStyle(.secondary)
+            }.font(.caption2)
+            if ["Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed" {
+                Text(task.status(at: date)).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(task.status(at: date))
+    }
+}
+
 private struct WatchTaskView: View {
     @ObservedObject var store: WatchAllowanceStore
     let task: WatchWorkTask
@@ -511,25 +461,39 @@ private struct WatchTaskView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var prompt: WatchWorkPrompt?
     @State private var deadline: TimeInterval = 0
-    @State private var selected: Set<Int> = []
-    @State private var text = ""
+    @State private var answers: [String: InputAnswer] = [:]
     @State private var submission: InputSubmission?
     @State private var sending = false
     @State private var submitted = false
     @State private var unconfirmed = false
     @State private var error: String?
-    @State private var confirmAllow = false
     @State private var rejected = false
     @State private var epoch = UUID()
 
     private var canSendAnswer: Bool {
         guard submission == nil, !sending, !rejected, let prompt, prompt.supportsWatchAnswer,
-              prompt.request.kind == "question", let question = prompt.request.questions.first,
+              prompt.request.kind == "question",
               ProcessInfo.processInfo.systemUptime < deadline else { return false }
-        return InputAnswer(selected: selected.sorted(), text: text).valid(for: question)
+        return answerSubmission?.valid(for: prompt.request) == true
+    }
+
+    private var answerSubmission: InputSubmission? {
+        guard let prompt else { return nil }
+        // Include the combined wire limit before offering Send; the real send uses a new key.
+        return InputSubmission(generation: prompt.generation, requestID: prompt.request.id,
+            version: prompt.request.version, idempotencyKey: "00000000-0000-4000-8000-000000000000",
+            action: "answer", answers: answers)
+    }
+
+    private var validationMessage: String? {
+        if answers.values.contains(where: { $0.text.unicodeScalars.count > 4096 }) {
+            return "Keep each answer to 4,096 characters or fewer."
+        }
+        return answerSubmission?.fitsWireLimit == false ? "The combined answer is too long. Shorten it to send." : nil
     }
 
     private var responseDestination: String { ResponseGuidance.destination(for: task.provider) }
+    private var currentTask: WatchWorkTask { store.workSnapshot?.tasks.first { $0.id == task.id } ?? task }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
@@ -547,18 +511,21 @@ private struct WatchTaskView: View {
                             }
                         }
                     } else {
-                        Text(task.title).font(.headline).fixedSize(horizontal: false, vertical: true)
+                        Text(currentTask.title).font(.headline).fixedSize(horizontal: false, vertical: true)
                         if submitted {
                             Label("Response sent", systemImage: "checkmark.circle")
                         } else if !rejected {
-                            Text(task.historical(at: Date()) ? "Last known: \(task.status)" : task.status)
+                            taskDetails
                         }
                     }
                     if sending { ProgressView(submission == nil ? "Loading request" : "Sending response") }
                     if let error { Text(error).font(.body) }
                     if prompt == nil, error != nil, !submitted, !rejected,
-                       task.state == "needs_input", !task.historical(at: Date()) {
+                       currentTask.state == "needs_input", !currentTask.historical(at: Date()) {
                         Button("Check again") { Task { await load() } }.disabled(sending)
+                    }
+                    if !submitted {
+                        WatchPhoneContinuation(store: store, task: task).disabled(sending && submission != nil)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -569,14 +536,25 @@ private struct WatchTaskView: View {
         .navigationTitle(prompt?.request.kind == "question" ? "Question" : prompt?.request.kind == "approval" ? "Approval" : "Session")
         .toolbarTitleDisplayMode(.inline)
         .task { await load() }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled {
+                _ = try? await store.workMessage(["operation": "refreshTasks", "sourceID": task.sourceID])
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            }
+        }
+        .task(id: scenePhase == .active ? store.workRevision : -1) {
+            if scenePhase == .active, store.workRevision > 0 {
+                _ = try? await store.workMessage(["operation": "cachedTasks"])
+            }
+        }
         .onChange(of: store.phoneReachable) { _, reachable in
             if reachable, prompt == nil, !submitted, scenePhase == .active {
                 Task { await load() }
-            } else if !reachable, submission == nil, !submitted, task.state == "needs_input" {
+            } else if !reachable, submission == nil, !submitted, currentTask.state == "needs_input" {
                 epoch = UUID()
                 prompt = nil
-                selected = []
-                text = ""
+                answers = [:]
                 error = "Reconnect to your iPhone to respond."
             }
         }
@@ -585,16 +563,16 @@ private struct WatchTaskView: View {
                 epoch = UUID()
                 prompt = nil
                 submission = nil
-                selected = []
-                text = ""
+                answers = [:]
                 error = nil
-                confirmAllow = false
             } else if value == .active, prompt == nil, !submitted, !sending {
                 Task { await load() }
             }
         }
-        .confirmationDialog("Allow this action once?", isPresented: $confirmAllow, titleVisibility: .visible) {
-            Button("Allow once") { respond("allowOnce") }
+        .onChange(of: currentTask.state) { _, state in
+            if state == "needs_input", prompt == nil, !submitted, scenePhase == .active {
+                Task { await load() }
+            }
         }
     }
 
@@ -602,24 +580,39 @@ private struct WatchTaskView: View {
         let request = prompt.request
         if request.kind == "approval" {
             approvalContent(request)
-            Button("Allow once") { confirmAllow = true }.buttonStyle(.borderedProminent).foregroundStyle(.black)
+            Button("Allow once") { respond("allowOnce") }.buttonStyle(.borderedProminent).foregroundStyle(.black)
             Button("Decline", role: .destructive) { respond("deny") }
         } else if !prompt.supportsWatchAnswer {
             Text("Answer these questions in Paceman on iPhone.")
-        } else if let question = request.questions.first {
+        } else {
+            ForEach(request.questions) { question in
+                questionForm(question, detail: question.id == request.questions.first?.id ? request.detail : "")
+            }
+            if let validationMessage { Text(validationMessage).font(.body) }
+            if canSendAnswer {
+                Button(request.questions.count > 1 ? "Send answers" : "Send answer") { respond("answer") }
+                    .buttonStyle(.borderedProminent).foregroundStyle(.black)
+            }
+        }
+    }
+
+    private func questionForm(_ question: InteractionQuestion, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
             Text(question.prompt).font(.headline).fixedSize(horizontal: false, vertical: true)
-            if !request.detail.isEmpty, request.detail != question.prompt {
-                Text(request.detail).font(.body).fixedSize(horizontal: false, vertical: true)
+            if !detail.isEmpty, detail != question.prompt {
+                Text(detail).font(.body).fixedSize(horizontal: false, vertical: true)
             }
             VStack(spacing: 8) {
                 ForEach(question.options.indices, id: \.self) { index in
                     let option = question.options[index]
-                    let chosen = selected.contains(index)
+                    let chosen = answers[question.id]?.selected.contains(index) == true
                     Button {
-                        if chosen { selected.remove(index) }
-                        else if question.multiple { selected.insert(index) }
-                        else { selected = [index] }
-                        text = ""
+                        var answer = answers[question.id] ?? InputAnswer()
+                        if chosen { answer.selected.removeAll { $0 == index } }
+                        else if question.multiple { answer.selected.append(index); answer.selected.sort() }
+                        else { answer.selected = [index] }
+                        answer.text = ""
+                        answers[question.id] = answer
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Image(systemName: question.multiple ? (chosen ? "checkmark.square.fill" : "square")
@@ -643,12 +636,35 @@ private struct WatchTaskView: View {
                     .accessibilityAddTraits(chosen ? .isSelected : [])
                 }
             }
-            TextField("Your answer", text: $text)
+            TextField("Your answer", text: Binding(get: { answers[question.id]?.text ?? "" }, set: { text in
+                var answer = answers[question.id] ?? InputAnswer()
+                answer.text = text
+                if !text.isEmpty { answer.selected = [] }
+                answers[question.id] = answer
+            }))
                 .accessibilityLabel("Your answer: " + question.prompt)
-                .onChange(of: text) { _, value in if !value.isEmpty { selected = [] } }
-            if canSendAnswer {
-                Button("Send answer") { respond("answer") }
-                    .buttonStyle(.borderedProminent).foregroundStyle(.black)
+        }
+    }
+
+    private var taskDetails: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(currentTask.historical(at: Date()) ? "Last known: \(currentTask.status)" : currentTask.status,
+                    systemImage: currentTask.symbol(at: Date()))
+                if let observedAt = currentTask.observedAt, observedAt > 0 {
+                    let observed = Date(timeIntervalSince1970: observedAt)
+                    let time = observed.formatted(date: Calendar.current.isDateInToday(observed) ? .omitted : .abbreviated, time: .shortened)
+                    Text("Last updated at \(time)").font(.caption).foregroundStyle(.secondary)
+                        .accessibilityLabel("Computer status last updated at \(time)")
+                }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Label(currentTask.computer, systemImage: "laptopcomputer")
+                if let project = currentTask.project, !project.isEmpty { Label(project, systemImage: "folder") }
+                Label(currentTask.providerName, systemImage: "terminal")
+            }.fixedSize(horizontal: false, vertical: true)
+            if currentTask.historical(at: Date()) {
+                Text("Last received activity. Current status is unavailable.")
             }
         }
     }
@@ -684,7 +700,7 @@ private struct WatchTaskView: View {
     }
 
     @MainActor private func load() async {
-        guard task.state == "needs_input", !task.historical(at: Date()), !sending else { return }
+        guard currentTask.state == "needs_input", !currentTask.historical(at: Date()), !sending else { return }
         error = nil
         sending = true
         defer { sending = false }
@@ -697,6 +713,7 @@ private struct WatchTaskView: View {
             let value = try JSONDecoder().decode(WatchWorkPrompt.self, from: data)
             prompt = value
             submission = value.submission
+            if let submission = value.submission { answers = submission.answers }
             submitted = value.submitted == true
             unconfirmed = value.submission != nil && !submitted
             rejected = false
@@ -709,12 +726,9 @@ private struct WatchTaskView: View {
 
     private func respond(_ action: String) {
         guard let prompt, submission == nil, ProcessInfo.processInfo.systemUptime < deadline else { return }
-        var answers: [String: InputAnswer] = [:]
-        if action == "answer", let question = prompt.request.questions.first {
-            answers[question.id] = InputAnswer(selected: selected.sorted(), text: text)
-        }
         let value = InputSubmission(generation: prompt.generation, requestID: prompt.request.id,
-            version: prompt.request.version, idempotencyKey: UUID().uuidString, action: action, answers: answers)
+            version: prompt.request.version, idempotencyKey: UUID().uuidString, action: action,
+            answers: action == "answer" ? answers : [:])
         guard value.valid(for: prompt.request) else { return }
         submission = value
         Task { await send() }
@@ -742,6 +756,56 @@ private struct WatchTaskView: View {
     }
 }
 
+private struct WatchPhoneContinuation: View {
+    @ObservedObject var store: WatchAllowanceStore
+    var task: WatchWorkTask? = nil
+    @Environment(\.scenePhase) private var phase
+    @State private var preparing = false
+    @State private var message: String?
+    @State private var epoch = UUID()
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Button("Continue on iPhone", systemImage: "iphone") {
+                Task { await prepare() }
+            }.buttonStyle(.bordered).disabled(preparing)
+            if preparing { ProgressView("Preparing iPhone") }
+            if let message { Text(message).font(.body).fixedSize(horizontal: false, vertical: true) }
+        }
+        .onChange(of: phase) { _, value in
+            if value == .background { epoch = UUID(); preparing = false; message = nil }
+        }
+        .onDisappear { epoch = UUID(); preparing = false; message = nil }
+    }
+
+    @MainActor private func prepare() async {
+        guard !preparing else { return }
+        preparing = true
+        message = nil
+        let expected = epoch
+        defer { if epoch == expected { preparing = false } }
+        var payload: [String: Any] = ["operation": "continueOnPhone"]
+        if let task {
+            payload["sourceID"] = task.sourceID
+            payload["sessionID"] = task.sessionID
+            payload["provider"] = task.provider
+        }
+        do {
+            let reply = try await store.workMessage(payload)
+            guard epoch == expected, phase == .active else { return }
+            if reply["selectionAvailable"] as? Bool == false, task != nil {
+                message = "This session is no longer available. Open Paceman on iPhone for current activity."
+            } else {
+                message = reply["handoff"] as? Int == 2 ? "Tap the Paceman notification on iPhone."
+                    : "Ready on iPhone."
+            }
+        } catch {
+            guard epoch == expected, phase == .active else { return }
+            message = error.localizedDescription
+        }
+    }
+}
+
 #if DEBUG
 private enum WatchWorkPreview {
     static var scenario: String? {
@@ -752,10 +816,14 @@ private enum WatchWorkPreview {
     static var task: WatchWorkTask {
         let state = ["working-detail": "working", "finished-detail": "finished", "failed-detail": "failed", "idle-detail": "idle", "historical-detail": "working"][scenario ?? ""] ?? "needs_input"
         return WatchWorkTask(sourceID: "preview", sessionID: "task", provider: "codex", title: "Simplify onboarding",
-            computer: "MacBook Pro", state: state, freshUntil: Date().timeIntervalSince1970 + (scenario == "historical-detail" ? -600 : 300))
+            computer: "MacBook Pro", state: state, freshUntil: Date().timeIntervalSince1970 + (scenario == "historical-detail" ? -600 : 300),
+            project: "Paceman", observedAt: Date().timeIntervalSince1970 - (scenario == "historical-detail" ? 900 : 15))
     }
     static func reply(_ payload: [String: Any]) throws -> [String: Any]? {
         guard let scenario else { return nil }
+        if payload["operation"] as? String == "continueOnPhone" {
+            return ["handoff": 2, "selectionAvailable": payload["sessionID"] != nil]
+        }
         if scenario == "disconnected" { throw WatchWorkError.message("Connect to your iPhone to review sessions and respond.") }
         func encoded<T: Encodable>(_ value: T) throws -> [String: Any] { ["data": try JSONEncoder().encode(value)] }
         if let operation = payload["operation"] as? String,

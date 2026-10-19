@@ -273,6 +273,15 @@ This content is never placed in application context or queued transfers.
 Session replies optionally include paired `sources` with display name, generation,
 revision, and complete `stateCounts`. Watch launch routing uses these counts and
 the displayed revision to avoid selecting a session from a newer or truncated list.
+Task metadata can include `project`, computer-snapshot `observedAt`, and the
+phone's `presentationSymbol`. Questions use one submission for all answers.
+
+`continueOnPhone` optionally selects the same exact task identity. The reply's
+`handoff` uses results 1–3 from [session handoff](#accessory-session-handoff);
+`selectionAvailable: false` means current Activity was prepared instead of a
+removed task. The phone validates its OS-paired Watch identity and resolves the
+destination itself. Only the opaque, expiring selection is retained; request
+content still uses live replies. Opening the agent app remains a phone action.
 
 Example background push:
 

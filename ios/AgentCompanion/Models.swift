@@ -531,12 +531,20 @@ struct PendingWatchHandoff: Codable, Identifiable, Equatable {
     let source: Data
     let session: Data
     let createdAt: Date
+    var appleWatch: Bool? = nil
+    var activityOnly: Bool? = nil
 
-    init(watchID: String, request: WatchHandoffRequest, now: Date = Date()) {
+    init(watchID: String, request: WatchHandoffRequest, now: Date = Date(), appleWatch: Bool = false) {
         id = UUID(); self.watchID = watchID; source = request.source; session = request.session; createdAt = now
+        self.appleWatch = appleWatch ? true : nil
+    }
+    init(appleWatchID: String, now: Date = Date()) {
+        id = UUID(); watchID = appleWatchID; source = Data(); session = Data(); createdAt = now
+        appleWatch = true; activityOnly = true
     }
     func isCurrent(now: Date = Date()) -> Bool {
-        source.count == 16 && session.count == 16 &&
+        (activityOnly == true ? appleWatch == true && source.isEmpty && session.isEmpty
+            : source.count == 16 && session.count == 16) &&
         now.timeIntervalSince(createdAt) >= 0 && now.timeIntervalSince(createdAt) < 600
     }
 }

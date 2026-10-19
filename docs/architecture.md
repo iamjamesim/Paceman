@@ -54,13 +54,13 @@ cannot erase that reading.
 
 WatchConnectivity also supplies the paired-computer list and cached readings.
 The Watch app opens to agent sessions grouped by attention, work, and history;
-Codex usage remains available separately. Session reads and lightweight responses use interactive
+Codex usage remains available in complications. Session reads and lightweight responses use interactive
 WatchConnectivity messages through the paired iPhone. The list shows the phone's
 cached activity while computers refresh independently. While visible, it requests
 updates every five seconds; live hints also refresh it as the phone receives data.
-Leaving the screen or backgrounding stops those requests. One-time approvals and
-single-question answers use the existing response bridge; larger forms
-continue on iPhone or computer. This path requires a reachable iPhone and computer.
+Leaving the screen or backgrounding stops those requests. Questions and one-time
+approvals use the existing response bridge. Task details and blocked requests
+can continue on iPhone. This path requires a reachable iPhone and computer.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
 are in [data lifecycle](data-lifecycle.md).

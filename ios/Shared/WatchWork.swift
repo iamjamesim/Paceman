@@ -78,7 +78,27 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
     // Keep the observed state intact for exact Live Activity route matching.
     var presentationStatus: String? = nil
     var presentationGroup: String? = nil
+    var project: String? = nil
+    // This is the computer snapshot observation, not the task's last action.
+    var observedAt: Double? = nil
+    var presentationSymbol: String? = nil
     var id: String { "\(sourceID)/\(provider)/\(sessionID)" }
+    var providerName: String {
+        switch provider { case "claude": return "Claude Code"; case "codex": return "Codex"; default: return provider.capitalized }
+    }
+    func symbol(at date: Date) -> String {
+        if !historical(at: date) {
+            if let presentationSymbol { return presentationSymbol }
+            if presentationGroup == "Working" { return "circle.dotted" }
+        }
+        switch state {
+        case "working": return "circle.dotted"
+        case "needs_input": return "exclamationmark.triangle"
+        case "failed": return "xmark.circle"
+        case "finished": return "checkmark.circle"
+        default: return "ellipsis.circle"
+        }
+    }
     func historical(at date: Date) -> Bool { date.timeIntervalSince1970 >= freshUntil }
     var status: String { status(at: Date()) }
     func status(at date: Date) -> String {
@@ -205,7 +225,8 @@ struct WatchWorkPrompt: Codable {
     var submission: InputSubmission? = nil
     var submitted: Bool? = nil
     var supportsWatchAnswer: Bool {
-        request.kind == "approval" || (request.kind == "question" && request.questions.count == 1)
+        request.kind == "approval" || (request.kind == "question" && (1...4).contains(request.questions.count)
+            && Set(request.questions.map(\.id)).count == request.questions.count)
     }
 }
 

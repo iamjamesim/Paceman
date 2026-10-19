@@ -16,6 +16,9 @@ struct AgentCompanionApp: App {
         _presentation = StateObject(wrappedValue: p)
         _model = StateObject(wrappedValue: m)
         if !p.preview { PushCoordinator.shared.model = m }
+        #if DEBUG
+        if p.preview, ProcessInfo.processInfo.arguments.contains("--watch-handoff-review") { PushCoordinator.shared.model = m }
+        #endif
     }
     var body: some Scene {
         WindowGroup {
@@ -25,6 +28,11 @@ struct AgentCompanionApp: App {
                     if presentation.preview, value == .active,
                        ProcessInfo.processInfo.arguments.contains("--watch-live-review") {
                         Task { await model.monitoring.reviewWatchLaunch() }
+                    }
+                    #endif
+                    #if DEBUG
+                    if presentation.preview, ProcessInfo.processInfo.arguments.contains("--watch-handoff-review") {
+                        model.setForeground(value == .active)
                     }
                     #endif
                     guard !presentation.preview else { return }
@@ -84,9 +92,23 @@ struct CompanionRoot: View {
         }
         .onChange(of: model.handoff?.id) { _, id in
             if id != nil {
-                if selectedTask != nil || reviewQueue != nil { model.dismissHandoff() }
-                else { sidebarPresented = false }
+                if selectedTask != nil || reviewQueue != nil {
+                    if model.handoff?.appleWatch == true { model.deferHandoff() }
+                    else { model.dismissHandoff() }
+                } else if model.handoff?.activityOnly == true {
+                    sidebarPresented = false
+                    path = NavigationPath()
+                    selectedSection = model.pairedSources.isEmpty ? .devices : .work
+                    workFilter = nil
+                    model.dismissHandoff()
+                } else { sidebarPresented = false }
             }
+        }
+        .onChange(of: selectedTask) { _, value in
+            if value == nil, reviewQueue == nil { model.presentStoredHandoff() }
+        }
+        .onChange(of: reviewQueue?.id) { _, value in
+            if value == nil, selectedTask == nil { model.presentStoredHandoff() }
         }
         .onOpenURL(perform: handleURL)
         .task(id: activityNavigation?.id) {
@@ -112,7 +134,7 @@ struct CompanionRoot: View {
         Binding(get: {
             if let reviewQueue { return .review(reviewQueue) }
             if let selectedTask { return .activity(selectedTask) }
-            return model.handoff.map { .handoff($0) }
+            return model.handoff.flatMap { $0.activityOnly == true ? nil : .handoff($0) }
         }, set: { value in
             if value == nil { selectedTask = nil; reviewQueue = nil; model.dismissHandoff() }
         })

@@ -24,6 +24,7 @@ final class CompanionModel: ObservableObject {
     private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
     private let client: SourceClient
     private let refreshUptime: () -> TimeInterval
+    private let appleWatchIdentity: () -> String?
     private let push: PushCoordinator
     private let pairedStore = PairedSourcesStore()
     private let savePairedSources: ([PairedSource]) throws -> Void
@@ -69,9 +70,11 @@ final class CompanionModel: ObservableObject {
 
     init(preview: Bool = false, push: PushCoordinator? = nil, client: SourceClient = SourceClient(),
          savePairedSources: (([PairedSource]) throws -> Void)? = nil,
-         refreshUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+         refreshUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         appleWatchIdentity: @escaping () -> String? = { AppleWatchAllowanceBridge.shared.taskHandoffIdentity }) {
         self.client = client
         self.refreshUptime = refreshUptime
+        self.appleWatchIdentity = appleWatchIdentity
         self.interactions = InteractionInbox(client: client)
         self.push = push ?? .shared
         self.savePairedSources = savePairedSources ?? PairedSourcesStore().save
@@ -184,6 +187,7 @@ final class CompanionModel: ObservableObject {
             Task { @MainActor in await self?.refreshAll(fromWatch: true) }
         }
         if !preview {
+            AppleWatchAllowanceBridge.shared.onWatchStateChanged = { [weak self] in self?.presentStoredHandoff() }
             AppleWatchAllowanceBridge.shared.onWorkMessage = { [weak self] message in
                 guard let self else { return ["error": "Open Paceman on iPhone to connect."] }
                 return await self.handleWatchWork(message)
@@ -236,6 +240,27 @@ final class CompanionModel: ObservableObject {
                 }
             }
         }
+        #if DEBUG
+        if preview, ProcessInfo.processInfo.arguments.contains("--watch-handoff-review") {
+            let source = PairedSource(endpoint: URL(string: "https://watch-review.invalid")!,
+                sourceID: "preview", clientID: "preview", credential: "preview")
+            let now = Date().timeIntervalSince1970
+            pairedSources = [source]
+            snapshots = [source.sourceID: Snapshot(schema: 1, sourceID: source.sourceID, generation: "preview", revision: 7,
+                sourceName: "Watch review Mac", observedAt: now, changedAt: now, freshFor: 300, state: .needsInput,
+                eventID: "review", allowance: nil,
+                sessions: [AgentSession(id: "review-question", provider: "claude", state: .needsInput,
+                    name: "Review Watch continuation", project: "Paceman")], interactionsEnabled: true)]
+            lastContacts = [source.sourceID: Date()]
+            fetchedUptimes[source.sourceID] = refreshUptime()
+            interactions.previewReview(source)
+            AppleWatchAllowanceBridge.shared.onWorkMessage = { [weak self] message in
+                await self?.handleWatchWork(message) ?? ["error": "Reopen the review app on iPhone."]
+            }
+            AppleWatchAllowanceBridge.shared.onWatchStateChanged = { [weak self] in self?.presentStoredHandoff() }
+            forwardWatchAggregate()
+        }
+        #endif
         if !preview { Diagnostics.shared.record("app_launched") }
     }
 
@@ -489,6 +514,7 @@ final class CompanionModel: ObservableObject {
 
     func setForeground(_ value: Bool) {
         guard foreground != value else { return }
+        if !value { preserveWatchResponses() }
         foreground = value
         interactions.setForeground(value)
         for link in accessories.links {
@@ -587,6 +613,9 @@ final class CompanionModel: ObservableObject {
 
     private func startRefresh(_ paired: PairedSource, fromPush: Bool = false,
                               fromWatch: Bool = false) -> Task<UIBackgroundFetchResult, Never>? {
+        #if DEBUG
+        if designPreview, ProcessInfo.processInfo.arguments.contains("--watch-handoff-review") { return nil }
+        #endif
         guard !busy else { return nil }
         // Foreground cadence is the sole status owner while the phone is open.
         // Watch demand only reads that projection; it never promotes its poll.
@@ -840,7 +869,25 @@ extension CompanionModel {
         }?.state, watchTracking[item.id]?.active ?? true)
     }
 
+    private func preserveWatchResponses() {
+        for (id, item) in watchRequests {
+            guard let response = interactions.response(for: item),
+                  response.submission.generation == item.generation, response.submission.valid(for: item.request),
+                  watchSubmissions[id] == nil || watchSubmissions[id] == response.submission else { continue }
+            switch response.phase {
+            case .submitted:
+                watchSubmissions[id] = response.submission
+                watchConfirmed.insert(id)
+            case .sending, .unconfirmed:
+                watchSubmissions[id] = response.submission
+            case .rejected:
+                watchTracking[id]?.active = false
+            }
+        }
+    }
+
     private func watchWorkSnapshot() -> WatchWorkSnapshot {
+        preserveWatchResponses()
         let sources = pairedSources.filter { !isRevoked($0.sourceID) }
         let values = sources.flatMap { source -> [WatchWorkTask] in
             guard let snapshot = snapshots[source.sourceID] else { return [] }
@@ -860,7 +907,9 @@ extension CompanionModel {
                     title: session.title ?? session.displayName,
                     computer: name, state: session.state.rawValue, freshUntil: snapshot.activityFreshUntil,
                     presentationStatus: item.historical ? session.state.title : item.status,
-                    presentationGroup: item.phase.group.rawValue)
+                    presentationGroup: item.phase.group.rawValue,
+                    project: session.detail.isEmpty ? nil : session.detail, observedAt: snapshot.observedAt,
+                    presentationSymbol: item.statusToken.symbol ?? "circle.dotted")
             }
         }
         var result = WatchWorkSnapshot(tasks: Array(values.prefix(128)), computers: sources.count,
@@ -891,9 +940,7 @@ extension CompanionModel {
 
     func handoffTarget(_ request: PendingWatchHandoff) -> (sourceID: String, computer: String, session: AgentSession)? {
         guard request.isCurrent(),
-              designPreview || accessories.links.contains(where: {
-                  $0.paired && $0.updatesEnabled && $0.preferenceID == request.watchID
-              }),
+              handoffOwnerIsCurrent(request),
               let source = pairedSources.first(where: { WatchWire.sourceIdentifier($0.sourceID) == request.source }),
               !revokedSources.contains(source.sourceID),
               let snapshot = snapshots[source.sourceID],
@@ -903,13 +950,29 @@ extension CompanionModel {
         return (source.sourceID, snapshot.sourceName, session)
     }
 
+    private func handoffOwnerIsCurrent(_ request: PendingWatchHandoff) -> Bool {
+        if request.appleWatch == true { return appleWatchIdentity() == request.watchID }
+        return designPreview || accessories.links.contains {
+            $0.paired && $0.updatesEnabled && $0.preferenceID == request.watchID
+        }
+    }
+
+    private func handoffIsCurrent(_ request: PendingWatchHandoff) -> Bool {
+        request.isCurrent() && handoffOwnerIsCurrent(request)
+            && (request.activityOnly == true || handoffTarget(request) != nil)
+    }
+
     func handoffNotificationIsCurrent(_ id: UUID) -> Bool {
-        storedHandoff.map { $0.id == id && handoffTarget($0) != nil } == true && !foreground
+        storedHandoff.map { $0.id == id && handoffIsCurrent($0) } == true && !foreground
     }
 
     private func receiveHandoff(_ request: WatchHandoffRequest, watchID: String) async -> WatchHandoffResult {
         let pending = PendingWatchHandoff(watchID: watchID, request: request)
-        guard handoffTarget(pending) != nil,
+        return await receiveHandoff(pending)
+    }
+
+    private func receiveHandoff(_ pending: PendingWatchHandoff) async -> WatchHandoffResult {
+        guard handoffIsCurrent(pending),
               let data = try? JSONEncoder().encode(pending) else { return .unavailable }
         if let previous = storedHandoff { push.clearHandoffNotification(previous.id) }
         UserDefaults.standard.set(data, forKey: handoffKey)
@@ -920,7 +983,7 @@ extension CompanionModel {
         let notified = await push.postHandoffNotification(pending.id)
         // A foreground transition during notification scheduling should show the sheet
         // and remove the now-redundant notification, never interrupt twice.
-        guard storedHandoff?.id == pending.id, handoffTarget(pending) != nil else {
+        guard storedHandoff?.id == pending.id, handoffIsCurrent(pending) else {
             push.clearHandoffNotification(pending.id)
             return .unavailable
         }
@@ -934,24 +997,40 @@ extension CompanionModel {
     func presentStoredHandoff(notificationID: String? = nil) {
         guard let pending = storedHandoff,
               notificationID == nil || pending.id.uuidString == notificationID else { return }
-        guard pending.isCurrent(),
-              let link = accessories.links.first(where: { $0.preferenceID == pending.watchID }),
-              link.updatesEnabled else {
+        if pending.appleWatch == true, !designPreview, appleWatchIdentity() == nil,
+           AppleWatchAllowanceBridge.shared.taskHandoffAvailable == nil { return }
+        if pending.appleWatch != true,
+           let link = accessories.links.first(where: { $0.preferenceID == pending.watchID }), !link.setupResolved { return }
+        guard handoffIsCurrent(pending) else {
             UserDefaults.standard.removeObject(forKey: handoffKey)
             push.clearHandoffNotification(pending.id)
-            return
-        }
-        // AccessorySetupKit restores authorization asynchronously on cold launch.
-        // Defer until its callback resolves, rather than discarding a valid selection.
-        guard link.setupResolved else { return }
-        guard link.paired else {
-            UserDefaults.standard.removeObject(forKey: handoffKey)
-            push.clearHandoffNotification(pending.id)
+            if handoff?.id == pending.id { handoff = nil }
             return
         }
         guard foreground, handoff != pending else { return }
+        restoreWatchRequestForHandoff(pending)
         handoff = pending
         push.clearHandoffNotification(pending.id)
+    }
+
+    private func restoreWatchRequestForHandoff(_ pending: PendingWatchHandoff) {
+        guard pending.appleWatch == true, let target = handoffTarget(pending),
+              errors[target.sourceID] == nil, snapshotIsFresh(target.sourceID) else { return }
+        let identity = WorkIdentity(sourceID: target.sourceID, sessionID: target.session.id, provider: target.session.provider)
+        guard let item = trackedWatchRequests(for: identity).first,
+              !watchConfirmed.contains(item.id), interactions.response(for: item) == nil else { return }
+        let current = interactions.items.first {
+            $0.source.sourceID == target.sourceID && $0.request.sessionID == target.session.id
+                && $0.request.provider == target.session.provider && interactions.isCurrent($0)
+        }
+        guard current == nil || (current?.id == item.id && current?.request.version == item.request.version) else { return }
+        // Request content stays in the existing RAM-only owner. Continuing on
+        // phone must not require a second fetch or turn an uncertain answer into
+        // a new submission. Never replace a newer phone form or receipt.
+        interactions.observeWatchRequest(item)
+        if let submission = watchSubmissions[item.id] {
+            interactions.observeWatchSubmission(item, submission: submission, phase: .unconfirmed)
+        }
     }
 
     func dismissHandoff() {
@@ -959,6 +1038,11 @@ extension CompanionModel {
         if pending.id == storedHandoff?.id { UserDefaults.standard.removeObject(forKey: handoffKey) }
         handoff = nil
         push.clearHandoffNotification(pending.id)
+    }
+
+    func deferHandoff() {
+        // Preserve the opaque selection while an existing phone form is open.
+        handoff = nil
     }
 }
 
@@ -1027,6 +1111,28 @@ extension CompanionModel {
                 }
                 guard !Task.isCancelled, epoch == sourceEpoch else { return ["error": "Connections changed. Refresh Activity."] }
                 return encoded(watchWorkSnapshot())
+            }
+            if message["operation"] as? String == "continueOnPhone" {
+                guard let watchID = appleWatchIdentity() else {
+                    return ["error": "Reconnect your Apple Watch in Paceman on iPhone."]
+                }
+                var pending = PendingWatchHandoff(appleWatchID: watchID)
+                var selected = false
+                if let sourceID = message["sourceID"] as? String,
+                   pairedSources.contains(where: { $0.sourceID == sourceID }), !isRevoked(sourceID),
+                   let sessionID = message["sessionID"] as? String, let provider = message["provider"] as? String,
+                   let session = snapshots[sourceID]?.sessions?.first(where: { $0.id == sessionID && $0.provider == provider }) {
+                    var data = Data([79, 72, 1, 0, 1, 0, 0, 0])
+                    data.append(WatchWire.sourceIdentifier(sourceID))
+                    data.append(WatchWire.sessionIdentifier(sourceID: sourceID, session: session))
+                    if let request = WatchHandoffRequest(data) {
+                        pending = PendingWatchHandoff(watchID: watchID, request: request, appleWatch: true)
+                        selected = true
+                    }
+                }
+                let result = await receiveHandoff(pending)
+                guard result != .unavailable else { return ["error": "Couldn’t prepare iPhone. Try again."] }
+                return ["handoff": Int(result.rawValue), "selectionAvailable": selected]
             }
             guard let sourceID = message["sourceID"] as? String,
                   let source = pairedSources.first(where: { $0.sourceID == sourceID }), !isRevoked(sourceID) else {
@@ -1121,6 +1227,7 @@ extension CompanionModel {
                     return reply
                 } catch {
                     if case HubError.http(let status) = error, [400, 401, 404, 409, 410, 422].contains(status) {
+                        watchTracking[item.id]?.active = false
                         if interactions.lifecycleID == inboxLifecycle {
                             interactions.observeWatchSubmission(item, submission: submission, phase: .rejected)
                         }
