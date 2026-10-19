@@ -437,17 +437,21 @@ private struct WatchActivityRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(task.title).font(.body).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: task.symbol(at: date))
                     .foregroundStyle(task.historical(at: date) || task.group(at: date) != "Needs you" ? Color.secondary : WatchPalette.tint)
                     .accessibilityHidden(true)
-                Text([task.providerName, showComputer ? task.computer : ""].filter { !$0.isEmpty }.joined(separator: " · "))
-                    .foregroundStyle(.secondary)
-            }.font(.caption2)
-            if ["Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed" {
-                Text(task.status(at: date)).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(task.title).font(.body).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if ["Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed" {
+                        Text(task.status(at: date)).font(.caption)
+                    }
+                }
             }
+            Text([task.providerName, showComputer ? task.computer : ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                .font(.caption2).foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(task.status(at: date))
@@ -515,7 +519,17 @@ private struct WatchTaskView: View {
                         if submitted {
                             Label("Response sent", systemImage: "checkmark.circle")
                         } else if !rejected {
-                            taskDetails
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label(currentTask.historical(at: Date()) ? "Last known: \(currentTask.status)" : currentTask.status,
+                                    systemImage: currentTask.symbol(at: Date()))
+                                if let observedAt = currentTask.observedAt, observedAt > 0 {
+                                    let observed = Date(timeIntervalSince1970: observedAt)
+                                    let time = observed.formatted(date: Calendar.current.isDateInToday(observed) ? .omitted : .abbreviated, time: .shortened)
+                                    Text("Last updated at \(time)").font(.caption).foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .accessibilityLabel("Computer status last updated at \(time)")
+                                }
+                            }
                         }
                     }
                     if sending { ProgressView(submission == nil ? "Loading request" : "Sending response") }
@@ -526,6 +540,9 @@ private struct WatchTaskView: View {
                     }
                     if !submitted {
                         WatchPhoneContinuation(store: store, task: task).disabled(sending && submission != nil)
+                    }
+                    if prompt == nil, !submitted, !rejected {
+                        taskDetails
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -648,16 +665,7 @@ private struct WatchTaskView: View {
 
     private var taskDetails: some View {
         VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 4) {
-                Label(currentTask.historical(at: Date()) ? "Last known: \(currentTask.status)" : currentTask.status,
-                    systemImage: currentTask.symbol(at: Date()))
-                if let observedAt = currentTask.observedAt, observedAt > 0 {
-                    let observed = Date(timeIntervalSince1970: observedAt)
-                    let time = observed.formatted(date: Calendar.current.isDateInToday(observed) ? .omitted : .abbreviated, time: .shortened)
-                    Text("Last updated at \(time)").font(.caption).foregroundStyle(.secondary)
-                        .accessibilityLabel("Computer status last updated at \(time)")
-                }
-            }
+            Text("Details").font(.headline).accessibilityAddTraits(.isHeader)
             VStack(alignment: .leading, spacing: 10) {
                 Label(currentTask.computer, systemImage: "laptopcomputer")
                 if let project = currentTask.project, !project.isEmpty { Label(project, systemImage: "folder") }
@@ -766,8 +774,16 @@ private struct WatchPhoneContinuation: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            Button("Continue on iPhone", systemImage: "iphone") {
+            Button {
                 Task { await prepare() }
+            } label: {
+                HStack(alignment: .center, spacing: 8) {
+                    Image(systemName: "iphone").fixedSize().accessibilityHidden(true)
+                    Text("Continue on iPhone")
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity)
             }.buttonStyle(.bordered).disabled(preparing)
             if preparing { ProgressView("Preparing iPhone") }
             if let message { Text(message).font(.body).fixedSize(horizontal: false, vertical: true) }
