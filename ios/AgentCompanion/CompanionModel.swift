@@ -23,6 +23,7 @@ final class CompanionModel: ObservableObject {
     private(set) var canForgetAfterRemovalFailure = false
     private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
     private let client: SourceClient
+    private let refreshUptime: () -> TimeInterval
     private let push: PushCoordinator
     private let pairedStore = PairedSourcesStore()
     private let savePairedSources: ([PairedSource]) throws -> Void
@@ -38,6 +39,9 @@ final class CompanionModel: ObservableObject {
         let task: Task<Void, Never>
     }
     private var sourceRefreshes: [String: SourceRefresh] = [:]
+    private var watchFetchAssertions: [UUID: UIBackgroundTaskIdentifier] = [:]
+    private var watchNextFetch: [String: TimeInterval] = [:]
+    private var sourceFailures: [String: Int] = [:]
     private var requestRefreshes: [String: RequestRefresh] = [:]
     private var monitoringRefresh: Task<Void, Never>?
     private var monitoringRefreshPending = false
@@ -52,15 +56,19 @@ final class CompanionModel: ObservableObject {
     private var watchRefreshCallers = 0
     private var fetchedUptimes: [String: TimeInterval] = [:]
     private var changeObserver: AnyCancellable?
+    private var interactionObserver: AnyCancellable?
     private var weatherObservers: [String: AnyCancellable] = [:]
     private var lastWatchRelayRequested = false
     private var watchRequests: [String: PendingInput] = [:]
     private var watchSubmissions: [String: InputSubmission] = [:]
     private var watchConfirmed: Set<String> = []
+    private var watchTracking: [String: (generation: String, state: ActivityState?, active: Bool)] = [:]
 
     init(preview: Bool = false, push: PushCoordinator? = nil, client: SourceClient = SourceClient(),
-         savePairedSources: (([PairedSource]) throws -> Void)? = nil) {
+         savePairedSources: (([PairedSource]) throws -> Void)? = nil,
+         refreshUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.client = client
+        self.refreshUptime = refreshUptime
         self.interactions = InteractionInbox(client: client)
         self.push = push ?? .shared
         self.savePairedSources = savePairedSources ?? PairedSourcesStore().save
@@ -199,6 +207,15 @@ final class CompanionModel: ObservableObject {
             self.forwardWatchAggregate()
         }
         forwardWatchAggregate()
+        interactionObserver = interactions.objectWillChange.sink { [weak self] _ in
+            // Published values change after this notification. Read the completed
+            // projection on the next main-actor turn, then send a content-free hint.
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.objectWillChange.send()
+                self.publishWatchWork()
+            }
+        }
         if !preview { monitoring.configure(sources: pairedSources) }
         changeObserver = accessories.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
@@ -501,6 +518,7 @@ final class CompanionModel: ObservableObject {
     }
 
     private func syncWatchPush() async {
+        guard !designPreview else { return }
         if watchPushSyncing { watchPushSyncPending = true; return }
         guard let token = Vault.load(String.self, key: "watch-apns-device-token"),
               let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String else { return }
@@ -567,6 +585,9 @@ final class CompanionModel: ObservableObject {
     private func startRefresh(_ paired: PairedSource, fromPush: Bool = false,
                               fromWatch: Bool = false) -> Task<UIBackgroundFetchResult, Never>? {
         guard !busy else { return nil }
+        // Foreground cadence is the sole status owner while the phone is open.
+        // Watch demand only reads that projection; it never promotes its poll.
+        if fromWatch && foreground { return nil }
         let backgroundOwned = fromPush || fromWatch
         if let current = sourceRefreshes[paired.sourceID] {
             // A platform callback can join a foreground poll. Its ownership
@@ -574,9 +595,11 @@ final class CompanionModel: ObservableObject {
             if backgroundOwned { sourceRefreshes[paired.sourceID]?.backgroundOwned = true }
             return current.task
         }
+        if fromWatch, refreshUptime() < watchNextFetch[paired.sourceID, default: 0] { return nil }
         let id = UUID()
         let task = Task { [weak self] in
             guard let self, !Task.isCancelled else { return UIBackgroundFetchResult.noData }
+            defer { self.endWatchFetchAssertion(id) }
             let result = await self.refreshOne(paired, fromPush: fromPush)
             if self.sourceRefreshes[paired.sourceID]?.id == id {
                 self.sourceRefreshes.removeValue(forKey: paired.sourceID)
@@ -584,7 +607,22 @@ final class CompanionModel: ObservableObject {
             return result
         }
         sourceRefreshes[paired.sourceID] = SourceRefresh(id: id, task: task, backgroundOwned: backgroundOwned)
+        if fromWatch {
+            watchFetchAssertions[id] = UIApplication.shared.beginBackgroundTask(withName: "Watch source refresh") { [weak self] in
+                guard let self else { return }
+                if self.sourceRefreshes[paired.sourceID]?.id == id {
+                    self.sourceRefreshes.removeValue(forKey: paired.sourceID)?.task.cancel()
+                }
+                self.endWatchFetchAssertion(id)
+            }
+        }
         return task
+    }
+
+    private func endWatchFetchAssertion(_ id: UUID) {
+        if let assertion = watchFetchAssertions.removeValue(forKey: id), assertion != .invalid {
+            UIApplication.shared.endBackgroundTask(assertion)
+        }
     }
 
     private func refreshOne(_ paired: PairedSource, fromPush: Bool) async -> UIBackgroundFetchResult {
@@ -593,6 +631,7 @@ final class CompanionModel: ObservableObject {
         let previousIdentity = snapshots[sourceID]?.identity
         let recovering = errors[sourceID] != nil || snapshots[sourceID] == nil
         let started = ProcessInfo.processInfo.systemUptime
+        watchNextFetch[sourceID] = refreshUptime() + 5
         Diagnostics.shared.record(fromPush ? "push_triggered_fetch" : "foreground_fetch", sourceID: sourceID)
         do {
             let value = try await client.snapshot(paired)
@@ -607,7 +646,10 @@ final class CompanionModel: ObservableObject {
                 sourceName: value.sourceName, host: paired.endpoint.host)
             let nameChanged = MonitoringComputerName.storedName(sourceID: sourceID) != displayName
             if nameChanged { MonitoringComputerName.save(displayName, for: sourceID) }
+            reconcileWatchRequests(value)
             snapshots[sourceID] = value
+            sourceFailures.removeValue(forKey: sourceID)
+            watchNextFetch[sourceID] = refreshUptime() + 5
             interactions.reconcile(value)
             let receivedAt = Date()
             lastContacts[sourceID] = receivedAt
@@ -630,6 +672,9 @@ final class CompanionModel: ObservableObject {
             return value.identity == previousIdentity ? .noData : .newData
         } catch {
             guard epoch == sourceEpoch, !Task.isCancelled else { return .noData }
+            sourceFailures[sourceID, default: 0] += 1
+            watchNextFetch[sourceID] = refreshUptime()
+                + min(60, 5 * pow(2, Double(min(sourceFailures[sourceID, default: 1] - 1, 4))))
             requestRefreshes.removeValue(forKey: sourceID)?.task.cancel()
             sourceFailed(error, sourceID: sourceID)
             Diagnostics.shared.recordError("source_fetch_failed", error: error, sourceID: sourceID,
@@ -648,6 +693,11 @@ final class CompanionModel: ObservableObject {
         let task = Task { [weak self] in
             guard let self, !Task.isCancelled else { return }
             await self.interactions.refresh(paired, snapshot: snapshot, client: self.client)
+            if !Task.isCancelled, self.requestRefreshes[sourceID]?.id == id,
+               self.interactions.availability[sourceID] == .available {
+                self.reconcileWatchListing(sourceID: sourceID, pending: self.interactions.items)
+                self.publishWatchWork()
+            }
             if self.requestRefreshes[sourceID]?.id == id {
                 self.requestRefreshes.removeValue(forKey: sourceID)
             }
@@ -658,6 +708,7 @@ final class CompanionModel: ObservableObject {
     private func cancelSourceRefreshes(includingBackground: Bool = true) {
         for (sourceID, refresh) in sourceRefreshes where includingBackground || !refresh.backgroundOwned {
             refresh.task.cancel()
+            endWatchFetchAssertion(refresh.id)
             sourceRefreshes.removeValue(forKey: sourceID)
         }
         requestRefreshes.values.forEach { $0.task.cancel() }
@@ -669,6 +720,9 @@ final class CompanionModel: ObservableObject {
         watchRequests.removeAll()
         watchSubmissions.removeAll()
         watchConfirmed.removeAll()
+        watchTracking.removeAll()
+        watchNextFetch.removeAll()
+        sourceFailures.removeAll()
         cancelSourceRefreshes()
     }
 
@@ -712,17 +766,95 @@ final class CompanionModel: ObservableObject {
 }
 
 extension CompanionModel {
+    private func publishWatchWork() {
+        AppleWatchAllowanceBridge.shared.workDidChange(watchWorkSnapshot())
+    }
+
+    private func trackedWatchRequests(for id: WorkIdentity) -> [PendingInput] {
+        watchRequests.values.filter { item in
+            watchTracking[item.id]?.active == true && item.expiresAtUptime > ProcessInfo.processInfo.systemUptime
+                && item.source.sourceID == id.sourceID && item.request.sessionID == id.sessionID
+                && item.request.provider == id.provider && !isRevoked(id.sourceID)
+                && pairedSources.contains(where: { $0.sourceID == id.sourceID })
+        }
+    }
+
+    func watchPending(for id: WorkIdentity) -> PendingInput? {
+        guard errors[id.sourceID] == nil else { return nil }
+        return trackedWatchRequests(for: id).first { watchSubmissions[$0.id] == nil }
+    }
+
+    func watchDelivery(for id: WorkIdentity) -> InputDelivery? {
+        guard let item = trackedWatchRequests(for: id).first(where: { watchConfirmed.contains($0.id) }),
+              let submission = watchSubmissions[item.id] else { return nil }
+        return submission.action == "release" ? .released : .sent
+    }
+
+    private func reconcileWatchRequests(_ snapshot: Snapshot) {
+        for (id, observation) in watchTracking {
+            guard let item = watchRequests[id], item.source.sourceID == snapshot.sourceID else { continue }
+            if observation.generation != snapshot.generation || snapshot.interactionsEnabled != true {
+                watchTracking.removeValue(forKey: id)
+                watchRequests.removeValue(forKey: id)
+                watchSubmissions.removeValue(forKey: id)
+                watchConfirmed.remove(id)
+                continue
+            }
+            let state = snapshot.sessions?.first {
+                $0.id == item.request.sessionID && $0.provider == item.request.provider
+            }?.state
+            if state == nil || (state != observation.state && state != .needsInput) {
+                watchTracking[id] = (observation.generation, state, false)
+            } else { watchTracking[id] = (observation.generation, state, observation.active) }
+        }
+    }
+
+    private func reconcileWatchListing(sourceID: String, pending: [PendingInput]) {
+        for (id, _) in watchTracking {
+            guard let item = watchRequests[id], item.source.sourceID == sourceID else { continue }
+            let native = pending.first { $0.source.sourceID == sourceID
+                && $0.request.sessionID == item.request.sessionID && $0.request.provider == item.request.provider }
+            if let native {
+                if native.id != item.id || native.request.version != item.request.version { watchTracking[id]?.active = false }
+            } else if watchSubmissions[id] == nil { watchTracking[id]?.active = false }
+        }
+    }
+
+    private func rememberWatchRequest(_ item: PendingInput, snapshot: Snapshot) {
+        if let old = watchRequests[item.id], old.request.version != item.request.version {
+            watchSubmissions.removeValue(forKey: item.id)
+            watchConfirmed.remove(item.id)
+        }
+        let siblings = watchRequests.values.filter { $0.source.sourceID == item.source.sourceID
+            && $0.request.sessionID == item.request.sessionID && $0.request.provider == item.request.provider && $0.id != item.id }
+        for previous in siblings { watchTracking[previous.id]?.active = false }
+        watchRequests[item.id] = item
+        watchTracking[item.id] = (snapshot.generation, snapshot.sessions?.first {
+            $0.id == item.request.sessionID && $0.provider == item.request.provider
+        }?.state, watchTracking[item.id]?.active ?? true)
+    }
+
     private func watchWorkSnapshot() -> WatchWorkSnapshot {
         let sources = pairedSources.filter { !isRevoked($0.sourceID) }
         let values = sources.flatMap { source -> [WatchWorkTask] in
             guard let snapshot = snapshots[source.sourceID] else { return [] }
             let name = ComputerPreferences.displayName(for: source.sourceID,
                 sourceName: snapshot.sourceName, host: source.endpoint.host)
-            let sessions = snapshot.sessions ?? [AgentSession(id: "aggregate", provider: "", state: snapshot.state)]
-            return sessions.filter { $0.state != .idle }.prefix(32).map {
-                WatchWorkTask(sourceID: source.sourceID, sessionID: $0.id, provider: $0.provider,
-                    title: $0.title ?? ($0.provider.isEmpty ? "Computer activity" : $0.displayName),
-                    computer: name, state: $0.state.rawValue, freshUntil: snapshot.activityFreshUntil)
+            let sessions: [AgentSession]
+            switch AgentFeedContent.resolve(snapshot) {
+            case .sessions(let values): sessions = values
+            case .summary(let state): sessions = [AgentSession(id: "aggregate", provider: "aggregate", state: state, name: "Agent activity")]
+            case .empty, .waiting: sessions = []
+            }
+            return sessions.prefix(32).map { session in
+                let item = WorkCatalog.item(session: session, source: source, model: self, inbox: interactions,
+                    computer: name, connected: connectionState(source.sourceID) == .current,
+                    current: isActivityCurrent(source.sourceID))
+                return WatchWorkTask(sourceID: source.sourceID, sessionID: session.id, provider: session.provider,
+                    title: session.title ?? session.displayName,
+                    computer: name, state: session.state.rawValue, freshUntil: snapshot.activityFreshUntil,
+                    presentationStatus: item.historical ? session.state.title : item.phase.title,
+                    presentationGroup: item.phase.group.rawValue)
             }
         }
         return WatchWorkSnapshot(tasks: Array(values.prefix(128)), computers: sources.count,
@@ -869,13 +1001,16 @@ extension CompanionModel {
         }
         watchSubmissions = watchSubmissions.filter { key, _ in watchRequests[key] != nil }
         watchConfirmed = watchConfirmed.intersection(watchRequests.keys)
+        watchTracking = watchTracking.filter { watchRequests[$0.key] != nil }
         do {
-            if let operation = message["operation"] as? String, ["tasks", "cachedTasks"].contains(operation) {
-                if operation == "tasks" {
+            if let operation = message["operation"] as? String, ["tasks", "cachedTasks", "refreshTasks"].contains(operation) {
+                if operation != "cachedTasks" {
                     let scope = message["sourceID"] as? String
                     let tasks = pairedSources.filter { !isRevoked($0.sourceID) && (scope == nil || $0.sourceID == scope) }
                         .compactMap { startRefresh($0, fromWatch: true) }
-                    for task in tasks { _ = await task.value }
+                    // Ordinary list reads return immediately. The existing
+                    // source owner publishes each completed refresh independently.
+                    if operation == "tasks" { for task in tasks { _ = await task.value } }
                 }
                 guard !Task.isCancelled, epoch == sourceEpoch else { return ["error": "Connections changed. Refresh Activity."] }
                 return encoded(watchWorkSnapshot())
@@ -888,10 +1023,30 @@ extension CompanionModel {
                 guard let sessionID = message["sessionID"] as? String,
                       let provider = message["provider"] as? String else { return ["error": "Refresh Activity."] }
                 let started = ProcessInfo.processInfo.systemUptime
-                let snapshot = try await client.snapshot(source)
+                if let task = startRefresh(source, fromWatch: true) { _ = await task.value }
+                guard let snapshot = snapshots[sourceID], errors[sourceID] == nil,
+                      snapshotIsFresh(sourceID) else { return ["error": "Couldn’t reach the computer. Check Paceman on iPhone."] }
                 guard snapshot.interactionsEnabled == true else { return ["error": "Continue on your computer. Phone responses are off."] }
+                let identity = WorkIdentity(sourceID: sourceID, sessionID: sessionID, provider: provider)
+                let known = interactions.items.first { $0.source.sourceID == sourceID
+                    && $0.request.sessionID == sessionID && $0.request.provider == provider && interactions.isCurrent($0) }
+                let response = interactions.response(for: identity).flatMap {
+                    known == nil || known?.id == $0.item.id ? $0 : nil
+                }
+                if let item = known ?? response?.item, item.expiresAtUptime > started,
+                   watchRequests.count < 256 || watchRequests[item.id] != nil {
+                    rememberWatchRequest(item, snapshot: snapshot)
+                    if let response {
+                        watchSubmissions[item.id] = response.submission
+                        if response.phase == .submitted { watchConfirmed.insert(item.id) }
+                    }
+                    return encoded(WatchWorkPrompt(generation: item.generation, request: item.request,
+                        remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
+                        submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
+                }
                 let requests = try await client.inputRequests(source)
                 guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID),
+                      snapshots[sourceID]?.identity == snapshot.identity,
                       snapshot.sessions?.contains(where: { $0.id == sessionID && $0.provider == provider }) == true else {
                     return ["error": "No response is available. Check the session on your computer."]
                 }
@@ -916,7 +1071,9 @@ extension CompanionModel {
                 guard watchRequests.count < 256 || watchRequests[item.id] != nil else {
                     return ["error": "Review this session on iPhone."]
                 }
-                watchRequests[item.id] = item
+                rememberWatchRequest(item, snapshot: snapshot)
+                interactions.observeWatchRequest(item)
+                publishWatchWork()
                 return encoded(WatchWorkPrompt(generation: requests.generation, request: request,
                     remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
                     submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
@@ -926,21 +1083,34 @@ extension CompanionModel {
                 let submission = try JSONDecoder().decode(InputSubmission.self, from: data)
                 let id = "\(sourceID)/\(submission.generation)/\(submission.requestID)"
                 guard let item = watchRequests[id], submission.valid(for: item.request),
-                      watchSubmissions[id] == nil || watchSubmissions[id] == submission else {
+                      watchSubmissions[id] == nil || watchSubmissions[id] == submission,
+                      interactions.response(for: item).map({ $0.submission == submission }) ?? true else {
                     return ["error": "This request changed or expired. Check the session on your computer."]
                 }
                 watchSubmissions[id] = submission
+                let inboxLifecycle = interactions.lifecycleID
+                interactions.observeWatchSubmission(item, submission: submission, phase: .sending)
                 do {
                     try await client.submitInput(submission, source: source)
-                    guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID) else {
+                    guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID),
+                          watchRequests[id]?.request == item.request else {
                         return ["error": "Connections changed. Check the session on your computer."]
                     }
-                    interactions.didSubmit(item, submission: submission)
+                    if interactions.lifecycleID == inboxLifecycle {
+                        interactions.didSubmit(item, submission: submission)
+                    }
                     watchConfirmed.insert(item.id)
+                    publishWatchWork()
                     return ["submitted": true]
                 } catch {
                     if case HubError.http(let status) = error, [400, 401, 404, 409, 410, 422].contains(status) {
+                        if interactions.lifecycleID == inboxLifecycle {
+                            interactions.observeWatchSubmission(item, submission: submission, phase: .rejected)
+                        }
                         return ["error": "This request is no longer available. Check the session on your computer."]
+                    }
+                    if interactions.lifecycleID == inboxLifecycle {
+                        interactions.observeWatchSubmission(item, submission: submission, phase: .unconfirmed)
                     }
                     return ["unconfirmed": true]
                 }

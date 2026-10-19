@@ -244,15 +244,24 @@ struct WorkSectionData: Identifiable {
 
     static func item(session: AgentSession, source: PairedSource, model: CompanionModel,
                      presentation: PresentationModel, inbox: InteractionInbox) -> WorkItem {
-        let id = WorkIdentity(sourceID: source.sourceID, sessionID: session.id, provider: session.provider)
         let connected = presentation.computerState(model: model, sourceID: source.sourceID) == .current
         let current = presentation.preview && !presentation.previewScreen.hasPrefix("handoff")
             ? connected : model.isActivityCurrent(source.sourceID)
-        let pending = connected ? inbox.items.first { $0.source.sourceID == id.sourceID && $0.request.sessionID == id.sessionID && $0.request.provider == id.provider && inbox.isCurrent($0) } : nil
+        return item(session: session, source: source, model: model, inbox: inbox,
+            computer: presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID]),
+            connected: connected, current: current)
+    }
+
+    /// The phone Activity and Watch export use the same derived presentation.
+    static func item(session: AgentSession, source: PairedSource, model: CompanionModel,
+                     inbox: InteractionInbox, computer: String, connected: Bool, current: Bool) -> WorkItem {
+        let id = WorkIdentity(sourceID: source.sourceID, sessionID: session.id, provider: session.provider)
+        let pending = connected ? inbox.items.first { $0.source.sourceID == id.sourceID && $0.request.sessionID == id.sessionID && $0.request.provider == id.provider && inbox.isCurrent($0) }
+            ?? model.watchPending(for: id) : nil
         return WorkItem(id: id, session: session,
-            computer: presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID]), historical: !current,
+            computer: computer, historical: !current,
             activityOrder: inbox.ordering.activityOrder(id), requestOrder: inbox.ordering.requestOrder(pending),
-            delivery: connected && session.state == .needsInput ? inbox.receipt(for: id) : nil,
+            delivery: connected && session.state == .needsInput ? inbox.receipt(for: id) ?? model.watchDelivery(for: id) : nil,
             inputAvailability: inbox.availability[source.sourceID],
             request: pending)
     }

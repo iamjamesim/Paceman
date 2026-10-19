@@ -7,7 +7,6 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
     static let shared = AppleWatchAllowanceBridge()
     private var pending: [String: Any] = ["schema": 1]
     private var lastWorkSnapshot: WatchWorkSnapshot?
-    @MainActor private var workRefreshes: [String: Task<Void, Never>] = [:]
     var onWatchPushToken: ((String, String, Int, Bool) -> Void)?
     var onWorkMessage: (@MainActor ([String: Any]) async -> [String: Any])?
 
@@ -89,26 +88,13 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
     }
 
     @MainActor func handleWorkMessage(_ message: [String: Any]) async -> [String: Any] {
-        guard message["operation"] as? String == "refreshTasks" else { return await performWork(message) }
-        // Return promptly even if one computer is offline. Each independently
-        // owned refresh emits a live hint when that computer finishes.
-        let result = await performWork(["operation": "cachedTasks"])
-        if let data = result["data"] as? Data,
-           let snapshot = try? JSONDecoder().decode(WatchWorkSnapshot.self, from: data) {
-            for source in snapshot.sources ?? [] where workRefreshes[source.sourceID] == nil {
-                workRefreshes[source.sourceID] = Task { @MainActor in
-                    _ = await self.performWork(["operation": "tasks", "sourceID": source.sourceID])
-                    self.workRefreshes.removeValue(forKey: source.sourceID)
-                }
-            }
-        }
-        return result
+        await performWork(message)
     }
 
     @MainActor private func performWork(_ message: [String: Any]) async -> [String: Any] {
         let started = ProcessInfo.processInfo.systemUptime
         let requestedOperation = message["operation"] as? String ?? "unknown"
-        let label = ["tasks", "cachedTasks", "request", "submit"].contains(requestedOperation)
+        let label = ["tasks", "cachedTasks", "refreshTasks", "request", "submit"].contains(requestedOperation)
             ? requestedOperation : "unknown"
         Diagnostics.shared.record("apple_watch_\(label)_received")
         var operation: Task<[String: Any], Never>?

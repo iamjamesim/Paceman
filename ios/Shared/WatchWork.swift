@@ -56,15 +56,30 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
     let computer: String
     let state: String
     let freshUntil: Double
+    // Phone-owned presentation overlays a known request or accepted response.
+    // Keep the observed state intact for exact Live Activity route matching.
+    var presentationStatus: String? = nil
+    var presentationGroup: String? = nil
     var id: String { "\(sourceID)/\(provider)/\(sessionID)" }
     func historical(at date: Date) -> Bool { date.timeIntervalSince1970 >= freshUntil }
-    var status: String {
+    var status: String { status(at: Date()) }
+    func status(at date: Date) -> String {
+        if !historical(at: date), let presentationStatus { return presentationStatus }
         switch state {
-        case "needs_input": "Needs you"
-        case "working": "Working"
-        case "finished": "Finished"
-        case "failed": "Failed"
-        default: "Idle"
+        case "needs_input": return historical(at: date) ? "Needs attention" : "Needs you"
+        case "working": return "Working"
+        case "finished": return "Finished"
+        case "failed": return "Failed"
+        default: return "Idle"
+        }
+    }
+    func group(at date: Date) -> String {
+        if historical(at: date) { return "Last known" }
+        if let presentationGroup { return presentationGroup }
+        switch state {
+        case "needs_input", "failed": return "Needs you"
+        case "working": return "Working"
+        default: return "Recent"
         }
     }
 }

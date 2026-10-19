@@ -282,9 +282,6 @@ final class InteractionTests: XCTestCase {
         try await checkBackgroundOwnerPreservesForegroundFetch(fromWatch: false)
     }
 
-    @MainActor func testWatchPromotesForegroundFetchAcrossBackgroundTransition() async throws {
-        try await checkBackgroundOwnerPreservesForegroundFetch(fromWatch: true)
-    }
 
     @MainActor private func checkBackgroundOwnerPreservesForegroundFetch(fromWatch: Bool) async throws {
         let source = refreshSource("background-owner")
@@ -1331,36 +1328,85 @@ private final class InteractionURLProtocol: URLProtocol {
 }
 
 extension InteractionTests {
-    @MainActor func testWatchRefreshRepliesBeforeComputersAndCoalescesEachSource() async throws {
-        let bridge = AppleWatchAllowanceBridge.shared
-        let previous = bridge.onWorkMessage
-        let sources = ["fast", "slow"].map {
-            WatchWorkSource(sourceID: $0, name: $0, generation: nil, revision: nil)
-        }
-        let data = try JSONEncoder().encode(WatchWorkSnapshot(tasks: [], computers: 2, unavailable: 2, sources: sources))
-        var pending: [String: CheckedContinuation<[String: Any], Never>] = [:]
-        var reads: [String: Int] = [:]
-        let started = expectation(description: "both computers start independently")
-        started.expectedFulfillmentCount = 2
-        bridge.onWorkMessage = { message in
-            if message["operation"] as? String == "cachedTasks" { return ["data": data] }
-            let source = message["sourceID"] as! String
-            reads[source, default: 0] += 1
-            return await withCheckedContinuation { continuation in
-                pending[source] = continuation
+    @MainActor func testWatchForegroundReadsUsePhoneCacheAndDoNotRetainItsPoll() async throws {
+        let source = refreshSource("watch-foreground-owner")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        let started = expectation(description: "phone owns its status read")
+        let cancelled = expectation(description: "foreground owner cancels on background")
+        var statusReads = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                statusReads += 1
                 started.fulfill()
             }
         }
+        InteractionURLProtocol.stop = { _ in cancelled.fulfill() }
         defer {
-            for continuation in pending.values { continuation.resume(returning: ["data": data]) }
-            bridge.onWorkMessage = previous
+            model.setForeground(false)
+            InteractionURLProtocol.start = nil
+            InteractionURLProtocol.stop = nil
         }
-        let first = await bridge.handleWorkMessage(["operation": "refreshTasks"])
-        XCTAssertEqual(first["data"] as? Data, data, "The Watch must receive its list while computers are still pending")
+        model.setForeground(true)
         await fulfillment(of: [started], timeout: 2)
-        let second = await bridge.handleWorkMessage(["operation": "refreshTasks"])
-        XCTAssertEqual(second["data"] as? Data, data)
-        XCTAssertEqual(reads, ["fast": 1, "slow": 1], "Foreground refreshes must join pending source work")
+        for operation in ["refreshTasks", "cachedTasks", "tasks", "refreshTasks"] {
+            let reply = await model.handleWatchWork(["operation": operation])
+            XCTAssertNotNil(reply["data"], "Watch list reads never wait for the phone poll")
+        }
+        XCTAssertEqual(statusReads, 1, "Opening, polling and hints add zero foreground STATUS reads")
+        model.setForeground(false)
+        await fulfillment(of: [cancelled], timeout: 2)
+        XCTAssertNil(model.snapshots[source.sourceID], "Watch cache reads must not promote the foreground operation")
+    }
+
+    @MainActor func testWatchBackgroundDemandCoalescesAndBoundsFailureScheduling() async throws {
+        let source = refreshSource("watch-background-owner")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        var now: TimeInterval = 100
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config), refreshUptime: { now })
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        var statusReads = 0
+        var fail = false
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                statusReads += 1
+                if fail { transport.client?.urlProtocol(transport, didFailWithError: URLError(.notConnectedToInternet)) }
+                else { transport.finish(self.refreshSnapshot(source, revision: statusReads)) }
+            }
+        }
+        defer {
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+        }
+        async let a = model.handleWatchWork(["operation": "tasks"])
+        async let b = model.handleWatchWork(["operation": "tasks"])
+        _ = await (a, b)
+        XCTAssertEqual(statusReads, 1)
+        for _ in 0..<10 { _ = await model.handleWatchWork(["operation": "tasks"]) }
+        XCTAssertEqual(statusReads, 1, "A recent phone observation satisfies background Watch demand")
+        now += 5
+        fail = true
+        _ = await model.handleWatchWork(["operation": "tasks"])
+        XCTAssertEqual(statusReads, 2)
+        _ = await model.handleWatchWork(["operation": "cachedTasks"])
+        _ = await model.handleWatchWork(["operation": "tasks"])
+        XCTAssertEqual(statusReads, 2)
+        now += 5
+        _ = await model.handleWatchWork(["operation": "tasks"])
+        XCTAssertEqual(statusReads, 3)
+        now += 5
+        _ = await model.handleWatchWork(["operation": "tasks"])
+        XCTAssertEqual(statusReads, 3, "Repeated failures cannot cause a status request on every Watch poll")
+        now += 5
+        fail = false
+        _ = await model.handleWatchWork(["operation": "tasks"])
+        XCTAssertEqual(statusReads, 4, "New demand recovers through the same source owner after the bounded delay")
+        XCTAssertNil(model.errors[source.sourceID])
     }
 
     @MainActor func testWatchCachedListReturnsDuringSlowRefreshAndScopedRefreshSkipsOtherComputers() async throws {
@@ -1405,6 +1451,137 @@ extension InteractionTests {
         _ = await refresh.value
     }
 
+    @MainActor func testPhoneAndWatchSharePendingSubmittedHistoricalAndAdvancedPresentation() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://watch-projection.example")!, sourceID: sourceID,
+            clientID: "client", credential: "test")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        model.interactions.setForeground(true)
+        var listing = fixture()
+        var state = "needs_input"
+        var revision = 1
+        var envelope: InputSubmission?
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.path == "/v1/snapshot" {
+                    transport.finish(self.refreshSnapshot(source, revision: revision, state: state, interactions: true))
+                } else if transport.request.httpMethod == "POST" {
+                    let response = envelope!
+                    transport.finish(try! JSONSerialization.data(withJSONObject: ["status": "submitted",
+                        "generation": response.generation, "requestID": response.requestID, "version": response.version]))
+                } else { transport.finish(try! JSONSerialization.data(withJSONObject: listing)) }
+            }
+        }
+        defer {
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+        }
+        func exported() async throws -> WatchWorkTask {
+            let reply = await model.handleWatchWork(["operation": "cachedTasks"])
+            return try XCTUnwrap(JSONDecoder().decode(WatchWorkSnapshot.self,
+                from: XCTUnwrap(reply["data"] as? Data)).tasks.first)
+        }
+        func phone() throws -> WorkItem {
+            let snapshot = try XCTUnwrap(model.snapshots[sourceID])
+            return WorkCatalog.item(session: try XCTUnwrap(snapshot.sessions?.first), source: source, model: model,
+                inbox: model.interactions, computer: "Test", connected: model.connectionState(sourceID) == .current,
+                current: model.isActivityCurrent(sourceID))
+        }
+        let message: [String: Any] = ["operation": "request", "sourceID": sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude"]
+        let reply = await model.handleWatchWork(message)
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reply["data"] as? Data))
+        var watch = try await exported()
+        XCTAssertEqual(try phone().phase, .question, "Watch-fetched content is known to the phone")
+        XCTAssertEqual(watch.status, try phone().phase.title)
+        XCTAssertEqual(watch.group(at: Date()), try phone().group.rawValue)
+        let answer = InputSubmission(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        envelope = answer
+        let sent = await model.handleWatchWork(["operation": "submit", "sourceID": sourceID,
+            "submission": try JSONEncoder().encode(answer)])
+        XCTAssertEqual(sent["submitted"] as? Bool, true)
+        watch = try await exported()
+        XCTAssertEqual(try phone().phase, .responded)
+        XCTAssertEqual(watch.status, "Working")
+        XCTAssertEqual(watch.group(at: Date()), try phone().group.rawValue)
+        XCTAssertEqual(watch.state, "needs_input", "Native routing still checks the exact observed state")
+        let historicalDate = Date(timeIntervalSince1970: watch.freshUntil + 1)
+        XCTAssertEqual(watch.group(at: historicalDate), "Last known")
+        XCTAssertEqual(watch.status(at: historicalDate), "Needs attention", "History describes the source observation, not a stale receipt")
+        // A newer request in the same conversation retires the old receipt.
+        var requests = listing["requests"] as! [[String: Any]]
+        requests[0]["requestID"] = UUID().uuidString
+        listing["requests"] = requests
+        await model.interactions.refresh(source, snapshot: try XCTUnwrap(model.snapshots[sourceID]), client: SourceClient(configuration: config))
+        watch = try await exported()
+        XCTAssertEqual(try phone().phase, .question)
+        XCTAssertEqual(watch.status, try phone().phase.title)
+        state = "working"
+        revision += 1
+        _ = await model.refresh(sourceID: sourceID)
+        watch = try await exported()
+        XCTAssertEqual(try phone().phase, .working)
+        XCTAssertEqual(watch.status, "Working")
+        state = "finished"
+        revision += 1
+        _ = await model.refresh(sourceID: sourceID)
+        watch = try await exported()
+        XCTAssertEqual(try phone().phase, .finished)
+        XCTAssertEqual(watch.group(at: Date()), "Recent")
+        XCTAssertEqual(watch.status, try phone().phase.title)
+    }
+
+    @MainActor func testLateWatchReceiptDoesNotRestoreInboxContentAfterLifecycleChange() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://watch-lifecycle.example")!, sourceID: sourceID,
+            clientID: "client", credential: "test")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        model.interactions.setForeground(true)
+        let listing = fixture()
+        let posted = expectation(description: "Watch answer pending")
+        var post: InteractionURLProtocol?
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.path == "/v1/snapshot" {
+                    transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                } else if transport.request.httpMethod == "POST" {
+                    post = transport
+                    posted.fulfill()
+                } else { transport.finish(try! JSONSerialization.data(withJSONObject: listing)) }
+            }
+        }
+        defer {
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+        }
+        let reply = await model.handleWatchWork(["operation": "request", "sourceID": sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude"])
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reply["data"] as? Data))
+        let answer = InputSubmission(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        let data = try JSONEncoder().encode(answer)
+        let sending = Task { await model.handleWatchWork(["operation": "submit", "sourceID": sourceID, "submission": data]) }
+        await fulfillment(of: [posted], timeout: 2)
+        model.interactions.setForeground(false)
+        model.interactions.setForeground(true)
+        try XCTUnwrap(post).finish(JSONSerialization.data(withJSONObject: ["status": "submitted",
+            "generation": answer.generation, "requestID": answer.requestID, "version": answer.version]))
+        let receipt = await sending.value
+        XCTAssertEqual(receipt["submitted"] as? Bool, true)
+        XCTAssertTrue(model.interactions.responses.isEmpty)
+        XCTAssertTrue(model.interactions.items.isEmpty, "Lifecycle-cleared sensitive inbox content must stay cleared")
+        let cached = await model.handleWatchWork(["operation": "cachedTasks"])
+        let exported = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(cached["data"] as? Data))
+        XCTAssertEqual(exported.tasks.first?.status, "Working", "The bounded Watch receipt still supplies presentation metadata")
+    }
+
     @MainActor func testWatchResponseKeepsExactSubmissionAcrossLostReplyAndReopening() async throws {
         let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
             clientID: "client", credential: "private-fixture")
@@ -1423,7 +1600,7 @@ extension InteractionTests {
         var resolved = false
         InteractionURLProtocol.start = { transport in
             Task { @MainActor in
-                if transport.request.httpMethod == "POST" {
+                if transport.request.httpMethod == "POST", transport.request.url?.path == "/v1/interactions" {
                     posts += 1
                     if loseReceipt {
                         transport.client?.urlProtocol(transport, didFailWithError: URLError(.networkConnectionLost))

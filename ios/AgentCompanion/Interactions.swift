@@ -195,6 +195,7 @@ struct InputResponseState {
     }
     private var active = false
     private var epoch = UUID()
+    var lifecycleID: UUID { epoch }
     private var revisions: [String: Int] = [:]
     var items: [PendingInput] { bySource.keys.sorted().flatMap { bySource[$0] ?? [] } }
     func setForeground(_ value: Bool) {
@@ -339,6 +340,33 @@ struct InputResponseState {
             startedAt: previous?.startedAt ?? ProcessInfo.processInfo.systemUptime, phase: .submitted,
             tracksTask: previous?.tracksTask ?? true)
         pruneRetiredResponses()
+    }
+
+    func observeWatchRequest(_ item: PendingInput) {
+        guard active else { return }
+        let sourceID = item.source.sourceID
+        bySource[sourceID, default: []].removeAll {
+            $0.request.sessionID == item.request.sessionID && $0.request.provider == item.request.provider
+        }
+        bySource[sourceID, default: []].append(item)
+        responses = responses.mapValues { response in
+            var value = response
+            if response.item.source.sourceID == sourceID && response.item.request.sessionID == item.request.sessionID
+                && response.item.request.provider == item.request.provider && response.item.id != item.id {
+                value.tracksTask = false
+            }
+            return value
+        }
+        ordering.observeRequests(bySource[sourceID] ?? [], sourceID: sourceID)
+    }
+
+    func observeWatchSubmission(_ item: PendingInput, submission: InputSubmission, phase: InputResponsePhase) {
+        guard active, submission.valid(for: item.request), submission.generation == item.generation else { return }
+        if let previous = responses[item.id], previous.submission != submission { return }
+        let previous = responses[item.id]
+        responses[item.id] = InputResponseState(item: item, submission: submission,
+            startedAt: previous?.startedAt ?? ProcessInfo.processInfo.systemUptime, phase: phase,
+            tracksTask: previous?.tracksTask ?? true)
     }
 
     private func pruneRetiredResponses() {

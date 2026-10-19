@@ -429,12 +429,7 @@ private struct WatchActivityView: View {
     }
 
     private func group(_ task: WatchWorkTask, at date: Date) -> String {
-        if task.historical(at: date) { return "Last known" }
-        switch task.state {
-        case "needs_input", "failed": return "Needs you"
-        case "working": return "Working"
-        default: return "Recent"
-        }
+        task.group(at: date)
     }
 
     @MainActor private func refresh() async {

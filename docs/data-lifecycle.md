@@ -49,6 +49,12 @@ Foreground status refreshes run independently per computer. Request lookups and
 Live Activity registration do not block them; concurrent status hints share one
 fetch per computer. Leaving the foreground cancels foreground-only reads, preserving
 fetches owned by push or Watch callbacks and submitted responses.
+While the phone is foregrounded, Apple Watch list reads use its derived Activity
+presentation without extra source reads. Background Watch demand shares the same
+per-computer fetch owner, with a five-second recency gate and demand-driven failure
+delays capped at one minute; it creates no background polling loop. Live change
+hints read only the phone cache. Requests and accepted responses affect both
+presentations; newer requests and source state changes retire earlier overlays.
 
 - A source with no snapshot says `No activity received yet`; expired activity
   appears as `Last known:`.
