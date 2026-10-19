@@ -6,6 +6,8 @@ import WatchConnectivity
 final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
     static let shared = AppleWatchAllowanceBridge()
     private var pending: [String: Any] = ["schema": 1]
+    private var lastWorkSnapshot: WatchWorkSnapshot?
+    @MainActor private var workRefreshes: [String: Task<Void, Never>] = [:]
     var onWatchPushToken: ((String, String, Int, Bool) -> Void)?
     var onWorkMessage: (@MainActor ([String: Any]) async -> [String: Any])?
 
@@ -59,6 +61,18 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
         }
     }
 
+    func workDidChange(_ snapshot: WatchWorkSnapshot) {
+        guard lastWorkSnapshot != snapshot else { return }
+        lastWorkSnapshot = snapshot
+        let session = WCSession.default
+        guard session.activationState == .activated, session.isReachable else { return }
+        // A live invalidation contains no session or request content. The Watch
+        // obtains the latest in-memory list through a separate live reply.
+        session.sendMessage(["watchWorkChanged": true], replyHandler: nil) { error in
+            Diagnostics.shared.recordError("apple_watch_work_hint_failed", error: error)
+        }
+    }
+
     func session(_ session: WCSession, didReceiveMessage message: [String: Any],
                  replyHandler: @escaping ([String: Any]) -> Void) {
         if receiveWatchPushToken(message) {
@@ -67,22 +81,55 @@ final class AppleWatchAllowanceBridge: NSObject, WCSessionDelegate {
         }
         if message["watchWork"] as? Int == 1 {
             Task { @MainActor in
-                var operation: Task<[String: Any], Never>?
-                let background = UIApplication.shared.beginBackgroundTask(withName: "Apple Watch response") {
-                    operation?.cancel()
-                }
-                defer {
-                    if background != .invalid { UIApplication.shared.endBackgroundTask(background) }
-                }
-                let work = Task { @MainActor in
-                    await self.onWorkMessage?(message) ?? ["error": "Open Paceman on iPhone to connect."]
-                }
-                operation = work
-                replyHandler(await work.value)
+                replyHandler(await handleWorkMessage(message))
             }
             return
         }
         replyHandler(["accepted": false])
+    }
+
+    @MainActor func handleWorkMessage(_ message: [String: Any]) async -> [String: Any] {
+        guard message["operation"] as? String == "refreshTasks" else { return await performWork(message) }
+        // Return promptly even if one computer is offline. Each independently
+        // owned refresh emits a live hint when that computer finishes.
+        let result = await performWork(["operation": "cachedTasks"])
+        if let data = result["data"] as? Data,
+           let snapshot = try? JSONDecoder().decode(WatchWorkSnapshot.self, from: data) {
+            for source in snapshot.sources ?? [] where workRefreshes[source.sourceID] == nil {
+                workRefreshes[source.sourceID] = Task { @MainActor in
+                    _ = await self.performWork(["operation": "tasks", "sourceID": source.sourceID])
+                    self.workRefreshes.removeValue(forKey: source.sourceID)
+                }
+            }
+        }
+        return result
+    }
+
+    @MainActor private func performWork(_ message: [String: Any]) async -> [String: Any] {
+        let started = ProcessInfo.processInfo.systemUptime
+        let requestedOperation = message["operation"] as? String ?? "unknown"
+        let label = ["tasks", "cachedTasks", "request", "submit"].contains(requestedOperation)
+            ? requestedOperation : "unknown"
+        Diagnostics.shared.record("apple_watch_\(label)_received")
+        var operation: Task<[String: Any], Never>?
+        var background: UIBackgroundTaskIdentifier = .invalid
+        background = UIApplication.shared.beginBackgroundTask(withName: "Apple Watch response") {
+            operation?.cancel()
+            if background != .invalid {
+                UIApplication.shared.endBackgroundTask(background)
+                background = .invalid
+            }
+        }
+        defer {
+            if background != .invalid { UIApplication.shared.endBackgroundTask(background) }
+            Diagnostics.shared.record("apple_watch_\(label)_finished",
+                duration: ProcessInfo.processInfo.systemUptime - started)
+        }
+        let work = Task { @MainActor in
+            await self.onWorkMessage?(message) ?? ["error": "Open Paceman on iPhone to connect."]
+        }
+        operation = work
+        return await work.value
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {

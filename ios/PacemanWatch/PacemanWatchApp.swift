@@ -8,6 +8,7 @@ import OSLog
 struct PacemanWatchApp: App {
     @WKApplicationDelegateAdaptor(WatchPushDelegate.self) private var pushDelegate
     @StateObject private var store = WatchAllowanceStore.shared
+    @Environment(\.scenePhase) private var scenePhase
     // Ayu dark is the iPhone app's default glance palette.
     private let accent = Color(red: 1, green: 0.8, blue: 0.4)
     private let launchLog = Logger(subsystem: "ai.paceman.watch", category: "ActivityLaunch")
@@ -41,6 +42,9 @@ struct PacemanWatchApp: App {
                 #endif
             }
             .tint(accent)
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background { store.cancelActivationWaits() }
+            }
             .onOpenURL { url in
                 guard let route = LiveActivityRoute(url: url) else { return }
                 launchLog.info("Received Live Activity URL context")
@@ -180,6 +184,8 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
     static let shared = WatchAllowanceStore()
     @Published private(set) var usage = WatchUsageState.load()
     @Published private(set) var phoneReachable = false
+    @Published private(set) var workRevision = 0
+    private let workActivation = WatchWorkActivation()
     private var pushTokenMessage: [String: Any]?
 
     override init() {
@@ -241,6 +247,10 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        if message["watchWorkChanged"] as? Bool == true {
+            DispatchQueue.main.async { self.workRevision &+= 1 }
+            return
+        }
         self.session(session, didReceiveApplicationContext: message)
     }
 
@@ -248,9 +258,14 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
                  error: Error?) {
         if activationState == .activated {
             self.session(session, didReceiveApplicationContext: session.receivedApplicationContext)
-            DispatchQueue.main.async {
-                self.phoneReachable = session.isReachable
+        }
+        DispatchQueue.main.async {
+            self.phoneReachable = activationState == .activated && session.isReachable
+            if activationState == .activated {
+                self.workActivation.complete(.success(()))
                 self.sendPushToken()
+            } else {
+                self.workActivation.complete(.failure(error ?? WatchWorkActivation.ActivationError.timedOut))
             }
         }
     }
@@ -264,11 +279,17 @@ final class WatchAllowanceStore: NSObject, ObservableObject, WCSessionDelegate {
 }
 
 extension WatchAllowanceStore {
-    func workMessage(_ payload: [String: Any]) async throws -> [String: Any] {
+    @MainActor func cancelActivationWaits() {
+        workActivation.complete(.failure(CancellationError()))
+    }
+
+    @MainActor func workMessage(_ payload: [String: Any]) async throws -> [String: Any] {
         #if DEBUG
         if let result = try WatchWorkPreview.reply(payload) { return result }
         #endif
-        guard WCSession.default.activationState == .activated, WCSession.default.isReachable else {
+        try await workActivation.wait(activated: WCSession.default.activationState == .activated)
+        try Task.checkCancellation()
+        guard WCSession.default.isReachable else {
             throw WatchWorkError.message("Connect to your iPhone to review sessions and respond.")
         }
         var message = payload
@@ -314,7 +335,9 @@ private struct WatchActivityView: View {
     @State private var snapshot: WatchWorkSnapshot?
     @State private var error: String?
     @State private var loading = false
+    @State private var visible = false
     @State private var refreshID = UUID()
+    @State private var cacheReadID = UUID()
     @State private var consumedLaunchID: UUID?
     private var route: LiveActivityRoute? { launch?.route }
     private var source: WatchWorkSource? {
@@ -361,20 +384,47 @@ private struct WatchActivityView: View {
                     }
                 } else if loading { ProgressView("Loading Activity") }
                 Section {
-                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }.disabled(loading)
                     if route != nil { Button("All activity", action: clearScope) }
                     NavigationLink("Codex usage", value: WatchDestination.usage)
                 }
             }
         }
         .navigationTitle(route == nil ? "Paceman" : source?.name ?? "Computer activity")
-        .task(id: launch?.id) { await refresh() }
+        .onAppear { visible = true }
+        .task(id: scenePhase == .active && visible ? refreshID : nil) {
+            guard scenePhase == .active, visible else { return }
+            while !Task.isCancelled {
+                await refresh()
+                do { try await Task.sleep(for: .seconds(5)) }
+                catch { return }
+            }
+        }
+        .task(id: scenePhase == .active && visible ? store.workRevision : -1) {
+            if scenePhase == .active, visible, store.workRevision > 0 { await readCached() }
+        }
+        .onChange(of: launch?.id) { _, _ in
+            refreshID = UUID()
+            cacheReadID = UUID()
+            loading = false
+        }
         .onChange(of: store.phoneReachable) { _, reachable in
-            if reachable, scenePhase == .active { Task { await refresh() } }
+            if reachable, scenePhase == .active, !loading { refreshID = UUID() }
         }
         .onChange(of: scenePhase) { _, value in
-            if value == .active { Task { await refresh() } }
-            else if value == .background { snapshot = nil; error = nil }
+            if value == .active, !loading { refreshID = UUID() }
+            else if value == .background {
+                refreshID = UUID()
+                cacheReadID = UUID()
+                loading = false
+                snapshot = nil
+                error = nil
+            }
+        }
+        .onDisappear {
+            visible = false
+            refreshID = UUID()
+            cacheReadID = UUID()
+            loading = false
         }
     }
 
@@ -388,15 +438,21 @@ private struct WatchActivityView: View {
     }
 
     @MainActor private func refresh() async {
-        let id = UUID()
-        refreshID = id
+        guard scenePhase == .active, visible, !loading else { return }
+        let id = refreshID
         loading = true
+        error = nil
         defer { if refreshID == id { loading = false } }
+        await readCached()
+        guard !Task.isCancelled, refreshID == id, scenePhase == .active else { return }
         do {
-            let result = try await store.workMessage(["operation": "tasks"])
+            var message: [String: Any] = ["operation": route == nil ? "refreshTasks" : "tasks"]
+            if let route { message["sourceID"] = route.sourceID }
+            let result = try await store.workMessage(message)
             guard !Task.isCancelled, refreshID == id, scenePhase == .active,
                   let data = result["data"] as? Data else { return }
             let value = try JSONDecoder().decode(WatchWorkSnapshot.self, from: data)
+            cacheReadID = UUID()
             snapshot = value
             error = nil
             if let launch, consumedLaunchID != launch.id {
@@ -406,6 +462,21 @@ private struct WatchActivityView: View {
         } catch {
             guard !Task.isCancelled, refreshID == id, scenePhase == .active else { return }
             self.error = error.localizedDescription
+        }
+    }
+
+    @MainActor private func readCached() async {
+        let id = UUID()
+        cacheReadID = id
+        do {
+            let result = try await store.workMessage(["operation": "cachedTasks"])
+            guard !Task.isCancelled, cacheReadID == id, scenePhase == .active,
+                  let data = result["data"] as? Data else { return }
+            snapshot = try JSONDecoder().decode(WatchWorkSnapshot.self, from: data)
+            error = nil
+        } catch {
+            // The explicit refresh reports transport failures. A change hint
+            // must not replace useful activity with a transient error.
         }
     }
 }
@@ -605,7 +676,8 @@ private enum WatchWorkPreview {
         guard let scenario else { return nil }
         if scenario == "disconnected" { throw WatchWorkError.message("Connect to your iPhone to review sessions and respond.") }
         func encoded<T: Encodable>(_ value: T) throws -> [String: Any] { ["data": try JSONEncoder().encode(value)] }
-        if payload["operation"] as? String == "tasks" {
+        if let operation = payload["operation"] as? String,
+           ["tasks", "cachedTasks", "refreshTasks"].contains(operation) {
             let now = Date().timeIntervalSince1970
             let tasks = [task] + ["working", "finished", "failed"].enumerated().map { index, state in
                 WatchWorkTask(sourceID: index == 0 ? "other" : "preview", sessionID: "task-\(index)", provider: index == 0 ? "claude" : "codex",

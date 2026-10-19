@@ -69,19 +69,60 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
     }
 }
 
-struct WatchWorkSnapshot: Codable {
+struct WatchWorkSnapshot: Codable, Equatable {
     let tasks: [WatchWorkTask]
     let computers: Int
     let unavailable: Int
     var sources: [WatchWorkSource]? = nil
 }
 
-struct WatchWorkSource: Codable {
+struct WatchWorkSource: Codable, Equatable {
     let sourceID: String
     let name: String
     let generation: String?
     let revision: UInt64?
     var stateCounts: [String: Int]? = nil
+}
+
+/// Wait only for the platform's activation callback. The deadline bounds an
+/// active read; it never keeps a background connection alive or retries a send.
+@MainActor final class WatchWorkActivation {
+    private var waiters: [UUID: CheckedContinuation<Void, Error>] = [:]
+    nonisolated init() {}
+
+    func wait(activated: Bool, timeout: Duration = .seconds(10)) async throws {
+        try Task.checkCancellation()
+        if activated { return }
+        let id = UUID()
+        let deadline = Task {
+            do { try await Task.sleep(for: timeout) } catch { return }
+            finish(id, result: .failure(ActivationError.timedOut))
+        }
+        defer { deadline.cancel() }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
+                else { waiters[id] = continuation }
+            }
+        } onCancel: {
+            Task { @MainActor in self.finish(id, result: .failure(CancellationError())) }
+        }
+    }
+
+    func complete(_ result: Result<Void, Error>) {
+        let pending = waiters
+        waiters.removeAll()
+        for continuation in pending.values { continuation.resume(with: result) }
+    }
+
+    private func finish(_ id: UUID, result: Result<Void, Error>) {
+        waiters.removeValue(forKey: id)?.resume(with: result)
+    }
+
+    enum ActivationError: LocalizedError {
+        case timedOut
+        var errorDescription: String? { "Couldn’t connect to iPhone. Open Paceman on iPhone and try again." }
+    }
 }
 
 extension LiveActivityRoute {

@@ -1331,6 +1331,80 @@ private final class InteractionURLProtocol: URLProtocol {
 }
 
 extension InteractionTests {
+    @MainActor func testWatchRefreshRepliesBeforeComputersAndCoalescesEachSource() async throws {
+        let bridge = AppleWatchAllowanceBridge.shared
+        let previous = bridge.onWorkMessage
+        let sources = ["fast", "slow"].map {
+            WatchWorkSource(sourceID: $0, name: $0, generation: nil, revision: nil)
+        }
+        let data = try JSONEncoder().encode(WatchWorkSnapshot(tasks: [], computers: 2, unavailable: 2, sources: sources))
+        var pending: [String: CheckedContinuation<[String: Any], Never>] = [:]
+        var reads: [String: Int] = [:]
+        let started = expectation(description: "both computers start independently")
+        started.expectedFulfillmentCount = 2
+        bridge.onWorkMessage = { message in
+            if message["operation"] as? String == "cachedTasks" { return ["data": data] }
+            let source = message["sourceID"] as! String
+            reads[source, default: 0] += 1
+            return await withCheckedContinuation { continuation in
+                pending[source] = continuation
+                started.fulfill()
+            }
+        }
+        defer {
+            for continuation in pending.values { continuation.resume(returning: ["data": data]) }
+            bridge.onWorkMessage = previous
+        }
+        let first = await bridge.handleWorkMessage(["operation": "refreshTasks"])
+        XCTAssertEqual(first["data"] as? Data, data, "The Watch must receive its list while computers are still pending")
+        await fulfillment(of: [started], timeout: 2)
+        let second = await bridge.handleWorkMessage(["operation": "refreshTasks"])
+        XCTAssertEqual(second["data"] as? Data, data)
+        XCTAssertEqual(reads, ["fast": 1, "slow": 1], "Foreground refreshes must join pending source work")
+    }
+
+    @MainActor func testWatchCachedListReturnsDuringSlowRefreshAndScopedRefreshSkipsOtherComputers() async throws {
+        let slow = refreshSource("watch-slow"), fast = refreshSource("watch-fast")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [slow, fast]
+        model.snapshots = [:]
+        let slowStarted = expectation(description: "offline computer pending")
+        let fastStarted = expectation(description: "reachable computer requested")
+        var pending: InteractionURLProtocol?
+        var fastReads = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.host == slow.endpoint.host {
+                    pending = transport
+                    slowStarted.fulfill()
+                } else {
+                    fastReads += 1
+                    transport.finish(self.refreshSnapshot(fast, revision: fastReads))
+                    if fastReads == 1 { fastStarted.fulfill() }
+                }
+            }
+        }
+        defer {
+            InteractionURLProtocol.start = nil
+            for source in [slow, fast] { SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID)) }
+        }
+        let refresh = Task { await model.handleWatchWork(["operation": "tasks"]) }
+        await fulfillment(of: [slowStarted, fastStarted], timeout: 2)
+        // A route to the reachable computer must not join another computer's wait.
+        let scoped = await model.handleWatchWork(["operation": "tasks", "sourceID": fast.sourceID])
+        XCTAssertNotNil(scoped["data"])
+        let cached = await model.handleWatchWork(["operation": "cachedTasks"])
+        let snapshot = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(cached["data"] as? Data))
+        XCTAssertEqual(snapshot.computers, 2)
+        XCTAssertEqual(snapshot.tasks.map(\.sourceID), [fast.sourceID])
+        XCTAssertEqual(snapshot.sources?.first(where: { $0.sourceID == fast.sourceID })?.revision, UInt64(fastReads))
+        XCTAssertNil(model.snapshots[slow.sourceID])
+        if let pending { pending.client?.urlProtocol(pending, didFailWithError: URLError(.timedOut)) }
+        _ = await refresh.value
+    }
+
     @MainActor func testWatchResponseKeepsExactSubmissionAcrossLostReplyAndReopening() async throws {
         let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
             clientID: "client", credential: "private-fixture")

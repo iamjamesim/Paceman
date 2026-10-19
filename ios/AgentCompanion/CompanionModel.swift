@@ -318,6 +318,7 @@ final class CompanionModel: ObservableObject {
                 selectionRevision: usageSelectionRevision, sourceID: sourceID, observedAt: watchUsageSource?.observedAt,
                 clear: sourceIDs.isEmpty, sourceIDs: sourceIDs,
                 snapshots: sourceIDs.compactMap { snapshots[$0] })
+            AppleWatchAllowanceBridge.shared.workDidChange(watchWorkSnapshot())
         }
     }
 
@@ -711,6 +712,33 @@ final class CompanionModel: ObservableObject {
 }
 
 extension CompanionModel {
+    private func watchWorkSnapshot() -> WatchWorkSnapshot {
+        let sources = pairedSources.filter { !isRevoked($0.sourceID) }
+        let values = sources.flatMap { source -> [WatchWorkTask] in
+            guard let snapshot = snapshots[source.sourceID] else { return [] }
+            let name = ComputerPreferences.displayName(for: source.sourceID,
+                sourceName: snapshot.sourceName, host: source.endpoint.host)
+            let sessions = snapshot.sessions ?? [AgentSession(id: "aggregate", provider: "", state: snapshot.state)]
+            return sessions.filter { $0.state != .idle }.prefix(32).map {
+                WatchWorkTask(sourceID: source.sourceID, sessionID: $0.id, provider: $0.provider,
+                    title: $0.title ?? ($0.provider.isEmpty ? "Computer activity" : $0.displayName),
+                    computer: name, state: $0.state.rawValue, freshUntil: snapshot.activityFreshUntil)
+            }
+        }
+        return WatchWorkSnapshot(tasks: Array(values.prefix(128)), computers: sources.count,
+            unavailable: sources.filter { !snapshotIsFresh($0.sourceID) || errors[$0.sourceID] != nil }.count,
+            sources: sources.map { source in
+                let snapshot = snapshots[source.sourceID]
+                return WatchWorkSource(sourceID: source.sourceID,
+                    name: ComputerPreferences.displayName(for: source.sourceID,
+                        sourceName: snapshot?.sourceName, host: source.endpoint.host),
+                    generation: snapshot?.generation, revision: snapshot?.revision,
+                    stateCounts: snapshot?.sessions.map { sessions in
+                        Dictionary(grouping: sessions, by: { $0.state.rawValue }).mapValues(\.count)
+                    })
+            })
+    }
+
     private var storedHandoff: PendingWatchHandoff? {
         guard let data = UserDefaults.standard.data(forKey: handoffKey) else { return nil }
         return try? JSONDecoder().decode(PendingWatchHandoff.self, from: data)
@@ -842,35 +870,15 @@ extension CompanionModel {
         watchSubmissions = watchSubmissions.filter { key, _ in watchRequests[key] != nil }
         watchConfirmed = watchConfirmed.intersection(watchRequests.keys)
         do {
-            if message["operation"] as? String == "tasks" {
-                let tasks = pairedSources.filter { !isRevoked($0.sourceID) }
-                    .compactMap { startRefresh($0, fromWatch: true) }
-                for task in tasks { _ = await task.value }
-                guard !Task.isCancelled, epoch == sourceEpoch else { return ["error": "Connections changed. Refresh Activity."] }
-                let sources = pairedSources.filter { !isRevoked($0.sourceID) }
-                let values = sources.flatMap { source -> [WatchWorkTask] in
-                    guard let snapshot = snapshots[source.sourceID] else { return [] }
-                    let name = ComputerPreferences.displayName(for: source.sourceID,
-                        sourceName: snapshot.sourceName, host: source.endpoint.host)
-                    let sessions = snapshot.sessions ?? [AgentSession(id: "aggregate", provider: "", state: snapshot.state)]
-                    return sessions.filter { $0.state != .idle }.prefix(32).map {
-                        WatchWorkTask(sourceID: source.sourceID, sessionID: $0.id, provider: $0.provider,
-                            title: $0.title ?? ($0.provider.isEmpty ? "Computer activity" : $0.displayName),
-                            computer: name, state: $0.state.rawValue, freshUntil: snapshot.activityFreshUntil)
-                    }
+            if let operation = message["operation"] as? String, ["tasks", "cachedTasks"].contains(operation) {
+                if operation == "tasks" {
+                    let scope = message["sourceID"] as? String
+                    let tasks = pairedSources.filter { !isRevoked($0.sourceID) && (scope == nil || $0.sourceID == scope) }
+                        .compactMap { startRefresh($0, fromWatch: true) }
+                    for task in tasks { _ = await task.value }
                 }
-                return encoded(WatchWorkSnapshot(tasks: Array(values.prefix(128)), computers: sources.count,
-                    unavailable: sources.filter { !snapshotIsFresh($0.sourceID) || errors[$0.sourceID] != nil }.count,
-                    sources: sources.map { source in
-                        let snapshot = snapshots[source.sourceID]
-                        return WatchWorkSource(sourceID: source.sourceID,
-                            name: ComputerPreferences.displayName(for: source.sourceID,
-                                sourceName: snapshot?.sourceName, host: source.endpoint.host),
-                            generation: snapshot?.generation, revision: snapshot?.revision,
-                            stateCounts: snapshot?.sessions.map { sessions in
-                                Dictionary(grouping: sessions, by: { $0.state.rawValue }).mapValues(\.count)
-                            })
-                    }))
+                guard !Task.isCancelled, epoch == sourceEpoch else { return ["error": "Connections changed. Refresh Activity."] }
+                return encoded(watchWorkSnapshot())
             }
             guard let sourceID = message["sourceID"] as? String,
                   let source = pairedSources.first(where: { $0.sourceID == sourceID }), !isRevoked(sourceID) else {
