@@ -859,7 +859,7 @@ extension CompanionModel {
                 return WatchWorkTask(sourceID: source.sourceID, sessionID: session.id, provider: session.provider,
                     title: session.title ?? session.displayName,
                     computer: name, state: session.state.rawValue, freshUntil: snapshot.activityFreshUntil,
-                    presentationStatus: item.historical ? session.state.title : item.phase.title,
+                    presentationStatus: item.historical ? session.state.title : item.status,
                     presentationGroup: item.phase.group.rawValue)
             }
         }
@@ -1030,7 +1030,7 @@ extension CompanionModel {
             }
             guard let sourceID = message["sourceID"] as? String,
                   let source = pairedSources.first(where: { $0.sourceID == sourceID }), !isRevoked(sourceID) else {
-                return ["error": "This computer is no longer connected."]
+                return ["error": "Check your connection in Paceman on iPhone."]
             }
             if message["operation"] as? String == "request" {
                 guard let sessionID = message["sessionID"] as? String,
@@ -1038,8 +1038,9 @@ extension CompanionModel {
                 let started = ProcessInfo.processInfo.systemUptime
                 if let task = startRefresh(source, fromWatch: true) { _ = await task.value }
                 guard let snapshot = snapshots[sourceID], errors[sourceID] == nil,
-                      snapshotIsFresh(sourceID) else { return ["error": "Couldn’t reach the computer. Check Paceman on iPhone."] }
-                guard snapshot.interactionsEnabled == true else { return ["error": "Continue on your computer. Phone responses are off."] }
+                      snapshotIsFresh(sourceID) else { return ["error": "Couldn’t refresh this chat. Check Paceman on iPhone."] }
+                let destination = ResponseGuidance.destination(for: provider)
+                guard snapshot.interactionsEnabled == true else { return ["error": "Phone responses are off. Open \(destination)."] }
                 let identity = WorkIdentity(sourceID: sourceID, sessionID: sessionID, provider: provider)
                 let known = interactions.items.first { $0.source.sourceID == sourceID
                     && $0.request.sessionID == sessionID && $0.request.provider == provider && interactions.isCurrent($0) }
@@ -1061,7 +1062,7 @@ extension CompanionModel {
                 guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID),
                       snapshots[sourceID]?.identity == snapshot.identity,
                       snapshot.sessions?.contains(where: { $0.id == sessionID && $0.provider == provider }) == true else {
-                    return ["error": "No response is available. Check the session on your computer."]
+                    return ["error": "No response is available. Check \(destination)."]
                 }
                 guard let request = requests.requests.first(where: { $0.sessionID == sessionID && $0.provider == provider }) else {
                     if let item = watchRequests.values.first(where: {
@@ -1073,10 +1074,10 @@ extension CompanionModel {
                             remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
                             submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
                     }
-                    return ["error": "No response is available. Check the session on your computer."]
+                    return ["error": "No response is available. Check \(destination)."]
                 }
                 guard started + request.remainingSeconds > ProcessInfo.processInfo.systemUptime else {
-                    return ["error": "This request expired. Check the session on your computer."]
+                    return ["error": "This request expired. Check \(destination)."]
                 }
                 let item = PendingInput(source: source, generation: requests.generation, request: request,
                     expiresAtUptime: started + request.remainingSeconds)
@@ -1095,10 +1096,11 @@ extension CompanionModel {
                let data = message["submission"] as? Data, data.count <= 65536 {
                 let submission = try JSONDecoder().decode(InputSubmission.self, from: data)
                 let id = "\(sourceID)/\(submission.generation)/\(submission.requestID)"
+                let destination = ResponseGuidance.destination(for: watchRequests[id]?.request.provider)
                 guard let item = watchRequests[id], submission.valid(for: item.request),
                       watchSubmissions[id] == nil || watchSubmissions[id] == submission,
                       interactions.response(for: item).map({ $0.submission == submission }) ?? true else {
-                    return ["error": "This request changed or expired. Check the session on your computer."]
+                    return ["error": "This request changed or expired. Check \(destination)."]
                 }
                 watchSubmissions[id] = submission
                 let inboxLifecycle = interactions.lifecycleID
@@ -1107,7 +1109,7 @@ extension CompanionModel {
                     try await client.submitInput(submission, source: source)
                     guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID),
                           watchRequests[id]?.request == item.request else {
-                        return ["error": "Connections changed. Check the session on your computer."]
+                        return ["error": "Connections changed. Check Paceman on iPhone."]
                     }
                     if interactions.lifecycleID == inboxLifecycle {
                         interactions.didSubmit(item, submission: submission)
@@ -1122,7 +1124,7 @@ extension CompanionModel {
                         if interactions.lifecycleID == inboxLifecycle {
                             interactions.observeWatchSubmission(item, submission: submission, phase: .rejected)
                         }
-                        return ["error": "This request is no longer available. Check the session on your computer."]
+                        return ["error": "This request is no longer available. Check \(destination)."]
                     }
                     if interactions.lifecycleID == inboxLifecycle {
                         interactions.observeWatchSubmission(item, submission: submission, phase: .unconfirmed)
@@ -1131,7 +1133,7 @@ extension CompanionModel {
                 }
             }
         } catch {
-            return ["error": "Couldn’t reach the computer. Check Paceman on iPhone."]
+            return ["error": "Couldn’t refresh this chat. Check Paceman on iPhone."]
         }
         return ["error": "Update Paceman on iPhone and Apple Watch."]
     }

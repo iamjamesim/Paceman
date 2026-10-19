@@ -81,7 +81,7 @@ struct WorkItem: Identifiable {
     var delivery: InputDelivery? = nil
     var inputAvailability: InputAvailability? = nil
     var returnedToComputer: Bool { delivery == .released }
-    var response: String? { delivery?.message }
+    var response: String? { delivery?.message(provider: session.provider) }
     var request: PendingInput? = nil
     // Lazy sections retain moved rows by ID. A phase transition replaces the
     // rendered row (including its animation), while task selection stays stable.
@@ -108,7 +108,8 @@ struct WorkItem: Identifiable {
     var state: ActivityState { phase.activity }
     var group: WorkGroup { historical ? .lastKnown : phase.group }
     var status: String {
-        historical ? "Last known: \(phase.title)" : phase.title
+        let title = phase == .continued ? ResponseGuidance.continuation(for: session.provider) : phase.title
+        return historical ? "Last known: \(title)" : title
     }
     var context: String {
         [session.provider.capitalized, session.detail, computer].filter { !$0.isEmpty }.joined(separator: " · ")
@@ -123,7 +124,8 @@ struct WorkItem: Identifiable {
         if phase == .responded { return nil }
         if state == .needsInput && (returnedToComputer || response != nil) { return status }
         if state == .needsInput {
-            return inputAvailability == .available || inputAvailability == .disabled ? "Continue on computer" : nil
+            return inputAvailability == .available || inputAvailability == .disabled
+                ? ResponseGuidance.continuation(for: session.provider) : nil
         }
         return state == .failed || state == .idle ? state.title : nil
     }
@@ -156,7 +158,7 @@ enum WorkPhase: Hashable {
         case .question: return "Question for you"
         case .attention, .resolving: return "Needs your attention"
         case .responded: return "Working"
-        case .continued: return "Continue on computer"
+        case .continued: return "Continue in the agent app"
         default: return activity.title
         }
     }

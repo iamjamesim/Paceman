@@ -1,5 +1,23 @@
 import Foundation
 
+enum ResponseGuidance {
+    static func continuation(for provider: String) -> String {
+        switch provider {
+        case "codex": return "Continue in Codex"
+        case "claude": return "Continue in Claude Code"
+        default: return "Continue in the agent app"
+        }
+    }
+
+    static func destination(for provider: String?) -> String {
+        switch provider {
+        case "codex": return "this chat in Codex"
+        case "claude": return "this chat in Claude Code"
+        default: return "Paceman on iPhone"
+        }
+    }
+}
+
 struct InteractionOption: Codable, Equatable {
     let label: String
     let description: String

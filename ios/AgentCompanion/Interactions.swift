@@ -56,7 +56,10 @@ struct PendingInput: Identifiable {
 
 enum InputDelivery {
     case sent, released
-    var message: String { self == .released ? "Continue on your computer." : "Response sent. Waiting for the agent’s next update." }
+    func message(provider: String) -> String {
+        self == .released ? ResponseGuidance.continuation(for: provider) + "."
+            : "Response sent. Waiting for the agent’s next update."
+    }
 }
 
 enum InputResponsePhase { case sending, submitted, unconfirmed, rejected }
@@ -342,9 +345,10 @@ struct InputResponseState {
                 } else { definitive = false }
                 guard var response = self.responses[item.id] else { return }
                 response.phase = definitive ? .rejected : .unconfirmed
+                let destination = ResponseGuidance.destination(for: item.request.provider)
                 response.message = definitive
-                    ? "This response could not be confirmed. Check the session on your computer."
-                    : "Delivery is unconfirmed. Retry the same response, or check the session on your computer."
+                    ? "This response could not be confirmed. Check \(destination)."
+                    : "Delivery is unconfirmed. Retry the same response, or check \(destination)."
                 self.responses[item.id] = response
             }
         }

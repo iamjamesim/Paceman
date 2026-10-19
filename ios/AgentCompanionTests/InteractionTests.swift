@@ -937,7 +937,7 @@ final class InteractionTests: XCTestCase {
         for availability in [InputAvailability.loading, .unavailable, .available, .disabled] {
             let item = WorkItem(id: .init(sourceID: sourceID, sessionID: session.id, provider: "claude"),
                                 session: session, computer: "Mac", historical: false, inputAvailability: availability)
-            XCTAssertEqual(item.statusDetail, availability == .available || availability == .disabled ? "Continue on computer" : nil)
+            XCTAssertEqual(item.statusDetail, availability == .available || availability == .disabled ? "Continue in Claude Code" : nil)
             XCTAssertEqual(item.phase, availability == .available || availability == .disabled ? .attention : .resolving)
             XCTAssertEqual(item.statusToken, availability == .available || availability == .disabled ? .attention : .approval,
                            "Fetching a request must not present a warning")
@@ -1250,7 +1250,7 @@ final class InteractionTests: XCTestCase {
         XCTAssertNotEqual(first.id, second.id)
         XCTAssertEqual(first.group, .attention)
         XCTAssertEqual(first.statusToken, .attention)
-        XCTAssertEqual(first.statusDetail, "Continue on computer")
+        XCTAssertEqual(first.statusDetail, "Continue in Claude Code")
         XCTAssertEqual(second.group, .lastKnown)
         second.delivery = .sent
         XCTAssertEqual(second.group, .lastKnown)
@@ -1270,7 +1270,7 @@ final class InteractionTests: XCTestCase {
             delivery: .released)
         XCTAssertEqual(returned.group, .attention)
         XCTAssertEqual(returned.statusToken, .attention)
-        XCTAssertEqual(returned.status, "Continue on computer")
+        XCTAssertEqual(returned.status, "Continue in Claude Code")
         var submitted = first
         submitted.delivery = .sent
         XCTAssertEqual(submitted.group, .working)

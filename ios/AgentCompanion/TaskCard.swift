@@ -310,11 +310,7 @@ struct TaskCard: View {
     }
 
     private func continuationTitle(_ item: WorkItem) -> String {
-        switch item.session.provider {
-        case "codex": return "Continue in Codex"
-        case "claude": return "Continue in Claude Code"
-        default: return "Continue on your computer"
-        }
+        ResponseGuidance.continuation(for: item.session.provider)
     }
 
     private func explanation(_ item: WorkItem) -> String? {
@@ -323,7 +319,7 @@ struct TaskCard: View {
         switch inbox.availability[item.id.sourceID] {
         case .loading, nil: return nil
         case .unavailable: return "Paceman couldn’t retrieve this request. It will retry while the app is open."
-        case .disabled: return "Phone responses aren’t available on this computer."
+        case .disabled: return "Phone responses are off for this connection."
         case .available: return "This request can’t be answered in Paceman right now."
         }
     }

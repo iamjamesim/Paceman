@@ -524,18 +524,20 @@ private struct WatchTaskView: View {
         return InputAnswer(selected: selected.sorted(), text: text).valid(for: question)
     }
 
+    private var responseDestination: String { ResponseGuidance.destination(for: task.provider) }
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if let prompt, !submitted, !rejected {
                         if ProcessInfo.processInfo.systemUptime >= deadline {
-                            Text(unconfirmed ? "Delivery is unconfirmed. Check the session on your computer."
-                                : "This request expired. Check the session on your computer.")
+                            Text(unconfirmed ? "Delivery is unconfirmed. Check \(responseDestination)."
+                                : "This request expired. Check \(responseDestination).")
                         } else {
                             requestContent(prompt).disabled(sending || submission != nil)
                             if unconfirmed {
-                                Text("Delivery is unconfirmed. Retry the same response or check your computer.")
+                                Text("Delivery is unconfirmed. Retry the same response or check \(responseDestination).")
                                 Button("Retry response") { Task { await send() } }.disabled(sending)
                             }
                         }
@@ -543,9 +545,7 @@ private struct WatchTaskView: View {
                         Text(task.title).font(.headline).fixedSize(horizontal: false, vertical: true)
                         if submitted {
                             Label("Response sent", systemImage: "checkmark.circle")
-                        } else if rejected {
-                            Text("Check the session on your computer.")
-                        } else {
+                        } else if !rejected {
                             Text(task.historical(at: Date()) ? "Last known: \(task.status)" : task.status)
                         }
                     }
