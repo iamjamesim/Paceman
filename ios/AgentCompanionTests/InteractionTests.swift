@@ -1660,6 +1660,70 @@ extension InteractionTests {
         XCTAssertEqual(posts, 2, "Removed access cannot submit a cached response")
     }
 
+    @MainActor func testWatchDefinitiveRejectionCannotReopenOrResubmitAfterBrokerDisconnect() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://watch-rejection.example")!, sourceID: sourceID,
+            clientID: "client", credential: "fixture")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        model.interactions.setForeground(true)
+        var listing = fixture()
+        var disconnected = false
+        var posts = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.path == "/v1/snapshot" {
+                    transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                } else if transport.request.httpMethod == "POST" {
+                    posts += 1
+                    disconnected = true
+                    transport.finish(Data(), status: 409)
+                } else {
+                    var current = listing
+                    if disconnected { current["requests"] = [] }
+                    transport.finish(try! JSONSerialization.data(withJSONObject: current))
+                }
+            }
+        }
+        defer {
+            model.interactions.setForeground(false)
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+        }
+        let request: [String: Any] = ["operation": "request", "sourceID": sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude"]
+        let reply = await model.handleWatchWork(request)
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reply["data"] as? Data))
+        let submission = InputSubmission(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        let payload: [String: Any] = ["operation": "submit", "sourceID": sourceID,
+            "submission": try JSONEncoder().encode(submission)]
+        let rejected = await model.handleWatchWork(payload)
+        XCTAssertNotNil(rejected["error"])
+        // First exercise the phone's retained rejected response, then clear its
+        // foreground inbox and exercise the missing-broker fallback in the same generation.
+        for clearInbox in [false, true] {
+            if clearInbox { model.interactions.setForeground(false) }
+            let reopened = await model.handleWatchWork(request)
+            XCTAssertNotNil(reopened["error"])
+            XCTAssertNil(reopened["data"], "A definitive rejection must not reopen as an uncertain form")
+            let retried = await model.handleWatchWork(payload)
+            XCTAssertNotNil(retried["error"])
+            XCTAssertEqual(posts, 1, "A known rejection must not offer or forward another POST")
+        }
+        var requests = listing["requests"] as! [[String: Any]]
+        let nextID = UUID().uuidString
+        requests[0]["requestID"] = nextID
+        listing["requests"] = requests
+        disconnected = false
+        let next = await model.handleWatchWork(request)
+        let nextPrompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(next["data"] as? Data))
+        XCTAssertEqual(nextPrompt.request.id, nextID, "Rejection belongs to one request, not the entire chat")
+        XCTAssertNil(nextPrompt.submission)
+    }
+
     @MainActor func testWatchRejectsUnmatchedTaskAndDisabledResponses() async throws {
         let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
             clientID: "client", credential: "fixture")
@@ -1825,6 +1889,10 @@ extension InteractionTests {
             } else if phase == .rejected {
                 XCTAssertNil(model.interactions.response(for: identity))
                 XCTAssertNil(model.watchPending(for: identity))
+                let reopened = await model.handleWatchWork(["operation": "request", "sourceID": sourceID,
+                    "sessionID": identity.sessionID, "provider": identity.provider])
+                XCTAssertNotNil(reopened["error"])
+                XCTAssertNil(reopened["data"], "A phone rejection must survive immediate backgrounding")
             } else {
                 XCTAssertEqual(model.interactions.response(for: identity)?.submission, submission)
                 XCTAssertEqual(model.interactions.response(for: identity)?.phase, .unconfirmed)

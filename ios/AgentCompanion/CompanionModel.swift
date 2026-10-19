@@ -63,6 +63,7 @@ final class CompanionModel: ObservableObject {
     private var watchRequests: [String: PendingInput] = [:]
     private var watchSubmissions: [String: InputSubmission] = [:]
     private var watchConfirmed: Set<String> = []
+    private var watchRejected: Set<String> = []
     private let workProjectionGeneration = UUID().uuidString
     private var workProjectionRevision: UInt64 = 0
     private var previousWorkProjection: WatchWorkSnapshot?
@@ -752,6 +753,7 @@ final class CompanionModel: ObservableObject {
         watchRequests.removeAll()
         watchSubmissions.removeAll()
         watchConfirmed.removeAll()
+        watchRejected.removeAll()
         watchTracking.removeAll()
         watchNextFetch.removeAll()
         sourceFailures.removeAll()
@@ -833,6 +835,7 @@ extension CompanionModel {
                 watchRequests.removeValue(forKey: id)
                 watchSubmissions.removeValue(forKey: id)
                 watchConfirmed.remove(id)
+                watchRejected.remove(id)
                 continue
             }
             let state = snapshot.sessions?.first {
@@ -859,6 +862,7 @@ extension CompanionModel {
         if let old = watchRequests[item.id], old.request.version != item.request.version {
             watchSubmissions.removeValue(forKey: item.id)
             watchConfirmed.remove(item.id)
+            watchRejected.remove(item.id)
         }
         let siblings = watchRequests.values.filter { $0.source.sourceID == item.source.sourceID
             && $0.request.sessionID == item.request.sessionID && $0.request.provider == item.request.provider && $0.id != item.id }
@@ -881,6 +885,7 @@ extension CompanionModel {
             case .sending, .unconfirmed:
                 watchSubmissions[id] = response.submission
             case .rejected:
+                watchRejected.insert(id)
                 watchTracking[id]?.active = false
             }
         }
@@ -1098,6 +1103,7 @@ extension CompanionModel {
         }
         watchSubmissions = watchSubmissions.filter { key, _ in watchRequests[key] != nil }
         watchConfirmed = watchConfirmed.intersection(watchRequests.keys)
+        watchRejected = watchRejected.intersection(watchRequests.keys)
         watchTracking = watchTracking.filter { watchRequests[$0.key] != nil }
         do {
             if let operation = message["operation"] as? String, ["tasks", "cachedTasks", "refreshTasks"].contains(operation) {
@@ -1156,6 +1162,10 @@ extension CompanionModel {
                 if let item = known ?? response?.item, item.expiresAtUptime > started,
                    watchRequests.count < 256 || watchRequests[item.id] != nil {
                     rememberWatchRequest(item, snapshot: snapshot)
+                    if response?.phase == .rejected { watchRejected.insert(item.id) }
+                    guard !watchRejected.contains(item.id) else {
+                        return ["error": "This request is no longer available. Check \(destination)."]
+                    }
                     if let response {
                         watchSubmissions[item.id] = response.submission
                         if response.phase == .submitted { watchConfirmed.insert(item.id) }
@@ -1175,6 +1185,7 @@ extension CompanionModel {
                         $0.source.sourceID == sourceID && $0.generation == requests.generation
                             && $0.request.sessionID == sessionID && $0.request.provider == provider
                             && watchSubmissions[$0.id] != nil
+                            && !watchRejected.contains($0.id)
                     }) {
                         return encoded(WatchWorkPrompt(generation: item.generation, request: item.request,
                             remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
@@ -1192,6 +1203,9 @@ extension CompanionModel {
                     return ["error": "Review this session on iPhone."]
                 }
                 rememberWatchRequest(item, snapshot: snapshot)
+                guard !watchRejected.contains(item.id) else {
+                    return ["error": "This request is no longer available. Check \(destination)."]
+                }
                 interactions.observeWatchRequest(item)
                 publishWatchWork()
                 return encoded(WatchWorkPrompt(generation: requests.generation, request: request,
@@ -1204,6 +1218,7 @@ extension CompanionModel {
                 let id = "\(sourceID)/\(submission.generation)/\(submission.requestID)"
                 let destination = ResponseGuidance.destination(for: watchRequests[id]?.request.provider)
                 guard let item = watchRequests[id], submission.valid(for: item.request),
+                      !watchRejected.contains(id), interactions.response(for: item)?.phase != .rejected,
                       watchSubmissions[id] == nil || watchSubmissions[id] == submission,
                       interactions.response(for: item).map({ $0.submission == submission }) ?? true else {
                     return ["error": "This request changed or expired. Check \(destination)."]
@@ -1227,6 +1242,7 @@ extension CompanionModel {
                     return reply
                 } catch {
                     if case HubError.http(let status) = error, [400, 401, 404, 409, 410, 422].contains(status) {
+                        if watchRequests[item.id]?.request == item.request { watchRejected.insert(item.id) }
                         watchTracking[item.id]?.active = false
                         if interactions.lifecycleID == inboxLifecycle {
                             interactions.observeWatchSubmission(item, submission: submission, phase: .rejected)

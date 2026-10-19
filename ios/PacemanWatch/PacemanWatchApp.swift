@@ -467,12 +467,13 @@ private struct WatchTaskView: View {
     @State private var deadline: TimeInterval = 0
     @State private var answers: [String: InputAnswer] = [:]
     @State private var submission: InputSubmission?
-    @State private var sending = false
+    @State private var operation = WatchWorkOperation()
     @State private var submitted = false
     @State private var unconfirmed = false
     @State private var error: String?
     @State private var rejected = false
-    @State private var epoch = UUID()
+
+    private var sending: Bool { operation.busy }
 
     private var canSendAnswer: Bool {
         guard submission == nil, !sending, !rejected, let prompt, prompt.supportsWatchAnswer,
@@ -569,7 +570,7 @@ private struct WatchTaskView: View {
             if reachable, prompt == nil, !submitted, scenePhase == .active {
                 Task { await load() }
             } else if !reachable, submission == nil, !submitted, currentTask.state == "needs_input" {
-                epoch = UUID()
+                operation.invalidate()
                 prompt = nil
                 answers = [:]
                 error = "Reconnect to your iPhone to respond."
@@ -577,7 +578,7 @@ private struct WatchTaskView: View {
         }
         .onChange(of: scenePhase) { _, value in
             if value == .background {
-                epoch = UUID()
+                operation.invalidate()
                 prompt = nil
                 submission = nil
                 answers = [:]
@@ -708,16 +709,15 @@ private struct WatchTaskView: View {
     }
 
     @MainActor private func load() async {
-        guard currentTask.state == "needs_input", !currentTask.historical(at: Date()), !sending else { return }
+        guard currentTask.state == "needs_input", !currentTask.historical(at: Date()),
+              let token = operation.begin() else { return }
         error = nil
-        sending = true
-        defer { sending = false }
+        defer { finish(token) }
         let started = ProcessInfo.processInfo.systemUptime
-        let expectedEpoch = epoch
         do {
             let result = try await store.workMessage(["operation": "request", "sourceID": task.sourceID,
                 "sessionID": task.sessionID, "provider": task.provider])
-            guard scenePhase != .background, expectedEpoch == epoch, let data = result["data"] as? Data else { return }
+            guard scenePhase != .background, operation.accepts(token), let data = result["data"] as? Data else { return }
             let value = try JSONDecoder().decode(WatchWorkPrompt.self, from: data)
             prompt = value
             submission = value.submission
@@ -727,7 +727,7 @@ private struct WatchTaskView: View {
             rejected = false
             deadline = started + value.remainingSeconds
         } catch {
-            guard scenePhase != .background, expectedEpoch == epoch else { return }
+            guard scenePhase != .background, operation.accepts(token) else { return }
             self.error = error.localizedDescription
         }
     }
@@ -743,23 +743,27 @@ private struct WatchTaskView: View {
     }
 
     @MainActor private func send() async {
-        guard let submission, !sending else { return }
-        sending = true
-        let expectedEpoch = epoch
-        defer { sending = false }
+        guard let submission, let token = operation.begin() else { return }
+        defer { finish(token) }
         do {
             let data = try JSONEncoder().encode(submission)
             let result = try await store.workMessage(["operation": "submit", "sourceID": task.sourceID, "submission": data])
-            guard scenePhase != .background, expectedEpoch == epoch else { return }
+            guard scenePhase != .background, operation.accepts(token) else { return }
             submitted = result["submitted"] as? Bool == true
             unconfirmed = !submitted
             error = nil
             if submitted { dismiss() }
         } catch {
-            guard scenePhase != .background, expectedEpoch == epoch else { return }
+            guard scenePhase != .background, operation.accepts(token) else { return }
             if case WatchWorkError.rejected = error { rejected = true; unconfirmed = false }
             else { unconfirmed = true }
             self.error = error.localizedDescription
+        }
+    }
+
+    @MainActor private func finish(_ token: WatchWorkOperation.Token) {
+        if operation.finish(token), scenePhase == .active, !submitted {
+            Task { await load() }
         }
     }
 }

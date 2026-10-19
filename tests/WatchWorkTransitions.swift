@@ -59,6 +59,29 @@ import Foundation
         }
         try await activation.wait(activated: false, timeout: .seconds(1))
         try await recovery.value
+
+        // Navigation retains the question view while it backgrounds and resumes.
+        // The active callback cannot start a second read until the old reply ends.
+        var operation = WatchWorkOperation()
+        let oldLoad = operation.begin()!
+        operation.invalidate()
+        precondition(operation.busy)
+        precondition(operation.begin() == nil, "Resume must not overlap the pending read")
+        precondition(!operation.accepts(oldLoad), "A background-cleared form cannot accept old content")
+        precondition(operation.finish(oldLoad), "An obsolete completion must request recovery for the active view")
+        let reloaded = operation.begin()!
+        precondition(operation.accepts(reloaded))
+        precondition(!operation.finish(oldLoad), "A late completion cannot clear the replacement read")
+        precondition(operation.busy)
+        precondition(!operation.finish(reloaded), "A current success or failure must not create a retry loop")
+        let asleep = operation.begin()!
+        operation.invalidate()
+        precondition(operation.finish(asleep))
+        precondition(!operation.busy, "Completion while asleep must release ownership for the next activation")
+        let afterWake = operation.begin()!
+        precondition(operation.accepts(afterWake))
+        precondition(!operation.finish(afterWake))
+
         // The list read before an answer can arrive after its acknowledgement.
         var cache = WatchWorkCache()
         let pending = WatchWorkTask(sourceID: "mac", sessionID: "task", provider: "codex", title: "Task",

@@ -217,6 +217,34 @@ extension LiveActivityRoute {
     }
 }
 
+/// Keep ownership until a live reply finishes, even when backgrounding makes
+/// its content obsolete. The retained view can then reload on return.
+struct WatchWorkOperation {
+    struct Token: Equatable {
+        fileprivate let epoch: UUID
+        fileprivate let id = UUID()
+    }
+    private var epoch = UUID()
+    private var current: Token?
+    var busy: Bool { current != nil }
+
+    mutating func begin() -> Token? {
+        guard current == nil else { return nil }
+        let token = Token(epoch: epoch)
+        current = token
+        return token
+    }
+    mutating func invalidate() { epoch = UUID() }
+    func accepts(_ token: Token) -> Bool { current == token && token.epoch == epoch }
+    /// Returns whether the completed operation was invalidated, so an active
+    /// view can recover with a read. This never retries a submitted response.
+    mutating func finish(_ token: Token) -> Bool {
+        guard current == token else { return false }
+        current = nil
+        return token.epoch != epoch
+    }
+}
+
 struct WatchWorkPrompt: Codable {
     let generation: String
     let request: InputRequest
