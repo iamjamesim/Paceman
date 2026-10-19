@@ -26,6 +26,7 @@ final class CompanionModel: ObservableObject {
     private let refreshUptime: () -> TimeInterval
     private let appleWatchIdentity: () -> String?
     private let push: PushCoordinator
+    private let postHandoffNotification: @MainActor (UUID) async -> Bool
     private let pairedStore = PairedSourcesStore()
     private let savePairedSources: ([PairedSource]) throws -> Void
     private var polling: Task<Void, Never>?
@@ -72,12 +73,17 @@ final class CompanionModel: ObservableObject {
     init(preview: Bool = false, push: PushCoordinator? = nil, client: SourceClient = SourceClient(),
          savePairedSources: (([PairedSource]) throws -> Void)? = nil,
          refreshUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-         appleWatchIdentity: @escaping () -> String? = { AppleWatchAllowanceBridge.shared.taskHandoffIdentity }) {
+         appleWatchIdentity: @escaping () -> String? = { AppleWatchAllowanceBridge.shared.taskHandoffIdentity },
+         postHandoffNotification: (@MainActor (UUID) async -> Bool)? = nil) {
         self.client = client
         self.refreshUptime = refreshUptime
         self.appleWatchIdentity = appleWatchIdentity
         self.interactions = InteractionInbox(client: client)
-        self.push = push ?? .shared
+        let notificationSender = push ?? .shared
+        self.push = notificationSender
+        self.postHandoffNotification = postHandoffNotification ?? { id in
+            await notificationSender.postHandoffNotification(id)
+        }
         self.savePairedSources = savePairedSources ?? PairedSourcesStore().save
         designPreview = preview
         accessories = WatchAccessories(preview: preview)
@@ -985,7 +991,7 @@ extension CompanionModel {
             presentStoredHandoff()
             return .ready
         }
-        let notified = await push.postHandoffNotification(pending.id)
+        let notified = await postHandoffNotification(pending.id)
         // A foreground transition during notification scheduling should show the sheet
         // and remove the now-redundant notification, never interrupt twice.
         guard storedHandoff?.id == pending.id, handoffIsCurrent(pending) else {

@@ -1864,7 +1864,7 @@ extension InteractionTests {
         }
         for phase in [InputResponsePhase.sending, .submitted, .unconfirmed, .rejected] {
             let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config),
-                appleWatchIdentity: { "watch" })
+                appleWatchIdentity: { "watch" }, postHandoffNotification: { _ in false })
             model.pairedSources = [source]
             model.snapshots = [:]
             defer { model.setForeground(false) }
@@ -1908,8 +1908,12 @@ extension InteractionTests {
             clientID: "client", credential: "private-fixture")
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [InteractionURLProtocol.self]
+        var notificationIDs: [UUID] = []
         let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config),
-            appleWatchIdentity: { "watch" })
+            appleWatchIdentity: { "watch" }, postHandoffNotification: { id in
+                notificationIDs.append(id)
+                return false
+            })
         model.pairedSources = [source]
         model.snapshots = [:]
         var listing = fixture()
@@ -1940,7 +1944,9 @@ extension InteractionTests {
         let identity = WorkIdentity(sourceID: sourceID, sessionID: prompt.request.sessionID, provider: "claude")
         let continuation: [String: Any] = ["operation": "continueOnPhone", "sourceID": sourceID,
             "sessionID": identity.sessionID, "provider": identity.provider]
-        _ = await model.handleWatchWork(continuation)
+        let continuationReply = await model.handleWatchWork(continuation)
+        XCTAssertEqual(continuationReply["handoff"] as? Int, Int(WatchHandoffResult.openPhone.rawValue))
+        XCTAssertEqual(notificationIDs.count, 1)
         model.setForeground(true)
         let restored = try XCTUnwrap(model.interactions.items.first { $0.request.id == prompt.request.id })
         XCTAssertTrue(model.interactions.isCurrent(restored), "A live cached Watch form must be immediately editable")
@@ -2020,7 +2026,7 @@ extension InteractionTests {
         let data = refreshSnapshot(source)
         InteractionURLProtocol.start = { $0.finish(data) }
         let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config),
-            appleWatchIdentity: { watchID })
+            appleWatchIdentity: { watchID }, postHandoffNotification: { _ in false })
         model.pairedSources = [source]
         var snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
         snapshot.sessions?[0].project = "Paceman"
@@ -2062,7 +2068,8 @@ extension InteractionTests {
     @MainActor func testAppleWatchContinuationFallsBackToActivityWithoutOpeningAnotherTask() async throws {
         let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
         let original = defaults.data(forKey: key)
-        let model = CompanionModel(preview: true, push: PushCoordinator(), appleWatchIdentity: { "watch" })
+        let model = CompanionModel(preview: true, push: PushCoordinator(), appleWatchIdentity: { "watch" },
+            postHandoffNotification: { _ in false })
         model.pairedSources = []
         model.snapshots = [:]
         defer {
