@@ -23,6 +23,14 @@ def command(rid=1, **params):
         availableDecisions=["accept", "acceptForSession", "decline", "cancel"], **params))
 
 
+def browser():
+    return dict(id=8, method='mcpServer/elicitation/request', params=dict(threadId=SESSION, turnId='turn',
+        mode='form', serverName='codex_apps', message='Allow website access?',
+        requestedSchema=dict(type='object', properties={}), _meta=dict(codex_approval_kind='mcp_tool_call',
+        connector_id='browser-use', tool_name='access_browser_origin', persist=['always'],
+        tool_params=dict(origin='http://127.0.0.1:8766', reason='Review the local preview'))))
+
+
 def snapshot(requests, revision=1):
     return dict(type="broadcast", sourceClientId="native-owner", version=11,
                 method="thread-stream-state-changed", params=dict(hostId="local", conversationId=SESSION,
@@ -235,6 +243,72 @@ class DesktopRequestTests(unittest.TestCase):
         raw['params']['requestedSchema']['properties'] = {}
         raw['params']['_meta']['tool_params']['plan_token'] = 'bound-execution'
         self.assertIsNone(decode_request(SESSION, raw))
+
+    def test_browser_scopes_match_native_metadata_and_managed_policy(self):
+        for allowed in (None, False, True):
+            public, encode = decode_request(SESSION, browser(), browser_global_allowed=allowed)
+            self.assertEqual([o['id'] for o in public['responseOptions']],
+                ['once', 'always', 'browser-all-sites', 'decline'] if allowed is True else ['once', 'always', 'decline'])
+            self.assertEqual(public['approval']['displayText'], 'Website:\nhttp://127.0.0.1:8766')
+            self.assertEqual(encode(dict(action='choose', optionID='once'))[1]['response'],
+                dict(action='accept', content={}, _meta=None))
+            self.assertEqual(encode(dict(action='choose', optionID='always'))[1]['response']['_meta'], {'persist': 'always'})
+            if allowed is True:
+                self.assertEqual(public['contentVersion'], 4)
+                self.assertIn('all websites', public['responseOptions'][2]['confirmation'])
+                self.assertEqual(encode(dict(action='choose', optionID='browser-all-sites'))[1]['response']['_meta'],
+                    dict(persist='always', browser_use_persistent_approval_scope='all-sites'))
+            else:
+                self.assertIsNone(encode(dict(action='choose', optionID='browser-all-sites')))
+
+    def test_browser_global_policy_is_rechecked_before_sending_to_the_native_owner(self):
+        self.adapter.policy_reader = Mock(side_effect=[True, False])
+        sent = []
+        self.adapter._request = lambda *args, **kw: sent.append(args)
+        self.adapter._receive(snapshot([browser()]))
+        wait_until(lambda: self.broker.pending()['requests'])
+        pending = self.broker.pending()['requests'][0]
+        self.broker.submit(submission(self.broker, pending, action='choose', optionID='browser-all-sites'))
+        wait_until(lambda: not self.adapter.pending)
+        self.assertEqual(sent, [])
+        self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [])
+        self.adapter.policy_reader.assert_called_with()
+
+    def test_delayed_browser_policy_read_cannot_reopen_a_disconnected_owner(self):
+        started, release, finished = threading.Event(), threading.Event(), threading.Event()
+        load = self.adapter._load_browser_policy
+        def monitored_load(epoch):
+            try:
+                load(epoch)
+            finally:
+                finished.set()
+        def policy():
+            started.set()
+            release.wait(2)
+            return True
+        self.adapter.policy_reader = policy
+        self.adapter._load_browser_policy = monitored_load
+        self.adapter._receive(snapshot([browser()]))
+        self.assertTrue(started.wait(1))
+        self.adapter._reset()
+        release.set()
+        self.assertTrue(finished.wait(1))
+        self.assertEqual(self.broker.pending()['requests'], [])
+
+    def test_browser_global_answer_uses_the_same_native_request_and_exact_scope(self):
+        self.adapter.policy_reader = Mock(return_value=True)
+        sent = []
+        self.adapter._request = lambda method, params, **kw: sent.append((method, params, kw))
+        self.adapter._receive(snapshot([browser()]))
+        wait_until(lambda: self.broker.pending()['requests'])
+        pending = self.broker.pending()['requests'][0]
+        self.broker.submit(submission(self.broker, pending, action='choose', optionID='browser-all-sites'))
+        wait_until(lambda: sent)
+        self.assertEqual(sent, [('thread-follower-submit-mcp-server-elicitation-response', dict(
+            conversationId=SESSION, requestId=8, response=dict(action='accept', content={},
+            _meta=dict(persist='always', browser_use_persistent_approval_scope='all-sites'))),
+            dict(target='native-owner', connection=None))])
+        self.assertEqual(self.adapter.policy_reader.call_count, 2)
 
     def test_plan_confirmation_is_attention_after_planning_turn_completes(self):
         attention = []
