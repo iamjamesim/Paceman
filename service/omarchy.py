@@ -20,7 +20,9 @@ import struct
 import threading
 import time
 
-from service.allowance import allowance_snapshot
+from service.allowance import allowance_snapshots
+from service.codex_turns import read_codex_turn_metadata
+from service.usage import readings, selected_reading
 from service.claude import ClaudeSession
 from service.claude_hooks import validate_message
 from service.session_titles import SessionTitles, read_session_titles
@@ -62,7 +64,8 @@ class EventHandler(socketserver.StreamRequestHandler):
 
 class OmarchySource:
     def __init__(self, store, *, socket_path: Path | None = None, state_dir: Path | None = None,
-                 processes=None, computer_name: str | None = None, monotonic=time.monotonic, providers=("codex",), settings_reader=None, title_reader=read_session_titles):
+                 processes=None, computer_name: str | None = None, monotonic=time.monotonic, providers=("codex",), settings_reader=None, title_reader=read_session_titles,
+                 turn_metadata_reader=read_codex_turn_metadata):
         self.providers = tuple(providers)
         self.settings_reader = settings_reader
         self.last_event_by_provider = {}
@@ -79,6 +82,13 @@ class OmarchySource:
         self.last_event_at = 0
         self.pending_questions = {}
         self.native_turns = {}
+        self.session_refs = {}
+        self.native_attention = {}
+        self.pending_turn_events = {}
+        self.confirmed_turns = {}
+        self.turn_metadata_reader = turn_metadata_reader
+        self.recovery_thread = None
+        self.next_recovery_at = 0.0
         self.monotonic = monotonic
         self.processes = processes if processes is not None else AgentProcesses()
         self.computer_name = (computer_name or socket.gethostname()).split(".")[0][:80] or "Computer"
@@ -116,6 +126,18 @@ class OmarchySource:
                            "pid INTEGER NOT NULL, start_ticks TEXT NOT NULL, boot_id TEXT NOT NULL, "
                            "closed INTEGER NOT NULL DEFAULT 0)")
                 db.execute("CREATE TABLE IF NOT EXISTS omarchy_claude (id TEXT PRIMARY KEY, lifecycle TEXT NOT NULL)")
+                db.execute("CREATE TABLE IF NOT EXISTS omarchy_tracking (id TEXT PRIMARY KEY, session TEXT NOT NULL, "
+                           "native_turn TEXT, question_turn TEXT, question_due REAL, attention_turn TEXT, waiting INTEGER)")
+                for row in db.execute("SELECT t.* FROM omarchy_tracking t JOIN omarchy_processes p "
+                                      "ON p.session_id=t.id WHERE p.closed=0"):
+                    key = row["id"]
+                    self.session_refs[key] = row["session"]
+                    if row["native_turn"]:
+                        self.native_turns[key] = row["native_turn"]
+                    if row["question_turn"]:
+                        self.pending_questions[key] = row["question_turn"], row["question_due"]
+                    if row["attention_turn"]:
+                        self.native_attention[key] = row["attention_turn"], bool(row["waiting"])
                 for row in db.execute("SELECT key,value FROM metadata WHERE key LIKE 'omarchy_last_event_%'"):
                     self.last_event_by_provider[row["key"].removeprefix("omarchy_last_event_")] = float(row["value"])
                 self.last_event_at = max(self.last_event_by_provider.values(), default=0)
@@ -125,6 +147,9 @@ class OmarchySource:
                 # them; don't carry old anonymous completions into the live list.
                 db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id NOT IN "
                            "(SELECT session_id FROM omarchy_processes)")
+                for row in db.execute("SELECT id,provider FROM omarchy_sessions"):
+                    if row['id'] in self.session_refs:
+                        self.titles.track(row['id'], row['provider'], self.session_refs[row['id']])
             self.tick(force=True)
             self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=.05), daemon=True)
             self.thread.start()
@@ -137,6 +162,8 @@ class OmarchySource:
         with self.lock:
             self.closed = True
             self.titles.close()
+        if self.recovery_thread is not None:
+            self.recovery_thread.join(timeout=2)
         if self.thread is not None:
             self.server.shutdown()
             self.thread.join(timeout=2)
@@ -186,6 +213,8 @@ class OmarchySource:
             if binding is not None and not same_owner:
                 self.pending_questions.pop(key, None)
                 self.native_turns.pop(key, None)
+                self.native_attention.pop(key, None)
+                self.pending_turn_events.pop(key, None)
             if not turn:
                 if previous is None:
                     return self.publish(db, lifecycle_only=True)
@@ -202,18 +231,35 @@ class OmarchySource:
                                    (owner.pid, owner.start_ticks, owner.boot_id)).fetchone()[0] >= 100):
                 raise ValueError("Too many active sessions")
             if previous:
-                if same_owner and previous["turn"] != turn and event != "working":
+                if same_owner and previous["turn"] != turn and (
+                        event != "working" or native and command.get("hook") != "UserPromptSubmit"):
+                    if native and event not in ("ended", "interrupted"):
+                        batch = self.pending_turn_events.setdefault(key, {
+                            "session": session, "previous": previous["turn"], "owner": owner, "events": []})
+                        event_data = {field: command[field] for field in (
+                            "command", "source", "adapter", "session", "turn", "event", "hook", "attention")
+                            if field in command}
+                        batch["events"] = (batch["events"] + [event_data])[-64:]
+                        self.next_recovery_at = 0.0
                     return self.publish(db, lifecycle_only=True)
+                if previous["turn"] != turn:
+                    self.pending_questions.pop(key, None)
+                    self.native_attention.pop(key, None)
+                    self.pending_turn_events.pop(key, None)
+                    self.confirmed_turns.pop(key, None)
                 if previous["turn"] == turn:
                     if same_owner and (binding["closed"] or (previous["state"] == "idle" and event != "ended")):
+                        return self.publish(db, lifecycle_only=True)
+                    if same_owner and previous["state"] == "failed" and event != "ended":
                         return self.publish(db, lifecycle_only=True)
                     if (same_owner and previous["state"] == EVENTS[event]
                             and event != "ended" and not async_question
                             and command.get("hook") != "UserPromptSubmit"):
                         if native:
                             self.native_turns[key] = turn
+                        self.session_refs[key] = session
                         return self.publish(db, lifecycle_only=True)
-                    if same_owner and previous["state"] in ("idle", "finished") and event in ("working", "needs-input"):
+                    if same_owner and previous["state"] in ("idle", "finished", "failed") and event in ("working", "needs-input"):
                         return self.publish(db, lifecycle_only=True)
             # A CLI can switch/resume conversations within one process. Its
             # latest session replaces its old binding instead of counting twice.
@@ -225,12 +271,17 @@ class OmarchySource:
                 db.execute("UPDATE omarchy_processes SET closed=1 WHERE session_id=?", (row[0],))
                 self.pending_questions.pop(row[0], None)
                 self.native_turns.pop(row[0], None)
+            self.session_refs[key] = session
             if native:
                 self.native_turns[key] = turn
             if async_question:
-                self.pending_questions[key] = (turn, self.monotonic() + ATTENTION_DELAY)
+                if key not in self.pending_questions or self.pending_questions[key][0] != turn:
+                    self.pending_questions[key] = (turn, self.monotonic() + ATTENTION_DELAY)
             elif event in ("completed", "interrupted", "ended") or command.get("hook") == "UserPromptSubmit":
                 self.pending_questions.pop(key, None)
+            if event in ("completed", "interrupted", "ended"):
+                self.native_attention.pop(key, None)
+                self.pending_turn_events.pop(key, None)
             state = (previous["state"] if async_question and previous and previous["turn"] == turn
                      else "working" if async_question else EVENTS[event])
             db.execute("INSERT OR REPLACE INTO omarchy_processes VALUES (?,?,?,?,0)",
@@ -330,6 +381,7 @@ class OmarchySource:
                        (key, "claude", current.turn, current.base_state, current.updated))
             db.execute("INSERT OR REPLACE INTO omarchy_claude VALUES (?,?)",
                        (key, json.dumps(asdict(current), separators=(",", ":"))))
+            self.session_refs[key] = session
             self.titles.track(key, "claude", session)
             self.record_event(db, "claude")
             return self.publish(db, lifecycle_only=event in ("started", "ended"))
@@ -338,14 +390,178 @@ class OmarchySource:
     def identity(row):
         return ProcessIdentity(row["pid"], row["start_ticks"], row["boot_id"])
 
+    def _tracking_maps(self):
+        return (self.session_refs, self.native_turns, self.pending_questions,
+                self.native_attention, self.pending_turn_events, self.confirmed_turns)
+
+    def _persist_tracking(self, db):
+        # Restore only while the same kernel-verified owner is still alive.
+        # Monotonic deadlines are valid within that owner's Linux boot.
+        live = {row[0] for row in db.execute("SELECT session_id FROM omarchy_processes WHERE closed=0")}
+        for mapping in self._tracking_maps():
+            for key in mapping.keys() - live:
+                mapping.pop(key, None)
+        db.execute("DELETE FROM omarchy_tracking WHERE id NOT IN "
+                   "(SELECT session_id FROM omarchy_processes WHERE closed=0)")
+        for key, session in self.session_refs.items():
+            question = self.pending_questions.get(key, (None, None))
+            attention = self.native_attention.get(key, (None, None))
+            db.execute("INSERT OR REPLACE INTO omarchy_tracking VALUES (?,?,?,?,?,?,?)",
+                       (key, session, self.native_turns.get(key), *question, *attention))
+
+    def native_active_sessions(self):
+        with self.lock, self.store.connect() as db:
+            if self.closed or "codex" not in self.providers:
+                return {}
+            return {self.session_refs[row['id']]: row['turn'] for row in db.execute(
+                "SELECT s.*,p.pid,p.start_ticks,p.boot_id FROM omarchy_sessions s "
+                "JOIN omarchy_processes p ON p.session_id=s.id WHERE p.closed=0 "
+                "AND s.provider='codex' AND s.state IN ('working','needs_input')")
+                if row['id'] in self.session_refs and self.processes.is_alive(self.identity(row))}
+
+    def native_requests_changed(self, session, by_turn):
+        key = hashlib.sha256(("codex:" + session).encode()).hexdigest()
+        with self.lock, self.store.connect() as db:
+            turn = self.native_active_sessions().get(session)
+            if turn is None:
+                return
+            if by_turn is None:
+                # A disconnected response channel cannot resolve attention.
+                if not self.native_attention.get(key, (None, False))[1]:
+                    self.native_attention.pop(key, None)
+            elif turn in by_turn:
+                self.native_attention[key] = turn, bool(by_turn[turn])
+            self.publish(db)
+
+    def native_claude_sessions(self):
+        with self.lock, self.store.connect() as db:
+            if self.closed or "claude" not in self.providers:
+                return []
+            result = []
+            for row in db.execute("SELECT c.*,p.pid,p.start_ticks,p.boot_id FROM omarchy_claude c "
+                                  "JOIN omarchy_processes p ON p.session_id=c.id WHERE p.closed=0"):
+                current = ClaudeSession(**json.loads(row['lifecycle']))
+                if (current.remote_session_id and current.turn and current.base_state == 'working'
+                        and self.processes.is_alive(self.identity(row))):
+                    result.append((row['id'], current.remote_session_id, current.turn))
+            return result
+
+    def native_claude_requests_changed(self, session, turn, waiting):
+        with self.lock, self.store.connect() as db:
+            if not any(key == session and active == turn for key, _, active in self.native_claude_sessions()):
+                return
+            if waiting is None:
+                if not self.native_attention.get(session, (None, False))[1]:
+                    self.native_attention.pop(session, None)
+            elif waiting:
+                self.native_attention[session] = turn, True
+            else:
+                self.native_attention.pop(session, None)
+            self.publish(db)
+
+    def native_claude_requests_resolved(self, session, turn, tools, pending_tools):
+        with self.lock, self.store.connect() as db:
+            if not any(key == session and active == turn for key, _, active in self.native_claude_sessions()):
+                return
+            row = db.execute("SELECT lifecycle FROM omarchy_claude WHERE id=?", (session,)).fetchone()
+            current = ClaudeSession(**json.loads(row[0]))
+            pending_hashes = {hashlib.sha256(tool.encode()).hexdigest() for tool in pending_tools
+                              if isinstance(tool, str)}
+            for tool_id, tool in tools:
+                tool_hash = hashlib.sha256(tool.encode()).hexdigest()
+                if current.tools.get(tool_id) != tool_hash:
+                    continue
+                current.waits.pop('question:' + tool_id, None)
+                if tool_hash not in pending_hashes:
+                    current.waits.pop('permission:' + tool_hash, None)
+            db.execute("UPDATE omarchy_claude SET lifecycle=? WHERE id=?",
+                       (json.dumps(asdict(current), separators=(",", ":")), session))
+            self.publish(db)
+
+    def _recover_turns(self, tracked, batches):
+        refs = {row['id']: self.session_refs.get(row['id']) for row, _ in tracked}
+        try:
+            metadata = self.turn_metadata_reader(list(dict.fromkeys(
+                [ref for ref in refs.values() if ref] + [b['session'] for b in batches.values()])))
+        except Exception:
+            return
+        if not isinstance(metadata, dict):
+            return
+        with self.lock:
+            if self.closed or "codex" not in self.providers:
+                return
+            for key, batch in batches.items():
+                if self.pending_turn_events.get(key) is not batch or not self.processes.is_alive(batch['owner']):
+                    continue
+                rows = metadata.get(batch['session'])
+                if not isinstance(rows, list) or not rows or not all(
+                        isinstance(row, dict) and isinstance(row.get('id'), str) for row in rows):
+                    continue
+                latest = rows[0].get('id')
+                events = [event for event in batch['events'] if event['turn'] == latest]
+                if not events:
+                    historical = {row.get('id') for row in rows[1:] if isinstance(row, dict)}
+                    batch['events'] = [event for event in batch['events'] if event['turn'] not in historical]
+                    if not batch['events']:
+                        self.pending_turn_events.pop(key, None)
+                    continue
+                with self.store.connect() as db:
+                    current = db.execute("SELECT s.turn,p.* FROM omarchy_sessions s JOIN omarchy_processes p "
+                                         "ON p.session_id=s.id WHERE s.id=?", (key,)).fetchone()
+                    if (not current or current['closed'] or current['turn'] != batch['previous']
+                            or self.identity(current) != batch['owner']):
+                        continue
+                    db.execute("UPDATE omarchy_sessions SET turn=?,state='working',updated=? WHERE id=?",
+                               (latest, time.time(), key))
+                self.pending_turn_events.pop(key, None)
+                self.pending_questions.pop(key, None)
+                self.native_attention.pop(key, None)
+                self.confirmed_turns.pop(key, None)
+                known = {row['id'] for row in rows}
+                remaining = [event for event in batch['events'] if event['turn'] not in known]
+                for event in events:
+                    self.receive(event, peer_pid=batch['owner'].pid)
+                if remaining:
+                    # Hooks arriving during the read may describe a newer turn
+                    # that has not reached saved metadata. Verify them again
+                    # against the turn we just recovered, preserving order.
+                    self.pending_turn_events[key] = dict(session=batch['session'], previous=latest,
+                        owner=batch['owner'], events=remaining)
+                    self.next_recovery_at = 0.0
+                tracked.append(({'id': key, 'turn': latest}, batch['owner']))
+                refs[key] = batch['session']
+            with self.store.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                for row, owner in tracked:
+                    outcomes = metadata.get(refs.get(row['id']), [])
+                    status = next((r.get('status') for r in outcomes if isinstance(r, dict)
+                                   and r.get('id') == row['turn']), None) if isinstance(outcomes, list) else None
+                    if status not in ('completed', 'failed') or not self.processes.is_alive(owner):
+                        continue  # Interrupted from a separate reader is not authoritative.
+                    current = db.execute("SELECT s.turn,p.* FROM omarchy_sessions s JOIN omarchy_processes p "
+                                         "ON p.session_id=s.id WHERE s.id=?", (row['id'],)).fetchone()
+                    if (not current or current['closed'] or current['turn'] != row['turn']
+                            or self.identity(current) != owner):
+                        continue
+                    db.execute("UPDATE omarchy_sessions SET state=?,updated=? WHERE id=? AND state!=?",
+                               ('failed' if status == 'failed' else 'finished', time.time(), row['id'],
+                                'failed' if status == 'failed' else 'finished'))
+                    self.confirmed_turns[row['id']] = row['turn']
+                    self.pending_questions.pop(row['id'], None)
+                    self.native_attention.pop(row['id'], None)
+                self.publish(db, lifecycle_only=True)
+
     def prune_processes(self, db):
         for row in db.execute("SELECT * FROM omarchy_processes").fetchall():
             if not self.processes.is_alive(self.identity(row)):
                 db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id=?", (row["session_id"],))
                 db.execute("DELETE FROM omarchy_processes WHERE session_id=?", (row["session_id"],))
                 db.execute("DELETE FROM omarchy_claude WHERE id=?", (row["session_id"],))
-                self.pending_questions.pop(row["session_id"], None)
-                self.native_turns.pop(row["session_id"], None)
+                db.execute("DELETE FROM omarchy_tracking WHERE id=?", (row["session_id"],))
+                # Clear before a hook can register a replacement owner under
+                # the same session key, even when the turn ID is unchanged.
+                for mapping in self._tracking_maps():
+                    mapping.pop(row["session_id"], None)
 
     def tick(self, *, force=False):
         with self.lock:
@@ -367,6 +583,18 @@ class OmarchySource:
                            "(SELECT session_id FROM omarchy_processes)", (cutoff,))
                 db.execute("DELETE FROM omarchy_claude WHERE id NOT IN (SELECT id FROM omarchy_sessions)")
                 self.publish(db, lifecycle_only=True)
+                tracked = [(dict(row), self.identity(row)) for row in db.execute(
+                    "SELECT s.*,p.pid,p.start_ticks,p.boot_id FROM omarchy_sessions s "
+                    "JOIN omarchy_processes p ON p.session_id=s.id "
+                    "WHERE p.closed=0 AND s.provider='codex' AND (s.state IN ('working','needs_input') "
+                    "OR (s.state='finished' AND s.updated>?))", (time.time() - FINISHED_RETENTION,))
+                    if self.confirmed_turns.get(row['id']) != row['turn']]
+            if (tracked or self.pending_turn_events) and self.monotonic() >= self.next_recovery_at and (
+                    self.recovery_thread is None or not self.recovery_thread.is_alive()):
+                self.next_recovery_at = self.monotonic() + 5
+                self.recovery_thread = threading.Thread(target=self._recover_turns,
+                    args=(tracked, dict(self.pending_turn_events)), daemon=True)
+                self.recovery_thread.start()
             self.next_poll = self.monotonic() + 1
 
     def _titles_changed(self):
@@ -377,6 +605,7 @@ class OmarchySource:
             self.publish(db)
 
     def publish(self, db, *, lifecycle_only=False) -> bool:
+        self._persist_tracking(db)
         records = db.execute("SELECT s.* FROM omarchy_sessions s JOIN omarchy_processes p "
                              "ON p.session_id=s.id WHERE p.closed=0 ORDER BY s.id").fetchall()
         cutoff = time.time() - FINISHED_RETENTION
@@ -386,7 +615,7 @@ class OmarchySource:
         sessions = []
         for row in records:
             question = self.pending_questions.get(row["id"])
-            state = ("needs_input" if row["state"] not in ("finished", "idle")
+            state = ("needs_input" if row["state"] not in ("finished", "failed", "idle")
                      and question and question[0] == row["turn"] and question[1] <= now_monotonic
                      else row["state"])
             session = {"id": row["id"], "provider": row["provider"], "state": state}
@@ -399,6 +628,9 @@ class OmarchySource:
                     session["state"] = current.state(now_monotonic)
                     if current.remote_session_id:
                         session["remoteSessionID"] = current.remote_session_id
+            native = self.native_attention.get(row["id"])
+            if native and native[0] == row["turn"] and row["state"] not in ("finished", "failed", "idle"):
+                session["state"] = "needs_input" if native[1] else "working"
             sessions.append(session)
         # Needs-input takes precedence; active work wins over old completions.
         state = next((candidate for candidate in ("needs_input", "failed", "working", "finished")
@@ -410,12 +642,12 @@ class OmarchySource:
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         old = json.loads(last["payload"]) if last["payload"] else {}
         # A temporarily unavailable allowance file must not erase the last reading.
-        current_allowance = (allowance_snapshot(self.state_dir / "agents/usage/codex.json", int(time.time()))
-                             if "codex" in self.providers else None)
+        current_allowances = (allowance_snapshots(self.state_dir / "agents/usage/codex.json", int(time.time()))
+                              if "codex" in self.providers else [])
+        allowances = (current_allowances or readings(old)) if "codex" in self.providers else []
         payload = {"sourceName": self.computer_name, "state": state, "sessions": sessions,
                    "configuredProviders": list(self.providers),
-                   "allowance": (current_allowance if current_allowance is not None else old.get("allowance"))
-                   if "codex" in self.providers else None}
+                   "allowance": selected_reading(allowances), "allowances": allowances}
         # Membership-only cleanup isn't a new alert. An aggregate state change
         # still needs a new event identity so an acknowledged watch state clears.
         activity_changed = sessions_changed and (not lifecycle_only or old.get("state") != state)

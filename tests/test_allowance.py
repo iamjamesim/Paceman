@@ -46,6 +46,17 @@ class AllowanceTests(unittest.TestCase):
                                           "resetsAt": self.iso(self.now + 600)})
         self.assertEqual(self.read()["window"], 1)
 
+    def test_complete_windows_include_actual_durations_and_reject_duplicates(self):
+        self.record['limits'].append({'label': '90m window', 'percent': .5,
+                                      'resetsAt': self.iso(self.now + 600)})
+        self.path.write_text(json.dumps(self.record))
+        values = daemon.allowance_snapshots(self.path, self.now)
+        self.assertEqual({v['windowDurationMins'] for v in values}, {10080, 90})
+        self.record['limits'].append({'label': '5h window', 'percent': .6,
+                                      'resetsAt': self.iso(self.now + 600)})
+        self.path.write_text(json.dumps(self.record))
+        self.assertEqual(daemon.allowance_snapshots(self.path, self.now), [])
+
     def test_zero_and_full_are_valid(self):
         for used, left in ((0, 100), (1, 0)):
             self.record["limits"][0]["percent"] = used

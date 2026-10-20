@@ -78,6 +78,17 @@ The iPhone must allow notifications and register its Apple-issued device token. 
 
 Paceman waits five seconds before showing an async input question, keeps it visible after the tool returns, and clears it when the turn ends or a new prompt begins.
 
+Supported questions and approvals can be answered from iPhone and Apple Watch
+through the existing native session. Codex CLI requires its own running local
+app-server daemon and a hook-observed active thread already loaded there. Claude
+requires Remote Control to be enabled and its existing Linux login to include
+the session scope. Paceman starts neither the Codex daemon nor a Claude Remote
+Control session. Hooks return immediately without taking over native prompts.
+Unsupported requests remain in the agent. Restart restores attention only for
+the same verified live process; saved Codex outcomes recover missed completion
+hooks. Codex quota snapshots retain both short and weekly windows, including
+their durations, for phone and direct Apple Watch delivery.
+
 ## Panel and control
 
 The panel shows Sharing, paired phones, per-agent activity and monitoring switches, and a pairing action. **Last contact** means the phone last fetched a snapshot; it does not prove watch delivery.
