@@ -14,11 +14,10 @@ Prefer to build locally? Use [source setup](#build-and-install-from-source). Bot
 
 ## Review agent hooks
 
-Normal setup prepares activity, questions and approvals for each selected agent.
-Review both installed commands shown in Paceman. Activity sends task IDs, states
-and project labels. Questions send their text and choices; approvals send the
-tool name, arguments and working directory. Your answers and decisions return
-to the agent. Sharing pauses all of this.
+Review the activity hook command shown in Paceman. Hooks send task IDs, states
+and project labels. Native connections mirror question text and choices, or
+approval tool names, arguments and working directories, and return your answers
+to the agent. Sharing pauses both activity and remote responses.
 
 ### Codex
 
@@ -105,8 +104,7 @@ alone does not prove delivery. See coverage limits below for unobserved activity
 
 Usage limits are **Codex-only**, including the Apple Watch **Codex Limit** and
 **Codex Reset** complications (watchOS 26+) and the ESP32 meter. Claude Code
-activity is supported; its usage limits are not. Paceman does not access Claude
-credentials.
+activity is supported; its usage limits are not.
 
 Usage assumes the same Codex account across computers. See [source selection and
 Apple Watch delivery](../docs/architecture.md#watches).
