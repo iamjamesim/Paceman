@@ -26,7 +26,7 @@ class ApprovalContentTests(unittest.TestCase):
             self.assertEqual(result['action']['operation'], operation)
             self.assertEqual(result['action']['text'], text)
             self.assertEqual(result['action']['terminalSessionID'], '35467')
-            self.assertEqual(result['input'], raw['input'])
+            self.assertEqual(json.loads(result['inputJSON']), raw['input'])
             self.assertTrue(result['hasAdditionalInput'])
             self.assertNotIn('parentCommand', result['action'])
             self.assertEqual(normalize_approval('claude', raw)['action']['kind'], 'tool')
@@ -48,7 +48,7 @@ class ApprovalContentTests(unittest.TestCase):
             for tool in (('Bash', 'PowerShell', 'apply_patch') if provider == 'codex' else ('Bash',)):
                 raw = request(tool)['approval']
                 result = normalize_approval(provider, raw)
-                self.assertEqual(result['input'], raw['input'])
+                self.assertEqual(json.loads(result['inputJSON']), raw['input'])
                 self.assertEqual(result['action']['text'], 'printf 日本語')
                 self.assertEqual(result['action']['kind'], 'patch' if tool == 'apply_patch' else 'command')
                 self.assertEqual(result['reason'], 'Verify output')
@@ -60,7 +60,7 @@ class ApprovalContentTests(unittest.TestCase):
             result = normalize_approval('claude', raw)
             self.assertEqual(result['action']['kind'], kind)
             self.assertEqual(result['action']['filePath'], '/tmp/a')
-            self.assertEqual(result['input'], fields)
+            self.assertEqual(json.loads(result['inputJSON']), fields)
             self.assertTrue(result['hasAdditionalInput'])
             self.assertEqual(normalize_approval('codex', raw)['action'], {'kind': 'tool'})
 
@@ -70,7 +70,7 @@ class ApprovalContentTests(unittest.TestCase):
                              ('Write', {'file_path': '/tmp/a', 'content': 42}),
                              ('Edit', {'file_path': '/tmp/a', 'old_string': 'a', 'new_string': 'b', 'replace_all': 'yes'})]:
             result = normalize_approval('claude', request(tool, fields)['approval'])
-            self.assertEqual(result['input'], fields)
+            self.assertEqual(json.loads(result['inputJSON']), fields)
             self.assertEqual(result['action'], {'kind': 'tool'})
             self.assertNotIn('reason', result)
 
@@ -81,7 +81,7 @@ class ApprovalContentTests(unittest.TestCase):
                 raw = request(tool)['approval']
                 result = normalize_approval(provider, raw)
                 self.assertEqual(result['action'], {'kind': 'tool'})
-                self.assertEqual(result['input'], raw['input'])
+                self.assertEqual(json.loads(result['inputJSON']), raw['input'])
                 self.assertNotIn('reason', result)
         broker = InteractionBroker(provider_enabled=lambda provider: provider == 'next-agent')
         self.addCleanup(broker.close)
@@ -109,6 +109,21 @@ class ApprovalContentTests(unittest.TestCase):
         self.assertEqual(pending.response, {'action': 'choose', 'optionID': 'session'})
         with self.assertRaises(BrokerError):
             broker.submit(dict(payload, optionID='once'))
+
+    def test_opaque_input_does_not_depend_on_a_client_number_type_or_coerce_non_json_values(self):
+        original = {'integer': 12345678901234567890123456789012345678901234567890,
+                    'magnitude': 1e300, 'nested': [True, None, '日本語\n\x03']}
+        broker = InteractionBroker()
+        self.addCleanup(broker.close)
+        pending = broker._publish(request('mcp__other__tool', original), 60)
+        payload = pending.public['approval']
+        self.assertEqual(json.loads(payload['inputJSON']), original)
+        self.assertIn(str(original['integer']), payload['inputJSON'])
+        self.assertIn('1e+300', payload['inputJSON'])
+        self.assertNotIn('input', payload)
+        for invalid in [{1: 'coerced key'}, {'tuple': (1, 2)}, {'set': {1, 2}}]:
+            with self.assertRaises(ValueError):
+                normalize_approval('next-agent', request(input=invalid)['approval'])
 
     def test_no_choices_means_no_remote_approval_and_oversize_input_is_rejected_not_cut(self):
         broker = InteractionBroker()

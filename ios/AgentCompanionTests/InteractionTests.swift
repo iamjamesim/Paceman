@@ -154,7 +154,7 @@ final class InteractionTests: XCTestCase {
         func approval(_ action: ApprovalPayload.Action, questions: [InteractionQuestion] = []) -> InputRequest {
             InputRequest(requestID: UUID().uuidString, version: 1, provider: "next-agent", sessionID: String(repeating: "a", count: 64),
                 kind: "approval", title: "Review", detail: "", questions: questions, remainingSeconds: 60,
-                contentVersion: 2, approval: ApprovalPayload(toolName: "tool", input: .object([:]), action: action, hasAdditionalInput: false),
+                contentVersion: 2, approval: ApprovalPayload(toolName: "tool", inputJSON: "{}", action: action, hasAdditionalInput: false),
                 responseOptions: [.init(id: "yes", label: "Proceed")])
         }
         for action in [ApprovalPayload.Action(kind: "fileEdit", text: "After", filePath: "/tmp/a"),
@@ -202,13 +202,17 @@ final class InteractionTests: XCTestCase {
     }
 
     func testStructuredUnknownInputPreservesNestedJSONNumbersNullsAndUnicode() throws {
-        let data = Data(#"{"toolName":"mcp__pages__edit","input":{"operations":[{"metadata":{"width":210.5,"id":9007199254740993,"flag":true,"nil":null},"markdown":"日本語"}]},"action":{"kind":"tool"},"hasAdditionalInput":false}"#.utf8)
+        let original = #"{"operations":[{"metadata":{"width":210.5,"id":12345678901234567890123456789012345678901234567890,"magnitude":1e300,"flag":true,"nil":null},"markdown":"日本語"}]}"#
+        let data = try JSONSerialization.data(withJSONObject: ["toolName": "mcp__pages__edit", "inputJSON": original,
+            "action": ["kind": "tool"], "hasAdditionalInput": false])
         let payload = try JSONDecoder().decode(ApprovalPayload.self, from: data)
         let roundTrip = try JSONDecoder().decode(ApprovalPayload.self, from: JSONEncoder().encode(payload))
         XCTAssertEqual(roundTrip, payload)
         let content = ApprovalActionContent(payload)
         XCTAssertEqual(content.kind, .tool)
-        XCTAssertTrue(content.body.contains("9007199254740993"))
+        XCTAssertEqual(content.originalInput, original)
+        XCTAssertTrue(content.body.contains("12345678901234567890123456789012345678901234567890"))
+        XCTAssertTrue(content.body.contains("1e300"))
         XCTAssertTrue(content.body.contains("日本語"))
         XCTAssertNil(content.explanation)
     }

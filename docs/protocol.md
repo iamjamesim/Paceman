@@ -494,7 +494,7 @@ agent sources omit `interactionsEnabled` and leave questions and approvals nativ
 Provider input is decoded on the desktop before transfer. Approval content v2
 adds `contentVersion: 2`, `approval`, and ordered `responseOptions: [{id, label}]`;
 `detail` is empty. `approval` contains `toolName`, optional `workingDirectory`
-and `reason`, complete JSON `input`, normalized `action`, and
+and `reason`, complete serialized `inputJSON`, normalized `action`, and
 `hasAdditionalInput`. Actions are `command`/`patch` (`text`), `fileWrite`
 (`filePath`, `text`), `fileEdit` (`filePath`, `before`, `text`, `replaceAll`), or
 `tool` (uninterpreted JSON). Only documented built-ins are unpacked; MCP
@@ -503,7 +503,10 @@ arguments retain every field. Views render this model without provider decoding.
 `operation` of `interrupt`, `poll`, or `write`. An optional `parentCommand` comes
 only from adapter-supplied terminal context with a matching session ID; a parent
 call ID alone never establishes a human-readable command. Complete original
-terminal input, including permission and parent-call metadata, remains in `input`.
+terminal input, including permission and parent-call metadata, remains in `inputJSON`.
+The desktop serializes this display copy from the complete input value; clients
+retain it as text rather than decoding and re-encoding arbitrary numbers. Typed
+actions remain structured. JSON formatting is not native payload byte identity.
 
 GET must advertise `X-Paceman-Content-Version: 2` to receive v2 requests. Watch
 request messages similarly advertise `contentVersion: 2`; older Watch clients
@@ -517,6 +520,7 @@ Input is bounded to 32 KiB and normalized requests to 64 KiB; oversize content
 is rejected, never truncated. The older v1 `detail` uses Paceman-owned headers
 with a separate compatibility decoder. Both clients collapse long display bodies
 and retain complete input for expansion; no arguments are stripped by field name.
+See [agent model boundaries](agent-models.md) for supported concepts and extension rules.
 
 Snapshot `interactionsEnabled: true` advertises these endpoints; sources that omit
 it provide activity only. Both endpoints use the paired bearer credential.

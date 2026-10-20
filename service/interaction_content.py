@@ -7,6 +7,14 @@ from copy import deepcopy
 import json
 
 
+def _json_value(value):
+    if type(value) is dict:
+        return all(type(key) is str and _json_value(item) for key, item in value.items())
+    if type(value) is list:
+        return all(_json_value(item) for item in value)
+    return value is None or type(value) in (str, int, float, bool)
+
+
 def normalize_approval(provider, value):
     if not isinstance(value, dict) or set(value) - {"toolName", "workingDirectory", "reason", "input", "terminalContext"}:
         raise ValueError("invalid approval")
@@ -17,11 +25,14 @@ def normalize_approval(provider, value):
         if name in value and (not isinstance(value[name], str) or len(value[name]) > 4096):
             raise ValueError("invalid approval")
     # Reject non-JSON values and non-finite numbers, never truncate an action.
-    encoded = json.dumps(value["input"], allow_nan=False, ensure_ascii=False)
+    if not _json_value(value["input"]):
+        raise ValueError("invalid JSON input")
+    encoded = json.dumps(value["input"], allow_nan=False, ensure_ascii=False, indent=2)
     if len(encoded.encode()) > 32768:
         raise ValueError("approval input too large")
-    result = dict(deepcopy(value), action={"kind": "tool"}, hasAdditionalInput=False)
-    fields = result["input"] if isinstance(result["input"], dict) else {}
+    result = dict(deepcopy(value), action={"kind": "tool"}, inputJSON=encoded, hasAdditionalInput=False)
+    original = result.pop("input")
+    fields = original if isinstance(original, dict) else {}
     consumed = set()
     action = result["action"]
     context = result.pop("terminalContext", None)

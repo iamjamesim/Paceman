@@ -27,36 +27,8 @@ struct ApprovalDetailContent {
     }
 }
 
-/// Paceman content v2: provider decoding has already happened on the desktop.
-/// JSON remains structured end to end, including unrecognized tool arguments.
-indirect enum ApprovalJSON: Codable, Equatable {
-    case object([String: ApprovalJSON]), array([ApprovalJSON]), string(String), number(Decimal), bool(Bool), null
-    init(from decoder: Decoder) throws {
-        let value = try decoder.singleValueContainer()
-        if value.decodeNil() { self = .null }
-        else if let v = try? value.decode(Bool.self) { self = .bool(v) }
-        else if let v = try? value.decode(String.self) { self = .string(v) }
-        else if let v = try? value.decode(Decimal.self) { self = .number(v) }
-        else if let v = try? value.decode([String: ApprovalJSON].self) { self = .object(v) }
-        else { self = .array(try value.decode([ApprovalJSON].self)) }
-    }
-    func encode(to encoder: Encoder) throws {
-        var value = encoder.singleValueContainer()
-        switch self {
-        case .object(let v): try value.encode(v)
-        case .array(let v): try value.encode(v)
-        case .string(let v): try value.encode(v)
-        case .number(let v): try value.encode(v)
-        case .bool(let v): try value.encode(v)
-        case .null: try value.encodeNil()
-        }
-    }
-    var formatted: String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        return (try? encoder.encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? ""
-    }
-}
+/// Desktop-decoded content plus its complete source JSON representation.
+/// Opaque JSON stays serialized: client numeric types must not round tool input.
 struct ApprovalPayload: Codable, Equatable {
     struct Action: Codable, Equatable {
         enum TerminalOperation: String { case interrupt, poll, write }
@@ -103,11 +75,11 @@ struct ApprovalPayload: Codable, Equatable {
     let toolName: String
     var workingDirectory: String? = nil
     var reason: String? = nil
-    let input: ApprovalJSON
+    let inputJSON: String
     let action: Action
     let hasAdditionalInput: Bool
     var valid: Bool {
-        guard !toolName.isEmpty, toolName.count <= 256 else { return false }
+        guard InteractionWire.text(toolName, limit: 256), !inputJSON.isEmpty, inputJSON.utf8.count <= 32768 else { return false }
         return action.content != nil
     }
 }
@@ -204,7 +176,7 @@ struct ApprovalActionContent {
         tool = payload.toolName
         directory = payload.workingDirectory
         explanation = payload.reason
-        originalInput = payload.input.formatted
+        originalInput = payload.inputJSON
         otherArguments = payload.hasAdditionalInput ? originalInput : nil
         var path: String?, before: String?, terminal: String?, command: String?
         var replaces = false
@@ -220,7 +192,7 @@ struct ApprovalActionContent {
             switch terminalOperation {
             case .interrupt: body = text.count == 1 ? "Ctrl-C" : "Ctrl-C × \(text.count)"
             case .poll: body = "No characters will be sent."
-            case .write: body = ApprovalJSON.string(text).formatted
+            case .write: body = (try? JSONEncoder().encode(text)).map { String(decoding: $0, as: UTF8.self) } ?? text
             }
         default: kind = .tool; body = originalInput
         }
@@ -311,11 +283,10 @@ enum ApprovalPreviewFixtures {
         let path = "/Projects/Paceman/notes.md"
         let text = String(repeating: "Proposed file content.\n", count: 100)
         let before = "Previous wording."
-        let input: ApprovalJSON = editing ? .object(["file_path": .string(path), "old_string": .string(before),
-            "new_string": .string(text), "replace_all": .bool(true)])
-            : .object(["file_path": .string(path), "content": .string(text)])
+        let input: [String: Any] = editing ? ["file_path": path, "old_string": before, "new_string": text, "replace_all": true]
+            : ["file_path": path, "content": text]
         return ApprovalPayload(toolName: editing ? "Edit" : "Write", workingDirectory: "/Projects/Paceman",
-            input: input, action: .init(kind: editing ? "fileEdit" : "fileWrite", text: text,
+            inputJSON: json(input), action: .init(kind: editing ? "fileEdit" : "fileWrite", text: text,
                 filePath: path, before: editing ? before : nil, replaceAll: editing ? true : nil), hasAdditionalInput: false)
     }
     static let choices: [ApprovalResponseOption] = [
@@ -323,9 +294,9 @@ enum ApprovalPreviewFixtures {
         .init(id: "decline", label: "Decline")]
     static func terminal(_ operation: String = "interrupt", parent: Bool = true) -> ApprovalPayload {
         let text = operation == "interrupt" ? "\u{03}\u{03}" : operation == "poll" ? "" : "echo ready\n"
-        let input: ApprovalJSON = .object(["session_id": .number(35467), "chars": .string(text),
-            "parent_call_id": .string("parent_fixture"), "approval_id": .string("approval_fixture")])
-        return ApprovalPayload(toolName: "write_stdin", input: input,
+        let input: [String: Any] = ["session_id": 35467, "chars": text,
+            "parent_call_id": "parent_fixture", "approval_id": "approval_fixture"]
+        return ApprovalPayload(toolName: "write_stdin", inputJSON: json(input),
             action: .init(kind: "terminalInput", text: text, terminalSessionID: "35467", operation: operation,
                 parentCommand: parent ? "xcodebuild test-without-building -resultBundlePath /private/tmp/paceman-watch-tests.xcresult\n" + String(repeating: "  -only-testing:AgentCompanionTests/InteractionTests\n", count: 40) : nil),
             hasAdditionalInput: true)
@@ -333,6 +304,9 @@ enum ApprovalPreviewFixtures {
     private static func detail(tool: String, input: [String: Any]) -> String {
         let data = try! JSONSerialization.data(withJSONObject: input, options: [.sortedKeys])
         return "Tool: \(tool)\nWorking directory: /Projects/Paceman\n\n" + String(decoding: data, as: UTF8.self)
+    }
+    private static func json(_ input: [String: Any]) -> String {
+        String(decoding: try! JSONSerialization.data(withJSONObject: input, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
     }
 }
 #endif
