@@ -106,9 +106,8 @@ def process(payload: dict, session: str) -> None:
                 "adapter": "paceman",
                 "session": session, "turn": str(payload.get("turn_id", "")),
                 "event": event, "timestamp": int(time.time()),
+                "hook": payload.get("hook_event_name"),
             }
-            if payload.get("hook_event_name") == "UserPromptSubmit":
-                command["hook"] = "UserPromptSubmit"
             if (payload.get("hook_event_name") == "PreToolUse"
                     and payload.get("tool_name") == "request_user_input_async"):
                 command["attention"] = "async"

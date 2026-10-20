@@ -68,7 +68,7 @@ class OmarchyTests(unittest.TestCase):
         self.source.tick(force=True)
         after = self.store.snapshot()
         self.assertEqual(after['allowance'], {"provider": "codex", "remaining": 20,
-            "window": 2, "updatedAt": now, "resetsAt": now + 3600})
+            "window": 2, "windowDurationMins": 300, "updatedAt": now, "resetsAt": now + 3600})
         self.assertEqual(after['eventID'], before['eventID'])
         self.assertGreater(after['revision'], before['revision'])
         self.assertNotIn('privateExtra', json.dumps(after))

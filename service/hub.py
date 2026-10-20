@@ -792,7 +792,7 @@ def main():
                 server.desktop_status = DesktopStatus(args.status_file, store)
                 server.desktop_status.publish(server.adapter, force=True)
                 stack.callback(server.desktop_status.publish, server.adapter, stopped=True, force=True)
-            if args.interaction_socket or args.source == "macos":
+            if args.interaction_socket or args.source in ("macos", "omarchy"):
                 from service.interactions import InteractionBroker, ResponseListener
                 server.interactions = InteractionBroker(provider_enabled=lambda provider:
                     provider in getattr(server.adapter, "providers", ("codex", "claude")),
@@ -817,6 +817,17 @@ def main():
                     stack.enter_context(RemoteRequests(server.interactions, server.adapter.native_claude_sessions,
                         attention=server.adapter.native_claude_requests_changed,
                         resolved=server.adapter.native_claude_requests_resolved))
+                elif args.source == "omarchy":
+                    from service.codex_daemon import DaemonRequests
+                    from service.claude_remote import NativeHTTP, RemoteRequests
+                    from service.linux_native import claude_token
+                    stack.enter_context(DaemonRequests(server.interactions,
+                        server.adapter.native_active_sessions,
+                        attention=server.adapter.native_requests_changed))
+                    stack.enter_context(RemoteRequests(server.interactions, server.adapter.native_claude_sessions,
+                        attention=server.adapter.native_claude_requests_changed,
+                        resolved=server.adapter.native_claude_requests_resolved,
+                        http_factory=lambda remote: NativeHTTP(remote, token_reader=claude_token)))
             print(f"{args.source.title()} source listening on 127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever(poll_interval=0.25)

@@ -13,7 +13,7 @@ import re
 
 DATA_FRESH_SECONDS = 1800
 
-def read_codex_allowance(path: Path, epoch: int, *, allow_stale: bool = False) -> dict:
+def read_codex_allowance(path: Path, epoch: int, *, allow_stale: bool = False, all_windows: bool = False):
     """Read Omarchy's versioned output, never credentials or transcripts.
 
     Unknown data is distinct from empty allowance. Reject any unsupported
@@ -55,17 +55,28 @@ def read_codex_allowance(path: Path, epoch: int, *, allow_stale: bool = False) -
                 raise ValueError("invalid used fraction")
             label = item.get("label")
             if label == "Weekly (7-day)":
-                window = 1
+                window, minutes = 1, 10080
             elif isinstance(label, str) and re.fullmatch(r"[1-9][0-9]*[hm] window", label):
                 window = 2
+                amount, unit = label.split()[0][:-1], label.split()[0][-1]
+                minutes = int(amount) * (60 if unit == "h" else 1)
+                if not 1 <= minutes <= 10080:
+                    raise ValueError("unsupported allowance duration")
             else:
                 raise ValueError("unsupported allowance window")
             reset = timestamp(item.get("resetsAt"))
             if reset <= updated or (not allow_stale and reset <= epoch):
                 raise ValueError("window reset; waiting for fresh limits")
-            candidates.append((used, window, reset))
+            candidates.append((used, window, reset, minutes))
         # Prefer the weekly reading when both windows are equally depleted.
-        used, window, reset = max(candidates, key=lambda item: (item[0], item[1] == 1))
+        if all_windows:
+            if len({item[1] for item in candidates}) != len(candidates):
+                raise ValueError("duplicate allowance window")
+            return [{"provider": "codex", "remaining": int(math.floor(100 * (1 - used) + 0.5)),
+                     "window": window, "windowDurationMins": minutes,
+                     "updatedAt": updated, "resetsAt": reset}
+                    for used, window, reset, minutes in candidates]
+        used, window, reset, _ = max(candidates, key=lambda item: (item[0], item[1] == 1))
         return {"remaining": int(math.floor(100 * (1 - used) + 0.5)),
                 "window": window, "updatedAt": updated, "resetsAt": reset}
     except (OSError, ValueError, TypeError, OverflowError, RecursionError) as error:
@@ -78,3 +89,9 @@ def allowance_snapshot(path: Path, epoch: int) -> dict | None:
         return None
     return {"provider": "codex", **{key: value[key] for key in
             ("remaining", "window", "updatedAt", "resetsAt")}}
+
+
+def allowance_snapshots(path: Path, epoch: int) -> list[dict]:
+    """Preserve every recognized window for phone and direct Watch delivery."""
+    values = read_codex_allowance(path, epoch, allow_stale=True, all_windows=True)
+    return values if isinstance(values, list) else []

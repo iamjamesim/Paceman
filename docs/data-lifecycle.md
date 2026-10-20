@@ -96,6 +96,12 @@ same-turn activity cannot clear it. A matching completion resolves one approval;
 new turns or confirmed terminal outcomes clear the old turn's attention. Hooks
 do not expose every native approval decision.
 
+Omarchy persists local session references and attention metadata, without request
+content, for restart recovery. Restoring them requires the same live process,
+start time and Linux boot. Saved Codex turn IDs and confirmed completed/failed
+outcomes recover missed hooks; a separate reader's interrupted status cannot
+finish live work.
+
 Requests and answers are RAM-only and excluded from snapshots, SQLite, APNs,
 accessory BLE and diagnostics. Codex desktop requests use private versioned IPC
 and belong to the existing native owner until resolution or disconnect. CLI
@@ -107,6 +113,9 @@ login's session scope. Only control events are requested; native request IDs and
 pending-request checkpoints govern lifetime. Local answers clear immediately;
 remote submissions are confirmed against the owner's pending set. Hooks only
 observe activity. Native login refresh and permission-mode changes stay in Claude.
+On Linux, the existing scoped login is read from Claude's private
+`$CLAUDE_CONFIG_DIR/.credentials.json` (default `~/.claude/.credentials.json`);
+Paceman does not copy it into source storage.
 Provider disable, source shutdown or pairing changes invalidate remote cards. Submission receipts confirm
 Paceman acceptance, not agent consumption. Responses are never retried
 automatically. An uncertain native delivery is reconciled against the owner's
