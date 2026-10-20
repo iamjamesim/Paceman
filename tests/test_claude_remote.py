@@ -361,4 +361,3 @@ class NativeClaudeTests(unittest.TestCase):
         self.assertEqual(next(events(io.BytesIO(value))), ('client_event', dict(source='worker', sequence_num=1)))
         with self.assertRaises(ValueError):
             next(events(io.BytesIO(b'data: []\n\n')))
-
