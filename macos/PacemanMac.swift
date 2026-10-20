@@ -44,6 +44,7 @@ private struct SourceStatus: Decodable {
     var providerCounts: [String: [String: Int]]? = nil
     var missingHooksByProvider: [String: [String]]? = nil
     var hookCommands: [String: String]? = nil
+    var responseHookCommands: [String: String]? = nil
     var lastAgentEventByProvider: [String: Double]? = nil
     var selectedProviders: [String] { configuredProviders ?? ["codex"] }
     func providerLabel(_ provider: String, selected: Bool? = nil) -> String {
@@ -793,6 +794,13 @@ private struct HookReviewView: View {
                             Text(model.hasReadStatus ? "The installed command is unavailable. Run Paceman setup again." : "Loading hook details…")
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
+                        if provider == "claude", let command = model.status.responseHookCommands?[provider] {
+                            Text("PermissionRequest response").font(.callout.weight(.medium))
+                            Text(command).font(.system(.callout, design: .monospaced))
+                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                        }
                         DisclosureGroup("Event reference (\(provider == "codex" ? 8 : 12))") {
                             VStack(alignment: .leading, spacing: 10) {
                                 ForEach(provider == "codex" ? events : claudeEvents, id: \.0) { event in
@@ -807,7 +815,7 @@ private struct HookReviewView: View {
                              ? "Activity hooks send lifecycle metadata, project labels, and a Remote Control session ID when available. Labels may appear on your Lock Screen."
                              : "Activity hooks send event names, task and turn IDs, and project labels. Labels may appear on your Lock Screen.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        Text("Response hooks share pending questions, choices, tool arguments, and the working directory with your paired phones. This content stays in memory and is not included in notifications or diagnostics. Conversation history is not shared.")
+                        Text("Native prompts remain available. Paceman shares supported pending questions, choices, and tool input with paired phones in memory. Request content is excluded from notifications and diagnostics.")
                             .font(.callout).fixedSize(horizontal: false, vertical: true)
                     }
                     VStack(alignment: .leading, spacing: 6) {

@@ -65,6 +65,17 @@ def missing_hooks(config_path: Path | None = None, script_path: Path | None = No
         )
         if not observer:
             missing.append(event)
+    if provider == "claude":
+        from macos.responses import owns_hook
+        responder = (ROOT / 'lib/macos/interaction_hook.py').is_file() and any(
+            isinstance(group, dict) and isinstance(group.get('hooks'), list) and group.get("matcher") in (None, "", "*", ".*")
+            and any(owns_hook(item, ROOT, provider) and item.get("type") == "command"
+                    and not any(item.get(k) for k in ("if", "async", "asyncRewake"))
+                    and type(item.get("timeout")) is int and item["timeout"] >= 602
+                    for item in group.get("hooks", []))
+            for group in groups_by_event.get("PermissionRequest", []) if isinstance(group, dict))
+        if not responder and "PermissionRequest" not in missing:
+            missing.append("PermissionRequest")
     return missing
 
 
@@ -103,6 +114,8 @@ def status():
             value["hookCommands"] = {p: installed_hook_command(p, ROOT) or shlex.quote(arguments[1]) + " -B " +
                                     shlex.quote(str(ROOT / f"lib/macos/{p}_hook.py")) for p in providers}
             value["hookCommand"] = value["hookCommands"].get("codex")
+            response_command = installed_hook_command("claude", ROOT, response=True) if "claude" in providers else None
+            value["responseHookCommands"] = {"claude": response_command} if response_command else {}
     except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
         pass
     return value

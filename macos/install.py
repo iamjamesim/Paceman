@@ -627,7 +627,11 @@ def print_claude_review_steps(wrapper: Path):
     for event, purpose in CLAUDE_PURPOSES:
         print(f"     {event}: {purpose}")
     print("  Activity hooks send lifecycle metadata, an optional project label and Remote Control session ID.")
-    print("  Questions and approvals stay in Claude Code with all native choices. Paceman observes activity only.")
+    print("  PermissionRequest also contains this separate response command:")
+    from macos.responses import command
+    print("     " + (installed_hook_command("claude", ROOT, response=True) or command(ROOT, PYTHON, "claude")))
+    print("  It shares pending main-session questions, tool input and offered permission updates with paired phones in memory.")
+    print("  Claude's native prompt stays available; tool completion withdraws the remote request.")
     print("  Activity requires Claude Code 2.1.196+; specific session links require 2.1.199+ with Remote Control.")
     print("  Hook reference: https://code.claude.com/docs/en/hooks#the-hooks-menu")
     print("  Send a prompt in a fresh local Claude session and verify lastAgentEventByProvider.claude.")
@@ -647,7 +651,7 @@ def print_hook_review_steps(wrapper: Path):
     print("  The script sends event names, opaque session/turn IDs, and an optional")
     print("  short project label to the private local Paceman socket; no prompts,")
     print("  replies, transcripts, tool arguments, or project paths.")
-    print("  Questions and approvals stay in Codex with all native choices. Paceman observes activity only.")
+    print("  Codex hooks never answer or delay prompts. The desktop follower mirrors supported pending requests.")
     print("  The user decides whether to trust each Paceman row individually.")
     print("  Do not choose Trust all or bypass review.")
     print("  Stay with the user, then send a short prompt in a fresh saved local task")

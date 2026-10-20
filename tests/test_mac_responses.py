@@ -25,9 +25,10 @@ class ResponseSetupTests(unittest.TestCase):
         self.enterContext(patch.multiple(control, ROOT=self.root, PLIST=self.root / 'source.plist'))
         self.enterContext(patch.object(uninstall, 'ROOT', self.root))
 
-    def test_agent_server_does_not_start_or_advertise_the_retired_response_bridge(self):
+    def test_agent_server_starts_native_follower_and_permission_competitor(self):
         with patch.object(hub, 'Server') as server_factory, \
              patch('service.macos.MacSource'), \
+             patch('service.codex_desktop.DesktopRequests'), \
              patch('builtins.print'), \
              patch('service.interactions.ResponseListener') as listener, \
              patch('service.interactions.InteractionBroker') as broker, \
@@ -35,9 +36,9 @@ class ResponseSetupTests(unittest.TestCase):
             server = server_factory.return_value.__enter__.return_value
             server.interactions = None
             hub.main()
-            self.assertIsNone(server.interactions)
-            listener.assert_not_called()
-            broker.assert_not_called()
+            self.assertIs(server.interactions, broker.return_value)
+            listener.assert_called_once()
+            broker.assert_called_once()
 
     def test_agent_sources_cannot_opt_back_into_the_blocking_bridge(self):
         for provider in ('macos', 'omarchy'):
@@ -48,13 +49,14 @@ class ResponseSetupTests(unittest.TestCase):
                 hub.main()
             self.assertEqual(error.exception.code, 2)
 
-    def test_normal_setup_installs_only_observers_for_each_selected_agent(self):
+    def test_normal_setup_never_installs_pretool_interceptors(self):
         for provider, path in self.paths.items():
             with self.subTest(provider=provider):
                 install.install_hooks(path, provider=provider)
                 document = json.loads(path.read_text())
-                self.assertFalse(any(responses.owns_hook(item, self.root, provider)
-                    for groups in document['hooks'].values() for group in groups for item in group['hooks']))
+                response_events = [event for event, groups in document['hooks'].items() for group in groups
+                    for item in group['hooks'] if responses.owns_hook(item, self.root, provider)]
+                self.assertEqual(response_events, ['PermissionRequest'] if provider == 'claude' else [])
                 self.assertEqual(control.missing_hooks(provider=provider), [])
 
     def test_upgrade_removes_legacy_responders_preserving_shared_groups_and_reviewed_observers(self):
@@ -75,7 +77,7 @@ class ResponseSetupTests(unittest.TestCase):
                 for event, group in observers.items():
                     self.assertEqual(result['hooks'][event][0], group)
                 for event in ('PermissionRequest', 'PreToolUse', 'Stop'):
-                    self.assertEqual(result['hooks'][event][-1], {'matcher': 'original', 'hooks': [foreign]})
+                    self.assertIn({'matcher': 'original', 'hooks': [foreign]}, result['hooks'][event])
                 self.assertEqual(install.install_hooks(path, provider=provider), [])
                 self.assertEqual(control.missing_hooks(provider=provider), [])
 
@@ -129,16 +131,16 @@ class ResponseSetupTests(unittest.TestCase):
             self.assertTrue(json.loads(path.read_text())['disableAllHooks'])
             self.assertTrue(control.missing_hooks(provider=provider))
 
-    def test_setup_status_and_instructions_offer_only_activity_commands(self):
+    def test_setup_status_and_instructions_identify_claude_response_command_separately(self):
         plist = self.root / 'source.plist'
         plist.write_bytes(plistlib.dumps({'ProgramArguments': ['/app/background', sys.executable, str(self.root)]}))
         for provider, path in self.paths.items():
             install.install_hooks(path, provider=provider)
         result = control.status()
-        self.assertNotIn('responseHookCommands', result)
+        self.assertEqual(set(result['responseHookCommands']), {'claude'})
         self.assertEqual(set(result['hookCommands']), set(self.paths))
         with patch('builtins.print') as output:
             install.print_hook_review_steps(self.root / 'pacemanctl')
         text = '\n'.join(str(call.args[0]) for call in output.call_args_list)
-        self.assertIn('Questions and approvals stay in Codex', text)
+        self.assertIn('Codex hooks never answer or delay prompts', text)
         self.assertNotIn('interaction_hook.py', text)
