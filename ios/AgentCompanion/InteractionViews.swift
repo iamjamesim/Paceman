@@ -210,7 +210,7 @@ struct InteractionDetail: View {
                         ApprovalExpandableText(text: section.text, label: section.label, theme: theme)
                     }
                     if presentation.otherArguments != nil {
-                        ApprovalExpandableText(text: presentation.originalInput, label: "Tool input", theme: theme,
+                        ApprovalExpandableText(text: presentation.originalInput, label: presentation.inputLabel, theme: theme,
                             startsCollapsed: true)
                     }
                     if let tool = presentation.tool, presentation.kind == .tool, item.request.title != "Allow \(tool)?" {
@@ -273,7 +273,7 @@ private struct ApprovalExpandableText: View {
     }
 
     private var expansionButton: some View {
-        Button(expanded ? "Show less" : startsCollapsed ? "Show tool input" : "Show more") { expanded.toggle() }
+        Button(expanded ? "Show less" : startsCollapsed ? "Show \(label.lowercased())" : "Show more") { expanded.toggle() }
             .font(CompanionTextRole.label.font).foregroundStyle(theme.tint)
             .frame(minHeight: 44).contentShape(Rectangle()).buttonStyle(.plain)
             .accessibilityLabel(expanded ? "Show less \(label.lowercased())" : "Show full \(label.lowercased())")

@@ -2,6 +2,24 @@ import XCTest
 @testable import AgentCompanion
 
 final class InteractionTests: XCTestCase {
+    func testApprovalProvenanceAndProviderDisplayKeepCompleteInputAccessible() throws {
+        let original = "{\"page_id\":\"page\",\"operations\":[{\"op\":\"replace\"}]}"
+        let data = try JSONSerialization.data(withJSONObject: ["toolName": "edit_page", "inputJSON": original,
+            "inputKind": "approvalRequest", "displayText": "Replace paragraph", "action": ["kind": "tool"],
+            "hasAdditionalInput": true])
+        let payload = try JSONDecoder().decode(ApprovalPayload.self, from: data)
+        XCTAssertTrue(payload.valid)
+        let presentation = ApprovalActionContent(payload)
+        XCTAssertEqual(presentation.body, "Replace paragraph")
+        XCTAssertEqual(presentation.originalInput, original)
+        XCTAssertEqual(presentation.otherArguments, original)
+        XCTAssertEqual(presentation.sections.first?.label, "Request details")
+        var preview = payload
+        preview.inputKind = "providerPreview"
+        XCTAssertEqual(ApprovalActionContent(preview).inputLabel, "Provider preview")
+        preview.inputKind = "unknown"
+        XCTAssertFalse(preview.valid)
+    }
     private func submission(_ item: PendingInput, action: String = "answer") -> InputSubmission {
         InputSubmission(generation: item.generation, requestID: item.request.id, version: item.request.version,
                         idempotencyKey: UUID().uuidString, action: action, answers: [:])

@@ -707,7 +707,7 @@ private struct WatchTaskView: View {
                 WatchApprovalText(text: section.text, label: section.label, summarizeJSON: action.kind == .tool)
             }
             if action.otherArguments != nil {
-                WatchApprovalText(text: action.originalInput, label: "Tool input", startsCollapsed: true)
+                WatchApprovalText(text: action.originalInput, label: action.inputLabel, startsCollapsed: true)
             }
             if let tool = action.tool, action.kind == .tool, request.title != "Allow \(tool)?" {
                 Text("Tool: " + tool).font(.caption).foregroundStyle(.secondary)
@@ -823,7 +823,7 @@ private struct WatchApprovalText: View {
     }
 
     private var expansionButton: some View {
-        Button(expanded ? "Show less" : startsCollapsed ? "Show tool input" : "Show more") { expanded.toggle() }
+        Button(expanded ? "Show less" : startsCollapsed ? "Show \(label.lowercased())" : "Show more") { expanded.toggle() }
             .font(.body).foregroundStyle(WatchPalette.tint)
             .frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
             .buttonStyle(.plain)

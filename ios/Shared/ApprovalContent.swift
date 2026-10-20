@@ -75,12 +75,15 @@ struct ApprovalPayload: Codable, Equatable {
     let toolName: String
     var workingDirectory: String? = nil
     var reason: String? = nil
+    var inputKind: String? = nil
+    var displayText: String? = nil
     let inputJSON: String
     let action: Action
     let hasAdditionalInput: Bool
     var valid: Bool {
         guard InteractionWire.text(toolName, limit: 256), !inputJSON.isEmpty, inputJSON.utf8.count <= 32768 else { return false }
-        return action.content != nil
+        return action.content != nil && (inputKind == nil || ["toolInput", "approvalRequest", "providerPreview"].contains(inputKind!))
+            && (displayText == nil || InteractionWire.text(displayText!, limit: 32768, empty: true))
     }
 }
 struct ApprovalResponseOption: Codable, Identifiable, Equatable {
@@ -109,6 +112,7 @@ struct ApprovalActionContent {
     let terminalSessionID: String?
     let terminalOperation: ApprovalPayload.Action.TerminalOperation?
     let parentCommand: String?
+    var inputLabel: String = "Tool input"
 
     init(_ action: String) {
         var remaining = action[...]
@@ -173,6 +177,7 @@ struct ApprovalActionContent {
     }
 
     init(_ payload: ApprovalPayload) {
+        inputLabel = payload.inputKind == "providerPreview" ? "Provider preview" : payload.inputKind == "approvalRequest" ? "Request details" : "Tool input"
         tool = payload.toolName
         directory = payload.workingDirectory
         explanation = payload.reason
@@ -194,7 +199,7 @@ struct ApprovalActionContent {
             case .poll: body = "No characters will be sent."
             case .write: body = (try? JSONEncoder().encode(text)).map { String(decoding: $0, as: UTF8.self) } ?? text
             }
-        default: kind = .tool; body = originalInput
+        default: kind = .tool; body = payload.displayText ?? originalInput
         }
         targetPath = path
         previousBody = before
@@ -214,7 +219,7 @@ struct ApprovalActionContent {
         case .fileWrite: label = "File contents"
         case .fileEdit: label = "Changes"
         case .terminalInput: label = "Input"
-        case .tool: label = "Tool input"
+        case .tool: label = inputLabel
         }
         return [.init(label: label, text: body)]
     }

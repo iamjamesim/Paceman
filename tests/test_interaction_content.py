@@ -16,6 +16,13 @@ def request(tool='Bash', input=None, choices=None):
 
 
 class ApprovalContentTests(unittest.TestCase):
+    def test_provider_preview_is_never_promoted_to_a_complete_command(self):
+        result = normalize_approval('claude', dict(toolName='Bash', inputKind='providerPreview', input={'command': 'rm …'}))
+        self.assertEqual(result['action'], {'kind': 'tool'})
+        self.assertEqual(result['inputKind'], 'providerPreview')
+        with self.assertRaises(ValueError):
+            normalize_approval('codex', dict(toolName='Bash', inputKind='guessed', input={}))
+
     def test_native_terminal_writes_distinguish_interrupt_poll_and_arbitrary_input(self):
         for text, operation in [("\x03\x03", "interrupt"), ("", "poll"), ("echo ready\n", "write"),
                                 ("a\x03", "write"), (r'\u0003', "write"), ("\x03\n", "write")]:

@@ -16,14 +16,19 @@ def _json_value(value):
 
 
 def normalize_approval(provider, value):
-    if not isinstance(value, dict) or set(value) - {"toolName", "workingDirectory", "reason", "input", "terminalContext"}:
+    if not isinstance(value, dict) or set(value) - {"toolName", "workingDirectory", "reason", "input", "terminalContext", "inputKind", "displayText"}:
         raise ValueError("invalid approval")
+    if value.get("inputKind", "toolInput") not in ("toolInput", "approvalRequest", "providerPreview"):
+        raise ValueError("invalid input kind")
     tool = value.get("toolName")
     if not isinstance(tool, str) or not tool.strip() or len(tool) > 256 or "input" not in value:
         raise ValueError("invalid approval")
     for name in ("workingDirectory", "reason"):
         if name in value and (not isinstance(value[name], str) or len(value[name]) > 4096):
             raise ValueError("invalid approval")
+    if "displayText" in value and (not isinstance(value["displayText"], str)
+            or len(value["displayText"].encode()) > 32768):
+        raise ValueError("invalid display text")
     # Reject non-JSON values and non-finite numbers, never truncate an action.
     if not _json_value(value["input"]):
         raise ValueError("invalid JSON input")
@@ -42,6 +47,11 @@ def normalize_approval(provider, value):
             or not context["command"].strip() or len(context["command"]) > 16384
             or context["sessionID"] != fields.get("session_id") or tool != "write_stdin" or provider != "codex"):
         raise ValueError("invalid terminal context")
+    if value.get("inputKind") == "providerPreview":
+        # Provider previews are display-only, possibly redacted or elided.
+        # Never promote a preview into an authoritative command/action.
+        result["hasAdditionalInput"] = "displayText" in value
+        return result
     # Codex's documented approval payload adds parent_call_id and permission
     # metadata to these native tool arguments. Preserve that complete input.
     if (provider == "codex" and tool == "write_stdin"
@@ -53,7 +63,7 @@ def normalize_approval(provider, value):
         if context is not None:
             action["parentCommand"] = context["command"]
         consumed = {"session_id", "chars"}
-    elif (tool in {"codex": ("Bash", "PowerShell", "apply_patch"), "claude": ("Bash",)}.get(provider, ())
+    elif (tool in {"codex": ("Bash", "PowerShell", "apply_patch", "commandExecution"), "claude": ("Bash",)}.get(provider, ())
             and isinstance(fields.get("command"), str) and fields["command"].strip()):
         action.update(kind="patch" if tool == "apply_patch" else "command", text=fields["command"])
         consumed.add("command")
@@ -63,6 +73,12 @@ def normalize_approval(provider, value):
             consumed.add("description")
         elif fields.get("description", False) is None:
             consumed.add("description")
+    elif provider == "codex" and tool == "fileChange" and isinstance(fields.get("changes"), list):
+        changes = fields["changes"]
+        if changes and all(isinstance(c, dict) and isinstance(c.get("path"), str)
+                           and isinstance(c.get("diff"), str) for c in changes):
+            action.update(kind="patch", text="\n\n".join(c["path"] + "\n" + c["diff"] for c in changes))
+            consumed.add("changes")
     elif (provider == "claude" and tool == "Write"
             and isinstance(fields.get("file_path"), str) and fields["file_path"]
             and isinstance(fields.get("content"), str)):
@@ -76,5 +92,5 @@ def normalize_approval(provider, value):
                       before=fields["old_string"], text=fields["new_string"],
                       replaceAll=fields.get("replace_all", False))
         consumed = {"file_path", "old_string", "new_string", "replace_all"}
-    result["hasAdditionalInput"] = bool(consumed and fields.keys() - consumed)
+    result["hasAdditionalInput"] = bool(consumed and fields.keys() - consumed or "displayText" in value)
     return result
