@@ -15,7 +15,8 @@ import threading
 import time
 import uuid
 
-from service.codex_requests import decode_request, decode_async_question
+from service.codex_requests import decode_request, decode_async_question, is_browser_approval
+from service.codex_policy import read_browser_policy
 from service.interactions import BrokerError
 
 
@@ -116,7 +117,7 @@ def owned_socket(path):
 
 
 class DesktopRequests:
-    def __init__(self, broker, sessions, *, path=None, attention=None):
+    def __init__(self, broker, sessions, *, path=None, attention=None, policy_reader=read_browser_policy):
         self.broker, self.sessions = broker, sessions
         self.path = path or Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "ipc/ipc.sock"
         self.attention = attention or (lambda session, pending: None)
@@ -133,6 +134,11 @@ class DesktopRequests:
         self.discovering = set()
         self.retry_at = {}
         self.thread = None
+        self.policy_reader = policy_reader
+        self.browser_policy = None
+        self.policy_loaded = False
+        self.policy_loading = False
+        self.policy_epoch = object()
 
     def __enter__(self):
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -200,6 +206,9 @@ class DesktopRequests:
             self.retired.clear()
             self.retry_at.clear()
             self.client = None
+            self.policy_epoch = object()
+            self.policy_loaded = self.policy_loading = False
+            self.browser_policy = None
 
     def _run(self):
         while not self.stop.is_set():
@@ -430,7 +439,13 @@ class DesktopRequests:
         self.retired = {k for k in self.retired if k[0] != session or k in native}
         for key, request in native.items():
             items = [i for t in turns if t.get("turnId") == request.get("params", {}).get("turnId") for i in t["items"]]
-            decoded = asynchronous[key] if key in asynchronous else decode_request(session, request, items)
+            if is_browser_approval(request) and not self.policy_loaded:
+                if not self.policy_loading:
+                    self.policy_loading = True
+                    threading.Thread(target=self._load_browser_policy, args=(self.policy_epoch,), daemon=True).start()
+                continue
+            decoded = asynchronous[key] if key in asynchronous else decode_request(session, request, items,
+                browser_global_allowed=self.browser_policy)
             if key in self.pending and (self.pending[key][1] != request
                     or decoded is None or self.pending[key][2] != decoded[0]):
                 self.broker.withdraw(self.pending.pop(key)[0])
@@ -454,19 +469,41 @@ class DesktopRequests:
             turn = request.get("params", {}).get("turnId")
             if request.get("method") in human and isinstance(turn, str):
                 by_turn[turn] = True
+            elif request.get("method") == "item/plan/requestImplementation" and isinstance(turn, str):
+                by_turn[turn] = "planImplementation"
         self.attention(session, by_turn)
+
+    def _load_browser_policy(self, epoch):
+        try:
+            allowed = self.policy_reader()
+        except (OSError, ValueError):
+            allowed = None
+        with self.lock:
+            if self.stop.is_set() or epoch is not self.policy_epoch:
+                return
+            self.browser_policy = allowed
+            self.policy_loaded, self.policy_loading = True, False
+            for session, (_, state) in list(self.states.items()):
+                self._sync(session, state)
 
     def _answer(self, key, handle, encode):
         handle.ready.wait()
+        global_allowed = True
+        if (handle.response or {}).get('optionID') == 'browser-all-sites':
+            try:
+                global_allowed = self.policy_reader() is True
+            except (OSError, ValueError):
+                global_allowed = False
         with self.lock:
             entry = self.pending.get(key)
             if entry is None or entry[0] is not handle:
                 return
-            response = encode(handle.response or {"action": "release"})
+            response = encode(handle.response or {"action": "release"}) if global_allowed else None
             if response is None:
                 # Release only relinquishes Paceman's card, never the agent's
                 # prompt. Access changes do not reopen it on every patch.
                 self.retired.add(key)
+                self.broker.withdraw(handle)
                 self.pending.pop(key, None)
                 return
             method, payload = response

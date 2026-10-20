@@ -6,12 +6,20 @@ opaque handles to the exact offered decision, never reconstructed permissions.
 from copy import deepcopy
 import hashlib
 import json
+import shlex
 import uuid
 from service.interaction_content import codex_terminal_input
 
 
 def session_key(session):
     return hashlib.sha256(("codex:" + session).encode()).hexdigest()
+
+
+def is_browser_approval(request):
+    params = request.get('params')
+    meta = params.get('_meta') if isinstance(params, dict) else None
+    return (request.get('method') == 'mcpServer/elicitation/request' and isinstance(meta, dict)
+            and meta.get('tool_name') == 'access_browser_origin' and meta.get('connector_id') == 'browser-use')
 
 
 def decode_async_question(session, turn, item, index, question):
@@ -43,13 +51,13 @@ def decode_async_question(session, turn, item, index, question):
     return public, answer
 
 
-def decode_request(session, request, items=()):
+def decode_request(session, request, items=(), *, browser_global_allowed=None):
     method, params = request.get("method"), request.get("params")
     if not isinstance(params, dict) or params.get("threadId") != session:
         return None
     base = dict(provider="codex", sessionID=session_key(session), detail="")
     if method == "mcpServer/elicitation/request":
-        return _mcp_approval(base, params)
+        return _mcp_approval(base, params, browser_global_allowed=browser_global_allowed)
     if method == "item/tool/requestUserInput":
         questions = params.get("questions")
         if not isinstance(questions, list) or not questions or len(questions) > 4:
@@ -122,6 +130,7 @@ def decode_request(session, request, items=()):
     labels = {"accept": "Allow once", "acceptForSession": "Allow for this session",
               "decline": "Decline", "cancel": "Cancel this turn"}
     for i, decision in enumerate(decisions):
+        confirmation = None
         label = labels.get(decision) if isinstance(decision, str) else None
         if isinstance(decision, dict) and set(decision) == {"acceptWithExecpolicyAmendment"}:
             amendment = decision["acceptWithExecpolicyAmendment"]
@@ -129,6 +138,9 @@ def decode_request(session, request, items=()):
             if (isinstance(amendment, dict) and set(amendment) == {"execpolicy_amendment"} and isinstance(prefix, list)
                     and prefix and all(isinstance(p, str) for p in prefix)):
                 label = "Always allow commands starting with: " + json.dumps(prefix, ensure_ascii=False)
+                if len(label) > 512:
+                    label = "Always allow this command prefix"
+                    confirmation = "Allow future commands starting with these exact arguments:\n\n" + shlex.join(prefix)
         if isinstance(decision, dict) and set(decision) == {"applyNetworkPolicyAmendment"}:
             amendment = decision["applyNetworkPolicyAmendment"]
             rule = amendment.get("network_policy_amendment") if isinstance(amendment, dict) else None
@@ -142,7 +154,7 @@ def decode_request(session, request, items=()):
             return None
         key = f"decision-{i}"
         mapped[key] = deepcopy(decision)
-        choices.append(dict(id=key, label=label))
+        choices.append(dict(id=key, label=label, **({"confirmation": confirmation} if confirmation else {})))
     approval = dict(toolName=tool, input=original, inputKind="approvalRequest")
     if terminal:
         parent = next((i for i in items if i.get("type") == "commandExecution"
@@ -157,6 +169,8 @@ def decode_request(session, request, items=()):
         approval["reason"] = params["reason"]
     public = dict(base, kind="approval", title=f"Allow {tool}?", contentVersion=2,
                   approval=approval, responseOptions=choices)
+    if any('confirmation' in option for option in choices):
+        public['contentVersion'] = 4
 
     def answer(response):
         if response["action"] != "choose" or response["optionID"] not in mapped:
@@ -167,7 +181,7 @@ def decode_request(session, request, items=()):
     return public, answer
 
 
-def _mcp_approval(base, params):
+def _mcp_approval(base, params, *, browser_global_allowed=None):
     """Desktop's typed MCP approval metadata, not arbitrary MCP form input."""
     meta, schema = params.get("_meta"), params.get("requestedSchema")
     if (params.get("mode") != "form" or not isinstance(meta, dict)
@@ -180,16 +194,25 @@ def _mcp_approval(base, params):
             or schema.get("required", []) or schema.get("type") != "object"):
         return None
     tool, original = meta["tool_name"], meta["tool_params"]
-    if (tool in ("access_browser_origin", "access_browser_origin_with_raw_cdp")
-            or "plan_token" in original or "confirmation_summary" in original):
-        return None  # Browser policy and bound database confirmations stay native.
+    browser = tool == 'access_browser_origin' and meta.get('connector_id') == 'browser-use'
+    if ((tool in ('access_browser_origin', 'access_browser_origin_with_raw_cdp') and not browser)
+            or 'plan_token' in original or 'confirmation_summary' in original):
+        return None
     persist = meta.get("persist", [])
     persist = [persist] if isinstance(persist, str) else persist
     if not isinstance(persist, list) or any(p not in ("session", "always") for p in persist):
         return None
     options = [("once", "Allow once", None)]
-    for scope in dict.fromkeys(persist):
-        options.append((scope, "Allow for this session" if scope == "session" else "Always allow this tool", scope))
+    if browser:
+        origin = meta.get('origin', original.get('origin'))
+        if not isinstance(origin, str) or not origin.strip() or len(origin) > 4096 or 'always' not in persist:
+            return None
+        options.append(('always', 'Always allow this site', 'always'))
+        if browser_global_allowed is True:
+            options.append(('browser-all-sites', 'Allow for all sites', 'all-sites'))
+    else:
+        for scope in dict.fromkeys(persist):
+            options.append((scope, "Allow for this session" if scope == "session" else "Always allow this tool", scope))
     options.append(("decline", "Decline", None))
     canonical_tool = tool if tool.startswith("mcp__") else f"mcp__{params['serverName']}__{tool}"
     approval = dict(toolName=canonical_tool, input=deepcopy(original))
@@ -198,6 +221,8 @@ def _mcp_approval(base, params):
     if meta.get("riskLevel") == "high":
         approval["reason"] = "Elevated risk. " + approval.get("reason", "")
     display = meta.get("tool_params_display")
+    if browser:
+        display = [dict(name='origin', display_name='Website', value=origin)]
     if display is not None:
         if not isinstance(display, list) or any(not isinstance(f, dict)
                 or not isinstance(f.get("name"), str) or "value" not in f
@@ -210,6 +235,10 @@ def _mcp_approval(base, params):
     public = dict(base, kind="approval", title=title if isinstance(title, str) and 0 < len(title) <= 256 else f"Allow {tool}?",
                   contentVersion=2, approval=approval,
                   responseOptions=[dict(id=i, label=label) for i, label, _ in options])
+    if browser_global_allowed is True and browser:
+        public['contentVersion'] = 4
+        next(o for o in public['responseOptions'] if o['id'] == 'browser-all-sites')['confirmation'] = (
+            'Allow the browser to access all websites without asking again, including sites beyond this request.')
     mapped = {i: scope for i, _, scope in options}
 
     def answer(response):
@@ -217,7 +246,9 @@ def _mcp_approval(base, params):
         if response["action"] != "choose" or option not in mapped:
             return None
         action = "decline" if option == "decline" else "accept"
-        result = dict(action=action, content={} if action == "accept" else None,
-                      _meta={"persist": mapped[option]} if mapped[option] else None)
+        metadata = {'persist': mapped[option]} if mapped[option] else None
+        if option == 'browser-all-sites':
+            metadata = dict(persist='always', browser_use_persistent_approval_scope='all-sites')
+        result = dict(action=action, content={} if action == "accept" else None, _meta=metadata)
         return "thread-follower-submit-mcp-server-elicitation-response", {"response": result}
     return public, answer

@@ -531,8 +531,12 @@ compatibility decoder. Display excerpts never replace the complete input.
 
 Snapshot `interactionsEnabled: true` advertises these endpoints; sources that omit
 it provide activity only. Both endpoints use the paired bearer credential.
+`interactionContentVersion` advertises the source maximum; clients cap requests
+to it, using v3 when absent for compatibility with older sources.
 
 - `GET /v1/interactions`: returns `sourceID`, broker `generation`, and `requests`.
+  Optional `awaitingRequestIDs` lists submitted requests still tracked by the
+  native adapter. An empty list retires their receipts; omission means unknown.
   Requests contain `requestID`, `version: 1`, provider, canonical hashed `sessionID`,
   kind (`approval` or `question`), title, detail, questions, and monotonic
   `remainingSeconds`. Questions contain `id`, `prompt`, `multiple`, and `options`
@@ -542,7 +546,8 @@ it provide activity only. Both endpoints use the paired bearer credential.
   interpreted only within their provider's documented schema.
 - `POST /v1/interactions`: supplies generation, requestID, version, idempotencyKey,
   and action (`allowOnce`, `deny`, `answer`, `release`; v2 approvals use `choose`
-  with `optionID`). Answers map question IDs to
+  with `optionID`; v4 choices may require a separate `confirmation` review).
+  Answers map question IDs to
   `{selected: [option indices], text}`; a selection may include a text comment.
   Indices refer to the immutable options of that exact request/version.
   First valid response wins; identical retries

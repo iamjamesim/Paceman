@@ -464,7 +464,6 @@ private struct WatchTaskView: View {
     @ObservedObject var store: WatchAllowanceStore
     let task: WatchWorkTask
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dismiss) private var dismiss
     @State private var prompt: WatchWorkPrompt?
     @State private var deadline: TimeInterval = 0
     @State private var answers: [String: InputAnswer] = [:]
@@ -475,6 +474,7 @@ private struct WatchTaskView: View {
     @State private var error: String?
     @State private var rejected = false
     @State private var nativeOnly = false
+    @State private var confirming: ApprovalResponseOption?
 
     private var sending: Bool { operation.busy }
 
@@ -513,7 +513,7 @@ private struct WatchTaskView: View {
                             Text(unconfirmed ? "Delivery is unconfirmed. Check \(responseDestination)."
                                 : "Refresh this request before responding.")
                             if submission == nil {
-                                Button("Check again") { Task { await load(renewing: prompt) } }.disabled(sending)
+                                Button("Check again") { Task { await load() } }.disabled(sending)
                             }
                         } else {
                             requestContent(prompt).disabled(sending || submission != nil)
@@ -524,9 +524,7 @@ private struct WatchTaskView: View {
                         }
                     } else {
                         Text(currentTask.title).font(.headline).fixedSize(horizontal: false, vertical: true)
-                        if submitted {
-                            Label("Response sent", systemImage: "checkmark.circle")
-                        } else if !rejected {
+                        if !rejected {
                             VStack(alignment: .leading, spacing: 4) {
                                 Label(currentTask.historical(at: Date()) ? "Last known: \(currentTask.status)" : currentTask.status,
                                     systemImage: currentTask.symbol(at: Date()))
@@ -540,7 +538,9 @@ private struct WatchTaskView: View {
                             }
                         }
                     }
-                    if sending { ProgressView(submission == nil ? "Loading request" : "Sending response") }
+                    if sending && (!nativeOnly || submission != nil) {
+                        ProgressView(submission == nil ? "Loading request" : "Sending response")
+                    }
                     if let error { Text(error).font(.body) }
                     if nativeOnly, currentTask.state == "needs_input", !currentTask.historical(at: Date()) {
                         Text("Review the full request and all response options in \(responseDestination).")
@@ -550,7 +550,7 @@ private struct WatchTaskView: View {
                        currentTask.state == "needs_input", !currentTask.historical(at: Date()) {
                         Button("Check again") { Task { await load() } }.disabled(sending)
                     }
-                    if !submitted {
+                    if !submitted || currentTask.state == "needs_input" {
                         WatchPhoneContinuation(store: store, task: task).disabled(sending && submission != nil)
                     }
                     if prompt == nil, !submitted, !rejected {
@@ -564,13 +564,27 @@ private struct WatchTaskView: View {
         }
         .navigationTitle(prompt?.request.kind == "question" ? "Question" : prompt?.request.kind == "approval" ? "Approval" : "Session")
         .toolbarTitleDisplayMode(.inline)
+        .sheet(item: $confirming) { option in
+            VStack(spacing: 8) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(option.label).font(.headline)
+                        WatchApprovalText(text: option.confirmation ?? "", label: "Permission scope", code: false)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Button("Confirm") {
+                    confirming = nil
+                    respond("choose", optionID: option.id)
+                }.buttonStyle(.borderedProminent).foregroundStyle(.black)
+            }.padding(.horizontal, 10)
+        }
         .task { await load() }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
                 _ = try? await store.workMessage(["operation": "refreshTasks", "sourceID": task.sourceID])
-                if let prompt, submission == nil, !submitted, ProcessInfo.processInfo.systemUptime >= deadline {
-                    await load(renewing: prompt)
+                if submitted || prompt == nil || submission == nil && ProcessInfo.processInfo.systemUptime >= deadline {
+                    await load()
                 }
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
@@ -585,6 +599,7 @@ private struct WatchTaskView: View {
                 Task { await load() }
             } else if !reachable, submission == nil, !submitted, currentTask.state == "needs_input" {
                 operation.invalidate()
+                confirming = nil
                 prompt = nil
                 answers = [:]
                 error = "Reconnect to your iPhone to respond."
@@ -605,6 +620,7 @@ private struct WatchTaskView: View {
             guard submission == nil, !submitted else { return }
             if state != "needs_input" {
                 operation.invalidate()
+                confirming = nil
                 prompt = nil
                 answers = [:]
                 error = nil
@@ -620,8 +636,11 @@ private struct WatchTaskView: View {
             approvalContent(request)
             ForEach(request.approvalChoices) { option in
                 Button(option.label) {
-                    respond(request.contentVersion == 2 ? "choose" : option.id,
-                        optionID: request.contentVersion == 2 ? option.id : nil)
+                    if option.confirmation != nil { confirming = option }
+                    else {
+                        respond(request.usesApprovalChoices ? "choose" : option.id,
+                            optionID: request.usesApprovalChoices ? option.id : nil)
+                    }
                 }.buttonStyle(.bordered)
             }
             if request.approvalChoices.isEmpty { Text(ResponseGuidance.continuation(for: request.provider) + ".") }
@@ -735,8 +754,9 @@ private struct WatchTaskView: View {
         }
     }
 
-    @MainActor private func load(renewing previous: WatchWorkPrompt? = nil) async {
-        guard currentTask.state == "needs_input", !currentTask.historical(at: Date()),
+    @MainActor private func load() async {
+        guard scenePhase != .background, !Task.isCancelled,
+              currentTask.state == "needs_input", !currentTask.historical(at: Date()),
               let token = operation.begin() else { return }
         error = nil
         defer { finish(token) }
@@ -747,30 +767,36 @@ private struct WatchTaskView: View {
             guard scenePhase != .background, operation.accepts(token) else { return }
             nativeOnly = result["nativeOnly"] as? Bool == true
             if nativeOnly {
+                confirming = nil
                 prompt = nil
                 submission = nil
                 answers = [:]
                 unconfirmed = false
+                submitted = false
                 rejected = false
                 return
             }
             guard let data = result["data"] as? Data else { return }
             let value = try JSONDecoder().decode(WatchWorkPrompt.self, from: data)
             guard value.request.validContent else {
+                confirming = nil
                 nativeOnly = true
                 prompt = nil
                 answers = [:]
                 submission = nil
                 return
             }
-            if let previous, previous.generation != value.generation || !previous.request.hasSameReview(as: value.request) {
-                prompt = nil
+            if prompt?.generation != value.generation || prompt?.request.hasSameReview(as: value.request) != true {
                 answers = [:]
                 submission = nil
-                error = "This request changed. Check again to review what's pending."
-                return
+                confirming = nil
             }
             prompt = value
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--approval-confirmation-preview") {
+                confirming = value.request.approvalChoices.first { $0.confirmation != nil }
+            }
+            #endif
             submission = value.submission
             if let submission = value.submission { answers = submission.answers }
             submitted = value.submitted == true
@@ -804,7 +830,7 @@ private struct WatchTaskView: View {
             submitted = result["submitted"] as? Bool == true
             unconfirmed = !submitted
             error = nil
-            if submitted { dismiss() }
+            if submitted { Task { await load() } }
         } catch {
             guard scenePhase != .background, operation.accepts(token) else { return }
             if case WatchWorkError.rejected = error { rejected = true; unconfirmed = false }
@@ -921,11 +947,13 @@ private enum WatchWorkPreview {
     static var scenario: String? {
         ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--work-preview=") }.map { String($0.dropFirst(15)) }
     }
-    static let detailScenarios = ["native-input", "native-long", "approval", "approval-json", "approval-unknown", "approval-large", "approval-long-command", "approval-write", "approval-edit", "approval-terminal", "approval-terminal-text", "approval-terminal-poll", "question", "selection-only", "renewing-request", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
+    static let detailScenarios = ["queued", "native-input", "native-long", "approval", "approval-json", "approval-unknown", "approval-large", "approval-long-command", "approval-policy", "approval-write", "approval-edit", "approval-terminal", "approval-terminal-text", "approval-terminal-poll", "question", "selection-only", "renewing-request", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
     static var responseSent = false
+    static var queueIndex = 0
     static var requestReads = 0
     static var task: WatchWorkTask {
-        let state = ["working-detail": "working", "finished-detail": "finished", "failed-detail": "failed", "idle-detail": "idle", "historical-detail": "working"][scenario ?? ""] ?? "needs_input"
+        let state = scenario == "queued" && queueIndex >= 2 ? "finished"
+            : ["working-detail": "working", "finished-detail": "finished", "failed-detail": "failed", "idle-detail": "idle", "historical-detail": "working"][scenario ?? ""] ?? "needs_input"
         return WatchWorkTask(sourceID: "preview", sessionID: "task", provider: ["approval-write", "approval-edit"].contains(scenario) ? "claude" : "codex", title: scenario == "native-long" ? "Review accessibility and notifications throughout the entire onboarding experience" : "Simplify onboarding",
             computer: "MacBook Pro", state: state, freshUntil: Date().timeIntervalSince1970 + (scenario == "historical-detail" ? -600 : 300),
             project: "Paceman", observedAt: Date().timeIntervalSince1970 - (scenario == "historical-detail" ? 900 : 15))
@@ -970,12 +998,14 @@ private enum WatchWorkPreview {
         }
         if payload["operation"] as? String == "submit" {
             if scenario == "unconfirmed" { return ["unconfirmed": true] }
-            responseSent = true
+            if scenario == "queued" { queueIndex += 1 }
+            responseSent = scenario != "queued"
             var reply: [String: Any] = ["submitted": true]
             reply["workSnapshot"] = try self.reply(["operation": "cachedTasks"])?["data"]
             return reply
         }
-        let question = InteractionQuestion(id: "q0", prompt: scenario == "long-question"
+        let question = InteractionQuestion(id: "q0", prompt: scenario == "queued" && queueIndex == 1
+            ? "Which screens should show the new guidance?" : scenario == "long-question"
             ? "When should we ask people to enable notifications, so they understand the benefit before granting access?"
             : "When should we ask for notifications?", multiple: false,
             options: [.init(label: scenario == "long-option" ? "Homepage https://paceman.ai opens on the hero with the tagline and TestFlight button" : "After the first result", description: scenario == "long-option" ? "" : "Let people try Paceman first."),
@@ -983,13 +1013,14 @@ private enum WatchWorkPreview {
             allowsText: scenario == "selection-only" ? false : nil)
         let approval = scenario.hasPrefix("approval") || scenario == "live-approval"
         let terminal = scenario.hasPrefix("approval-terminal")
-        let payload: ApprovalPayload? = terminal ? ApprovalPreviewFixtures.terminal(scenario == "approval-terminal-poll" ? "poll" : scenario == "approval-terminal-text" ? "write" : "interrupt")
+        let policy = scenario == "approval-policy"
+        let payload: ApprovalPayload? = policy ? ApprovalPreviewFixtures.policy : terminal ? ApprovalPreviewFixtures.terminal(scenario == "approval-terminal-poll" ? "poll" : scenario == "approval-terminal-text" ? "write" : "interrupt")
             : ["approval-write", "approval-edit"].contains(scenario) ? ApprovalPreviewFixtures.file(scenario == "approval-edit") : nil
-        let request = InputRequest(requestID: "preview", version: 1, provider: task.provider, sessionID: "task",
+        let request = InputRequest(requestID: scenario == "queued" ? "preview-\(queueIndex)" : "preview", version: 1, provider: task.provider, sessionID: "task",
             kind: approval ? "approval" : "question", title: terminal ? "Allow write_stdin?" : scenario == "approval-large" ? "Allow \(ApprovalPreviewFixtures.pageTool)?"
                 : scenario == "approval-write" ? "Allow Write?" : scenario == "approval-edit" ? "Allow Edit?"
                 : approval ? "Run the tests?" : "Question for you",
-            detail: terminal ? "" : scenario == "approval-large" ? ApprovalPreviewFixtures.largePageEdit
+            detail: terminal || policy ? "" : scenario == "approval-large" ? ApprovalPreviewFixtures.largePageEdit
                 : scenario == "approval-long-command" ? ApprovalPreviewFixtures.longCommand
                 : ["approval-write", "approval-edit"].contains(scenario) ? ""
                 : scenario == "approval-json" ? "Tool: Bash\nWorking directory: /Projects/Paceman\n\n{\"command\":\"swift test --filter WatchWorkTests\",\"description\":\"Verify the Watch response flow.\",\"timeout\":120000}"
@@ -997,8 +1028,9 @@ private enum WatchWorkPreview {
                 : approval ? "Tool: Bash\nWorking directory: /Projects/Paceman\nCommand: swift test" : "",
             questions: approval ? [] : scenario == "multiple" ? [question, .init(id: "q1", prompt: "Which screens?", multiple: true, options: [])]
                 : scenario == "free-text" ? [.init(id: "q0", prompt: "What should we improve next?", multiple: false, options: [])] : [question], remainingSeconds: 120,
-            contentVersion: scenario == "selection-only" ? 3 : payload == nil ? nil : 2, approval: payload,
-            responseOptions: terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : payload == nil ? nil : ApprovalPreviewFixtures.choices)
+            contentVersion: scenario == "selection-only" ? 3 : policy ? 4 : payload == nil ? nil : 2, approval: payload,
+            responseOptions: policy ? ApprovalPreviewFixtures.policyChoices
+                : terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : payload == nil ? nil : ApprovalPreviewFixtures.choices)
         requestReads += 1
         return try encoded(WatchWorkPrompt(generation: "preview", request: request,
             remainingSeconds: scenario == "expired-request" ? -1 : scenario == "renewing-request" && requestReads == 1 ? 1 : 120))

@@ -191,6 +191,16 @@ final class InteractionTests: XCTestCase {
         XCTAssertFalse(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60).supportsWatchAnswer)
         request.contentVersion = 3
         XCTAssertFalse(request.validContent)
+        request.responseOptions = [.init(id: "session", label: "Always allow this command prefix",
+            confirmation: String(repeating: "Exact argument prefix\n", count: 100))]
+        request.contentVersion = 2
+        XCTAssertFalse(request.validContent, "An older client must not overlook required confirmation")
+        request.contentVersion = 4
+        let confirmedWire = try JSONEncoder().encode(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60))
+        let confirmed = try JSONDecoder().decode(WatchWorkPrompt.self, from: confirmedWire)
+        XCTAssertEqual(confirmed.request.approvalChoices[0].confirmation, request.responseOptions![0].confirmation)
+        XCTAssertTrue(confirmed.supportsWatchAnswer)
+        XCTAssertTrue(selected.valid(for: confirmed.request))
     }
 
     func testCommonRequestsAcceptNewProviderNamespacesWithoutGuessingTheirToolSchemas() throws {
@@ -375,13 +385,15 @@ final class InteractionTests: XCTestCase {
     }
 
     private func refreshSnapshot(_ source: PairedSource, revision: Int = 1,
-                                 state: String = "working", interactions: Bool = false) -> Data {
-        try! JSONSerialization.data(withJSONObject: [
+                                 state: String = "working", interactions: Bool = false, contentVersion: Int? = nil) -> Data {
+        var value: [String: Any] = [
             "schema": 1, "sourceID": source.sourceID, "generation": source.sourceID,
             "revision": revision, "eventID": String(revision), "sourceName": "Test",
             "observedAt": Date().timeIntervalSince1970, "changedAt": Date().timeIntervalSince1970,
             "freshFor": 30, "state": state, "interactionsEnabled": interactions,
-            "sessions": [["id": String(repeating: "a", count: 64), "provider": "claude", "state": state]]])
+            "sessions": [["id": String(repeating: "a", count: 64), "provider": "claude", "state": state]]]
+        value["interactionContentVersion"] = contentVersion
+        return try! JSONSerialization.data(withJSONObject: value)
     }
 
     @MainActor func testSlowFirstComputerDoesNotDelayOtherComputerOrItsNextRefresh() async throws {
@@ -656,6 +668,11 @@ final class InteractionTests: XCTestCase {
         let requests = try XCTUnwrap(value["requests"] as? [[String: Any]])
         duplicated["requests"] = requests + requests
         XCTAssertThrowsError(try InputRequests.decode(JSONSerialization.data(withJSONObject: duplicated), sourceID: sourceID))
+        for ids in [["invalid"], Array(repeating: UUID().uuidString, count: 2), (0..<257).map { _ in UUID().uuidString }] {
+            var invalid = value
+            invalid["awaitingRequestIDs"] = ids
+            XCTAssertThrowsError(try InputRequests.decode(JSONSerialization.data(withJSONObject: invalid), sourceID: sourceID))
+        }
     }
     func testPhoneAcceptsTheFullResponseWindowForBothProviders() throws {
         for provider in ["claude", "codex"] {
@@ -1910,8 +1927,25 @@ extension InteractionTests {
         let historicalDate = Date(timeIntervalSince1970: watch.freshUntil + 1)
         XCTAssertEqual(watch.group(at: historicalDate), "Last known")
         XCTAssertEqual(watch.status(at: historicalDate), "Needs attention", "History describes the source observation, not a stale receipt")
-        // A newer request in the same conversation retires the old receipt.
+        // A missed Working observation must not leave a receipt covering a
+        // different, native-only decision in the same Needs input state.
         var requests = listing["requests"] as! [[String: Any]]
+        listing["requests"] = []
+        listing["awaitingRequestIDs"] = [prompt.request.id]
+        await model.interactions.refresh(source, snapshot: snapshot, client: SourceClient(configuration: config))
+        XCTAssertEqual(try phone().phase, .responded, "The original native request is still tracked")
+        let stillPending = await model.handleWatchWork(message)
+        XCTAssertEqual(try JSONDecoder().decode(WatchWorkPrompt.self,
+            from: XCTUnwrap(stillPending["data"] as? Data)).submitted, true)
+        listing["awaitingRequestIDs"] = []
+        let resolved = await model.handleWatchWork(message)
+        XCTAssertNil(resolved["data"], "The Watch must not reopen a retired submitted prompt")
+        await model.interactions.refresh(source, snapshot: snapshot, client: SourceClient(configuration: config))
+        XCTAssertNil(model.interactions.receipt(for: WorkIdentity(sourceID: sourceID,
+            sessionID: prompt.request.sessionID, provider: prompt.request.provider)))
+        let retired = try await exported()
+        XCTAssertNotEqual(retired.status, "Response sent")
+        // A newer supported request remains answerable.
         requests[0]["requestID"] = UUID().uuidString
         listing["requests"] = requests
         await model.interactions.refresh(source, snapshot: try XCTUnwrap(model.snapshots[sourceID]), client: SourceClient(configuration: config))
@@ -2095,7 +2129,7 @@ extension InteractionTests {
         for clearInbox in [false, true] {
             if clearInbox { model.interactions.setForeground(false) }
             let reopened = await model.handleWatchWork(request)
-            XCTAssertNotNil(reopened["error"])
+            XCTAssertTrue(reopened["error"] != nil || reopened["nativeOnly"] as? Bool == true)
             XCTAssertNil(reopened["data"], "A definitive rejection must not reopen as an uncertain form")
             let retried = await model.handleWatchWork(payload)
             XCTAssertNotNil(retried["error"])
@@ -2110,6 +2144,83 @@ extension InteractionTests {
         let nextPrompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(next["data"] as? Data))
         XCTAssertEqual(nextPrompt.request.id, nextID, "Rejection belongs to one request, not the entire chat")
         XCTAssertNil(nextPrompt.submission)
+    }
+
+    @MainActor func testWatchAdvancesOnlyWithinSelectedSessionAndKeepsUncertainSubmission() async throws {
+        for foreground in [false, true] {
+            let source = PairedSource(endpoint: URL(string: "https://watch-queue.example")!, sourceID: sourceID,
+                clientID: "client", credential: "fixture")
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [InteractionURLProtocol.self]
+            let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+            model.pairedSources = [source]
+            model.snapshots = [:]
+            model.interactions.setForeground(foreground)
+            var listing = fixture()
+            let first = (listing["requests"] as! [[String: Any]])[0]
+            var second = first
+            second["requestID"] = UUID().uuidString
+            var other = first
+            other["requestID"] = UUID().uuidString
+            other["sessionID"] = String(repeating: "b", count: 64)
+            listing["requests"] = [first, other, second]
+            listing["awaitingRequestIDs"] = []
+            var posts: [InputSubmission] = []
+            var envelope: InputSubmission?
+            InteractionURLProtocol.start = { transport in
+                Task { @MainActor in
+                    if transport.request.url?.path == "/v1/snapshot" {
+                        transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                    } else if transport.request.httpMethod == "POST" {
+                        let answer = envelope!
+                        posts.append(answer)
+                        if posts.count == 1 {
+                            listing["requests"] = [other, second]
+                            listing["awaitingRequestIDs"] = [answer.requestID]
+                            transport.finish(try! JSONSerialization.data(withJSONObject: ["status": "submitted",
+                                "generation": answer.generation, "requestID": answer.requestID, "version": 1]))
+                        } else {
+                            transport.client?.urlProtocol(transport, didFailWithError: URLError(.networkConnectionLost))
+                        }
+                    } else { transport.finish(try! JSONSerialization.data(withJSONObject: listing)) }
+                }
+            }
+            defer {
+                model.interactions.setForeground(false)
+                InteractionURLProtocol.start = nil
+                SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+            }
+            let request: [String: Any] = ["operation": "request", "sourceID": sourceID,
+                "sessionID": String(repeating: "a", count: 64), "provider": "claude"]
+            func read() async throws -> WatchWorkPrompt {
+                let reply = await model.handleWatchWork(request)
+                return try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reply["data"] as? Data))
+            }
+            func answer(_ prompt: WatchWorkPrompt) -> InputSubmission {
+                .init(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+                    idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": .init(selected: [0])])
+            }
+            let initial = try await read()
+            let firstAnswer = answer(initial)
+            envelope = firstAnswer
+            _ = await model.handleWatchWork(["operation": "submit", "sourceID": sourceID,
+                "submission": try JSONEncoder().encode(firstAnswer)])
+            let next = try await read()
+            XCTAssertEqual(next.request.id, second["requestID"] as? String)
+            XCTAssertEqual(next.request.sessionID, initial.request.sessionID)
+            XCTAssertNil(next.submission)
+            let renewed = try await read()
+            XCTAssertTrue(next.request.hasSameReview(as: renewed.request))
+            let secondAnswer = answer(next)
+            envelope = secondAnswer
+            let uncertain = await model.handleWatchWork(["operation": "submit", "sourceID": sourceID,
+                "submission": try JSONEncoder().encode(secondAnswer)])
+            XCTAssertEqual(uncertain["unconfirmed"] as? Bool, true)
+            let reopened = try await read()
+            XCTAssertEqual(reopened.submission, secondAnswer)
+            XCTAssertEqual(reopened.submitted, false)
+            XCTAssertEqual(posts.map(\.requestID), [initial.request.id, next.request.id])
+        }
     }
 
     @MainActor func testWatchUsesNativeContinuationAndRejectsUnmatchedResponseTasks() async throws {
@@ -2147,18 +2258,53 @@ extension InteractionTests {
         XCTAssertNil(unmatched["data"], "A response form must match the exact task identity")
     }
 
+    @MainActor func testNewPhonePreservesStructuredApprovalsFromOlderSources() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://source-versions.example")!, sourceID: sourceID,
+            clientID: "client", credential: "fixture")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let client = SourceClient(configuration: config)
+        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+            sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow Edit?", detail: "",
+            questions: [], remainingSeconds: 60, contentVersion: 2, approval: ApprovalPreviewFixtures.file(true),
+            responseOptions: ApprovalPreviewFixtures.choices)
+        var listing = fixture()
+        listing["requests"] = [try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))]
+        for advertised: Int? in [nil, 2, 3, 4, 7] {
+            let expected = min(advertised ?? 3, InputRequest.maximumContentVersion)
+            InteractionURLProtocol.start = { transport in
+                XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), String(expected))
+                var compatible = listing
+                // The older source treats an unknown capability as legacy-only.
+                if advertised == nil && transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version") != "3" {
+                    compatible["requests"] = []
+                }
+                transport.finish(try! JSONSerialization.data(withJSONObject: compatible))
+            }
+            let inbox = InteractionInbox(client: client)
+            inbox.setForeground(true)
+            let snapshot = try JSONDecoder().decode(Snapshot.self, from: refreshSnapshot(source,
+                state: "needs_input", interactions: true, contentVersion: advertised))
+            await inbox.refresh(source, snapshot: snapshot, client: client)
+            XCTAssertEqual(inbox.items.first?.request, request, "A phone update must not hide an older source's approval")
+            inbox.setForeground(false)
+        }
+        InteractionURLProtocol.start = nil
+    }
+
     @MainActor func testContentProfilesRequireWatchCapabilityAndSourceNegotiation() async throws {
-        for version in [2, 3] {
+        for version in [2, 3, 4] {
             let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
                 clientID: "client", credential: "fixture")
             let configuration = URLSessionConfiguration.ephemeral
             configuration.protocolClasses = [InteractionURLProtocol.self]
             let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
             model.pairedSources = [source]
-            let request = version == 2 ? InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+            let request = version != 3 ? InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
                 sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow Edit?", detail: "",
-                questions: [], remainingSeconds: 60, contentVersion: 2, approval: ApprovalPreviewFixtures.file(true),
-                responseOptions: ApprovalPreviewFixtures.choices) : InputRequest(requestID: UUID().uuidString,
+                questions: [], remainingSeconds: 60, contentVersion: version, approval: ApprovalPreviewFixtures.file(true),
+                responseOptions: version == 4 ? [.init(id: "confirm", label: "Allow this scope", confirmation: "Exact scope")]
+                    : ApprovalPreviewFixtures.choices) : InputRequest(requestID: UUID().uuidString,
                 version: 1, provider: "claude", sessionID: String(repeating: "a", count: 64), kind: "question",
                 title: "Choose", detail: "", questions: [.init(id: "q", prompt: "Which?", multiple: false,
                     options: [.init(label: "First", description: "")], allowsText: false)], remainingSeconds: 60,
@@ -2169,9 +2315,9 @@ extension InteractionTests {
             InteractionURLProtocol.start = { transport in
                 Task { @MainActor in
                     if transport.request.url?.path == "/v1/snapshot" {
-                        transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                        transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true, contentVersion: 4))
                     } else {
-                        XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), "3")
+                        XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), "4")
                         transport.finish(listing)
                     }
                 }
@@ -2182,8 +2328,8 @@ extension InteractionTests {
             let legacy = await model.handleWatchWork(message)
             XCTAssertEqual(legacy["nativeOnly"] as? Bool, true)
             XCTAssertNil(legacy["data"])
-            if version == 3 {
-                message["contentVersion"] = 2
+            for olderVersion in 1..<version {
+                message["contentVersion"] = olderVersion
                 let older = await model.handleWatchWork(message)
                 XCTAssertEqual(older["nativeOnly"] as? Bool, true)
             }
@@ -2191,7 +2337,7 @@ extension InteractionTests {
             let modern = await model.handleWatchWork(message)
             let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(modern["data"] as? Data))
             XCTAssertEqual(prompt.request, request)
-            XCTAssertEqual(prompt.request.approvalChoices.count, version == 2 ? 3 : 0)
+            XCTAssertEqual(prompt.request.approvalChoices.count, version == 2 ? 3 : version == 4 ? 1 : 0)
         }
     }
 

@@ -183,10 +183,13 @@ final class SourceClient {
         }
     }
 
-    func inputRequests(_ source: PairedSource) async throws -> InputRequests {
+    func inputRequests(_ source: PairedSource, contentVersion: Int? = nil) async throws -> InputRequests {
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/interactions"))
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
-        request.setValue(String(InputRequest.maximumContentVersion), forHTTPHeaderField: "X-Paceman-Content-Version")
+        // Sources before capability advertisement understand v3; an unknown
+        // higher header would make them silently return only legacy requests.
+        let maximum = contentVersion.flatMap { $0 > 0 ? $0 : nil } ?? 3
+        request.setValue(String(min(InputRequest.maximumContentVersion, maximum)), forHTTPHeaderField: "X-Paceman-Content-Version")
         let data = try await response(request, maximumBytes: 2_200_000)
         return try InputRequests.decode(data, sourceID: source.sourceID)
     }
