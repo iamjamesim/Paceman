@@ -7,6 +7,7 @@ from copy import deepcopy
 import hashlib
 import json
 import shlex
+import time
 import uuid
 from service.interaction_content import codex_terminal_input
 
@@ -46,8 +47,16 @@ def decode_async_question(session, turn, item, index, question):
         text = "\n".join([*(options[i] for i in value["selected"]), *([value["text"]] if value["text"].strip() else [])])
         reply = [dict(questionItemId=qid, question=question["title"], answer=text)]
         content = "<send_user_message_question_reply>\n" + json.dumps(reply, ensure_ascii=False) + "\n</send_user_message_question_reply>"
+        message_id = "paceman-" + str(uuid.uuid4())
+        # The desktop owner reads restoreMessage before submitting turn/steer,
+        # and keeps it with the optimistic message for matching and recovery.
+        # Inherit its cwd and collaboration mode rather than changing either.
+        restore = dict(id=message_id, text=content, cwd=None, createdAt=int(time.time() * 1000),
+                       context=dict(prompt=content, turnTrigger="send_user_message_async_question",
+                                    addedFiles=[], fileAttachments=[], imageAttachments=[],
+                                    commentAttachments=[], ideContext=None, workspaceRoots=[]))
         return "thread-follower-steer-turn", dict(input=[dict(type="text", text=content, text_elements=[])],
-                                                  clientUserMessageId="paceman-" + str(uuid.uuid4()))
+                                                  clientUserMessageId=message_id, restoreMessage=restore)
     return public, answer
 
 
