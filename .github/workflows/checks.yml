@@ -56,6 +56,7 @@ jobs:
             --release-label 0.1.0-alpha.1 --build-number 1 \
             --output-dir "$RUNNER_TEMP/PacemanMacRelease" --adhoc
       - name: Test iPhone app and extensions
+        id: ios_tests
         run: |
           simulator_id=$(xcrun simctl list -j devices available | python -c '
           import json, sys
@@ -67,8 +68,24 @@ jobs:
           print(phones[0])
           ')
           # Preserve test failures without waiting for simulator sysdiagnose collection.
+          test_status=0
           xcodebuild -project ios/AgentCompanion.xcodeproj -scheme AgentCompanion \
             -destination "platform=iOS Simulator,id=$simulator_id" \
             -derivedDataPath "$RUNNER_TEMP/PacemanDerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/AgentCompanion.xcresult" \
             -parallel-testing-enabled NO -collect-test-diagnostics never \
-            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= test
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= test || test_status=$?
+          if (( test_status != 0 )); then
+            echo "::group::iOS test failure details"
+            python scripts/report-xcresult.py "$RUNNER_TEMP/AgentCompanion.xcresult" || \
+              echo "Could not summarize test results; inspect the uploaded xcresult."
+            echo "::endgroup::"
+          fi
+          exit "$test_status"
+      - name: Preserve failed iOS test results
+        if: ${{ failure() && steps.ios_tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: AgentCompanion.xcresult
+          path: ${{ runner.temp }}/AgentCompanion.xcresult
+          retention-days: 7
