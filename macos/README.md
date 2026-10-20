@@ -124,8 +124,11 @@ Apple Watch delivery](../docs/architecture.md#watches).
 Codes expire after five minutes; choose **New code** if needed. Keep the pairing code private.
 
 Questions and approvals stay in Codex or Claude Code with all native response
-choices. Paceman observes when input is needed; phone and Watch continue in the
-agent. Setup removes the retired blocking response hooks.
+choices. Paceman mirrors supported live requests for answering from phone or
+Watch. Setup removes PreToolUse interception. Native integration remains under
+validation; see [current limits](../docs/data-lifecycle.md#questions-and-approvals).
+Review Claude's additional PermissionRequest response command: it shares the
+pending question or tool input with paired phones in memory.
 
 <details>
 <summary>Private Tailscale connection</summary>

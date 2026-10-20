@@ -96,11 +96,18 @@ same-turn activity cannot clear it. A matching completion resolves one approval;
 new turns or confirmed terminal outcomes clear the old turn's attention. Hooks
 do not expose every native approval decision.
 
-For compatibility with older computers, clients still support the retired
-response protocol. Those requests and answers are RAM-only and excluded from
-snapshots, SQLite, APNs, accessory BLE and diagnostics. A request belongs to one
-live hook connection for at most ten minutes; disconnect, provider disable,
-source shutdown or pairing changes invalidate it. Submission receipts confirm
+Requests and answers are RAM-only and excluded from snapshots, SQLite, APNs,
+accessory BLE and diagnostics. Codex desktop requests use private versioned IPC
+and belong to the existing native owner until resolution or disconnect; this
+does not attach to CLI sessions. Async question replies use native steering,
+whose follower interface does not expose a caller-supplied turn fence.
+Claude main-session requests compete at PermissionRequest for at most ten minutes.
+Its hook omits native request IDs and the exact native menu. Local approval can
+leave a remote card pending until tool completion; completion withdraws the
+matching scope and prevents late publication. Indistinguishable identical inputs
+remain native for the rest of that turn. These integration limits remain open.
+Provider disable,
+source shutdown or pairing changes invalidate remote cards. Submission receipts confirm
 Paceman acceptance, not agent consumption. Responses are never retried
 automatically. Backgrounding clears forms; uncertain submissions require an
 explicit identical retry. Watch content travels only through live

@@ -493,11 +493,14 @@ Implementations: [source API](../service/hub.py),
 
 ## Pending interactions
 
-Current agent sources omit `interactionsEnabled`. This contract serves older
-computers and synthetic tests. Approval content v2 adds `contentVersion: 2`,
+Mac sources advertise `interactionsEnabled` for supported live native requests.
+Approval content v2 adds `contentVersion: 2`,
 `approval`, and ordered `responseOptions: [{id, label}]`; `detail` is empty.
 `approval` contains `toolName`, optional `workingDirectory` and `reason`, complete
 serialized `inputJSON`, normalized `action`, and `hasAdditionalInput`.
+Optional `inputKind` distinguishes complete `toolInput` (default), an
+`approvalRequest`, and a `providerPreview`. Optional `displayText` is provider
+presentation; it never replaces `inputJSON` or determines the approved action.
 
 | Action kind | Fields |
 | --- | --- |
@@ -529,7 +532,7 @@ it provide activity only. Both endpoints use the paired bearer credential.
   Requests contain `requestID`, `version: 1`, provider, canonical hashed `sessionID`,
   kind (`approval` or `question`), title, detail, questions, and monotonic
   `remainingSeconds`. Questions contain `id`, `prompt`, `multiple`, and `options`
-  with label/description. Request IDs identify hook invocations, not tools or titles.
+  with label/description. Request IDs identify live invocations, not tools or titles.
   Provider identifiers are extensible ASCII namespaces, not a two-provider enum;
   enabled providers remain an adapter-owned capability. Native tool names are
   interpreted only within their provider's documented schema.
@@ -540,8 +543,8 @@ it provide activity only. Both endpoints use the paired bearer credential.
   Indices refer to the immutable options of that exact request/version.
   First valid response wins; identical retries
   return the same `submitted` receipt. Stale requests or conflicting retries return
-  409. A receipt confirms submission, not agent consumption. Release resumes native
-  handling without a decision. Access invalidation changes the broker generation.
+  409. A receipt confirms submission, not agent consumption. Release relinquishes
+  the remote card without deciding the native request. Access invalidation changes the broker generation.
 
 The separate private socket accepts newline JSON `{request, timeoutSeconds}` and
 returns one action/answers object. For v2 ingress, `approval.input` is the complete

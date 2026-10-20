@@ -2,7 +2,7 @@
 
 Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, groups tasks across computers by attention and activity, and forwards current activity to compatible Bluetooth accessories.
 
-Activity updates carry task identity and state, plus available titles, project labels and Codex usage. Agent hooks send lifecycle metadata only; questions, answers and tool arguments remain in the source agent.
+Activity updates carry task identity and state, plus available titles, project labels and Codex usage. Activity hooks send lifecycle metadata; live request content uses private response endpoints and remains in memory.
 
 Individual session rows include an optional provider title. Codex titles come from metadata-only App Server reads; Claude titles come from explicit local `custom-title` / `ai-title` records. Prompt previews are never used as titles. Titles travel over private HTTPS to the phone and, on compatible Pebble firmware, owner-authenticated BLE; APNs activity payloads stay aggregate.
 
@@ -62,8 +62,10 @@ are in [data lifecycle](data-lifecycle.md).
 
 ## Questions and approvals
 
-Agent sources observe attention; questions and approvals stay native. Mac setup
-removes retired blocking hooks. Phone and Watch direct users to the agent. See
+The Mac mirrors supported requests from Codex's existing desktop owner through
+versioned IPC, and competes with Claude's native main-session PermissionRequest.
+Native prompts remain available; unsupported interactions continue there. Setup
+removes PreToolUse interceptors. See
 [interaction lifecycle](data-lifecycle.md#questions-and-approvals).
 
 ## iPhone Activity
