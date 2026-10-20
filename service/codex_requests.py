@@ -7,6 +7,7 @@ from copy import deepcopy
 import hashlib
 import json
 import uuid
+from service.interaction_content import codex_terminal_input
 
 
 def session_key(session):
@@ -88,10 +89,12 @@ def decode_request(session, request, items=()):
     if method not in ("item/commandExecution/requestApproval", "item/fileChange/requestApproval"):
         return None
     tool = "commandExecution" if method == "item/commandExecution/requestApproval" else "fileChange"
-    # Stdin approval's command field describes the parent, not the input being
-    # approved. Keep this native until its actual input is available.
+    terminal = None
     if tool == "commandExecution" and params.get("kind", "command") != "command":
-        return None
+        terminal = codex_terminal_input(params)
+        if terminal is None:
+            return None
+        tool = "write_stdin"
     original = deepcopy(params)
     if tool == "fileChange":
         item = next((i for i in items if i.get("id") == params.get("itemId")
@@ -100,6 +103,8 @@ def decode_request(session, request, items=()):
             return None  # Never offer a blind approval with no patch to review.
         original["changes"] = deepcopy(item["changes"])
     decisions = params.get("availableDecisions")
+    if terminal and decisions is None:
+        return None
     if decisions is None:
         # These are the protocol's legacy decision sets, not guessed labels
         # extracted from the command or a permission description.
@@ -132,6 +137,13 @@ def decode_request(session, request, items=()):
         mapped[key] = deepcopy(decision)
         choices.append(dict(id=key, label=label))
     approval = dict(toolName=tool, input=original, inputKind="approvalRequest")
+    if terminal:
+        parent = next((i for i in items if i.get("type") == "commandExecution"
+                       and i.get("id") == params.get("itemId")
+                       and str(i.get("processId")) == str(terminal["session_id"])
+                       and isinstance(i.get("command"), str)), None)
+        if parent:
+            approval["terminalContext"] = dict(sessionID=terminal["session_id"], command=parent["command"])
     if isinstance(params.get("cwd"), str):
         approval["workingDirectory"] = params["cwd"]
     if isinstance(params.get("reason"), str):
@@ -142,7 +154,7 @@ def decode_request(session, request, items=()):
     def answer(response):
         if response["action"] != "choose" or response["optionID"] not in mapped:
             return None
-        target = ("thread-follower-command-approval-decision" if tool == "commandExecution"
+        target = ("thread-follower-command-approval-decision" if tool in ("commandExecution", "write_stdin")
                   else "thread-follower-file-approval-decision")
         return target, {"decision": mapped[response["optionID"]]}
     return public, answer

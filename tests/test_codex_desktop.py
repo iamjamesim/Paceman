@@ -1,4 +1,5 @@
 import json
+import shlex
 import socket
 import struct
 import tempfile
@@ -262,6 +263,40 @@ class DesktopRequestTests(unittest.TestCase):
         self.assertEqual(handle.public["approval"]["action"]["text"], "a.py\n-old\n+new")
         raw = command(); raw["params"]["kind"] = "writeStdin"
         self.assertIsNone(decode_request(SESSION, raw))
+
+    def test_native_terminal_approval_decodes_exact_input_without_changing_reply(self):
+        for text, operation in [('\x03\x03', 'interrupt'), ('', 'poll'),
+                                ('say "hi"; $(literal)\n日本語\\\'', 'write')]:
+            with self.subTest(text=text):
+                raw = command()
+                raw['params'].update(kind='writeStdin', approvalId='callback',
+                    command=shlex.join(['write_stdin', '--session-id', '35467', text]),
+                    availableDecisions=['accept', 'cancel'])
+                public, encode = decode_request(SESSION, raw, [dict(type='commandExecution', id='item',
+                    processId='35467', command='xcodebuild test')])
+                handle = self.broker.publish_live(public)
+                action = handle.public['approval']['action']
+                self.assertEqual(action['text'], text)
+                self.assertEqual(action['operation'], operation)
+                self.assertEqual(action['terminalSessionID'], '35467')
+                self.assertEqual(action['parentCommand'], 'xcodebuild test')
+                self.assertEqual(json.loads(handle.public['approval']['inputJSON']), raw['params'])
+                self.assertEqual(encode(dict(action='choose', optionID='decision-0')),
+                    ('thread-follower-command-approval-decision', {'decision': 'accept'}))
+                self.broker.withdraw(handle)
+
+    def test_native_terminal_format_does_not_guess_unknown_argv_or_parent(self):
+        for value in ['write_stdin --session-id 3', 'write_stdin --session-id x text',
+                      'write_stdin --session-id 3 text extra', 'write_stdin --session-id 3 \"unterminated',
+                      'python3 -c parent']:
+            raw = command(); raw['params'].update(kind='writeStdin', command=value)
+            self.assertIsNone(decode_request(SESSION, raw))
+        raw = command()
+        raw['params'].update(kind='writeStdin', command="write_stdin --session-id 3 text")
+        public, _ = decode_request(SESSION, raw, [dict(type='commandExecution', id='item',
+            processId='4', command='different parent')])
+        handle = self.broker.publish_live(public)
+        self.assertNotIn('parentCommand', handle.public['approval']['action'])
 
 
 class NativeSocketTests(unittest.TestCase):

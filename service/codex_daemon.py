@@ -183,10 +183,11 @@ class DaemonRequests:
                     self._reset()
 
     def _item(self, session, item):
-        if item.get('type') == 'fileChange' and isinstance(item.get('id'), str):
+        if item.get('type') in ('fileChange', 'commandExecution') and isinstance(item.get('id'), str):
             if len(self.items[session]) >= 64 and item['id'] not in self.items[session]:
                 raise ValueError('too many native review items')
-            self.items[session][item['id']] = deepcopy(item)
+            fields = ('id', 'type', 'changes') if item['type'] == 'fileChange' else ('id', 'type', 'command', 'processId')
+            self.items[session][item['id']] = {k: deepcopy(item[k]) for k in fields if k in item}
 
     def _resolve(self, key):
         self.requests.pop(key, None)

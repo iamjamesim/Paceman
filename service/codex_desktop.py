@@ -25,6 +25,7 @@ STREAM_VERSION = 11
 
 def _item(value):
     fields = {"fileChange": ("id", "type", "changes"),
+              "commandExecution": ("id", "type", "command", "processId"),
               "agentMessage": ("id", "type", "questions"),
               "userInputResponse": ("id", "type", "completed", "requestId"),
               "userMessage": ("type", "content"),
@@ -373,7 +374,7 @@ class DesktopRequests:
                     transform = lambda v: [_item(i) for i in v]
                 elif len(rest) == 2:
                     transform = _item
-                elif rest[2] not in ("id", "type", "changes", "questions", "completed", "requestId", "content", "input", "status"):
+                elif rest[2] not in ("id", "type", "changes", "questions", "completed", "requestId", "content", "input", "status", "command", "processId"):
                     return
         parent = state
         for key in path[:-1]:

@@ -5,6 +5,31 @@ extensions remain complete JSON; field names alone never identify display data.
 """
 from copy import deepcopy
 import json
+import shlex
+
+
+def codex_terminal_input(value):
+    """Decode Codex's writeStdin argv serialized with shlex_join.
+
+    core/tools/approvals.rs constructs exactly
+    [write_stdin, --session-id, process_id, input]. The explicit approval kind,
+    not a command-name guess, distinguishes this from executing a command.
+    """
+    if not isinstance(value, dict) or value.get("kind") != "writeStdin":
+        return None
+    command = value.get("command")
+    if not isinstance(command, str) or len(command) > 32768:
+        return None
+    try:
+        argv = shlex.split(command, posix=True)
+        if len(argv) != 4 or argv[:2] != ["write_stdin", "--session-id"]:
+            return None
+        process = int(argv[2])
+        if not 0 <= process < 2**31 or str(process) != argv[2]:
+            return None
+    except ValueError:
+        return None
+    return dict(session_id=process, chars=argv[3])
 
 
 def _json_value(value):
@@ -38,6 +63,10 @@ def normalize_approval(provider, value):
     result = dict(deepcopy(value), action={"kind": "tool"}, inputJSON=encoded, hasAdditionalInput=False)
     original = result.pop("input")
     fields = original if isinstance(original, dict) else {}
+    if provider == "codex" and tool == "write_stdin" and value.get("inputKind") == "approvalRequest":
+        fields = codex_terminal_input(original)
+        if fields is None:
+            raise ValueError("invalid native terminal approval")
     consumed = set()
     action = result["action"]
     context = result.pop("terminalContext", None)
