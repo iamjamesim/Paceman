@@ -417,7 +417,9 @@ class MacSource:
                 if command.get("hook") == "PostToolUse":
                     approval_cleared = self._resolve_approval(key, command.get("attentionKey"), tool_id)
                 if event in ("completed", "interrupted"):
-                    self.native_attention.pop(key, None)
+                    native = self.native_attention.get(key)
+                    if event != 'completed' or native != (turn, 'planImplementation'):
+                        self.native_attention.pop(key, None)
                     self._clear_approvals(key)
                     self.resolved_approval_tools.pop(key, None)
                 question_cleared = False
