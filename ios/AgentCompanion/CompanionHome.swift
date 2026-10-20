@@ -321,8 +321,8 @@ struct CompanionWork: View {
                 if hasComputerFilters && typeSize.isAccessibilitySize { computerFilters }
                 if model.pairedSources.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Your work, wherever it runs").companionText(.title, theme: theme)
-                        Text("Connect your computer to follow Codex and Claude sessions here.")
+                        Text("Take your agents for a walk.").companionText(.title, theme: theme)
+                        Text("Follow Codex and Claude Code activity, wherever you go.")
                             .companionText(.body, theme: theme)
                         Button(action: connectComputer) {
                             Text("Connect a computer").font(CompanionTextRole.button.font)
