@@ -592,6 +592,7 @@ class Handler(BaseHTTPRequestHandler):
             snapshot = self.server.store.snapshot()
             if self.server.interactions is not None:
                 snapshot["interactionsEnabled"] = True
+                snapshot["interactionContentVersion"] = 4
             self.reply(200, snapshot)
             self.server.store.client_fetched(token)
             if self.server.desktop_status is not None:

@@ -385,13 +385,15 @@ final class InteractionTests: XCTestCase {
     }
 
     private func refreshSnapshot(_ source: PairedSource, revision: Int = 1,
-                                 state: String = "working", interactions: Bool = false) -> Data {
-        try! JSONSerialization.data(withJSONObject: [
+                                 state: String = "working", interactions: Bool = false, contentVersion: Int? = nil) -> Data {
+        var value: [String: Any] = [
             "schema": 1, "sourceID": source.sourceID, "generation": source.sourceID,
             "revision": revision, "eventID": String(revision), "sourceName": "Test",
             "observedAt": Date().timeIntervalSince1970, "changedAt": Date().timeIntervalSince1970,
             "freshFor": 30, "state": state, "interactionsEnabled": interactions,
-            "sessions": [["id": String(repeating: "a", count: 64), "provider": "claude", "state": state]]])
+            "sessions": [["id": String(repeating: "a", count: 64), "provider": "claude", "state": state]]]
+        value["interactionContentVersion"] = contentVersion
+        return try! JSONSerialization.data(withJSONObject: value)
     }
 
     @MainActor func testSlowFirstComputerDoesNotDelayOtherComputerOrItsNextRefresh() async throws {
@@ -2256,6 +2258,40 @@ extension InteractionTests {
         XCTAssertNil(unmatched["data"], "A response form must match the exact task identity")
     }
 
+    @MainActor func testNewPhonePreservesStructuredApprovalsFromOlderSources() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://source-versions.example")!, sourceID: sourceID,
+            clientID: "client", credential: "fixture")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let client = SourceClient(configuration: config)
+        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+            sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow Edit?", detail: "",
+            questions: [], remainingSeconds: 60, contentVersion: 2, approval: ApprovalPreviewFixtures.file(true),
+            responseOptions: ApprovalPreviewFixtures.choices)
+        var listing = fixture()
+        listing["requests"] = [try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))]
+        for advertised: Int? in [nil, 2, 3, 4, 7] {
+            let expected = min(advertised ?? 3, InputRequest.maximumContentVersion)
+            InteractionURLProtocol.start = { transport in
+                XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), String(expected))
+                var compatible = listing
+                // The older source treats an unknown capability as legacy-only.
+                if advertised == nil && transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version") != "3" {
+                    compatible["requests"] = []
+                }
+                transport.finish(try! JSONSerialization.data(withJSONObject: compatible))
+            }
+            let inbox = InteractionInbox(client: client)
+            inbox.setForeground(true)
+            let snapshot = try JSONDecoder().decode(Snapshot.self, from: refreshSnapshot(source,
+                state: "needs_input", interactions: true, contentVersion: advertised))
+            await inbox.refresh(source, snapshot: snapshot, client: client)
+            XCTAssertEqual(inbox.items.first?.request, request, "A phone update must not hide an older source's approval")
+            inbox.setForeground(false)
+        }
+        InteractionURLProtocol.start = nil
+    }
+
     @MainActor func testContentProfilesRequireWatchCapabilityAndSourceNegotiation() async throws {
         for version in [2, 3, 4] {
             let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
@@ -2279,7 +2315,7 @@ extension InteractionTests {
             InteractionURLProtocol.start = { transport in
                 Task { @MainActor in
                     if transport.request.url?.path == "/v1/snapshot" {
-                        transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                        transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true, contentVersion: 4))
                     } else {
                         XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), "4")
                         transport.finish(listing)

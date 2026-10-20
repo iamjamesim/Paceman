@@ -1199,7 +1199,7 @@ extension CompanionModel {
                 }
                 let confirmed = watchConfirmed
                 let inboxConfirmed = Set(interactions.responses.filter { $0.value.phase == .submitted }.keys)
-                let requests = try await client.inputRequests(source)
+                let requests = try await client.inputRequests(source, contentVersion: snapshot.interactionContentVersion)
                 guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID),
                       snapshots[sourceID]?.identity == snapshot.identity,
                       snapshot.sessions?.contains(where: { $0.id == sessionID && $0.provider == provider }) == true else {

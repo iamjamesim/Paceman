@@ -33,6 +33,7 @@ struct Snapshot: Codable {
     var allowances: [CodexAllowance]? = nil
     var configuredProviders: [String]? = nil
     var interactionsEnabled: Bool? = nil
+    var interactionContentVersion: Int? = nil
     var usageReadings: [CodexAllowance] {
         var values: [CodexAllowance] = []
         for value in (allowances ?? allowance.map { [$0] } ?? []).filter({ $0.valid }) {
@@ -42,7 +43,7 @@ struct Snapshot: Codable {
         }
         return values
     }
-    enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, observedAt, changedAt, freshFor, state, eventID, sessions, allowance, allowances, configuredProviders, interactionsEnabled }
+    enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, observedAt, changedAt, freshFor, state, eventID, sessions, allowance, allowances, configuredProviders, interactionsEnabled, interactionContentVersion }
     var identity: String { "\(sourceID)/\(generation)/\(eventID)" }
     var activityFreshUntil: Double { observedAt + MonitoringActivity.displayLeaseDuration }
 
@@ -494,6 +495,7 @@ extension Snapshot {
         } else { allowances = nil }
         configuredProviders = (try? c.decode([String].self, forKey: .configuredProviders))?.filter { ["codex", "claude"].contains($0) }
         interactionsEnabled = try? c.decode(Bool.self, forKey: .interactionsEnabled)
+        interactionContentVersion = try? c.decode(Int.self, forKey: .interactionContentVersion)
     }
 }
 

@@ -222,7 +222,7 @@ struct InputResponseState {
         revisions[source.sourceID, default: 0] += 1
         let revision = revisions[source.sourceID, default: 0]
         do {
-            let value = try await client.inputRequests(source)
+            let value = try await client.inputRequests(source, contentVersion: snapshot.interactionContentVersion)
             guard active, expectedEpoch == epoch, revision == revisions[source.sourceID, default: 0], !Task.isCancelled else { return nil }
             if let previous = brokerGenerations[source.sourceID], previous != value.generation {
                 responses = responses.filter { $0.value.item.source.sourceID != source.sourceID }

@@ -70,6 +70,7 @@ class InteractionHTTPTests(unittest.TestCase):
         self.assertEqual(pending.response, {'action': 'choose', 'optionID': 'session'})
 
     def test_approval_confirmation_requires_a_capable_client(self):
+        self.assertEqual(self.call('GET', '/v1/snapshot')[1]['interactionContentVersion'], 4)
         from tests.test_interaction_content import request
         raw = request()
         raw['contentVersion'] = 4

@@ -531,6 +531,8 @@ compatibility decoder. Display excerpts never replace the complete input.
 
 Snapshot `interactionsEnabled: true` advertises these endpoints; sources that omit
 it provide activity only. Both endpoints use the paired bearer credential.
+`interactionContentVersion` advertises the source maximum; clients cap requests
+to it, using v3 when absent for compatibility with older sources.
 
 - `GET /v1/interactions`: returns `sourceID`, broker `generation`, and `requests`.
   Optional `awaitingRequestIDs` lists submitted requests still tracked by the
