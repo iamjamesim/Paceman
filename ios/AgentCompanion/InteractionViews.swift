@@ -65,7 +65,7 @@ struct InteractionDetail: View {
                         Text(validationMessage).companionText(.body, theme: theme)
                     }
                     if !sent && !sending && !retryable && !editable && message == nil {
-                        Text("This request is no longer available. Continue on your computer.").companionText(.body, theme: theme)
+                        Text("This request is no longer available. \(ResponseGuidance.continuation(for: item.request.provider)).").companionText(.body, theme: theme)
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, CompanionLayout.pageInset)

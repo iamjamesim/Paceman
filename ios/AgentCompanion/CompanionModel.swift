@@ -23,7 +23,11 @@ final class CompanionModel: ObservableObject {
     private(set) var canForgetAfterRemovalFailure = false
     private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
     private let client: SourceClient
+    private let refreshUptime: () -> TimeInterval
+    private let appleWatchIdentity: () -> String?
     private let push: PushCoordinator
+    private let postHandoffNotification: @MainActor (UUID) async -> Bool
+    private let clearHandoffNotification: @MainActor (UUID) -> Void
     private let pairedStore = PairedSourcesStore()
     private let savePairedSources: ([PairedSource]) throws -> Void
     private var polling: Task<Void, Never>?
@@ -38,6 +42,9 @@ final class CompanionModel: ObservableObject {
         let task: Task<Void, Never>
     }
     private var sourceRefreshes: [String: SourceRefresh] = [:]
+    private var watchFetchAssertions: [UUID: UIBackgroundTaskIdentifier] = [:]
+    private var watchNextFetch: [String: TimeInterval] = [:]
+    private var sourceFailures: [String: Int] = [:]
     private var requestRefreshes: [String: RequestRefresh] = [:]
     private var monitoringRefresh: Task<Void, Never>?
     private var monitoringRefreshPending = false
@@ -52,14 +59,36 @@ final class CompanionModel: ObservableObject {
     private var watchRefreshCallers = 0
     private var fetchedUptimes: [String: TimeInterval] = [:]
     private var changeObserver: AnyCancellable?
+    private var interactionObserver: AnyCancellable?
     private var weatherObservers: [String: AnyCancellable] = [:]
     private var lastWatchRelayRequested = false
+    private var watchRequests: [String: PendingInput] = [:]
+    private var watchSubmissions: [String: InputSubmission] = [:]
+    private var watchConfirmed: Set<String> = []
+    private var watchRejected: Set<String> = []
+    private let workProjectionGeneration = UUID().uuidString
+    private var workProjectionRevision: UInt64 = 0
+    private var previousWorkProjection: WatchWorkSnapshot?
+    private var watchTracking: [String: (generation: String, state: ActivityState?, active: Bool)] = [:]
 
     init(preview: Bool = false, push: PushCoordinator? = nil, client: SourceClient = SourceClient(),
-         savePairedSources: (([PairedSource]) throws -> Void)? = nil) {
+         savePairedSources: (([PairedSource]) throws -> Void)? = nil,
+         refreshUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         appleWatchIdentity: @escaping () -> String? = { AppleWatchAllowanceBridge.shared.taskHandoffIdentity },
+         postHandoffNotification: (@MainActor (UUID) async -> Bool)? = nil,
+         clearHandoffNotification: (@MainActor (UUID) -> Void)? = nil) {
         self.client = client
+        self.refreshUptime = refreshUptime
+        self.appleWatchIdentity = appleWatchIdentity
         self.interactions = InteractionInbox(client: client)
-        self.push = push ?? .shared
+        let notificationSender = push ?? .shared
+        self.push = notificationSender
+        self.postHandoffNotification = postHandoffNotification ?? { id in
+            await notificationSender.postHandoffNotification(id)
+        }
+        self.clearHandoffNotification = clearHandoffNotification ?? { id in
+            notificationSender.clearHandoffNotification(id)
+        }
         self.savePairedSources = savePairedSources ?? PairedSourcesStore().save
         designPreview = preview
         accessories = WatchAccessories(preview: preview)
@@ -170,6 +199,11 @@ final class CompanionModel: ObservableObject {
             Task { @MainActor in await self?.refreshAll(fromWatch: true) }
         }
         if !preview {
+            AppleWatchAllowanceBridge.shared.onWatchStateChanged = { [weak self] in self?.presentStoredHandoff() }
+            AppleWatchAllowanceBridge.shared.onWorkMessage = { [weak self] message in
+                guard let self else { return ["error": "Open Paceman on iPhone to connect."] }
+                return await self.handleWatchWork(message)
+            }
             AppleWatchAllowanceBridge.shared.onWatchPushToken = { [weak self] token, environment, usageSchema, multipleSources in
                 guard let self,
                       Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String == environment else { return }
@@ -192,6 +226,15 @@ final class CompanionModel: ObservableObject {
             self.forwardWatchAggregate()
         }
         forwardWatchAggregate()
+        interactionObserver = interactions.objectWillChange.sink { [weak self] _ in
+            // Published values change after this notification. Read the completed
+            // projection on the next main-actor turn, then send a content-free hint.
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.objectWillChange.send()
+                self.publishWatchWork()
+            }
+        }
         if !preview { monitoring.configure(sources: pairedSources) }
         changeObserver = accessories.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
@@ -209,6 +252,27 @@ final class CompanionModel: ObservableObject {
                 }
             }
         }
+        #if DEBUG
+        if preview, ProcessInfo.processInfo.arguments.contains("--watch-handoff-review") {
+            let source = PairedSource(endpoint: URL(string: "https://watch-review.invalid")!,
+                sourceID: "preview", clientID: "preview", credential: "preview")
+            let now = Date().timeIntervalSince1970
+            pairedSources = [source]
+            snapshots = [source.sourceID: Snapshot(schema: 1, sourceID: source.sourceID, generation: "preview", revision: 7,
+                sourceName: "Watch review Mac", observedAt: now, changedAt: now, freshFor: 300, state: .needsInput,
+                eventID: "review", allowance: nil,
+                sessions: [AgentSession(id: "review-question", provider: "claude", state: .needsInput,
+                    name: "Review Watch continuation", project: "Paceman")], interactionsEnabled: true)]
+            lastContacts = [source.sourceID: Date()]
+            fetchedUptimes[source.sourceID] = refreshUptime()
+            interactions.previewReview(source)
+            AppleWatchAllowanceBridge.shared.onWorkMessage = { [weak self] message in
+                await self?.handleWatchWork(message) ?? ["error": "Reopen the review app on iPhone."]
+            }
+            AppleWatchAllowanceBridge.shared.onWatchStateChanged = { [weak self] in self?.presentStoredHandoff() }
+            forwardWatchAggregate()
+        }
+        #endif
         if !preview { Diagnostics.shared.record("app_launched") }
     }
 
@@ -311,6 +375,7 @@ final class CompanionModel: ObservableObject {
                 selectionRevision: usageSelectionRevision, sourceID: sourceID, observedAt: watchUsageSource?.observedAt,
                 clear: sourceIDs.isEmpty, sourceIDs: sourceIDs,
                 snapshots: sourceIDs.compactMap { snapshots[$0] })
+            AppleWatchAllowanceBridge.shared.workDidChange(watchWorkSnapshot())
         }
     }
 
@@ -461,6 +526,7 @@ final class CompanionModel: ObservableObject {
 
     func setForeground(_ value: Bool) {
         guard foreground != value else { return }
+        if !value { preserveWatchResponses() }
         foreground = value
         interactions.setForeground(value)
         for link in accessories.links {
@@ -493,6 +559,7 @@ final class CompanionModel: ObservableObject {
     }
 
     private func syncWatchPush() async {
+        guard !designPreview else { return }
         if watchPushSyncing { watchPushSyncPending = true; return }
         guard let token = Vault.load(String.self, key: "watch-apns-device-token"),
               let environment = Bundle.main.object(forInfoDictionaryKey: "APNSEnvironment") as? String else { return }
@@ -558,7 +625,13 @@ final class CompanionModel: ObservableObject {
 
     private func startRefresh(_ paired: PairedSource, fromPush: Bool = false,
                               fromWatch: Bool = false) -> Task<UIBackgroundFetchResult, Never>? {
+        #if DEBUG
+        if designPreview, ProcessInfo.processInfo.arguments.contains("--watch-handoff-review") { return nil }
+        #endif
         guard !busy else { return nil }
+        // Foreground cadence is the sole status owner while the phone is open.
+        // Watch demand only reads that projection; it never promotes its poll.
+        if fromWatch && foreground { return nil }
         let backgroundOwned = fromPush || fromWatch
         if let current = sourceRefreshes[paired.sourceID] {
             // A platform callback can join a foreground poll. Its ownership
@@ -566,9 +639,11 @@ final class CompanionModel: ObservableObject {
             if backgroundOwned { sourceRefreshes[paired.sourceID]?.backgroundOwned = true }
             return current.task
         }
+        if fromWatch, refreshUptime() < watchNextFetch[paired.sourceID, default: 0] { return nil }
         let id = UUID()
         let task = Task { [weak self] in
             guard let self, !Task.isCancelled else { return UIBackgroundFetchResult.noData }
+            defer { self.endWatchFetchAssertion(id) }
             let result = await self.refreshOne(paired, fromPush: fromPush)
             if self.sourceRefreshes[paired.sourceID]?.id == id {
                 self.sourceRefreshes.removeValue(forKey: paired.sourceID)
@@ -576,7 +651,22 @@ final class CompanionModel: ObservableObject {
             return result
         }
         sourceRefreshes[paired.sourceID] = SourceRefresh(id: id, task: task, backgroundOwned: backgroundOwned)
+        if fromWatch {
+            watchFetchAssertions[id] = UIApplication.shared.beginBackgroundTask(withName: "Watch source refresh") { [weak self] in
+                guard let self else { return }
+                if self.sourceRefreshes[paired.sourceID]?.id == id {
+                    self.sourceRefreshes.removeValue(forKey: paired.sourceID)?.task.cancel()
+                }
+                self.endWatchFetchAssertion(id)
+            }
+        }
         return task
+    }
+
+    private func endWatchFetchAssertion(_ id: UUID) {
+        if let assertion = watchFetchAssertions.removeValue(forKey: id), assertion != .invalid {
+            UIApplication.shared.endBackgroundTask(assertion)
+        }
     }
 
     private func refreshOne(_ paired: PairedSource, fromPush: Bool) async -> UIBackgroundFetchResult {
@@ -585,6 +675,7 @@ final class CompanionModel: ObservableObject {
         let previousIdentity = snapshots[sourceID]?.identity
         let recovering = errors[sourceID] != nil || snapshots[sourceID] == nil
         let started = ProcessInfo.processInfo.systemUptime
+        watchNextFetch[sourceID] = refreshUptime() + 5
         Diagnostics.shared.record(fromPush ? "push_triggered_fetch" : "foreground_fetch", sourceID: sourceID)
         do {
             let value = try await client.snapshot(paired)
@@ -599,7 +690,10 @@ final class CompanionModel: ObservableObject {
                 sourceName: value.sourceName, host: paired.endpoint.host)
             let nameChanged = MonitoringComputerName.storedName(sourceID: sourceID) != displayName
             if nameChanged { MonitoringComputerName.save(displayName, for: sourceID) }
+            reconcileWatchRequests(value)
             snapshots[sourceID] = value
+            sourceFailures.removeValue(forKey: sourceID)
+            watchNextFetch[sourceID] = refreshUptime() + 5
             interactions.reconcile(value)
             let receivedAt = Date()
             lastContacts[sourceID] = receivedAt
@@ -622,6 +716,9 @@ final class CompanionModel: ObservableObject {
             return value.identity == previousIdentity ? .noData : .newData
         } catch {
             guard epoch == sourceEpoch, !Task.isCancelled else { return .noData }
+            sourceFailures[sourceID, default: 0] += 1
+            watchNextFetch[sourceID] = refreshUptime()
+                + min(60, 5 * pow(2, Double(min(sourceFailures[sourceID, default: 1] - 1, 4))))
             requestRefreshes.removeValue(forKey: sourceID)?.task.cancel()
             sourceFailed(error, sourceID: sourceID)
             Diagnostics.shared.recordError("source_fetch_failed", error: error, sourceID: sourceID,
@@ -640,6 +737,11 @@ final class CompanionModel: ObservableObject {
         let task = Task { [weak self] in
             guard let self, !Task.isCancelled else { return }
             await self.interactions.refresh(paired, snapshot: snapshot, client: self.client)
+            if !Task.isCancelled, self.requestRefreshes[sourceID]?.id == id,
+               self.interactions.availability[sourceID] == .available {
+                self.reconcileWatchListing(sourceID: sourceID, pending: self.interactions.items)
+                self.publishWatchWork()
+            }
             if self.requestRefreshes[sourceID]?.id == id {
                 self.requestRefreshes.removeValue(forKey: sourceID)
             }
@@ -650,6 +752,7 @@ final class CompanionModel: ObservableObject {
     private func cancelSourceRefreshes(includingBackground: Bool = true) {
         for (sourceID, refresh) in sourceRefreshes where includingBackground || !refresh.backgroundOwned {
             refresh.task.cancel()
+            endWatchFetchAssertion(refresh.id)
             sourceRefreshes.removeValue(forKey: sourceID)
         }
         requestRefreshes.values.forEach { $0.task.cancel() }
@@ -658,10 +761,20 @@ final class CompanionModel: ObservableObject {
 
     private func invalidateRefreshes() {
         sourceEpoch = UUID()
+        watchRequests.removeAll()
+        watchSubmissions.removeAll()
+        watchConfirmed.removeAll()
+        watchRejected.removeAll()
+        watchTracking.removeAll()
+        watchNextFetch.removeAll()
+        sourceFailures.removeAll()
         cancelSourceRefreshes()
     }
 
     private func scheduleMonitoringRefresh() {
+        // Preview models exercise source transport without registering real Live
+        // Activities or sending their fixtures to the notification service.
+        guard !designPreview else { return }
         monitoringRefreshPending = true
         guard monitoringRefresh == nil else { return }
         monitoringRefresh = Task { [weak self] in
@@ -701,6 +814,141 @@ final class CompanionModel: ObservableObject {
 }
 
 extension CompanionModel {
+    private func publishWatchWork() {
+        AppleWatchAllowanceBridge.shared.workDidChange(watchWorkSnapshot())
+    }
+
+    private func trackedWatchRequests(for id: WorkIdentity) -> [PendingInput] {
+        watchRequests.values.filter { item in
+            watchTracking[item.id]?.active == true && item.expiresAtUptime > ProcessInfo.processInfo.systemUptime
+                && item.source.sourceID == id.sourceID && item.request.sessionID == id.sessionID
+                && item.request.provider == id.provider && !isRevoked(id.sourceID)
+                && pairedSources.contains(where: { $0.sourceID == id.sourceID })
+        }
+    }
+
+    func watchPending(for id: WorkIdentity) -> PendingInput? {
+        guard errors[id.sourceID] == nil else { return nil }
+        return trackedWatchRequests(for: id).first { watchSubmissions[$0.id] == nil }
+    }
+
+    func watchDelivery(for id: WorkIdentity) -> InputDelivery? {
+        guard let item = trackedWatchRequests(for: id).first(where: { watchConfirmed.contains($0.id) }),
+              let submission = watchSubmissions[item.id] else { return nil }
+        return submission.action == "release" ? .released : .sent
+    }
+
+    private func reconcileWatchRequests(_ snapshot: Snapshot) {
+        for (id, observation) in watchTracking {
+            guard let item = watchRequests[id], item.source.sourceID == snapshot.sourceID else { continue }
+            if observation.generation != snapshot.generation || snapshot.interactionsEnabled != true {
+                watchTracking.removeValue(forKey: id)
+                watchRequests.removeValue(forKey: id)
+                watchSubmissions.removeValue(forKey: id)
+                watchConfirmed.remove(id)
+                watchRejected.remove(id)
+                continue
+            }
+            let state = snapshot.sessions?.first {
+                $0.id == item.request.sessionID && $0.provider == item.request.provider
+            }?.state
+            if state == nil || (state != observation.state && state != .needsInput) {
+                watchTracking[id] = (observation.generation, state, false)
+            } else { watchTracking[id] = (observation.generation, state, observation.active) }
+        }
+    }
+
+    private func reconcileWatchListing(sourceID: String, pending: [PendingInput]) {
+        for (id, _) in watchTracking {
+            guard let item = watchRequests[id], item.source.sourceID == sourceID else { continue }
+            let native = pending.first { $0.source.sourceID == sourceID
+                && $0.request.sessionID == item.request.sessionID && $0.request.provider == item.request.provider }
+            if let native {
+                if native.id != item.id || native.request.version != item.request.version { watchTracking[id]?.active = false }
+            } else if watchSubmissions[id] == nil { watchTracking[id]?.active = false }
+        }
+    }
+
+    private func rememberWatchRequest(_ item: PendingInput, snapshot: Snapshot) {
+        if let old = watchRequests[item.id], old.request.version != item.request.version {
+            watchSubmissions.removeValue(forKey: item.id)
+            watchConfirmed.remove(item.id)
+            watchRejected.remove(item.id)
+        }
+        let siblings = watchRequests.values.filter { $0.source.sourceID == item.source.sourceID
+            && $0.request.sessionID == item.request.sessionID && $0.request.provider == item.request.provider && $0.id != item.id }
+        for previous in siblings { watchTracking[previous.id]?.active = false }
+        watchRequests[item.id] = item
+        watchTracking[item.id] = (snapshot.generation, snapshot.sessions?.first {
+            $0.id == item.request.sessionID && $0.provider == item.request.provider
+        }?.state, watchTracking[item.id]?.active ?? true)
+    }
+
+    private func preserveWatchResponses() {
+        for (id, item) in watchRequests {
+            guard let response = interactions.response(for: item),
+                  response.submission.generation == item.generation, response.submission.valid(for: item.request),
+                  watchSubmissions[id] == nil || watchSubmissions[id] == response.submission else { continue }
+            switch response.phase {
+            case .submitted:
+                watchSubmissions[id] = response.submission
+                watchConfirmed.insert(id)
+            case .sending, .unconfirmed:
+                watchSubmissions[id] = response.submission
+            case .rejected:
+                watchRejected.insert(id)
+                watchTracking[id]?.active = false
+            }
+        }
+    }
+
+    private func watchWorkSnapshot() -> WatchWorkSnapshot {
+        preserveWatchResponses()
+        let sources = pairedSources.filter { !isRevoked($0.sourceID) }
+        let values = sources.flatMap { source -> [WatchWorkTask] in
+            guard let snapshot = snapshots[source.sourceID] else { return [] }
+            let name = ComputerPreferences.displayName(for: source.sourceID,
+                sourceName: snapshot.sourceName, host: source.endpoint.host)
+            let sessions: [AgentSession]
+            switch AgentFeedContent.resolve(snapshot) {
+            case .sessions(let values): sessions = values
+            case .summary(let state): sessions = [AgentSession(id: "aggregate", provider: "aggregate", state: state, name: "Agent activity")]
+            case .empty, .waiting: sessions = []
+            }
+            return sessions.prefix(32).map { session in
+                let item = WorkCatalog.item(session: session, source: source, model: self, inbox: interactions,
+                    computer: name, connected: connectionState(source.sourceID) == .current,
+                    current: isActivityCurrent(source.sourceID))
+                return WatchWorkTask(sourceID: source.sourceID, sessionID: session.id, provider: session.provider,
+                    title: session.title ?? session.displayName,
+                    computer: name, state: session.state.rawValue, freshUntil: snapshot.activityFreshUntil,
+                    presentationStatus: item.historical ? session.state.title : item.status,
+                    presentationGroup: item.phase.group.rawValue,
+                    project: session.detail.isEmpty ? nil : session.detail, observedAt: snapshot.observedAt,
+                    presentationSymbol: item.statusToken.symbol ?? "circle.dotted")
+            }
+        }
+        var result = WatchWorkSnapshot(tasks: Array(values.prefix(128)), computers: sources.count,
+            unavailable: sources.filter { !snapshotIsFresh($0.sourceID) || errors[$0.sourceID] != nil }.count,
+            sources: sources.map { source in
+                let snapshot = snapshots[source.sourceID]
+                return WatchWorkSource(sourceID: source.sourceID,
+                    name: ComputerPreferences.displayName(for: source.sourceID,
+                        sourceName: snapshot?.sourceName, host: source.endpoint.host),
+                    generation: snapshot?.generation, revision: snapshot?.revision,
+                    stateCounts: snapshot?.sessions.map { sessions in
+                        Dictionary(grouping: sessions, by: { $0.state.rawValue }).mapValues(\.count)
+                    })
+            })
+        if previousWorkProjection != result {
+            previousWorkProjection = result
+            workProjectionRevision &+= 1
+        }
+        result.projectionGeneration = workProjectionGeneration
+        result.projectionRevision = workProjectionRevision
+        return result
+    }
+
     private var storedHandoff: PendingWatchHandoff? {
         guard let data = UserDefaults.standard.data(forKey: handoffKey) else { return nil }
         return try? JSONDecoder().decode(PendingWatchHandoff.self, from: data)
@@ -708,9 +956,7 @@ extension CompanionModel {
 
     func handoffTarget(_ request: PendingWatchHandoff) -> (sourceID: String, computer: String, session: AgentSession)? {
         guard request.isCurrent(),
-              designPreview || accessories.links.contains(where: {
-                  $0.paired && $0.updatesEnabled && $0.preferenceID == request.watchID
-              }),
+              handoffOwnerIsCurrent(request),
               let source = pairedSources.first(where: { WatchWire.sourceIdentifier($0.sourceID) == request.source }),
               !revokedSources.contains(source.sourceID),
               let snapshot = snapshots[source.sourceID],
@@ -720,25 +966,41 @@ extension CompanionModel {
         return (source.sourceID, snapshot.sourceName, session)
     }
 
+    private func handoffOwnerIsCurrent(_ request: PendingWatchHandoff) -> Bool {
+        if request.appleWatch == true { return appleWatchIdentity() == request.watchID }
+        return designPreview || accessories.links.contains {
+            $0.paired && $0.updatesEnabled && $0.preferenceID == request.watchID
+        }
+    }
+
+    private func handoffIsCurrent(_ request: PendingWatchHandoff) -> Bool {
+        request.isCurrent() && handoffOwnerIsCurrent(request)
+            && (request.activityOnly == true || handoffTarget(request) != nil)
+    }
+
     func handoffNotificationIsCurrent(_ id: UUID) -> Bool {
-        storedHandoff.map { $0.id == id && handoffTarget($0) != nil } == true && !foreground
+        storedHandoff.map { $0.id == id && handoffIsCurrent($0) } == true && !foreground
     }
 
     private func receiveHandoff(_ request: WatchHandoffRequest, watchID: String) async -> WatchHandoffResult {
         let pending = PendingWatchHandoff(watchID: watchID, request: request)
-        guard handoffTarget(pending) != nil,
+        return await receiveHandoff(pending)
+    }
+
+    private func receiveHandoff(_ pending: PendingWatchHandoff) async -> WatchHandoffResult {
+        guard handoffIsCurrent(pending),
               let data = try? JSONEncoder().encode(pending) else { return .unavailable }
-        if let previous = storedHandoff { push.clearHandoffNotification(previous.id) }
+        if let previous = storedHandoff { clearHandoffNotification(previous.id) }
         UserDefaults.standard.set(data, forKey: handoffKey)
         if foreground {
             presentStoredHandoff()
             return .ready
         }
-        let notified = await push.postHandoffNotification(pending.id)
+        let notified = await postHandoffNotification(pending.id)
         // A foreground transition during notification scheduling should show the sheet
         // and remove the now-redundant notification, never interrupt twice.
-        guard storedHandoff?.id == pending.id, handoffTarget(pending) != nil else {
-            push.clearHandoffNotification(pending.id)
+        guard storedHandoff?.id == pending.id, handoffIsCurrent(pending) else {
+            clearHandoffNotification(pending.id)
             return .unavailable
         }
         if foreground {
@@ -751,31 +1013,52 @@ extension CompanionModel {
     func presentStoredHandoff(notificationID: String? = nil) {
         guard let pending = storedHandoff,
               notificationID == nil || pending.id.uuidString == notificationID else { return }
-        guard pending.isCurrent(),
-              let link = accessories.links.first(where: { $0.preferenceID == pending.watchID }),
-              link.updatesEnabled else {
+        if pending.appleWatch == true, !designPreview, appleWatchIdentity() == nil,
+           AppleWatchAllowanceBridge.shared.taskHandoffAvailable == nil { return }
+        if pending.appleWatch != true,
+           let link = accessories.links.first(where: { $0.preferenceID == pending.watchID }), !link.setupResolved { return }
+        guard handoffIsCurrent(pending) else {
             UserDefaults.standard.removeObject(forKey: handoffKey)
-            push.clearHandoffNotification(pending.id)
-            return
-        }
-        // AccessorySetupKit restores authorization asynchronously on cold launch.
-        // Defer until its callback resolves, rather than discarding a valid selection.
-        guard link.setupResolved else { return }
-        guard link.paired else {
-            UserDefaults.standard.removeObject(forKey: handoffKey)
-            push.clearHandoffNotification(pending.id)
+            clearHandoffNotification(pending.id)
+            if handoff?.id == pending.id { handoff = nil }
             return
         }
         guard foreground, handoff != pending else { return }
+        restoreWatchRequestForHandoff(pending)
         handoff = pending
-        push.clearHandoffNotification(pending.id)
+        clearHandoffNotification(pending.id)
+    }
+
+    private func restoreWatchRequestForHandoff(_ pending: PendingWatchHandoff) {
+        guard pending.appleWatch == true, let target = handoffTarget(pending),
+              errors[target.sourceID] == nil, snapshotIsFresh(target.sourceID) else { return }
+        let identity = WorkIdentity(sourceID: target.sourceID, sessionID: target.session.id, provider: target.session.provider)
+        guard let item = trackedWatchRequests(for: identity).first,
+              !watchConfirmed.contains(item.id), interactions.response(for: item) == nil else { return }
+        let current = interactions.items.first {
+            $0.source.sourceID == target.sourceID && $0.request.sessionID == target.session.id
+                && $0.request.provider == target.session.provider && interactions.isCurrent($0)
+        }
+        guard current == nil || (current?.id == item.id && current?.request.version == item.request.version) else { return }
+        // Request content stays in the existing RAM-only owner. Continuing on
+        // phone must not require a second fetch or turn an uncertain answer into
+        // a new submission. Never replace a newer phone form or receipt.
+        interactions.observeWatchRequest(item)
+        if let submission = watchSubmissions[item.id] {
+            interactions.observeWatchSubmission(item, submission: submission, phase: .unconfirmed)
+        }
     }
 
     func dismissHandoff() {
         guard let pending = handoff else { return }
         if pending.id == storedHandoff?.id { UserDefaults.standard.removeObject(forKey: handoffKey) }
         handoff = nil
-        push.clearHandoffNotification(pending.id)
+        clearHandoffNotification(pending.id)
+    }
+
+    func deferHandoff() {
+        // Preserve the opaque selection while an existing phone form is open.
+        handoff = nil
     }
 }
 
@@ -812,3 +1095,180 @@ extension CompanionModel {
     }
 }
 #endif
+
+extension CompanionModel {
+    /// Watch-initiated reads use background-owned fetches, without activating the
+    /// phone's foreground response inbox or placing sensitive content in a queue.
+    func handleWatchWork(_ message: [String: Any]) async -> [String: Any] {
+        func encoded<T: Encodable>(_ value: T) -> [String: Any] {
+            guard let data = try? JSONEncoder().encode(value), data.count <= 60_000 else {
+                return ["error": "Review this session on iPhone."]
+            }
+            return ["data": data]
+        }
+        let epoch = sourceEpoch
+        let uptime = ProcessInfo.processInfo.systemUptime
+        watchRequests = watchRequests.filter { _, item in
+            item.expiresAtUptime > uptime && !isRevoked(item.source.sourceID)
+                && pairedSources.contains(where: { $0.sourceID == item.source.sourceID })
+        }
+        watchSubmissions = watchSubmissions.filter { key, _ in watchRequests[key] != nil }
+        watchConfirmed = watchConfirmed.intersection(watchRequests.keys)
+        watchRejected = watchRejected.intersection(watchRequests.keys)
+        watchTracking = watchTracking.filter { watchRequests[$0.key] != nil }
+        do {
+            if let operation = message["operation"] as? String, ["tasks", "cachedTasks", "refreshTasks"].contains(operation) {
+                if operation != "cachedTasks" {
+                    let scope = message["sourceID"] as? String
+                    let tasks = pairedSources.filter { !isRevoked($0.sourceID) && (scope == nil || $0.sourceID == scope) }
+                        .compactMap { startRefresh($0, fromWatch: true) }
+                    // Ordinary list reads return immediately. The existing
+                    // source owner publishes each completed refresh independently.
+                    if operation == "tasks" { for task in tasks { _ = await task.value } }
+                }
+                guard !Task.isCancelled, epoch == sourceEpoch else { return ["error": "Connections changed. Refresh Activity."] }
+                return encoded(watchWorkSnapshot())
+            }
+            if message["operation"] as? String == "continueOnPhone" {
+                guard let watchID = appleWatchIdentity() else {
+                    return ["error": "Reconnect your Apple Watch in Paceman on iPhone."]
+                }
+                var pending = PendingWatchHandoff(appleWatchID: watchID)
+                var selected = false
+                if let sourceID = message["sourceID"] as? String,
+                   pairedSources.contains(where: { $0.sourceID == sourceID }), !isRevoked(sourceID),
+                   let sessionID = message["sessionID"] as? String, let provider = message["provider"] as? String,
+                   let session = snapshots[sourceID]?.sessions?.first(where: { $0.id == sessionID && $0.provider == provider }) {
+                    var data = Data([79, 72, 1, 0, 1, 0, 0, 0])
+                    data.append(WatchWire.sourceIdentifier(sourceID))
+                    data.append(WatchWire.sessionIdentifier(sourceID: sourceID, session: session))
+                    if let request = WatchHandoffRequest(data) {
+                        pending = PendingWatchHandoff(watchID: watchID, request: request, appleWatch: true)
+                        selected = true
+                    }
+                }
+                let result = await receiveHandoff(pending)
+                guard result != .unavailable else { return ["error": "Couldn’t prepare iPhone. Try again."] }
+                return ["handoff": Int(result.rawValue), "selectionAvailable": selected]
+            }
+            guard let sourceID = message["sourceID"] as? String,
+                  let source = pairedSources.first(where: { $0.sourceID == sourceID }), !isRevoked(sourceID) else {
+                return ["error": "Check your connection in Paceman on iPhone."]
+            }
+            if message["operation"] as? String == "request" {
+                guard let sessionID = message["sessionID"] as? String,
+                      let provider = message["provider"] as? String else { return ["error": "Refresh Activity."] }
+                let started = ProcessInfo.processInfo.systemUptime
+                if let task = startRefresh(source, fromWatch: true) { _ = await task.value }
+                guard let snapshot = snapshots[sourceID], errors[sourceID] == nil,
+                      snapshotIsFresh(sourceID) else { return ["error": "Couldn’t refresh this chat. Check Paceman on iPhone."] }
+                let destination = ResponseGuidance.destination(for: provider)
+                guard snapshot.interactionsEnabled == true else { return ["error": "Phone responses are off. Open \(destination)."] }
+                let identity = WorkIdentity(sourceID: sourceID, sessionID: sessionID, provider: provider)
+                let known = interactions.items.first { $0.source.sourceID == sourceID
+                    && $0.request.sessionID == sessionID && $0.request.provider == provider && interactions.isCurrent($0) }
+                let response = interactions.response(for: identity).flatMap {
+                    known == nil || known?.id == $0.item.id ? $0 : nil
+                }
+                if let item = known ?? response?.item, item.expiresAtUptime > started,
+                   watchRequests.count < 256 || watchRequests[item.id] != nil {
+                    rememberWatchRequest(item, snapshot: snapshot)
+                    if response?.phase == .rejected { watchRejected.insert(item.id) }
+                    guard !watchRejected.contains(item.id) else {
+                        return ["error": "This request is no longer available. Check \(destination)."]
+                    }
+                    if let response {
+                        watchSubmissions[item.id] = response.submission
+                        if response.phase == .submitted { watchConfirmed.insert(item.id) }
+                    }
+                    return encoded(WatchWorkPrompt(generation: item.generation, request: item.request,
+                        remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
+                        submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
+                }
+                let requests = try await client.inputRequests(source)
+                guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID),
+                      snapshots[sourceID]?.identity == snapshot.identity,
+                      snapshot.sessions?.contains(where: { $0.id == sessionID && $0.provider == provider }) == true else {
+                    return ["error": "No response is available. Check \(destination)."]
+                }
+                guard let request = requests.requests.first(where: { $0.sessionID == sessionID && $0.provider == provider }) else {
+                    if let item = watchRequests.values.first(where: {
+                        $0.source.sourceID == sourceID && $0.generation == requests.generation
+                            && $0.request.sessionID == sessionID && $0.request.provider == provider
+                            && watchSubmissions[$0.id] != nil
+                            && !watchRejected.contains($0.id)
+                    }) {
+                        return encoded(WatchWorkPrompt(generation: item.generation, request: item.request,
+                            remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
+                            submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
+                    }
+                    return ["error": "No response is available. Check \(destination)."]
+                }
+                guard started + request.remainingSeconds > ProcessInfo.processInfo.systemUptime else {
+                    return ["error": "This request expired. Check \(destination)."]
+                }
+                let item = PendingInput(source: source, generation: requests.generation, request: request,
+                    expiresAtUptime: started + request.remainingSeconds)
+                // A request keeps one exact submission across lost Watch replies.
+                guard watchRequests.count < 256 || watchRequests[item.id] != nil else {
+                    return ["error": "Review this session on iPhone."]
+                }
+                rememberWatchRequest(item, snapshot: snapshot)
+                guard !watchRejected.contains(item.id) else {
+                    return ["error": "This request is no longer available. Check \(destination)."]
+                }
+                interactions.observeWatchRequest(item)
+                publishWatchWork()
+                return encoded(WatchWorkPrompt(generation: requests.generation, request: request,
+                    remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
+                    submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
+            }
+            if message["operation"] as? String == "submit",
+               let data = message["submission"] as? Data, data.count <= 65536 {
+                let submission = try JSONDecoder().decode(InputSubmission.self, from: data)
+                let id = "\(sourceID)/\(submission.generation)/\(submission.requestID)"
+                let destination = ResponseGuidance.destination(for: watchRequests[id]?.request.provider)
+                guard let item = watchRequests[id], submission.valid(for: item.request),
+                      !watchRejected.contains(id), interactions.response(for: item)?.phase != .rejected,
+                      watchSubmissions[id] == nil || watchSubmissions[id] == submission,
+                      interactions.response(for: item).map({ $0.submission == submission }) ?? true else {
+                    return ["error": "This request changed or expired. Check \(destination)."]
+                }
+                watchSubmissions[id] = submission
+                let inboxLifecycle = interactions.lifecycleID
+                interactions.observeWatchSubmission(item, submission: submission, phase: .sending)
+                do {
+                    try await client.submitInput(submission, source: source)
+                    guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID),
+                          watchRequests[id]?.request == item.request else {
+                        return ["error": "Connections changed. Check Paceman on iPhone."]
+                    }
+                    if interactions.lifecycleID == inboxLifecycle {
+                        interactions.didSubmit(item, submission: submission)
+                    }
+                    watchConfirmed.insert(item.id)
+                    publishWatchWork()
+                    var reply: [String: Any] = ["submitted": true]
+                    if let data = encoded(watchWorkSnapshot())["data"] as? Data { reply["workSnapshot"] = data }
+                    return reply
+                } catch {
+                    if case HubError.http(let status) = error, [400, 401, 404, 409, 410, 422].contains(status) {
+                        if watchRequests[item.id]?.request == item.request { watchRejected.insert(item.id) }
+                        watchTracking[item.id]?.active = false
+                        if interactions.lifecycleID == inboxLifecycle {
+                            interactions.observeWatchSubmission(item, submission: submission, phase: .rejected)
+                        }
+                        return ["error": "This request is no longer available. Check \(destination)."]
+                    }
+                    if interactions.lifecycleID == inboxLifecycle {
+                        interactions.observeWatchSubmission(item, submission: submission, phase: .unconfirmed)
+                    }
+                    return ["unconfirmed": true]
+                }
+            }
+        } catch {
+            return ["error": "Couldn’t refresh this chat. Check Paceman on iPhone."]
+        }
+        return ["error": "Update Paceman on iPhone and Apple Watch."]
+    }
+}

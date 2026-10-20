@@ -53,6 +53,9 @@ window in Codex Limit and Codex Reset. Older or empty data from another computer
 cannot erase that reading.
 
 WatchConnectivity also supplies the paired-computer list and cached readings.
+The Watch app uses the phone's session presentation and supports questions,
+one-time approvals and continuation on iPhone through live WatchConnectivity.
+Codex usage remains available in complications.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
 are in [data lifecycle](data-lifecycle.md).
@@ -71,7 +74,7 @@ See the [wire contract](protocol.md#pending-interactions) and
 
 ## iPhone Activity
 
-Tasks are keyed by source, provider, and session, never title. Activity owns tasks
+Sessions are keyed by source, provider, and session ID, never title. Activity owns sessions
 and responses; Devices owns connections, accessories, and Live Activities.
 Ordering is stable and phone-observed, not durable task chronology: answerable
 requests lead Needs you, Working follows state-entry order, and Recent is newest
@@ -79,7 +82,8 @@ first. Review freezes its membership and order; new arrivals wait for the next
 Review. Each form stays pinned to its exact request. Confirmed responses dismiss
 or advance Review and use Working presentation without changing observed agent state.
 
-Live Activity taps open a unique task only when its source revision matches;
-otherwise they open source-filtered Activity. Opening the agent app releases any
-pending phone request. Detail timestamps describe the computer snapshot, not task
-progress. A completed turn does not establish a successful outcome.
+Live Activity taps open a unique session only when its source generation and
+revision match; otherwise they open source-filtered Activity. Watch resolves through
+iPhone and preserves an open response form across another tap. Opening the agent
+app releases any pending phone request. Detail timestamps describe the computer
+snapshot, not session progress. A completed turn does not establish a successful outcome.

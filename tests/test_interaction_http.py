@@ -3,6 +3,7 @@ import http.client
 import json
 import os
 from pathlib import Path
+import queue
 import socket
 import subprocess
 import sys
@@ -51,14 +52,29 @@ class InteractionHTTPTests(unittest.TestCase):
         response = connection.getresponse()
         return response.status, json.loads(response.read())
 
+    def completed_replies(self):
+        replies = queue.Queue()
+        record = self.diagnostics.record
+
+        def record_completed(stage, **fields):
+            record(stage, **fields)
+            if stage == 'http_replied':
+                replies.put(None)
+
+        self.enterContext(patch.object(self.diagnostics, 'record', side_effect=record_completed))
+        return replies
+
     def test_trace_distinguishes_empty_expired_inbox_from_failed_fetch(self):
+        replies = self.completed_replies()
         self.hook()
         trace = 'c9b86b49-fbd9-4acf-90b7-461265034bae'
         status, before = self.call('GET', '/v1/interactions', trace_id=trace)
+        replies.get(timeout=2)
         self.assertEqual(status, 200)
         self.assertEqual(len(before['requests']), 1)
         self.broker._clock = lambda: time.monotonic() + 601
         status, after = self.call('GET', '/v1/interactions', trace_id=trace)
+        replies.get(timeout=2)
         self.assertEqual((status, after['requests']), (200, []))
         entries = [json.loads(line) for line in self.diagnostics.path.read_text().splitlines()]
         releases = [e for e in entries if e['stage'] == 'request_released']
@@ -71,7 +87,9 @@ class InteractionHTTPTests(unittest.TestCase):
             self.assertNotIn(private, encoded)
 
     def test_unauthorized_fetch_logs_status_without_credential(self):
+        replies = self.completed_replies()
         status, _ = self.call('GET', '/v1/snapshot', authorized=False, trace_id='private invalid value')
+        replies.get(timeout=2)
         self.assertEqual(status, 401)
         entries = [json.loads(line) for line in self.diagnostics.path.read_text().splitlines()]
         self.assertEqual(entries[-1]['httpStatus'], 401)

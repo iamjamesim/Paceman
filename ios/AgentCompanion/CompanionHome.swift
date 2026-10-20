@@ -81,7 +81,7 @@ struct WorkItem: Identifiable {
     var delivery: InputDelivery? = nil
     var inputAvailability: InputAvailability? = nil
     var returnedToComputer: Bool { delivery == .released }
-    var response: String? { delivery?.message }
+    var response: String? { delivery?.message(provider: session.provider) }
     var request: PendingInput? = nil
     // Lazy sections retain moved rows by ID. A phase transition replaces the
     // rendered row (including its animation), while task selection stays stable.
@@ -108,7 +108,8 @@ struct WorkItem: Identifiable {
     var state: ActivityState { phase.activity }
     var group: WorkGroup { historical ? .lastKnown : phase.group }
     var status: String {
-        historical ? "Last known: \(phase.title)" : phase.title
+        let title = phase == .continued ? ResponseGuidance.continuation(for: session.provider) : phase.title
+        return historical ? "Last known: \(title)" : title
     }
     var context: String {
         [session.provider.capitalized, session.detail, computer].filter { !$0.isEmpty }.joined(separator: " · ")
@@ -123,7 +124,8 @@ struct WorkItem: Identifiable {
         if phase == .responded { return nil }
         if state == .needsInput && (returnedToComputer || response != nil) { return status }
         if state == .needsInput {
-            return inputAvailability == .available || inputAvailability == .disabled ? "Continue on computer" : nil
+            return inputAvailability == .available || inputAvailability == .disabled
+                ? ResponseGuidance.continuation(for: session.provider) : nil
         }
         return state == .failed || state == .idle ? state.title : nil
     }
@@ -156,7 +158,7 @@ enum WorkPhase: Hashable {
         case .question: return "Question for you"
         case .attention, .resolving: return "Needs your attention"
         case .responded: return "Working"
-        case .continued: return "Continue on computer"
+        case .continued: return "Continue in the agent app"
         default: return activity.title
         }
     }
@@ -244,15 +246,24 @@ struct WorkSectionData: Identifiable {
 
     static func item(session: AgentSession, source: PairedSource, model: CompanionModel,
                      presentation: PresentationModel, inbox: InteractionInbox) -> WorkItem {
-        let id = WorkIdentity(sourceID: source.sourceID, sessionID: session.id, provider: session.provider)
         let connected = presentation.computerState(model: model, sourceID: source.sourceID) == .current
         let current = presentation.preview && !presentation.previewScreen.hasPrefix("handoff")
             ? connected : model.isActivityCurrent(source.sourceID)
-        let pending = connected ? inbox.items.first { $0.source.sourceID == id.sourceID && $0.request.sessionID == id.sessionID && $0.request.provider == id.provider && inbox.isCurrent($0) } : nil
+        return item(session: session, source: source, model: model, inbox: inbox,
+            computer: presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID]),
+            connected: connected, current: current)
+    }
+
+    /// The phone Activity and Watch export use the same derived presentation.
+    static func item(session: AgentSession, source: PairedSource, model: CompanionModel,
+                     inbox: InteractionInbox, computer: String, connected: Bool, current: Bool) -> WorkItem {
+        let id = WorkIdentity(sourceID: source.sourceID, sessionID: session.id, provider: session.provider)
+        let pending = connected ? inbox.items.first { $0.source.sourceID == id.sourceID && $0.request.sessionID == id.sessionID && $0.request.provider == id.provider && inbox.isCurrent($0) }
+            ?? model.watchPending(for: id) : nil
         return WorkItem(id: id, session: session,
-            computer: presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID]), historical: !current,
+            computer: computer, historical: !current,
             activityOrder: inbox.ordering.activityOrder(id), requestOrder: inbox.ordering.requestOrder(pending),
-            delivery: connected && session.state == .needsInput ? inbox.receipt(for: id) : nil,
+            delivery: current && session.state == .needsInput ? inbox.receipt(for: id) ?? model.watchDelivery(for: id) : nil,
             inputAvailability: inbox.availability[source.sourceID],
             request: pending)
     }
@@ -311,7 +322,7 @@ struct CompanionWork: View {
                 if model.pairedSources.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Your work, wherever it runs").companionText(.title, theme: theme)
-                        Text("Connect your computer to follow Codex and Claude tasks here.")
+                        Text("Connect your computer to follow Codex and Claude sessions here.")
                             .companionText(.body, theme: theme)
                         Button(action: connectComputer) {
                             Text("Connect a computer").font(CompanionTextRole.button.font)
@@ -330,9 +341,9 @@ struct CompanionWork: View {
                 }
                 if !model.pairedSources.isEmpty && currentRows.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(awaitingActivity ? "No activity received yet" : filter == nil ? "No tasks to show" : "No tasks on this computer")
+                        Text(awaitingActivity ? "No activity received yet" : filter == nil ? "No sessions to show" : "No sessions on this computer")
                             .companionText(.title, theme: theme)
-                        Text(awaitingActivity ? "Activity will appear when your computer connects." : "Tasks appear when an agent starts working.")
+                        Text(awaitingActivity ? "Activity will appear when your computer connects." : "Sessions appear when an agent starts working.")
                             .companionText(.body, theme: theme)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
@@ -365,7 +376,7 @@ struct CompanionWork: View {
                         groupHeading(group, count: rows.contains { $0.aggregate } ? nil : rows.count)
                     }.buttonStyle(.plain)
                         .accessibilityValue(recentExpanded ? "Expanded" : "Collapsed")
-                        .accessibilityHint("Show or hide recent tasks")
+                        .accessibilityHint("Show or hide recent sessions")
                 } else {
                     let layout = typeSize.isAccessibilitySize
                         ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
@@ -379,7 +390,7 @@ struct CompanionWork: View {
                                     .padding(.horizontal, 14).padding(.vertical, 8)
                                     .background(theme.tint.opacity(0.12), in: Capsule())
                                     .frame(minHeight: 44).contentShape(Capsule())
-                            }.buttonStyle(.plain).accessibilityLabel("Review tasks needing you")
+                            }.buttonStyle(.plain).accessibilityLabel("Review sessions needing you")
                         }
                     }
                 }
@@ -398,7 +409,7 @@ struct CompanionWork: View {
             Spacer(minLength: 0)
         }.frame(minHeight: group == .recent ? 44 : 32).contentShape(Rectangle())
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(count.map { "\(group.rawValue), \($0) \($0 == 1 ? "task" : "tasks")" } ?? group.rawValue)
+            .accessibilityLabel(count.map { "\(group.rawValue), \($0) \($0 == 1 ? "session" : "sessions")" } ?? group.rawValue)
             .accessibilityAddTraits(.isHeader)
 
     }

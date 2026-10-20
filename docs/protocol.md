@@ -259,6 +259,20 @@ phone changes that list and its revision. Pushes must match the revision and an
 allowed source. `observedAt` orders complete snapshots within each source,
 including removals; each reading keeps its original `updatedAt` and reset time.
 A source cannot clear another source's cache.
+
+Interactive Watch messages use `watchWork: 1` and an `operation`. `cachedTasks`
+reads the phone's list; `refreshTasks` requests source refreshes without waiting;
+`tasks` waits for them. `request` selects an exact `sourceID`/`provider`/`sessionID`;
+`submit` carries an `InputSubmission` as JSON `Data`. Replies use JSON `data`,
+`submitted: true`, `unconfirmed: true`, or `error`; confirmations can include
+`workSnapshot`. Optional `projectionGeneration` and `projectionRevision` order list
+replies. [Shared types](../ios/Shared/WatchWork.swift) define the payloads.
+
+`continueOnPhone` returns `handoff` results 1–3 from
+[session handoff](#accessory-session-handoff); `selectionAvailable: false` prepares
+Activity instead of a removed session. Storage and retry rules are defined in
+[data lifecycle](data-lifecycle.md#questions-and-approvals).
+
 Example background push:
 
 ```json

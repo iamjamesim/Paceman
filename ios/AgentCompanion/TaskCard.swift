@@ -146,7 +146,7 @@ struct TaskCard: View {
                                 Text(text).companionText(.body, theme: theme)
                             }
                         } else {
-                            Text("This session is no longer available. Return to Activity for current tasks.")
+                            Text("This session is no longer available. Return to Activity for current sessions.")
                                 .companionText(.body, theme: theme)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
@@ -210,7 +210,7 @@ struct TaskCard: View {
         VStack(alignment: .leading, spacing: 8) {
           HStack(spacing: 12) {
             Text(review.progress).companionText(.supporting, theme: theme).monospacedDigit()
-                .accessibilityLabel("Task \(review.progress)")
+                .accessibilityLabel("Session \(review.progress)")
             Spacer(minLength: 0)
             Button(review.hasNext ? (displayedRequest.map { inbox.isCurrent($0) } == true && response == nil ? "Skip" : "Next") : "Done") {
                 advanceReview()
@@ -269,7 +269,7 @@ struct TaskCard: View {
                 detailRow("Agent", symbol: "terminal", value: item.session.provider == "claude" ? "Claude Code" : item.session.provider.capitalized)
             }
             if item.historical {
-                Text("Last received activity. This task’s current status is unavailable.")
+                Text("Last received activity. This session’s current status is unavailable.")
                     .companionText(.body, theme: theme)
             }
         }
@@ -310,11 +310,7 @@ struct TaskCard: View {
     }
 
     private func continuationTitle(_ item: WorkItem) -> String {
-        switch item.session.provider {
-        case "codex": return "Continue in Codex"
-        case "claude": return "Continue in Claude Code"
-        default: return "Continue on your computer"
-        }
+        ResponseGuidance.continuation(for: item.session.provider)
     }
 
     private func explanation(_ item: WorkItem) -> String? {
@@ -323,7 +319,7 @@ struct TaskCard: View {
         switch inbox.availability[item.id.sourceID] {
         case .loading, nil: return nil
         case .unavailable: return "Paceman couldn’t retrieve this request. It will retry while the app is open."
-        case .disabled: return "Phone responses aren’t available on this computer."
+        case .disabled: return "Phone responses are off for this connection."
         case .available: return "This request can’t be answered in Paceman right now."
         }
     }

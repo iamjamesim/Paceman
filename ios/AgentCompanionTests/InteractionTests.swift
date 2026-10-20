@@ -282,9 +282,6 @@ final class InteractionTests: XCTestCase {
         try await checkBackgroundOwnerPreservesForegroundFetch(fromWatch: false)
     }
 
-    @MainActor func testWatchPromotesForegroundFetchAcrossBackgroundTransition() async throws {
-        try await checkBackgroundOwnerPreservesForegroundFetch(fromWatch: true)
-    }
 
     @MainActor private func checkBackgroundOwnerPreservesForegroundFetch(fromWatch: Bool) async throws {
         let source = refreshSource("background-owner")
@@ -940,7 +937,7 @@ final class InteractionTests: XCTestCase {
         for availability in [InputAvailability.loading, .unavailable, .available, .disabled] {
             let item = WorkItem(id: .init(sourceID: sourceID, sessionID: session.id, provider: "claude"),
                                 session: session, computer: "Mac", historical: false, inputAvailability: availability)
-            XCTAssertEqual(item.statusDetail, availability == .available || availability == .disabled ? "Continue on computer" : nil)
+            XCTAssertEqual(item.statusDetail, availability == .available || availability == .disabled ? "Continue in Claude Code" : nil)
             XCTAssertEqual(item.phase, availability == .available || availability == .disabled ? .attention : .resolving)
             XCTAssertEqual(item.statusToken, availability == .available || availability == .disabled ? .attention : .approval,
                            "Fetching a request must not present a warning")
@@ -1253,7 +1250,7 @@ final class InteractionTests: XCTestCase {
         XCTAssertNotEqual(first.id, second.id)
         XCTAssertEqual(first.group, .attention)
         XCTAssertEqual(first.statusToken, .attention)
-        XCTAssertEqual(first.statusDetail, "Continue on computer")
+        XCTAssertEqual(first.statusDetail, "Continue in Claude Code")
         XCTAssertEqual(second.group, .lastKnown)
         second.delivery = .sent
         XCTAssertEqual(second.group, .lastKnown)
@@ -1273,7 +1270,7 @@ final class InteractionTests: XCTestCase {
             delivery: .released)
         XCTAssertEqual(returned.group, .attention)
         XCTAssertEqual(returned.statusToken, .attention)
-        XCTAssertEqual(returned.status, "Continue on computer")
+        XCTAssertEqual(returned.status, "Continue in Claude Code")
         var submitted = first
         submitted.delivery = .sent
         XCTAssertEqual(submitted.group, .working)
@@ -1318,8 +1315,8 @@ final class SidebarGestureTests: XCTestCase {
 private final class InteractionURLProtocol: URLProtocol {
     static var start: ((InteractionURLProtocol) -> Void)?
     static var stop: ((InteractionURLProtocol) -> Void)?
-    func finish(_ data: Data) {
-        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200,
+    func finish(_ data: Data, status: Int = 200) {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status,
             httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)
         client?.urlProtocolDidFinishLoading(self)
@@ -1328,4 +1325,786 @@ private final class InteractionURLProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() { Self.start?(self) }
     override func stopLoading() { Self.stop?(self) }
+}
+
+extension InteractionTests {
+    @MainActor func testWatchForegroundReadsUsePhoneCacheAndDoNotRetainItsPoll() async throws {
+        let source = refreshSource("watch-foreground-owner")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        let started = expectation(description: "phone owns its status read")
+        let cancelled = expectation(description: "foreground owner cancels on background")
+        var statusReads = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                statusReads += 1
+                started.fulfill()
+            }
+        }
+        InteractionURLProtocol.stop = { _ in cancelled.fulfill() }
+        defer {
+            model.setForeground(false)
+            InteractionURLProtocol.start = nil
+            InteractionURLProtocol.stop = nil
+        }
+        model.setForeground(true)
+        await fulfillment(of: [started], timeout: 2)
+        for operation in ["refreshTasks", "cachedTasks", "tasks", "refreshTasks"] {
+            let reply = await model.handleWatchWork(["operation": operation])
+            XCTAssertNotNil(reply["data"], "Watch list reads never wait for the phone poll")
+        }
+        XCTAssertEqual(statusReads, 1, "Opening, polling and hints add zero foreground STATUS reads")
+        model.setForeground(false)
+        await fulfillment(of: [cancelled], timeout: 2)
+        XCTAssertNil(model.snapshots[source.sourceID], "Watch cache reads must not promote the foreground operation")
+    }
+
+    @MainActor func testWatchBackgroundDemandCoalescesAndBoundsFailureScheduling() async throws {
+        let source = refreshSource("watch-background-owner")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        var now: TimeInterval = 100
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config), refreshUptime: { now })
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        var statusReads = 0
+        var fail = false
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                statusReads += 1
+                if fail { transport.client?.urlProtocol(transport, didFailWithError: URLError(.notConnectedToInternet)) }
+                else { transport.finish(self.refreshSnapshot(source, revision: statusReads)) }
+            }
+        }
+        defer {
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+        }
+        async let a = model.handleWatchWork(["operation": "tasks"])
+        async let b = model.handleWatchWork(["operation": "tasks"])
+        _ = await (a, b)
+        XCTAssertEqual(statusReads, 1)
+        for _ in 0..<10 { _ = await model.handleWatchWork(["operation": "tasks"]) }
+        XCTAssertEqual(statusReads, 1, "A recent phone observation satisfies background Watch demand")
+        now += 5
+        fail = true
+        _ = await model.handleWatchWork(["operation": "tasks"])
+        XCTAssertEqual(statusReads, 2)
+        _ = await model.handleWatchWork(["operation": "cachedTasks"])
+        _ = await model.handleWatchWork(["operation": "tasks"])
+        XCTAssertEqual(statusReads, 2)
+        now += 5
+        _ = await model.handleWatchWork(["operation": "tasks"])
+        XCTAssertEqual(statusReads, 3)
+        now += 5
+        _ = await model.handleWatchWork(["operation": "tasks"])
+        XCTAssertEqual(statusReads, 3, "Repeated failures cannot cause a status request on every Watch poll")
+        now += 5
+        fail = false
+        _ = await model.handleWatchWork(["operation": "tasks"])
+        XCTAssertEqual(statusReads, 4, "New demand recovers through the same source owner after the bounded delay")
+        XCTAssertNil(model.errors[source.sourceID])
+    }
+
+    @MainActor func testWatchCachedListReturnsDuringSlowRefreshAndScopedRefreshSkipsOtherComputers() async throws {
+        let slow = refreshSource("watch-slow"), fast = refreshSource("watch-fast")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [slow, fast]
+        model.snapshots = [:]
+        let slowStarted = expectation(description: "offline computer pending")
+        let fastStarted = expectation(description: "reachable computer requested")
+        var pending: InteractionURLProtocol?
+        var fastReads = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.host == slow.endpoint.host {
+                    pending = transport
+                    slowStarted.fulfill()
+                } else {
+                    fastReads += 1
+                    transport.finish(self.refreshSnapshot(fast, revision: fastReads))
+                    if fastReads == 1 { fastStarted.fulfill() }
+                }
+            }
+        }
+        defer {
+            InteractionURLProtocol.start = nil
+            for source in [slow, fast] { SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID)) }
+        }
+        let refresh = Task { await model.handleWatchWork(["operation": "tasks"]) }
+        await fulfillment(of: [slowStarted, fastStarted], timeout: 2)
+        // A route to the reachable computer must not join another computer's wait.
+        let scoped = await model.handleWatchWork(["operation": "tasks", "sourceID": fast.sourceID])
+        XCTAssertNotNil(scoped["data"])
+        let cached = await model.handleWatchWork(["operation": "cachedTasks"])
+        let snapshot = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(cached["data"] as? Data))
+        XCTAssertEqual(snapshot.computers, 2)
+        XCTAssertEqual(snapshot.tasks.map(\.sourceID), [fast.sourceID])
+        XCTAssertEqual(snapshot.sources?.first(where: { $0.sourceID == fast.sourceID })?.revision, UInt64(fastReads))
+        XCTAssertNil(model.snapshots[slow.sourceID])
+        if let pending { pending.client?.urlProtocol(pending, didFailWithError: URLError(.timedOut)) }
+        _ = await refresh.value
+    }
+
+    @MainActor func testPhoneAndWatchSharePendingSubmittedHistoricalAndAdvancedPresentation() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://watch-projection.example")!, sourceID: sourceID,
+            clientID: "client", credential: "test")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        model.interactions.setForeground(true)
+        var listing = fixture()
+        var state = "needs_input"
+        var revision = 1
+        var envelope: InputSubmission?
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.path == "/v1/snapshot" {
+                    transport.finish(self.refreshSnapshot(source, revision: revision, state: state, interactions: true))
+                } else if transport.request.httpMethod == "POST" {
+                    let response = envelope!
+                    transport.finish(try! JSONSerialization.data(withJSONObject: ["status": "submitted",
+                        "generation": response.generation, "requestID": response.requestID, "version": response.version]))
+                } else { transport.finish(try! JSONSerialization.data(withJSONObject: listing)) }
+            }
+        }
+        defer {
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+        }
+        func exported() async throws -> WatchWorkTask {
+            let reply = await model.handleWatchWork(["operation": "cachedTasks"])
+            return try XCTUnwrap(JSONDecoder().decode(WatchWorkSnapshot.self,
+                from: XCTUnwrap(reply["data"] as? Data)).tasks.first)
+        }
+        func phone() throws -> WorkItem {
+            let snapshot = try XCTUnwrap(model.snapshots[sourceID])
+            return WorkCatalog.item(session: try XCTUnwrap(snapshot.sessions?.first), source: source, model: model,
+                inbox: model.interactions, computer: "Test", connected: model.connectionState(sourceID) == .current,
+                current: model.isActivityCurrent(sourceID))
+        }
+        let message: [String: Any] = ["operation": "request", "sourceID": sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude"]
+        let reply = await model.handleWatchWork(message)
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reply["data"] as? Data))
+        var watch = try await exported()
+        XCTAssertEqual(try phone().phase, .question, "Watch-fetched content is known to the phone")
+        XCTAssertEqual(watch.status, try phone().phase.title)
+        XCTAssertEqual(watch.group(at: Date()), try phone().group.rawValue)
+        let answer = InputSubmission(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        envelope = answer
+        let sent = await model.handleWatchWork(["operation": "submit", "sourceID": sourceID,
+            "submission": try JSONEncoder().encode(answer)])
+        XCTAssertEqual(sent["submitted"] as? Bool, true)
+        watch = try await exported()
+        XCTAssertEqual(try phone().phase, .responded)
+        XCTAssertEqual(watch.status, "Working")
+        XCTAssertEqual(watch.group(at: Date()), try phone().group.rawValue)
+        XCTAssertEqual(watch.state, "needs_input", "Native routing still checks the exact observed state")
+        let receiptList = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(sent["workSnapshot"] as? Data))
+        XCTAssertEqual(receiptList.tasks.first?.group(at: Date()), "Working", "The acknowledgement carries the phone's new list without another source read")
+        let snapshot = try XCTUnwrap(model.snapshots[sourceID])
+        let duringConnectionGap = WorkCatalog.item(session: try XCTUnwrap(snapshot.sessions?.first), source: source,
+            model: model, inbox: model.interactions, computer: "Test", connected: false, current: true)
+        XCTAssertEqual(duringConnectionGap.group, .working, "A short connection lease cannot undo an accepted answer")
+        let historical = WorkCatalog.item(session: try XCTUnwrap(snapshot.sessions?.first), source: source,
+            model: model, inbox: model.interactions, computer: "Test", connected: false, current: false)
+        XCTAssertEqual(historical.group, .lastKnown)
+
+        let historicalDate = Date(timeIntervalSince1970: watch.freshUntil + 1)
+        XCTAssertEqual(watch.group(at: historicalDate), "Last known")
+        XCTAssertEqual(watch.status(at: historicalDate), "Needs attention", "History describes the source observation, not a stale receipt")
+        // A newer request in the same conversation retires the old receipt.
+        var requests = listing["requests"] as! [[String: Any]]
+        requests[0]["requestID"] = UUID().uuidString
+        listing["requests"] = requests
+        await model.interactions.refresh(source, snapshot: try XCTUnwrap(model.snapshots[sourceID]), client: SourceClient(configuration: config))
+        watch = try await exported()
+        XCTAssertEqual(try phone().phase, .question)
+        XCTAssertEqual(watch.status, try phone().phase.title)
+        state = "working"
+        revision += 1
+        _ = await model.refresh(sourceID: sourceID)
+        watch = try await exported()
+        XCTAssertEqual(try phone().phase, .working)
+        XCTAssertEqual(watch.status, "Working")
+        state = "finished"
+        revision += 1
+        _ = await model.refresh(sourceID: sourceID)
+        watch = try await exported()
+        XCTAssertEqual(try phone().phase, .finished)
+        XCTAssertEqual(watch.group(at: Date()), "Recent")
+        XCTAssertEqual(watch.status, try phone().phase.title)
+    }
+
+    @MainActor func testLateWatchReceiptDoesNotRestoreInboxContentAfterLifecycleChange() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://watch-lifecycle.example")!, sourceID: sourceID,
+            clientID: "client", credential: "test")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        model.interactions.setForeground(true)
+        let listing = fixture()
+        let posted = expectation(description: "Watch answer pending")
+        var post: InteractionURLProtocol?
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.path == "/v1/snapshot" {
+                    transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                } else if transport.request.httpMethod == "POST" {
+                    post = transport
+                    posted.fulfill()
+                } else { transport.finish(try! JSONSerialization.data(withJSONObject: listing)) }
+            }
+        }
+        defer {
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+        }
+        let reply = await model.handleWatchWork(["operation": "request", "sourceID": sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude"])
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reply["data"] as? Data))
+        let answer = InputSubmission(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        let data = try JSONEncoder().encode(answer)
+        let sending = Task { await model.handleWatchWork(["operation": "submit", "sourceID": sourceID, "submission": data]) }
+        await fulfillment(of: [posted], timeout: 2)
+        model.interactions.setForeground(false)
+        model.interactions.setForeground(true)
+        try XCTUnwrap(post).finish(JSONSerialization.data(withJSONObject: ["status": "submitted",
+            "generation": answer.generation, "requestID": answer.requestID, "version": answer.version]))
+        let receipt = await sending.value
+        XCTAssertEqual(receipt["submitted"] as? Bool, true)
+        XCTAssertTrue(model.interactions.responses.isEmpty)
+        XCTAssertTrue(model.interactions.items.isEmpty, "Lifecycle-cleared sensitive inbox content must stay cleared")
+        let cached = await model.handleWatchWork(["operation": "cachedTasks"])
+        let exported = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(cached["data"] as? Data))
+        XCTAssertEqual(exported.tasks.first?.status, "Working", "The bounded Watch receipt still supplies presentation metadata")
+    }
+
+    @MainActor func testWatchResponseKeepsExactSubmissionAcrossLostReplyAndReopening() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
+            clientID: "client", credential: "private-fixture")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
+        model.pairedSources = [source]
+        let listing = fixture()
+        let listingData = try JSONSerialization.data(withJSONObject: listing)
+        let snapshotData = refreshSnapshot(source, state: "needs_input", interactions: true)
+        let requestMessage: [String: Any] = ["operation": "request", "sourceID": sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude"]
+        var envelope: InputSubmission?
+        var posts = 0
+        var loseReceipt = true
+        var resolved = false
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.httpMethod == "POST", transport.request.url?.path == "/v1/interactions" {
+                    posts += 1
+                    if loseReceipt {
+                        transport.client?.urlProtocol(transport, didFailWithError: URLError(.networkConnectionLost))
+                    } else if let envelope {
+                        resolved = true
+                        transport.finish(try! JSONSerialization.data(withJSONObject: ["status": "submitted",
+                            "generation": envelope.generation, "requestID": envelope.requestID, "version": 1]))
+                    }
+                } else if transport.request.url?.path == "/v1/snapshot" { transport.finish(snapshotData) }
+                else if resolved {
+                    transport.finish(try! JSONSerialization.data(withJSONObject: ["sourceID": self.sourceID,
+                        "generation": listing["generation"]!, "requests": []]))
+                } else { transport.finish(listingData) }
+            }
+        }
+        defer { InteractionURLProtocol.start = nil }
+        let response = await model.handleWatchWork(requestMessage)
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(response["data"] as? Data))
+        let value = InputSubmission(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        envelope = value
+        let payload: [String: Any] = ["operation": "submit", "sourceID": sourceID,
+            "submission": try JSONEncoder().encode(value)]
+        let uncertain = await model.handleWatchWork(payload)
+        XCTAssertEqual(uncertain["unconfirmed"] as? Bool, true)
+        let reopened = await model.handleWatchWork(requestMessage)
+        let pending = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reopened["data"] as? Data))
+        XCTAssertEqual(pending.submission, value)
+        XCTAssertEqual(pending.submitted, false)
+        let changed = InputSubmission(generation: value.generation, requestID: value.requestID, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [1])])
+        let rejected = await model.handleWatchWork(["operation": "submit", "sourceID": sourceID,
+            "submission": try JSONEncoder().encode(changed)])
+        XCTAssertNotNil(rejected["error"])
+        XCTAssertEqual(posts, 1)
+        loseReceipt = false
+        let confirmed = await model.handleWatchWork(payload)
+        XCTAssertEqual(confirmed["submitted"] as? Bool, true)
+        XCTAssertEqual(posts, 2)
+        let receipt = await model.handleWatchWork(requestMessage)
+        let saved = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(receipt["data"] as? Data))
+        XCTAssertEqual(saved.submitted, true)
+        XCTAssertEqual(saved.submission, value)
+        model.pairedSources = []
+        let removed = await model.handleWatchWork(payload)
+        XCTAssertNotNil(removed["error"])
+        XCTAssertEqual(posts, 2, "Removed access cannot submit a cached response")
+    }
+
+    @MainActor func testWatchDefinitiveRejectionCannotReopenOrResubmitAfterBrokerDisconnect() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://watch-rejection.example")!, sourceID: sourceID,
+            clientID: "client", credential: "fixture")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        model.interactions.setForeground(true)
+        var listing = fixture()
+        var disconnected = false
+        var posts = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.path == "/v1/snapshot" {
+                    transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                } else if transport.request.httpMethod == "POST" {
+                    posts += 1
+                    disconnected = true
+                    transport.finish(Data(), status: 409)
+                } else {
+                    var current = listing
+                    if disconnected { current["requests"] = [] }
+                    transport.finish(try! JSONSerialization.data(withJSONObject: current))
+                }
+            }
+        }
+        defer {
+            model.interactions.setForeground(false)
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+        }
+        let request: [String: Any] = ["operation": "request", "sourceID": sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude"]
+        let reply = await model.handleWatchWork(request)
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reply["data"] as? Data))
+        let submission = InputSubmission(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        let payload: [String: Any] = ["operation": "submit", "sourceID": sourceID,
+            "submission": try JSONEncoder().encode(submission)]
+        let rejected = await model.handleWatchWork(payload)
+        XCTAssertNotNil(rejected["error"])
+        // First exercise the phone's retained rejected response, then clear its
+        // foreground inbox and exercise the missing-broker fallback in the same generation.
+        for clearInbox in [false, true] {
+            if clearInbox { model.interactions.setForeground(false) }
+            let reopened = await model.handleWatchWork(request)
+            XCTAssertNotNil(reopened["error"])
+            XCTAssertNil(reopened["data"], "A definitive rejection must not reopen as an uncertain form")
+            let retried = await model.handleWatchWork(payload)
+            XCTAssertNotNil(retried["error"])
+            XCTAssertEqual(posts, 1, "A known rejection must not offer or forward another POST")
+        }
+        var requests = listing["requests"] as! [[String: Any]]
+        let nextID = UUID().uuidString
+        requests[0]["requestID"] = nextID
+        listing["requests"] = requests
+        disconnected = false
+        let next = await model.handleWatchWork(request)
+        let nextPrompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(next["data"] as? Data))
+        XCTAssertEqual(nextPrompt.request.id, nextID, "Rejection belongs to one request, not the entire chat")
+        XCTAssertNil(nextPrompt.submission)
+    }
+
+    @MainActor func testWatchRejectsUnmatchedTaskAndDisabledResponses() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
+            clientID: "client", credential: "fixture")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
+        model.pairedSources = [source]
+        var enabled = false
+        var interactionReads = 0
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.path == "/v1/snapshot" {
+                    transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: enabled))
+                } else {
+                    interactionReads += 1
+                    transport.finish(try! JSONSerialization.data(withJSONObject: self.fixture()))
+                }
+            }
+        }
+        defer { InteractionURLProtocol.start = nil }
+        let message: [String: Any] = ["operation": "request", "sourceID": sourceID,
+            "sessionID": String(repeating: "b", count: 64), "provider": "claude"]
+        let disabled = await model.handleWatchWork(message)
+        XCTAssertNotNil(disabled["error"])
+        XCTAssertEqual(interactionReads, 0)
+        enabled = true
+        let unmatched = await model.handleWatchWork(message)
+        XCTAssertNotNil(unmatched["error"])
+        XCTAssertNil(unmatched["data"], "A response form must match the exact task identity")
+    }
+
+    func testWatchAnswerValidationAndActivityLease() throws {
+        let data = try JSONSerialization.data(withJSONObject: fixture())
+        let request = try XCTUnwrap(InputRequests.decode(data, sourceID: sourceID).requests.first)
+        for answers in [["q0": InputAnswer(selected: [0])], ["q0": InputAnswer(text: "After the first result")]] {
+            let submission = InputSubmission(generation: "generation", requestID: request.id, version: 1,
+                idempotencyKey: UUID().uuidString, action: "answer", answers: answers)
+            XCTAssertTrue(submission.valid(for: request))
+        }
+        for answers in [[:], ["other": InputAnswer(selected: [0])], ["q0": InputAnswer(selected: [2])],
+                        ["q0": InputAnswer(selected: [0], text: "Both")], ["q0": InputAnswer(selected: [0, 1])]] {
+            let submission = InputSubmission(generation: "generation", requestID: request.id, version: 1,
+                idempotencyKey: UUID().uuidString, action: "answer", answers: answers)
+            XCTAssertFalse(submission.valid(for: request))
+        }
+        let task = WatchWorkTask(sourceID: sourceID, sessionID: request.sessionID, provider: "claude",
+            title: "Task", computer: "Mac", state: "needs_input", freshUntil: 300)
+        XCTAssertFalse(task.historical(at: Date(timeIntervalSince1970: 299)))
+        XCTAssertTrue(task.historical(at: Date(timeIntervalSince1970: 300)))
+        XCTAssertTrue(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60).supportsWatchAnswer)
+        let multiple = InputRequest(requestID: request.id, version: 1, provider: "claude", sessionID: request.sessionID,
+            kind: "question", title: "Questions", detail: "", questions: request.questions + request.questions, remainingSeconds: 60)
+        XCTAssertFalse(WatchWorkPrompt(generation: "g", request: multiple, remainingSeconds: 60).supportsWatchAnswer)
+    }
+}
+
+extension InteractionTests {
+    func testWatchLiveActivityResolvesOnlyUniqueFreshSessionInDisplayedRevision() {
+        let route = LiveActivityRoute(sourceID: "mac", generation: "g", revision: 7, state: "needs_input")
+        let now = Date(timeIntervalSince1970: 100)
+        func session(_ id: String = "one", source: String = "mac", state: String = "needs_input",
+                     until: Double = 400) -> WatchWorkTask {
+            WatchWorkTask(sourceID: source, sessionID: id, provider: "codex", title: "A session",
+                computer: "Mac", state: state, freshUntil: until)
+        }
+        func snapshot(_ tasks: [WatchWorkTask], source: String = "mac", generation: String = "g",
+                      revision: UInt64 = 7, count: Int = 1) -> WatchWorkSnapshot {
+            WatchWorkSnapshot(tasks: tasks, computers: 1, unavailable: 0,
+                sources: [WatchWorkSource(sourceID: source, name: "Mac", generation: generation,
+                    revision: revision, stateCounts: ["needs_input": count])])
+        }
+        XCTAssertEqual(route.watchSession(in: snapshot([session()]), at: now)?.sessionID, "one")
+        XCTAssertNil(route.watchSession(in: snapshot([session()], source: "other"), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session()], generation: "new"), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session()], revision: 8), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session(until: 100)]), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session(state: "working")]), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session("aggregate")]), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session(), session("two")], count: 2), at: now))
+        XCTAssertNil(route.watchSession(in: snapshot([session()], count: 2), at: now),
+            "Truncated session lists must not look uniquely resolvable")
+        XCTAssertNil(route.watchSession(in: WatchWorkSnapshot(tasks: [session()], computers: 1, unavailable: 0), at: now),
+            "Older phones without revision metadata can only open the scoped list")
+        XCTAssertEqual(route.watchSession(in: snapshot([session(), session("two", source: "other")]), at: now)?.sessionID, "one")
+    }
+
+    @MainActor func testWatchSnapshotIncludesFullCountsForSafeLaunchResolution() async throws {
+        let source = refreshSource("watch-launch")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        var snapshot = try XCTUnwrap(JSONSerialization.jsonObject(with: refreshSnapshot(source, revision: 8,
+            state: "needs_input")) as? [String: Any])
+        snapshot["sessions"] = (0..<40).map { index in
+            ["id": String(format: "%064x", index), "provider": "claude", "state": "needs_input"]
+        }
+        let data = try JSONSerialization.data(withJSONObject: snapshot)
+        InteractionURLProtocol.start = { transport in transport.finish(data) }
+        defer {
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+        }
+        let response = await model.handleWatchWork(["operation": "tasks"])
+        let result = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(response["data"] as? Data))
+        XCTAssertEqual(result.tasks.count, 32)
+        let metadata = try XCTUnwrap(result.sources?.first)
+        XCTAssertEqual(metadata.sourceID, source.sourceID)
+        XCTAssertEqual(metadata.revision, 8)
+        XCTAssertEqual(metadata.generation, source.sourceID)
+        XCTAssertEqual(metadata.stateCounts?["needs_input"], 40)
+        let route = LiveActivityRoute(sourceID: source.sourceID, generation: source.sourceID, revision: 8, state: "needs_input")
+        XCTAssertNil(route.watchSession(in: result))
+        XCTAssertFalse(String(decoding: try XCTUnwrap(response["data"] as? Data), as: UTF8.self).contains("credential"))
+    }
+}
+
+extension InteractionTests {
+    @MainActor func testAppleWatchHandoffPreservesPhoneOutcomesAcrossImmediateBackgrounding() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        let source = PairedSource(endpoint: URL(string: "https://watch-outcomes.example")!, sourceID: sourceID,
+            clientID: "client", credential: "private-fixture")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let listing = try JSONSerialization.data(withJSONObject: fixture())
+        let snapshot = refreshSnapshot(source, state: "needs_input", interactions: true)
+        var posts = 0
+        InteractionURLProtocol.start = { transport in
+            if transport.request.httpMethod == "POST" { posts += 1 }
+            transport.finish(transport.request.url?.path == "/v1/snapshot" ? snapshot : listing)
+        }
+        defer {
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: sourceID))
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        for phase in [InputResponsePhase.sending, .submitted, .unconfirmed, .rejected] {
+            let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config),
+                appleWatchIdentity: { "watch" }, postHandoffNotification: { _ in false },
+                clearHandoffNotification: { _ in })
+            model.pairedSources = [source]
+            model.snapshots = [:]
+            defer { model.setForeground(false) }
+            let identity = WorkIdentity(sourceID: sourceID, sessionID: String(repeating: "a", count: 64), provider: "claude")
+            let reply = await model.handleWatchWork(["operation": "request", "sourceID": sourceID,
+                "sessionID": identity.sessionID, "provider": identity.provider])
+            XCTAssertNotNil(reply["data"])
+            let item = try XCTUnwrap(model.watchPending(for: identity))
+            model.setForeground(true)
+            model.interactions.observeWatchRequest(item)
+            let submission = InputSubmission(generation: item.generation, requestID: item.request.id, version: 1,
+                idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+            model.interactions.observeWatchSubmission(item, submission: submission, phase: phase)
+            model.setForeground(false) // No actor yield for an observer to preserve the outcome.
+            _ = await model.handleWatchWork(["operation": "continueOnPhone", "sourceID": sourceID,
+                "sessionID": identity.sessionID, "provider": identity.provider])
+            model.setForeground(true)
+            if phase == .submitted {
+                XCTAssertNotNil(model.watchDelivery(for: identity))
+                XCTAssertNil(model.interactions.response(for: identity))
+                XCTAssertNil(model.watchPending(for: identity), "A confirmed phone answer cannot reopen as pending")
+            } else if phase == .rejected {
+                XCTAssertNil(model.interactions.response(for: identity))
+                XCTAssertNil(model.watchPending(for: identity))
+                let reopened = await model.handleWatchWork(["operation": "request", "sourceID": sourceID,
+                    "sessionID": identity.sessionID, "provider": identity.provider])
+                XCTAssertNotNil(reopened["error"])
+                XCTAssertNil(reopened["data"], "A phone rejection must survive immediate backgrounding")
+            } else {
+                XCTAssertEqual(model.interactions.response(for: identity)?.submission, submission)
+                XCTAssertEqual(model.interactions.response(for: identity)?.phase, .unconfirmed)
+            }
+        }
+        XCTAssertEqual(posts, 0, "Restoring any response outcome must not replay it")
+    }
+
+    @MainActor func testAppleWatchBackgroundHandoffRestoresLiveAndUncertainFormsWithoutReplaying() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        let source = PairedSource(endpoint: URL(string: "https://watch-handoff.example")!, sourceID: sourceID,
+            clientID: "client", credential: "private-fixture")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        var notificationIDs: [UUID] = []
+        var clearedNotificationIDs: [UUID] = []
+        // Neither notification operation should depend on the simulator's system service.
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config),
+            appleWatchIdentity: { "watch" }, postHandoffNotification: { id in
+                notificationIDs.append(id)
+                return false
+            }, clearHandoffNotification: { clearedNotificationIDs.append($0) })
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        var listing = fixture()
+        let snapshotData = refreshSnapshot(source, state: "needs_input", interactions: true)
+        var posts = 0, definitive = false
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.httpMethod == "POST" {
+                    posts += 1
+                    if definitive { transport.finish(Data(), status: 410) }
+                    else { transport.client?.urlProtocol(transport, didFailWithError: URLError(.networkConnectionLost)) }
+                } else if transport.request.url?.path == "/v1/snapshot" { transport.finish(snapshotData) }
+                else {
+                    transport.finish(try! JSONSerialization.data(withJSONObject: listing))
+                }
+            }
+        }
+        defer {
+            model.setForeground(false)
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: sourceID))
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        let request: [String: Any] = ["operation": "request", "sourceID": sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude"]
+        let reply = await model.handleWatchWork(request)
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reply["data"] as? Data))
+        let identity = WorkIdentity(sourceID: sourceID, sessionID: prompt.request.sessionID, provider: "claude")
+        let continuation: [String: Any] = ["operation": "continueOnPhone", "sourceID": sourceID,
+            "sessionID": identity.sessionID, "provider": identity.provider]
+        let continuationReply = await model.handleWatchWork(continuation)
+        XCTAssertEqual(continuationReply["handoff"] as? Int, Int(WatchHandoffResult.openPhone.rawValue))
+        XCTAssertEqual(notificationIDs.count, 1)
+        let notificationID = try XCTUnwrap(notificationIDs.first)
+        model.setForeground(true)
+        XCTAssertTrue(clearedNotificationIDs.contains(notificationID), "Foreground handoff must clear its notification")
+        let restored = try XCTUnwrap(model.interactions.items.first { $0.request.id == prompt.request.id })
+        XCTAssertTrue(model.interactions.isCurrent(restored), "A live cached Watch form must be immediately editable")
+        model.setForeground(false)
+        let submission = InputSubmission(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        let payload: [String: Any] = ["operation": "submit", "sourceID": sourceID,
+            "submission": try JSONEncoder().encode(submission)]
+        let uncertain = await model.handleWatchWork(payload)
+        XCTAssertEqual(uncertain["unconfirmed"] as? Bool, true)
+        _ = await model.handleWatchWork(continuation)
+        model.setForeground(true)
+        XCTAssertEqual(model.interactions.response(for: identity)?.submission, submission)
+        XCTAssertEqual(model.interactions.response(for: identity)?.phase, .unconfirmed)
+        XCTAssertEqual(posts, 1, "Continuing on phone must not submit or retry an answer")
+        let newerRequest = InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+            sessionID: identity.sessionID, kind: "question", title: "New question", detail: "",
+            questions: prompt.request.questions, remainingSeconds: 60)
+        let newer = PendingInput(source: source, generation: prompt.generation, request: newerRequest,
+            expiresAtUptime: ProcessInfo.processInfo.systemUptime + 60)
+        listing["requests"] = [try JSONSerialization.jsonObject(with: JSONEncoder().encode(newerRequest))]
+        model.interactions.observeWatchRequest(newer)
+        _ = await model.handleWatchWork(continuation)
+        XCTAssertTrue(model.interactions.isCurrent(newer), "Handoff cannot replace a newer phone request")
+        XCTAssertFalse(model.interactions.isCurrent(restored))
+        model.setForeground(false)
+        definitive = true
+        let rejected = await model.handleWatchWork(payload)
+        XCTAssertNotNil(rejected["error"])
+        _ = await model.handleWatchWork(continuation)
+        model.setForeground(true)
+        XCTAssertNil(model.interactions.response(for: identity), "A rejected Watch response must not reopen as retryable")
+        XCTAssertFalse(model.interactions.items.contains { $0.request.id == prompt.request.id })
+        XCTAssertEqual(posts, 2)
+    }
+
+    func testWatchMultipleQuestionsRequireEveryAnswerInOneSubmission() {
+        let questions = [
+            InteractionQuestion(id: "timing", prompt: "When?", multiple: false,
+                options: [InteractionOption(label: "Now", description: "")]),
+            InteractionQuestion(id: "screens", prompt: "Which screens?", multiple: true,
+                options: [InteractionOption(label: "Watch", description: ""), InteractionOption(label: "Phone", description: "")])
+        ]
+        let request = InputRequest(requestID: "request", version: 1, provider: "claude", sessionID: "session",
+            kind: "question", title: "Questions", detail: "", questions: questions, remainingSeconds: 120)
+        XCTAssertTrue(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 120).supportsWatchAnswer)
+        func valid(_ answers: [String: InputAnswer]) -> Bool {
+            InputSubmission(generation: "g", requestID: "request", version: 1, idempotencyKey: UUID().uuidString,
+                action: "answer", answers: answers).valid(for: request)
+        }
+        XCTAssertFalse(valid(["timing": InputAnswer(selected: [0])]))
+        XCTAssertTrue(valid(["timing": InputAnswer(selected: [0]), "screens": InputAnswer(selected: [0, 1])]))
+        XCTAssertTrue(valid(["timing": InputAnswer(selected: [0]), "screens": InputAnswer(text: "Both screens")]))
+        XCTAssertFalse(valid(["timing": InputAnswer(selected: [0]), "screens": InputAnswer(selected: [0], text: "Both")]))
+        let largeQuestions = (0..<4).map {
+            InteractionQuestion(id: "q\($0)", prompt: "Explain", multiple: false, options: [])
+        }
+        let largeRequest = InputRequest(requestID: "large", version: 1, provider: "claude", sessionID: "session",
+            kind: "question", title: "Questions", detail: "", questions: largeQuestions, remainingSeconds: 120)
+        let largeAnswers = Dictionary(uniqueKeysWithValues: largeQuestions.map {
+            ($0.id, InputAnswer(text: String(repeating: "🚀", count: 4096)))
+        })
+        XCTAssertTrue(largeQuestions.allSatisfy { largeAnswers[$0.id]!.valid(for: $0) })
+        let largeSubmission = InputSubmission(generation: "g", requestID: "large", version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: largeAnswers)
+        XCTAssertFalse(largeSubmission.fitsWireLimit)
+        XCTAssertFalse(largeSubmission.valid(for: largeRequest))
+    }
+
+    @MainActor func testAppleWatchContinuationRestoresExactTaskAndRejectsChangedWatch() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        var watchID: String? = "watch-installation"
+        let source = refreshSource("watch-continuation")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let data = refreshSnapshot(source)
+        InteractionURLProtocol.start = { $0.finish(data) }
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config),
+            appleWatchIdentity: { watchID }, postHandoffNotification: { _ in false },
+            clearHandoffNotification: { _ in })
+        model.pairedSources = [source]
+        var snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
+        snapshot.sessions?[0].project = "Paceman"
+        model.snapshots = [source.sourceID: snapshot]
+        defer {
+            model.setForeground(false)
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        let exported = await model.handleWatchWork(["operation": "cachedTasks"])
+        let task = try XCTUnwrap(JSONDecoder().decode(WatchWorkSnapshot.self,
+            from: XCTUnwrap(exported["data"] as? Data)).tasks.first)
+        XCTAssertEqual(task.project, "Paceman")
+        XCTAssertEqual(task.observedAt, snapshot.observedAt)
+        let reply = await model.handleWatchWork(["operation": "continueOnPhone", "sourceID": source.sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude"])
+        XCTAssertEqual(reply["selectionAvailable"] as? Bool, true)
+        XCTAssertNotNil(reply["handoff"])
+        let stored = try XCTUnwrap(defaults.data(forKey: key))
+        let pending = try JSONDecoder().decode(PendingWatchHandoff.self, from: stored)
+        XCTAssertEqual(model.handoffTarget(pending)?.session.id, task.sessionID)
+        XCTAssertEqual(pending.appleWatch, true)
+        XCTAssertFalse(String(decoding: stored, as: UTF8.self).contains(task.sessionID))
+        XCTAssertFalse(String(decoding: stored, as: UTF8.self).contains("\"credential\""))
+        model.setForeground(true)
+        XCTAssertEqual(model.handoff?.id, pending.id)
+        model.deferHandoff()
+        XCTAssertNil(model.handoff)
+        model.presentStoredHandoff()
+        XCTAssertEqual(model.handoff?.id, pending.id, "Closing an existing form must restore the deferred selection")
+        watchID = "different-watch"
+        model.presentStoredHandoff()
+        XCTAssertNil(model.handoff)
+        XCTAssertNil(defaults.data(forKey: key))
+        XCTAssertNil(model.handoffTarget(pending))
+    }
+
+    @MainActor func testAppleWatchContinuationFallsBackToActivityWithoutOpeningAnotherTask() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        let model = CompanionModel(preview: true, push: PushCoordinator(), appleWatchIdentity: { "watch" },
+            postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
+        model.pairedSources = []
+        model.snapshots = [:]
+        defer {
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        let reply = await model.handleWatchWork(["operation": "continueOnPhone", "sourceID": "removed",
+            "sessionID": "removed-task", "provider": "codex"])
+        XCTAssertEqual(reply["selectionAvailable"] as? Bool, false)
+        XCTAssertNotNil(reply["handoff"])
+        let pending = try JSONDecoder().decode(PendingWatchHandoff.self, from: XCTUnwrap(defaults.data(forKey: key)))
+        XCTAssertTrue(pending.isCurrent())
+        XCTAssertEqual(pending.activityOnly, true)
+        XCTAssertNil(model.handoffTarget(pending))
+        XCTAssertTrue(pending.source.isEmpty)
+        XCTAssertTrue(pending.session.isEmpty)
+        XCTAssertFalse(pending.isCurrent(now: pending.createdAt.addingTimeInterval(601)))
+    }
+
+    func testWatchApprovalAllowsOnlyOneTimeDecisionOrRelease() {
+        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "codex",
+            sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Run tests?",
+            detail: "Command: swift test", questions: [], remainingSeconds: 60)
+        for action in ["allowOnce", "deny", "release", "allow", "allowAlways", "answer"] {
+            let submission = InputSubmission(generation: "g", requestID: request.id, version: 1,
+                idempotencyKey: UUID().uuidString, action: action, answers: [:])
+            XCTAssertEqual(submission.valid(for: request), ["allowOnce", "deny", "release"].contains(action))
+        }
+        let malformed = InputSubmission(generation: "g", requestID: request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "allowOnce", answers: ["q0": InputAnswer(text: "yes")])
+        XCTAssertFalse(malformed.valid(for: request))
+    }
 }
