@@ -44,7 +44,6 @@ private struct SourceStatus: Decodable {
     var providerCounts: [String: [String: Int]]? = nil
     var missingHooksByProvider: [String: [String]]? = nil
     var hookCommands: [String: String]? = nil
-    var responseHookCommands: [String: String]? = nil
     var lastAgentEventByProvider: [String: Double]? = nil
     var selectedProviders: [String] { configuredProviders ?? ["codex"] }
     func providerLabel(_ provider: String, selected: Bool? = nil) -> String {
@@ -781,8 +780,8 @@ private struct HookReviewView: View {
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("2. Review Paceman’s hooks").font(.headline)
-                        Text(provider == "codex" ? "Expand the Paceman rows under each of the 8 events. Codex labels them “Hook 1”. PreToolUse and PermissionRequest also have a response command; review both. Trust only commands that match below."
-                             : "Check Paceman’s commands under each of the 12 events, including the response command in PreToolUse and PermissionRequest. Claude runs configured hooks in trusted workspaces; there is no separate acceptance step for each hook.")
+                        Text(provider == "codex" ? "Expand the Paceman rows under each of the 8 events. Codex labels them “Hook 1”. Trust only commands that match below."
+                             : "Check Paceman’s commands under each of the 12 events. Claude runs configured hooks in trusted workspaces; there is no separate acceptance step for each hook.")
                             .fixedSize(horizontal: false, vertical: true)
                         if let command = model.status.hookCommands?[provider] ?? (provider == "codex" ? model.status.hookCommand : nil) {
                             Text("Activity").font(.callout.weight(.medium))
@@ -793,13 +792,6 @@ private struct HookReviewView: View {
                         } else {
                             Text(model.hasReadStatus ? "The installed command is unavailable. Run Paceman setup again." : "Loading hook details…")
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        }
-                        if let command = model.status.responseHookCommands?[provider] {
-                            Text("Questions and approvals · PreToolUse, PermissionRequest").font(.callout.weight(.medium))
-                            Text(command).font(.system(.callout, design: .monospaced))
-                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                         }
                         DisclosureGroup("Event reference (\(provider == "codex" ? 8 : 12))") {
                             VStack(alignment: .leading, spacing: 10) {

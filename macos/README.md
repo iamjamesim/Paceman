@@ -25,7 +25,7 @@ to the agent. Sharing pauses all of this.
 Hooks let Codex send activity events to Paceman. Review them yourself before trusting them:
 
 1. In Codex, open **Settings → Hooks → User config (All projects)**.
-2. Expand the Paceman rows, labelled **Hook 1**, under the eight events listed in Paceman. `PreToolUse` and `PermissionRequest` also have a response command. Review both against the commands in Paceman’s setup window before trusting them.
+2. Expand the Paceman rows, labelled **Hook 1**, under the eight events listed in Paceman. Compare each command against the command in Paceman’s setup window before trusting it.
 3. Start a **new saved local Codex task** in the interface you use on this Mac and send a short prompt. Paceman should show **A new Codex event reached Paceman.** Wait for a successful reply and confirm Paceman shows the task as **Finished**.
 
 Keep Paceman’s hook-review window open while checking. If you use the Codex CLI, enter `/hooks` or select **Review hooks** at startup instead.
@@ -61,8 +61,8 @@ Project labels may appear on your iPhone Lock Screen. Session titles come from p
 ### Claude Code
 
 Use Claude Code **2.1.196 or later**. Paceman adds twelve observer commands to
-`~/.claude/settings.json` (or the saved `CLAUDE_CONFIG_DIR`), plus response commands
-in `PreToolUse` and `PermissionRequest`, preserving unrelated hooks and settings.
+`~/.claude/settings.json` (or the saved `CLAUDE_CONFIG_DIR`), preserving unrelated
+hooks and settings.
 In the CLI, `/hooks` is a read-only list of loaded hooks. In
 VS Code, use **/ → Customize → Hooks** (Claude Code 2.1.269+); for local desktop Code sessions,
 inspect the same user settings. Hooks run after workspace trust; there is no
@@ -123,10 +123,9 @@ Apple Watch delivery](../docs/architecture.md#watches).
 
 Codes expire after five minutes; choose **New code** if needed. Keep the pairing code private.
 
-Verify a question, approval and denial in each agent from the phone. Confirm the
-agent consumes the response; a submission receipt is insufficient. Keep Paceman
-open to answer within ten minutes. Timeout or hook disconnection returns to the
-agent without approving. Secret Codex questions stay in Codex.
+Questions and approvals stay in Codex or Claude Code with all native response
+choices. Paceman observes when input is needed; phone and Watch continue in the
+agent. Setup removes the retired blocking response hooks.
 
 <details>
 <summary>Private Tailscale connection</summary>

@@ -1724,12 +1724,13 @@ extension InteractionTests {
         XCTAssertNil(nextPrompt.submission)
     }
 
-    @MainActor func testWatchRejectsUnmatchedTaskAndDisabledResponses() async throws {
+    @MainActor func testWatchUsesNativeContinuationAndRejectsUnmatchedResponseTasks() async throws {
         let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
             clientID: "client", credential: "fixture")
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [InteractionURLProtocol.self]
-        let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
+        var now: TimeInterval = 100
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration), refreshUptime: { now })
         model.pairedSources = [source]
         var enabled = false
         var interactionReads = 0
@@ -1747,9 +1748,12 @@ extension InteractionTests {
         let message: [String: Any] = ["operation": "request", "sourceID": sourceID,
             "sessionID": String(repeating: "b", count: 64), "provider": "claude"]
         let disabled = await model.handleWatchWork(message)
-        XCTAssertNotNil(disabled["error"])
+        XCTAssertEqual(disabled["nativeOnly"] as? Bool, true)
+        XCTAssertNil(disabled["error"], "Native continuation is normal, not a retryable failure")
+        XCTAssertNil(disabled["data"])
         XCTAssertEqual(interactionReads, 0)
         enabled = true
+        now += 6 // The Watch fetch owner gates healthy reads for five seconds.
         let unmatched = await model.handleWatchWork(message)
         XCTAssertNotNil(unmatched["error"])
         XCTAssertNil(unmatched["data"], "A response form must match the exact task identity")

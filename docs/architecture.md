@@ -2,7 +2,7 @@
 
 Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, groups tasks across computers by attention and activity, and forwards current activity to compatible Bluetooth accessories.
 
-Activity updates carry task identity and state, plus available titles, project labels and Codex usage. On Mac, questions send text and choices to the phone; approvals send the tool name, arguments and working directory. Answers and decisions return to the waiting agent hook. The phone does not request chat history; text inside a question or tool argument is included as supplied.
+Activity updates carry task identity and state, plus available titles, project labels and Codex usage. Agent hooks send lifecycle metadata only; questions, answers and tool arguments remain in the source agent.
 
 Individual session rows include an optional provider title. Codex titles come from metadata-only App Server reads; Claude titles come from explicit local `custom-title` / `ai-title` records. Prompt previews are never used as titles. Titles travel over private HTTPS to the phone and, on compatible Pebble firmware, owner-authenticated BLE; APNs activity payloads stay aggregate.
 
@@ -53,8 +53,9 @@ window in Codex Limit and Codex Reset. Older or empty data from another computer
 cannot erase that reading.
 
 WatchConnectivity also supplies the paired-computer list and cached readings.
-The Watch app uses the phone's session presentation and supports questions,
-one-time approvals and continuation on iPhone through live WatchConnectivity.
+The Watch app uses the phone's session presentation and supports continuation
+on iPhone through live WatchConnectivity. Questions and approvals are reviewed
+in the source agent with their complete native choices.
 Codex usage remains available in complications.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
@@ -62,15 +63,12 @@ are in [data lifecycle](data-lifecycle.md).
 
 ## Questions and approvals
 
-Normal Mac [setup](../macos/README.md#review-agent-hooks) prepares the hooks for
-selected agents. Sharing pauses activity, questions and approvals.
-
-Claude supplies answers through `AskUserQuestion` input updates. Codex skips the
-blocking or async question tool and returns the answer as `PreToolUse` feedback.
-Secret Codex questions stay native. Waiting hooks delay the native prompt;
-release or timeout returns control without granting permission.
-See the [wire contract](protocol.md#pending-interactions) and
-[request lifecycle](data-lifecycle.md#questions-and-approvals).
+Mac setup installs observational hooks and removes the retired blocking response
+hooks. Legacy response-script invocations exit without reading the prompt or
+emitting a decision. Questions and approvals remain immediately available in
+Codex or Claude Code; phone and Watch direct the user to the agent. Current agent
+sources do not advertise remote response capability. Clients retain the older
+response protocol for compatibility with computers that have not upgraded.
 
 ## iPhone Activity
 

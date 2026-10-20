@@ -319,7 +319,7 @@ struct TaskCard: View {
         switch inbox.availability[item.id.sourceID] {
         case .loading, nil: return nil
         case .unavailable: return "Paceman couldn’t retrieve this request. It will retry while the app is open."
-        case .disabled: return "Phone responses are off for this connection."
+        case .disabled: return "Review the full request and all response options in the agent."
         case .available: return "This request can’t be answered in Paceman right now."
         }
     }

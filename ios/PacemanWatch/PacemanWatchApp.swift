@@ -239,7 +239,8 @@ extension WatchAllowanceStore {
                 if let error = result["error"] as? String {
                     continuation.resume(throwing: payload["operation"] as? String == "submit"
                         ? WatchWorkError.rejected(error) : WatchWorkError.message(error))
-                } else if result["data"] is Data || result["submitted"] as? Bool == true
+                } else if result["nativeOnly"] as? Bool == true
+                            || result["data"] is Data || result["submitted"] as? Bool == true
                             || result["unconfirmed"] as? Bool == true || result["handoff"] is Int {
                     continuation.resume(returning: result)
                 } else {
@@ -472,6 +473,7 @@ private struct WatchTaskView: View {
     @State private var unconfirmed = false
     @State private var error: String?
     @State private var rejected = false
+    @State private var nativeOnly = false
 
     private var sending: Bool { operation.busy }
 
@@ -535,6 +537,10 @@ private struct WatchTaskView: View {
                     }
                     if sending { ProgressView(submission == nil ? "Loading request" : "Sending response") }
                     if let error { Text(error).font(.body) }
+                    if nativeOnly, currentTask.state == "needs_input", !currentTask.historical(at: Date()) {
+                        Text("Review the full request and all response options in \(responseDestination).")
+                            .font(.body).fixedSize(horizontal: false, vertical: true)
+                    }
                     if prompt == nil, error != nil, !submitted, !rejected,
                        currentTask.state == "needs_input", !currentTask.historical(at: Date()) {
                         Button("Check again") { Task { await load() } }.disabled(sending)
@@ -717,7 +723,17 @@ private struct WatchTaskView: View {
         do {
             let result = try await store.workMessage(["operation": "request", "sourceID": task.sourceID,
                 "sessionID": task.sessionID, "provider": task.provider])
-            guard scenePhase != .background, operation.accepts(token), let data = result["data"] as? Data else { return }
+            guard scenePhase != .background, operation.accepts(token) else { return }
+            nativeOnly = result["nativeOnly"] as? Bool == true
+            if nativeOnly {
+                prompt = nil
+                submission = nil
+                answers = [:]
+                unconfirmed = false
+                rejected = false
+                return
+            }
+            guard let data = result["data"] as? Data else { return }
             let value = try JSONDecoder().decode(WatchWorkPrompt.self, from: data)
             prompt = value
             submission = value.submission
@@ -831,11 +847,11 @@ private enum WatchWorkPreview {
     static var scenario: String? {
         ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--work-preview=") }.map { String($0.dropFirst(15)) }
     }
-    static let detailScenarios = ["approval", "approval-json", "approval-unknown", "question", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
+    static let detailScenarios = ["native-input", "native-long", "approval", "approval-json", "approval-unknown", "question", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
     static var responseSent = false
     static var task: WatchWorkTask {
         let state = ["working-detail": "working", "finished-detail": "finished", "failed-detail": "failed", "idle-detail": "idle", "historical-detail": "working"][scenario ?? ""] ?? "needs_input"
-        return WatchWorkTask(sourceID: "preview", sessionID: "task", provider: "codex", title: "Simplify onboarding",
+        return WatchWorkTask(sourceID: "preview", sessionID: "task", provider: "codex", title: scenario == "native-long" ? "Review accessibility and notifications throughout the entire onboarding experience" : "Simplify onboarding",
             computer: "MacBook Pro", state: state, freshUntil: Date().timeIntervalSince1970 + (scenario == "historical-detail" ? -600 : 300),
             project: "Paceman", observedAt: Date().timeIntervalSince1970 - (scenario == "historical-detail" ? 900 : 15))
     }
@@ -872,6 +888,9 @@ private enum WatchWorkPreview {
             }
             return try encoded(WatchWorkSnapshot(tasks: values, computers: sources.count,
                 unavailable: ["stale", "waiting"].contains(scenario) ? 2 : scenario == "partial" ? 1 : 0, sources: sources))
+        }
+        if payload["operation"] as? String == "request", scenario.hasPrefix("native-") {
+            return ["nativeOnly": true]
         }
         if payload["operation"] as? String == "submit" {
             if scenario == "unconfirmed" { return ["unconfirmed": true] }

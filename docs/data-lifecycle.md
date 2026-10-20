@@ -91,24 +91,17 @@ statuses and hook lifecycle reasons; the phone records matching IDs and request 
 
 ## Questions and approvals
 
-Requests and answers are memory-only, excluded from snapshots, SQLite, APNs,
-BLE accessories, and diagnostics. Apple Watch receives them only through live
+Current agent sources observe input-needed state without collecting request
+content or answering prompts. Native questions and approvals retain their full
+content, choices and lifetime in the agent. Phone and Watch continue in that
+agent rather than offering a reduced decision.
+
+For compatibility with older computers, clients still support the retired
+response protocol. Those requests and answers are RAM-only and excluded from
+snapshots, SQLite, APNs, accessory BLE and diagnostics. A request belongs to one
+live hook connection for at most ten minutes; disconnect, provider disable,
+source shutdown or pairing changes invalidate it. Submission receipts confirm
+Paceman acceptance, not agent consumption. Responses are never retried
+automatically. Backgrounding clears forms; uncertain submissions require an
+explicit identical retry. Watch content travels only through live
 WatchConnectivity replies, never application context or queued transfers.
-Each request belongs to a live hook connection;
-disconnect, timeout (up to ten minutes), provider disable, source
-shutdown, or pairing changes invalidate it. Restart never replays approvals.
-An approval can remain pending in the agent after its hook ends; Paceman cannot
-recover or answer that native prompt.
-Deduplication retains response hashes and receipt metadata, at most 256 for five minutes.
-
-The phone clears actionable requests on connection failure and refetches on return,
-but preserves in-flight and uncertain submissions for confirmation or an explicit
-retry with the same payload and idempotency key. Backgrounding, access removal,
-and source-generation changes clear request/response content. An already-submitted
-operation may finish in the background. There are no automatic response retries
-or background polling. Late confirmations can complete the original card without
-overriding newer task state. Unknown delivery remains unconfirmed.
-
-Watch forms clear on backgrounding. The phone retains up to 256 Watch requests
-and exact submissions in RAM until their original deadlines; pairing changes clear
-them. Reopened forms can retry the same submission explicitly.

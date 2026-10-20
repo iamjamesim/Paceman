@@ -1163,7 +1163,7 @@ extension CompanionModel {
                 guard let snapshot = snapshots[sourceID], errors[sourceID] == nil,
                       snapshotIsFresh(sourceID) else { return ["error": "Couldn’t refresh this chat. Check Paceman on iPhone."] }
                 let destination = ResponseGuidance.destination(for: provider)
-                guard snapshot.interactionsEnabled == true else { return ["error": "Phone responses are off. Open \(destination)."] }
+                guard snapshot.interactionsEnabled == true else { return ["nativeOnly": true] }
                 let identity = WorkIdentity(sourceID: sourceID, sessionID: sessionID, provider: provider)
                 let known = interactions.items.first { $0.source.sourceID == sourceID
                     && $0.request.sessionID == sessionID && $0.request.provider == provider && interactions.isCurrent($0) }

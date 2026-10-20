@@ -489,6 +489,9 @@ Implementations: [source API](../service/hub.py),
 
 ## Pending interactions
 
+This is a compatibility contract for older computers and synthetic tests. Current
+agent sources omit `interactionsEnabled` and leave questions and approvals native.
+
 Snapshot `interactionsEnabled: true` advertises these endpoints; sources that omit
 it provide activity only. Both endpoints use the paired bearer credential.
 
