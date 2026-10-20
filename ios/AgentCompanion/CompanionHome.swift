@@ -258,7 +258,7 @@ struct WorkSectionData: Identifiable {
     static func item(session: AgentSession, source: PairedSource, model: CompanionModel,
                      inbox: InteractionInbox, computer: String, connected: Bool, current: Bool) -> WorkItem {
         let id = WorkIdentity(sourceID: source.sourceID, sessionID: session.id, provider: session.provider)
-        let pending = connected ? inbox.items.first { $0.source.sourceID == id.sourceID && $0.request.sessionID == id.sessionID && $0.request.provider == id.provider && inbox.isCurrent($0) }
+        let pending = connected ? inbox.pendingRequests(for: id).first
             ?? model.watchPending(for: id) : nil
         return WorkItem(id: id, session: session,
             computer: computer, historical: !current,

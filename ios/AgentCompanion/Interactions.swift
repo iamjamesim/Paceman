@@ -78,6 +78,9 @@ struct InputResponseState {
 /// Request content lives in RAM only and is discarded on backgrounding.
 @MainActor final class InteractionInbox: ObservableObject {
     private let client: SourceClient
+    #if DEBUG
+    private var previewQueueSourceID: String?
+    #endif
     init(client: SourceClient = SourceClient()) { self.client = client }
     @Published private(set) var bySource: [String: [PendingInput]] = [:]
     @Published private(set) var responses: [String: InputResponseState] = [:]
@@ -116,6 +119,17 @@ struct InputResponseState {
     var lifecycleID: UUID { epoch }
     private var revisions: [String: Int] = [:]
     var items: [PendingInput] { bySource.keys.sorted().flatMap { bySource[$0] ?? [] } }
+    func pendingRequests(for identity: WorkIdentity) -> [PendingInput] {
+        items.enumerated().filter { _, item in
+            item.source.sourceID == identity.sourceID && item.request.provider == identity.provider
+                && item.request.sessionID == identity.sessionID && isCurrent(item)
+                && response(for: item)?.phase != .submitted && response(for: item)?.phase != .rejected
+        }.sorted { a, b in
+            let first = ordering.requestOrder(a.element) ?? UInt64.max
+            let second = ordering.requestOrder(b.element) ?? UInt64.max
+            return first == second ? a.offset < b.offset : first < second
+        }.map(\.element)
+    }
     func setForeground(_ value: Bool) {
         guard active != value else { return }
         active = value
@@ -263,8 +277,10 @@ struct InputResponseState {
     func observeWatchRequest(_ item: PendingInput) {
         guard active else { return }
         let sourceID = item.source.sourceID
+        // This observes one request, not an authoritative inbox listing.
+        // A delayed Watch read cannot invalidate any other pending identity.
         bySource[sourceID, default: []].removeAll {
-            $0.request.sessionID == item.request.sessionID && $0.request.provider == item.request.provider
+            $0.id == item.id
         }
         bySource[sourceID, default: []].append(item)
         responses = responses.mapValues { response in
@@ -322,6 +338,12 @@ struct InputResponseState {
         let started = ProcessInfo.processInfo.systemUptime
         let operation = Task { @MainActor [weak self] in
             defer { self?.operations.removeValue(forKey: item.id) }
+            #if DEBUG
+            if self?.previewQueueSourceID == item.source.sourceID {
+                self?.didSubmit(item, submission: submission)
+                return
+            }
+            #endif
             do {
                 try await client.submitInput(submission, source: item.source)
                 Diagnostics.shared.record("interaction_submit_confirmed", sourceID: item.source.sourceID,
@@ -371,6 +393,17 @@ struct InputResponseState {
                 questions: approval ? [] : [question], remainingSeconds: 120)
             return PendingInput(source: source, generation: generation, request: request,
                 expiresAtUptime: ProcessInfo.processInfo.systemUptime + 3600)
+        }
+        if ProcessInfo.processInfo.arguments.contains("--request-queue-preview") {
+            previewQueueSourceID = source.sourceID
+            let question = InteractionQuestion(id: "next", prompt: "Which checks should run next?", multiple: false,
+                options: [.init(label: "Full test suite", description: "Verify all behavior."),
+                          .init(label: "Changed files only", description: "Check this change.")])
+            let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "codex",
+                sessionID: "review-approval", kind: "question", title: "Follow-up", detail: "",
+                questions: [question], remainingSeconds: 120)
+            bySource[source.sourceID]?.insert(PendingInput(source: source, generation: generation, request: request,
+                expiresAtUptime: ProcessInfo.processInfo.systemUptime + 3600), at: 1)
         }
         ordering.observeRequests(bySource[source.sourceID] ?? [], sourceID: source.sourceID)
     }

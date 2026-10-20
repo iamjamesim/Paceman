@@ -27,6 +27,23 @@ struct TaskCardRequestLock {
     mutating func capture(_ candidate: PendingInput?) {
         if request == nil { request = candidate }
     }
+    /// A new arrival cannot redirect an answer. Only an exact acknowledgement
+    /// releases this form and permits the next request in the selected session.
+    @discardableResult mutating func advance(after response: InputResponseState?, to next: PendingInput?) -> Bool {
+        guard let current = request, let response, response.item.id == current.id,
+              response.phase == .submitted, response.submission.action != "release",
+              response.submission.requestID == current.request.id,
+              response.submission.generation == current.generation,
+              response.submission.version == current.request.version else { return false }
+        if let next {
+            guard next.id != current.id, next.generation == current.generation,
+                  next.source.sourceID == current.source.sourceID,
+                  next.request.provider == current.request.provider,
+                  next.request.sessionID == current.request.sessionID else { return false }
+        }
+        request = next
+        return true
+    }
 }
 
 enum TaskCardSelection: Identifiable {
@@ -44,7 +61,7 @@ enum TaskCardSelection: Identifiable {
         // Queues handle confirmed responses by advancing. Passive state changes
         // do not close details or replace a request being answered.
         if case .review = self { return false }
-        return response?.phase == .submitted
+        return response?.phase == .submitted && response?.submission.action == "release"
     }
 }
 
@@ -67,6 +84,15 @@ struct TaskCard: View {
         return request
     }
     private var response: InputResponseState? { displayedRequest.flatMap { inbox.response(for: $0) } }
+    private var sessionRequests: [PendingInput] {
+        guard let item, !item.historical else { return [] }
+        return inbox.pendingRequests(for: item.id)
+    }
+    private var nextAvailableRequest: PendingInput? {
+        guard let displayedRequest, response?.phase != .sending, response?.phase != .unconfirmed,
+              !inbox.isCurrent(displayedRequest) || response?.phase == .rejected else { return nil }
+        return sessionRequests.first { $0.id != displayedRequest.id }
+    }
     private var isReview: Bool { if case .review = selection { return true }; return false }
     private var currentIdentity: WorkIdentity? {
         switch selection {
@@ -106,7 +132,7 @@ struct TaskCard: View {
     }
     private var showsIdentity: Bool {
         if case .handoff = selection { return true }
-        return false
+        return !isReview && displayedRequest != nil
     }
     private var scrollingHeading: TaskCardHeading? {
         showsIdentity && typeSize.isAccessibilitySize ? heading : nil
@@ -129,7 +155,12 @@ struct TaskCard: View {
             if item != nil, let request = displayedRequest, phase == .active {
                 InteractionDetail(item: request, inbox: inbox, theme: theme,
                     heading: scrollingHeading, context: isReview && typeSize.isAccessibilitySize ? reviewContext : nil, contentTopInset: isReview || (showsIdentity && !typeSize.isAccessibilitySize) ? 16 : CompanionLayout.taskCardTopInset,
-                    openSession: handoffOpen).id(request.id)
+                    openSession: handoffOpen, nextRequest: nextAvailableRequest.map { next in
+                        { guard inbox.isCurrent(next) else { return }
+                            requestLock = TaskCardRequestLock()
+                            requestLock.capture(next)
+                        }
+                    }).id(request.id)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
@@ -178,7 +209,16 @@ struct TaskCard: View {
             if close { dismiss() }
         }
         .onChange(of: response?.phase) { _, value in
-            if isReview && TaskReviewQueue.advances(after: response) { advanceReview() }
+            guard TaskReviewQueue.advances(after: response), response?.submission.action != "release" else { return }
+            if let next = sessionRequests.first {
+                requestLock.advance(after: response, to: next)
+            } else if review?.hasNext == true {
+                advanceReview()
+            } else {
+                // Remain in the selected session. A later question can open
+                // here without another row tap; closing the sheet ends this flow.
+                requestLock.advance(after: response, to: nil)
+            }
         }
         .onChange(of: candidateRequest?.id, initial: true) { _, _ in
             requestLock.capture(candidateRequest)
@@ -202,7 +242,9 @@ struct TaskCard: View {
 
     private var reviewContext: String? {
         guard let item, let review else { return nil }
-        return [item.session.displayName, Set(review.tasks.map(\.sourceID)).count > 1 ? item.computer : nil]
+        return [item.session.displayName, item.session.provider == "claude" ? "Claude Code" : item.session.provider.capitalized,
+                Set(review.tasks.map(\.sourceID)).count > 1 ? item.computer : nil,
+                sessionRequests.count > 1 ? "\(sessionRequests.count) requests pending" : nil]
             .compactMap { $0 }.joined(separator: " · ")
     }
 
@@ -289,7 +331,7 @@ struct TaskCard: View {
     }
 
     private var heading: TaskCardHeading {
-        TaskCardHeading(item: item, theme: theme)
+        TaskCardHeading(item: item, theme: theme, pendingCount: sessionRequests.count, showsClose: !isReview)
     }
 
     private var handoffOpen: SessionOpenButton? {
@@ -328,15 +370,20 @@ struct TaskCard: View {
 struct TaskCardHeading: View {
     let item: WorkItem?
     let theme: CompanionTheme
+    var pendingCount = 0
+    var showsClose = false
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item?.session.displayName ?? "Session unavailable")
                     .companionText(.label, theme: theme).accessibilityAddTraits(.isHeader)
-                if let item { Text(item.context).companionText(.supporting, theme: theme) }
+                if let item {
+                    Text([item.context, pendingCount > 1 ? "\(pendingCount) requests pending" : nil]
+                        .compactMap { $0 }.joined(separator: " · ")).companionText(.supporting, theme: theme)
+                }
             }.frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-            if item == nil {
+            if item == nil || showsClose {
                 TaskCardCloseButton(theme: theme)
             }
         }

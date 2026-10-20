@@ -76,9 +76,13 @@ Sessions are keyed by source, provider, and session ID, never title. Activity ow
 and responses; Devices owns connections, accessories, and Live Activities.
 Ordering is stable and phone-observed, not durable task chronology: answerable
 requests lead Needs you, Working follows state-entry order, and Recent is newest
-first. Review freezes its membership and order; new arrivals wait for the next
-Review. Each form stays pinned to its exact request. Confirmed responses dismiss
-or advance Review and use Working presentation without changing observed agent state.
+first. Review freezes session membership and order. Within the selected session,
+requests retain their observed order and advance only after exact submission
+confirmation; a new arrival never replaces a draft or uncertain response. Row
+visits remain open for follow-up requests until dismissed. Review drains pending
+requests in its current session before advancing, and its final session remains
+open until Done. Confirmed responses use Working presentation without changing
+observed agent state. Other sessions never present unsolicited question sheets.
 
 Live Activity taps open a unique session only when its source generation and
 revision match; otherwise they open source-filtered Activity. Watch resolves through

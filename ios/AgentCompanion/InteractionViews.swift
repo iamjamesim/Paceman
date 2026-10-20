@@ -9,6 +9,7 @@ struct InteractionDetail: View {
     var context: String? = nil
     var contentTopInset: CGFloat = 16
     var openSession: SessionOpenButton? = nil
+    var nextRequest: (() -> Void)? = nil
     @Environment(\.scenePhase) private var phase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var answers: [String: InputAnswer] = [:]
@@ -74,13 +75,16 @@ struct InteractionDetail: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if message != nil || (!sent && (sending || retryable || editable)) || openSession != nil {
+                if message != nil || (!sent && (sending || retryable || editable)) || openSession != nil || nextRequest != nil {
                     VStack(spacing: 8) {
                         if !typeSize.isAccessibilitySize, let message {
                             Text(message).companionText(.body, theme: theme)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         if !sent && (sending || retryable || editable) { responseActions }
+                        if !sending && !retryable, let nextRequest {
+                            InputActionButton(title: "Next request", theme: theme, action: nextRequest)
+                        }
                         if let openSession { openSession }
                     }
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 12)
