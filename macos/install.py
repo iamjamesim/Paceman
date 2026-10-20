@@ -175,7 +175,7 @@ def install_hooks(path: Path | None = None, *, provider="codex"):
             groups.append(group)
             changed.append(event)
     from macos.responses import updated_hooks
-    updated = updated_hooks(document, ROOT, PYTHON, provider)
+    updated = updated_hooks(document, ROOT, provider)
     if updated != document:
         changed.extend(event for event in updated["hooks"]
                        if updated["hooks"].get(event) != document["hooks"].get(event)

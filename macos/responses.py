@@ -6,11 +6,6 @@ from pathlib import Path
 import shlex
 
 
-def command(root: Path, python: str, provider: str) -> str:
-    return shlex.join([python, "-B", str(root / "lib/macos/interaction_hook.py"),
-                       "--provider", provider])
-
-
 def owns_hook(item, root: Path, provider: str) -> bool:
     if not isinstance(item, dict):
         return False
@@ -22,7 +17,7 @@ def owns_hook(item, root: Path, provider: str) -> bool:
                                            "--provider", provider])
 
 
-def updated_hooks(document, root: Path, python: str, provider: str):
+def updated_hooks(document, root: Path, provider: str):
     """Keep observer and foreign definitions intact, including their matchers."""
     if not isinstance(document, dict) or not isinstance(document.get("hooks", {}), dict):
         raise ValueError(f"Invalid {provider} hooks configuration")

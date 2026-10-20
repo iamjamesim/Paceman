@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import plistlib
+import shlex
 import sys
 import tempfile
 import unittest
@@ -8,6 +9,10 @@ from unittest.mock import patch
 
 from macos import agents, control, install, responses, uninstall
 from service import hub
+
+
+def legacy_response_command(root, python, provider):
+    return shlex.join([python, '-B', str(root / 'lib/macos/interaction_hook.py'), '--provider', provider])
 
 
 class ResponseSetupTests(unittest.TestCase):
@@ -70,7 +75,7 @@ class ResponseSetupTests(unittest.TestCase):
                 foreign = {'type': 'command', 'command': '/bin/echo keep'}
                 for event in ('PermissionRequest', 'PreToolUse', 'Stop'):
                     document['hooks'][event].append({'matcher': 'original', 'hooks': [foreign,
-                        {'type': 'command', 'command': responses.command(self.root, '/retired/python', provider),
+                        {'type': 'command', 'command': legacy_response_command(self.root, '/retired/python', provider),
                          'timeout': 605}]})
                 path.write_text(json.dumps(document))
                 self.assertEqual(set(install.install_hooks(path, provider=provider)),
@@ -116,7 +121,7 @@ class ResponseSetupTests(unittest.TestCase):
         foreign = {'type': 'command', 'command': '/bin/echo keep'}
         document['hooks']['PermissionRequest'][-1]['hooks'].append(foreign)
         document['hooks']['PermissionRequest'].append({'hooks': [{'type': 'command',
-            'command': responses.command(self.root, sys.executable, 'claude'), 'timeout': 605}]})
+            'command': legacy_response_command(self.root, sys.executable, 'claude'), 'timeout': 605}]})
         path.write_text(json.dumps(document))
         with patch.object(control, 'launch') as launch:
             control.configure_agents(['codex'])
