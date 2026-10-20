@@ -20,13 +20,13 @@ TIMEOUT_SECONDS = 8
 MAX_RESPONSE_BYTES = 1_048_576
 
 
-def codex_binary(*, application_dirs: tuple[Path, ...] | None = None) -> str | None:
+def codex_binary(*, application_dirs: tuple[Path, ...] | None = None, desktop_only: bool = False) -> str | None:
     if application_dirs is None:
         application_dirs = (Path("/Applications"), Path.home() / "Applications")
     # Prefer the runtime owned by the desktop client. A separately installed CLI
     # may be signed in to another account. This is an optional bundle detail,
     # verified by bundle ID and executable presence rather than assumed.
-    candidates = [os.environ.get("PACEMAN_CODEX_BIN")]
+    candidates = [] if desktop_only else [os.environ.get("PACEMAN_CODEX_BIN")]
     for directory in application_dirs:
         for name in ("Codex.app", "ChatGPT.app"):
             bundle = directory / name
@@ -37,7 +37,8 @@ def codex_binary(*, application_dirs: tuple[Path, ...] | None = None) -> str | N
             if isinstance(info, dict) and info.get("CFBundleIdentifier") == "com.openai.codex":
                 candidates.extend(str(bundle / relative) for relative in (
                     "Contents/Resources/codex-cli/bin/codex", "Contents/Resources/codex"))
-    candidates.extend((shutil.which("codex"), "/opt/homebrew/bin/codex", "/usr/local/bin/codex"))
+    if not desktop_only:
+        candidates.extend((shutil.which("codex"), "/opt/homebrew/bin/codex", "/usr/local/bin/codex"))
     for candidate in candidates:
         if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
             return str(Path(candidate).resolve())

@@ -6,7 +6,9 @@ from service.codex_limits import _response, _send, codex_binary
 
 
 def read_browser_policy():
-    binary = codex_binary()
+    # A separate CLI can belong to another account or installation. Its policy
+    # cannot authorize a broader grant in the desktop owner.
+    binary = codex_binary(desktop_only=True)
     if binary is None:
         return None
     process = None

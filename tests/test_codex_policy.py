@@ -1,10 +1,21 @@
 import unittest
+import os
+from pathlib import Path
+import tempfile
 from unittest.mock import Mock, patch
 
 from service.codex_policy import read_browser_policy
+from service.codex_limits import codex_binary
 
 
 class BrowserPolicyTests(unittest.TestCase):
+    def test_desktop_policy_cannot_fall_back_to_another_cli_or_binary_override(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.dict(os.environ, {'PACEMAN_CODEX_BIN': '/bin/echo'}), \
+                patch('service.codex_limits.shutil.which', return_value='/bin/echo'):
+            self.assertIsNotNone(codex_binary(application_dirs=(Path(temporary),)))
+            self.assertIsNone(codex_binary(application_dirs=(Path(temporary),), desktop_only=True))
+
     def test_managed_policy_defaults_require_a_successful_read(self):
         for result, expected in [({}, None), ({'requirements': None}, True),
                 ({'requirements': {}}, True), ({'requirements': {'browserUse': None}}, True),
