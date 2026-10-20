@@ -499,6 +499,11 @@ and `reason`, complete JSON `input`, normalized `action`, and
 (`filePath`, `text`), `fileEdit` (`filePath`, `before`, `text`, `replaceAll`), or
 `tool` (uninterpreted JSON). Only documented built-ins are unpacked; MCP
 arguments retain every field. Views render this model without provider decoding.
+`terminalInput` actions carry `terminalSessionID`, exact `text`, and an
+`operation` of `interrupt`, `poll`, or `write`. An optional `parentCommand` comes
+only from adapter-supplied terminal context with a matching session ID; a parent
+call ID alone never establishes a human-readable command. Complete original
+terminal input, including permission and parent-call metadata, remains in `input`.
 
 GET must advertise `X-Paceman-Content-Version: 2` to receive v2 requests. Watch
 request messages similarly advertise `contentVersion: 2`; older Watch clients

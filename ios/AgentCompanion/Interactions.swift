@@ -379,6 +379,7 @@ struct InputResponseState {
         let generation = UUID().uuidString
         bySource[source.sourceID] = ["approval", "question", "multiple"].map { kind in
             let approval = kind == "approval"
+            let terminal = approval && ProcessInfo.processInfo.arguments.contains("--approval-terminal-payload")
             let question = InteractionQuestion(id: "q0",
                 prompt: kind == "multiple" ? "What should appear on the watch?" : "When should we ask people to enable notifications?",
                 multiple: kind == "multiple", options: kind == "multiple"
@@ -388,9 +389,11 @@ struct InputResponseState {
                        .init(label: "During setup", description: "Have notifications ready for the first task.")])
             let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: approval ? "codex" : "claude",
                 sessionID: "review-" + kind, kind: approval ? "approval" : "question",
-                title: approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? "Allow \(ApprovalPreviewFixtures.pageTool)?" : approval ? "Run the tests?" : "Question",
-                detail: approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? ApprovalPreviewFixtures.largePageEdit : approval ? "Command: npm test -- checkout" : "",
-                questions: approval ? [] : [question], remainingSeconds: 120)
+                title: terminal ? "Allow write_stdin?" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? "Allow \(ApprovalPreviewFixtures.pageTool)?" : approval ? "Run the tests?" : "Question",
+                detail: terminal ? "" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? ApprovalPreviewFixtures.largePageEdit : approval ? "Command: npm test -- checkout" : "",
+                questions: approval ? [] : [question], remainingSeconds: 120,
+                contentVersion: terminal ? 2 : nil, approval: terminal ? ApprovalPreviewFixtures.terminal() : nil,
+                responseOptions: terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : nil)
             return PendingInput(source: source, generation: generation, request: request,
                 expiresAtUptime: ProcessInfo.processInfo.systemUptime + 3600)
         }

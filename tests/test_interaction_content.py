@@ -16,6 +16,33 @@ def request(tool='Bash', input=None, choices=None):
 
 
 class ApprovalContentTests(unittest.TestCase):
+    def test_native_terminal_writes_distinguish_interrupt_poll_and_arbitrary_input(self):
+        for text, operation in [("\x03\x03", "interrupt"), ("", "poll"), ("echo ready\n", "write"),
+                                ("a\x03", "write"), (r'\u0003', "write"), ("\x03\n", "write")]:
+            raw = request('write_stdin', {'session_id': 35467, 'chars': text,
+                'parent_call_id': 'exact-parent', 'approval_id': 'exact-approval'})['approval']
+            result = normalize_approval('codex', raw)
+            self.assertEqual(result['action']['kind'], 'terminalInput')
+            self.assertEqual(result['action']['operation'], operation)
+            self.assertEqual(result['action']['text'], text)
+            self.assertEqual(result['action']['terminalSessionID'], 35467)
+            self.assertEqual(result['input'], raw['input'])
+            self.assertTrue(result['hasAdditionalInput'])
+            self.assertNotIn('parentCommand', result['action'])
+            self.assertEqual(normalize_approval('claude', raw)['action']['kind'], 'tool')
+        for session in [False, '35467', 35467.5]:
+            raw = request('write_stdin', {'session_id': session, 'chars': '\x03'})['approval']
+            self.assertEqual(normalize_approval('codex', raw)['action']['kind'], 'tool')
+
+    def test_terminal_parent_command_requires_matching_confirmed_context(self):
+        raw = request('write_stdin', {'session_id': 35467, 'chars': '\x03'})['approval']
+        raw['terminalContext'] = {'sessionID': 35467, 'command': 'xcodebuild test'}
+        result = normalize_approval('codex', raw)
+        self.assertEqual(result['action']['parentCommand'], 'xcodebuild test')
+        raw['terminalContext']['sessionID'] = 99
+        with self.assertRaises(ValueError):
+            normalize_approval('codex', raw)
+
     def test_documented_commands_and_files_decode_at_source_and_preserve_extensions(self):
         for provider in ('codex', 'claude'):
             for tool in ('Bash', 'PowerShell', 'apply_patch'):

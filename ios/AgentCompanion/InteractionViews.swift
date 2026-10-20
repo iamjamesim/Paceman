@@ -193,6 +193,9 @@ struct InteractionDetail: View {
                     ApprovalExpandableText(text: explanation, label: "Request details", theme: theme, code: false)
                 }
                 VStack(alignment: .leading, spacing: 12) {
+                    if let session = presentation.terminalSessionID {
+                        Text("Terminal session \(String(session))").companionText(.body, theme: theme)
+                    }
                     if let path = presentation.targetPath {
                         Text(path).companionText(.body, theme: theme).textSelection(.enabled)
                             .accessibilityLabel("File: " + path)

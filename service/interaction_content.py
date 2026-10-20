@@ -8,7 +8,7 @@ import json
 
 
 def normalize_approval(provider, value):
-    if not isinstance(value, dict) or set(value) - {"toolName", "workingDirectory", "reason", "input"}:
+    if not isinstance(value, dict) or set(value) - {"toolName", "workingDirectory", "reason", "input", "terminalContext"}:
         raise ValueError("invalid approval")
     tool = value.get("toolName")
     if not isinstance(tool, str) or not tool.strip() or len(tool) > 256 or "input" not in value:
@@ -24,7 +24,25 @@ def normalize_approval(provider, value):
     fields = result["input"] if isinstance(result["input"], dict) else {}
     consumed = set()
     action = result["action"]
-    if (tool in ("Bash", "PowerShell", "apply_patch")
+    context = result.pop("terminalContext", None)
+    if context is not None and (not isinstance(context, dict)
+            or set(context) != {"sessionID", "command"}
+            or type(context["sessionID"]) is not int or not isinstance(context["command"], str)
+            or not context["command"].strip() or len(context["command"]) > 16384
+            or context["sessionID"] != fields.get("session_id") or tool != "write_stdin" or provider != "codex"):
+        raise ValueError("invalid terminal context")
+    # Codex's documented approval payload adds parent_call_id and permission
+    # metadata to these native tool arguments. Preserve that complete input.
+    if (provider == "codex" and tool == "write_stdin"
+            and type(fields.get("session_id")) is int and -(2**31) <= fields["session_id"] < 2**31
+            and isinstance(fields.get("chars", ""), str)):
+        text = fields.get("chars", "")
+        operation = "poll" if not text else "interrupt" if set(text) == {"\x03"} else "write"
+        action.update(kind="terminalInput", text=text, terminalSessionID=fields["session_id"], operation=operation)
+        if context is not None:
+            action["parentCommand"] = context["command"]
+        consumed = {"session_id", "chars"}
+    elif (tool in ("Bash", "PowerShell", "apply_patch")
             and isinstance(fields.get("command"), str) and fields["command"].strip()):
         action.update(kind="patch" if tool == "apply_patch" else "command", text=fields["command"])
         consumed.add("command")

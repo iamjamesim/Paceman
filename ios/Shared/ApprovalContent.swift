@@ -64,6 +64,9 @@ struct ApprovalPayload: Codable, Equatable {
         var filePath: String? = nil
         var before: String? = nil
         var replaceAll: Bool? = nil
+        var terminalSessionID: Int? = nil
+        var operation: String? = nil
+        var parentCommand: String? = nil
     }
     let toolName: String
     var workingDirectory: String? = nil
@@ -77,6 +80,8 @@ struct ApprovalPayload: Codable, Equatable {
         case "command", "patch": return action.text != nil
         case "fileWrite": return action.text != nil && action.filePath?.isEmpty == false
         case "fileEdit": return action.text != nil && action.before != nil && action.filePath?.isEmpty == false
+        case "terminalInput": return action.text != nil && action.terminalSessionID != nil
+            && ["interrupt", "poll", "write"].contains(action.operation ?? "")
         case "tool": return true
         default: return false
         }
@@ -90,7 +95,7 @@ struct ApprovalResponseOption: Codable, Identifiable, Equatable {
 /// Known tool contracts get a useful presentation. Arbitrary MCP arguments are
 /// never interpreted as shell input or stripped of fields that look like metadata.
 struct ApprovalActionContent {
-    enum Kind { case command, patch, fileWrite, fileEdit, tool }
+    enum Kind { case command, patch, fileWrite, fileEdit, terminalInput, tool }
     struct Section {
         let label: String
         let text: String
@@ -105,6 +110,9 @@ struct ApprovalActionContent {
     let targetPath: String?
     let previousBody: String?
     let replacesAll: Bool
+    let terminalSessionID: Int?
+    let terminalOperation: String?
+    let parentCommand: String?
 
     init(_ action: String) {
         var remaining = action[...]
@@ -162,6 +170,9 @@ struct ApprovalActionContent {
         targetPath = nil
         previousBody = nil
         replacesAll = false
+        terminalSessionID = nil
+        terminalOperation = nil
+        parentCommand = nil
         kind = decodedBody != nil ? decodedKind : explicitCommand ? .command : .tool
     }
 
@@ -171,20 +182,32 @@ struct ApprovalActionContent {
         explanation = payload.reason
         originalInput = payload.input.formatted
         otherArguments = payload.hasAdditionalInput ? originalInput : nil
-        body = payload.action.text ?? originalInput
+        let text = payload.action.text ?? originalInput
+        if payload.action.kind == "terminalInput" {
+            switch payload.action.operation {
+            case "interrupt": body = text.count == 1 ? "Ctrl-C" : "Ctrl-C × \(text.count)"
+            case "poll": body = "No characters will be sent."
+            default: body = ApprovalJSON.string(text).formatted
+            }
+        } else { body = text }
         targetPath = payload.action.filePath
         previousBody = payload.action.before
         replacesAll = payload.action.replaceAll == true
+        terminalSessionID = payload.action.terminalSessionID
+        terminalOperation = payload.action.operation
+        parentCommand = payload.action.parentCommand
         switch payload.action.kind {
         case "command": kind = .command
         case "patch": kind = .patch
         case "fileWrite": kind = .fileWrite
         case "fileEdit": kind = .fileEdit
+        case "terminalInput": kind = .terminalInput
         default: kind = .tool
         }
     }
 
     var sections: [Section] {
+        if let parentCommand { return [.init(label: "Input", text: body), .init(label: "Running command", text: parentCommand)] }
         if let previousBody { return [.init(label: "Before", text: previousBody), .init(label: "After", text: body)] }
         let label: String
         switch kind {
@@ -192,6 +215,7 @@ struct ApprovalActionContent {
         case .patch: label = "Changes"
         case .fileWrite: label = "File contents"
         case .fileEdit: label = "Changes"
+        case .terminalInput: label = "Input"
         case .tool: label = "Tool input"
         }
         return [.init(label: label, text: body)]
@@ -204,6 +228,12 @@ struct ApprovalActionContent {
         case .patch: return "Apply these changes?"
         case .fileWrite: return "Write this file?"
         case .fileEdit: return "Edit this file?"
+        case .terminalInput:
+            switch terminalOperation {
+            case "interrupt": return "Interrupt this terminal?"
+            case "poll": return "Read terminal output?"
+            default: return "Send input to this terminal?"
+            }
         case .tool: return original
         }
     }
@@ -265,6 +295,15 @@ enum ApprovalPreviewFixtures {
     static let choices: [ApprovalResponseOption] = [
         .init(id: "once", label: "Allow once"), .init(id: "session", label: "Allow for this session"),
         .init(id: "decline", label: "Decline")]
+    static func terminal(_ operation: String = "interrupt", parent: Bool = true) -> ApprovalPayload {
+        let text = operation == "interrupt" ? "\u{03}\u{03}" : operation == "poll" ? "" : "echo ready\n"
+        let input: ApprovalJSON = .object(["session_id": .number(35467), "chars": .string(text),
+            "parent_call_id": .string("parent_fixture"), "approval_id": .string("approval_fixture")])
+        return ApprovalPayload(toolName: "write_stdin", input: input,
+            action: .init(kind: "terminalInput", text: text, terminalSessionID: 35467, operation: operation,
+                parentCommand: parent ? "xcodebuild test-without-building -resultBundlePath /private/tmp/paceman-watch-tests.xcresult\n" + String(repeating: "  -only-testing:AgentCompanionTests/InteractionTests\n", count: 40) : nil),
+            hasAdditionalInput: true)
+    }
     private static func detail(tool: String, input: [String: Any]) -> String {
         let data = try! JSONSerialization.data(withJSONObject: input, options: [.sortedKeys])
         return "Tool: \(tool)\nWorking directory: /Projects/Paceman\n\n" + String(decoding: data, as: UTF8.self)

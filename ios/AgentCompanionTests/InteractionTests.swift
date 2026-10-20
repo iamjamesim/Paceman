@@ -185,6 +185,26 @@ final class InteractionTests: XCTestCase {
         }
     }
 
+    func testTypedTerminalPresentationExplainsExactActionWithoutGuessingParentCommand() throws {
+        let interrupt = ApprovalActionContent(ApprovalPreviewFixtures.terminal())
+        XCTAssertEqual(interrupt.title("Allow write_stdin?"), "Interrupt this terminal?")
+        XCTAssertEqual(interrupt.body, "Ctrl-C × 2")
+        XCTAssertEqual(interrupt.terminalSessionID, 35467)
+        XCTAssertEqual(interrupt.sections.map(\.label), ["Input", "Running command"])
+        XCTAssertTrue(interrupt.originalInput.contains("\\u0003"))
+        let write = ApprovalActionContent(ApprovalPreviewFixtures.terminal("write", parent: false))
+        XCTAssertEqual(write.title("Allow write_stdin?"), "Send input to this terminal?")
+        XCTAssertEqual(write.body, "\"echo ready\\n\"")
+        XCTAssertNil(write.parentCommand)
+        XCTAssertEqual(write.sections.count, 1)
+        let poll = ApprovalActionContent(ApprovalPreviewFixtures.terminal("poll", parent: false))
+        XCTAssertEqual(poll.title("Allow write_stdin?"), "Read terminal output?")
+        XCTAssertEqual(poll.body, "No characters will be sent.")
+        let roundTrip = try JSONDecoder().decode(ApprovalPayload.self,
+            from: JSONEncoder().encode(ApprovalPreviewFixtures.terminal()))
+        XCTAssertEqual(roundTrip.action.text, "\u{03}\u{03}")
+    }
+
     @MainActor func testCatalogPreservesDistinctSessionIdentityAndLegacyActivity() throws {
         let model = CompanionModel(preview: true)
         model.showHandoffPreview("handoff-codex-working")

@@ -695,6 +695,7 @@ private struct WatchTaskView: View {
         Text(action?.title(request.title) ?? request.title).font(.headline)
         if !content.explanation.isEmpty { WatchApprovalText(text: content.explanation, label: "Request details", code: false) }
         if let action {
+            if let session = action.terminalSessionID { Text("Terminal session \(String(session))").font(.body) }
             if let reason = action.explanation, reason != content.explanation { WatchApprovalText(text: reason, label: "Request details", code: false) }
             if let path = action.targetPath {
                 Text(path).font(.body).fixedSize(horizontal: false, vertical: true)
@@ -894,7 +895,7 @@ private enum WatchWorkPreview {
     static var scenario: String? {
         ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--work-preview=") }.map { String($0.dropFirst(15)) }
     }
-    static let detailScenarios = ["native-input", "native-long", "approval", "approval-json", "approval-unknown", "approval-large", "approval-long-command", "approval-write", "approval-edit", "question", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
+    static let detailScenarios = ["native-input", "native-long", "approval", "approval-json", "approval-unknown", "approval-large", "approval-long-command", "approval-write", "approval-edit", "approval-terminal", "approval-terminal-text", "approval-terminal-poll", "question", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
     static var responseSent = false
     static var task: WatchWorkTask {
         let state = ["working-detail": "working", "finished-detail": "finished", "failed-detail": "failed", "idle-detail": "idle", "historical-detail": "working"][scenario ?? ""] ?? "needs_input"
@@ -952,11 +953,14 @@ private enum WatchWorkPreview {
             options: [.init(label: scenario == "long-option" ? "Homepage https://paceman.ai opens on the hero with the tagline and TestFlight button" : "After the first result", description: scenario == "long-option" ? "" : "Let people try Paceman first."),
                       .init(label: "During setup", description: "Ready for the first task.")])
         let approval = scenario.hasPrefix("approval") || scenario == "live-approval"
+        let terminal = scenario.hasPrefix("approval-terminal")
+        let payload: ApprovalPayload? = terminal ? ApprovalPreviewFixtures.terminal(scenario == "approval-terminal-poll" ? "poll" : scenario == "approval-terminal-text" ? "write" : "interrupt")
+            : ["approval-write", "approval-edit"].contains(scenario) ? ApprovalPreviewFixtures.file(scenario == "approval-edit") : nil
         let request = InputRequest(requestID: "preview", version: 1, provider: task.provider, sessionID: "task",
-            kind: approval ? "approval" : "question", title: scenario == "approval-large" ? "Allow \(ApprovalPreviewFixtures.pageTool)?"
+            kind: approval ? "approval" : "question", title: terminal ? "Allow write_stdin?" : scenario == "approval-large" ? "Allow \(ApprovalPreviewFixtures.pageTool)?"
                 : scenario == "approval-write" ? "Allow Write?" : scenario == "approval-edit" ? "Allow Edit?"
                 : approval ? "Run the tests?" : "Question for you",
-            detail: scenario == "approval-large" ? ApprovalPreviewFixtures.largePageEdit
+            detail: terminal ? "" : scenario == "approval-large" ? ApprovalPreviewFixtures.largePageEdit
                 : scenario == "approval-long-command" ? ApprovalPreviewFixtures.longCommand
                 : ["approval-write", "approval-edit"].contains(scenario) ? ""
                 : scenario == "approval-json" ? "Tool: Bash\nWorking directory: /Projects/Paceman\n\n{\"command\":\"swift test --filter WatchWorkTests\",\"description\":\"Verify the Watch response flow.\",\"timeout\":120000}"
@@ -964,9 +968,8 @@ private enum WatchWorkPreview {
                 : approval ? "Tool: Bash\nWorking directory: /Projects/Paceman\nCommand: swift test" : "",
             questions: approval ? [] : scenario == "multiple" ? [question, .init(id: "q1", prompt: "Which screens?", multiple: true, options: [])]
                 : scenario == "free-text" ? [.init(id: "q0", prompt: "What should we improve next?", multiple: false, options: [])] : [question], remainingSeconds: 120,
-            contentVersion: ["approval-write", "approval-edit"].contains(scenario) ? 2 : nil,
-            approval: ["approval-write", "approval-edit"].contains(scenario) ? ApprovalPreviewFixtures.file(scenario == "approval-edit") : nil,
-            responseOptions: ["approval-write", "approval-edit"].contains(scenario) ? ApprovalPreviewFixtures.choices : nil)
+            contentVersion: payload == nil ? nil : 2, approval: payload,
+            responseOptions: terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : payload == nil ? nil : ApprovalPreviewFixtures.choices)
         return try encoded(WatchWorkPrompt(generation: "preview", request: request, remainingSeconds: scenario == "expired-request" ? -1 : 120))
     }
 }
