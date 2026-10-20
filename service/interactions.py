@@ -1,4 +1,4 @@
-"""Ephemeral responses to live agent hook invocations.
+"""Ephemeral responses to live agent-owned requests.
 
 An HTTP receipt confirms submission to Paceman, never agent consumption. The
 private socket lifetime owns each request; neither requests nor answers persist.
@@ -116,9 +116,10 @@ def _request(value):
 @dataclass
 class _Pending:
     public: dict
-    deadline: float
+    deadline: float | None
     ready: threading.Event = field(default_factory=threading.Event)
     response: dict | None = None
+    binding: dict | None = None
 
 
 class InteractionBroker:
@@ -128,6 +129,7 @@ class InteractionBroker:
         self._lock = threading.RLock()
         self._pending = {}
         self._receipts = OrderedDict()
+        self._resolved_scopes = OrderedDict()
         self._closed = False
         self._provider_enabled = provider_enabled or (lambda provider: True)
         self.diagnostics = diagnostics
@@ -147,13 +149,16 @@ class InteractionBroker:
     def _prune(self):
         now = self._clock()
         for request_id, pending in list(self._pending.items()):
-            if pending.deadline <= now:
+            if pending.deadline is not None and pending.deadline <= now:
                 self._release(request_id, "deadline")
             elif not self._enabled(pending.public["provider"]):
                 self._release(request_id, "provider_disabled")
         for request_id, receipt in list(self._receipts.items()):
             if receipt[0] <= now:
                 del self._receipts[request_id]
+        for scope, deadline in list(self._resolved_scopes.items()):
+            if deadline <= now:
+                del self._resolved_scopes[scope]
 
     def _release(self, request_id, reason="hook_disconnected"):
         pending = self._pending.pop(request_id, None)
@@ -162,7 +167,7 @@ class InteractionBroker:
             pending.response = {"action": "release"}
             pending.ready.set()
 
-    def _publish(self, request, timeout):
+    def _publish(self, request, timeout, binding=None):
         normalized = _request(request)
         if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= RESPONSE_TIMEOUT_SECONDS:
             raise BrokerError("invalid_request")
@@ -174,9 +179,11 @@ class InteractionBroker:
                 raise BrokerError("unavailable", 503)
             if len(self._pending) >= 32:
                 raise BrokerError("busy", 429)
+            if binding is not None and any((key, value) in self._resolved_scopes for key, value in binding.items()):
+                raise BrokerError("stale_request", 409)
             request_id = str(uuid.uuid4())
             normalized.update(requestID=request_id, version=1)
-            pending = _Pending(normalized, self._clock() + timeout)
+            pending = _Pending(normalized, self._clock() + timeout, binding=binding)
             self._pending[request_id] = pending
             self._record("request_published", normalized, pendingCount=len(self._pending))
             return pending
@@ -185,11 +192,36 @@ class InteractionBroker:
         with self._lock:
             self._release(pending.public["requestID"])
 
+    def publish_live(self, request):
+        """The adapter owns lifetime and must withdraw on resolution/disconnect.
+
+        The phone still gets a bounded display lease; elapsed time cannot expire
+        an operation that the connected agent confirms is pending.
+        """
+        with self._lock:
+            pending = self._publish(request, RESPONSE_TIMEOUT_SECONDS)
+            pending.deadline = None
+            return pending
+
+    def withdraw(self, pending):
+        self._cancel(pending)
+
+    def native_resolved(self, field, value):
+        with self._lock:
+            self._prune()
+            self._resolved_scopes[field, value] = self._clock() + RESPONSE_TIMEOUT_SECONDS
+            while len(self._resolved_scopes) > 512:
+                self._resolved_scopes.popitem(last=False)
+            for request_id, pending in list(self._pending.items()):
+                if pending.binding and pending.binding.get(field) == value:
+                    self._release(request_id, "native_resolved")
+
     def pending(self, content_version=2):
         with self._lock:
             self._prune()
             return {"generation": self.generation,
-                    "requests": [dict(deepcopy(p.public), remainingSeconds=max(0, p.deadline - self._clock()))
+                    "requests": [dict(deepcopy(p.public), remainingSeconds=(RESPONSE_TIMEOUT_SECONDS
+                                     if p.deadline is None else max(0, p.deadline - self._clock())))
                                  for p in self._pending.values()
                                  if p.public.get("contentVersion", 1) <= content_version]}
 
@@ -337,8 +369,21 @@ class _Handler(socketserver.BaseRequestHandler):
             if raw.find(b"\n") != len(raw) - 1:
                 raise ValueError()
             message = json.loads(raw)
-            _keys(message, ("request",), ("timeoutSeconds",))
-            pending = broker._publish(message["request"], message.get("timeoutSeconds", RESPONSE_TIMEOUT_SECONDS))
+            if set(message) == {"nativeResolved"}:
+                binding = message["nativeResolved"]
+                _keys(binding, ("field", "value"))
+                if binding["field"] not in ("scope", "turn", "session") or not re.fullmatch(r"[0-9a-f]{64}", binding["value"]):
+                    raise BrokerError("invalid_request")
+                broker.native_resolved(binding["field"], binding["value"])
+                return
+            _keys(message, ("request",), ("timeoutSeconds", "binding"))
+            binding = message.get("binding")
+            if binding is not None:
+                _keys(binding, ("scope", "turn", "session"))
+                if not isinstance(message["request"], dict) or message["request"].get("provider") != "claude" or any(
+                        not isinstance(v, str) or not re.fullmatch(r"[0-9a-f]{64}", v) for v in binding.values()):
+                    raise BrokerError("invalid_request")
+            pending = broker._publish(message["request"], message.get("timeoutSeconds", RESPONSE_TIMEOUT_SECONDS), binding)
             connection.settimeout(.2)
             while not pending.ready.is_set():
                 if select.select([connection], [], [], .05)[0]:
