@@ -467,6 +467,7 @@ class DesktopRequests:
                 # Release only relinquishes Paceman's card, never the agent's
                 # prompt. Access changes do not reopen it on every patch.
                 self.retired.add(key)
+                self.broker.withdraw(handle)
                 self.pending.pop(key, None)
                 return
             method, payload = response

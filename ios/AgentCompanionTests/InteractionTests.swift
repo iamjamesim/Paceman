@@ -656,6 +656,11 @@ final class InteractionTests: XCTestCase {
         let requests = try XCTUnwrap(value["requests"] as? [[String: Any]])
         duplicated["requests"] = requests + requests
         XCTAssertThrowsError(try InputRequests.decode(JSONSerialization.data(withJSONObject: duplicated), sourceID: sourceID))
+        for ids in [["invalid"], Array(repeating: UUID().uuidString, count: 2), (0..<257).map { _ in UUID().uuidString }] {
+            var invalid = value
+            invalid["awaitingRequestIDs"] = ids
+            XCTAssertThrowsError(try InputRequests.decode(JSONSerialization.data(withJSONObject: invalid), sourceID: sourceID))
+        }
     }
     func testPhoneAcceptsTheFullResponseWindowForBothProviders() throws {
         for provider in ["claude", "codex"] {
@@ -1910,8 +1915,25 @@ extension InteractionTests {
         let historicalDate = Date(timeIntervalSince1970: watch.freshUntil + 1)
         XCTAssertEqual(watch.group(at: historicalDate), "Last known")
         XCTAssertEqual(watch.status(at: historicalDate), "Needs attention", "History describes the source observation, not a stale receipt")
-        // A newer request in the same conversation retires the old receipt.
+        // A missed Working observation must not leave a receipt covering a
+        // different, native-only decision in the same Needs input state.
         var requests = listing["requests"] as! [[String: Any]]
+        listing["requests"] = []
+        listing["awaitingRequestIDs"] = [prompt.request.id]
+        await model.interactions.refresh(source, snapshot: snapshot, client: SourceClient(configuration: config))
+        XCTAssertEqual(try phone().phase, .responded, "The original native request is still tracked")
+        let stillPending = await model.handleWatchWork(message)
+        XCTAssertEqual(try JSONDecoder().decode(WatchWorkPrompt.self,
+            from: XCTUnwrap(stillPending["data"] as? Data)).submitted, true)
+        listing["awaitingRequestIDs"] = []
+        let resolved = await model.handleWatchWork(message)
+        XCTAssertNil(resolved["data"], "The Watch must not reopen a retired submitted prompt")
+        await model.interactions.refresh(source, snapshot: snapshot, client: SourceClient(configuration: config))
+        XCTAssertNil(model.interactions.receipt(for: WorkIdentity(sourceID: sourceID,
+            sessionID: prompt.request.sessionID, provider: prompt.request.provider)))
+        let retired = try await exported()
+        XCTAssertNotEqual(retired.status, "Response sent")
+        // A newer supported request remains answerable.
         requests[0]["requestID"] = UUID().uuidString
         listing["requests"] = requests
         await model.interactions.refresh(source, snapshot: try XCTUnwrap(model.snapshots[sourceID]), client: SourceClient(configuration: config))

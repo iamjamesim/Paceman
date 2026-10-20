@@ -51,8 +51,8 @@ fetch per computer. Leaving the foreground cancels foreground-only reads, preser
 fetches owned by push or Watch callbacks and submitted responses.
 Visible Watch screens use the same Activity presentation and per-computer refresh
 owner; background phone reads are demand-driven, without a polling loop. Accepted
-answers remain Working within the activity lease; older list replies cannot undo
-that presentation.
+answers show Response sent while the native request remains tracked; older list
+replies cannot undo a newer submission.
 
 - A source with no snapshot says `No activity received yet`; expired activity
   appears as `Last known:`.

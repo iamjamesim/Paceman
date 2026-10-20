@@ -533,6 +533,8 @@ Snapshot `interactionsEnabled: true` advertises these endpoints; sources that om
 it provide activity only. Both endpoints use the paired bearer credential.
 
 - `GET /v1/interactions`: returns `sourceID`, broker `generation`, and `requests`.
+  Optional `awaitingRequestIDs` lists submitted requests still tracked by the
+  native adapter. An empty list retires their receipts; omission means unknown.
   Requests contain `requestID`, `version: 1`, provider, canonical hashed `sessionID`,
   kind (`approval` or `question`), title, detail, questions, and monotonic
   `remainingSeconds`. Questions contain `id`, `prompt`, `multiple`, and `options`

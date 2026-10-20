@@ -734,12 +734,15 @@ final class CompanionModel: ObservableObject {
             current.task.cancel()
         }
         let id = UUID()
+        let confirmed = watchConfirmed
         let task = Task { [weak self] in
             guard let self, !Task.isCancelled else { return }
-            await self.interactions.refresh(paired, snapshot: snapshot, client: self.client)
+            let listing = await self.interactions.refresh(paired, snapshot: snapshot, client: self.client)
             if !Task.isCancelled, self.requestRefreshes[sourceID]?.id == id,
-               self.interactions.availability[sourceID] == .available {
+               let listing {
                 self.reconcileWatchListing(sourceID: sourceID, pending: self.interactions.items)
+                self.reconcileWatchLifetime(sourceID: sourceID,
+                    awaiting: listing.awaitingRequestIDs.map(Set.init), confirmed: confirmed)
                 self.publishWatchWork()
             }
             if self.requestRefreshes[sourceID]?.id == id {
@@ -866,6 +869,15 @@ extension CompanionModel {
             if let native {
                 if native.id != item.id || native.request.version != item.request.version { watchTracking[id]?.active = false }
             } else if watchSubmissions[id] == nil { watchTracking[id]?.active = false }
+        }
+    }
+
+    private func reconcileWatchLifetime(sourceID: String, awaiting: Set<String>?, confirmed: Set<String>) {
+        guard let awaiting else { return } // Older sources do not report native lifetime.
+        for id in confirmed {
+            guard let item = watchRequests[id], item.source.sourceID == sourceID,
+                  !awaiting.contains(item.request.id) else { continue }
+            watchTracking[id]?.active = false
         }
     }
 
@@ -1170,7 +1182,7 @@ extension CompanionModel {
                 let response = interactions.response(for: identity).flatMap {
                     known == nil || known?.id == $0.item.id ? $0 : nil
                 }
-                if let item = known ?? response?.item, item.expiresAtUptime > started,
+                if let item = known ?? (response?.phase == .submitted ? nil : response?.item), item.expiresAtUptime > started,
                    watchRequests.count < 256 || watchRequests[item.id] != nil {
                     rememberWatchRequest(item, snapshot: snapshot)
                     if response?.phase == .rejected { watchRejected.insert(item.id) }
@@ -1186,17 +1198,24 @@ extension CompanionModel {
                         remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
                         submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
                 }
+                let confirmed = watchConfirmed
+                let inboxConfirmed = Set(interactions.responses.filter { $0.value.phase == .submitted }.keys)
                 let requests = try await client.inputRequests(source)
                 guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID),
                       snapshots[sourceID]?.identity == snapshot.identity,
                       snapshot.sessions?.contains(where: { $0.id == sessionID && $0.provider == provider }) == true else {
                     return ["error": "No response is available. Check \(destination)."]
                 }
+                reconcileWatchLifetime(sourceID: sourceID, awaiting: requests.awaitingRequestIDs.map(Set.init),
+                    confirmed: confirmed)
+                interactions.reconcileNativeLifetime(requests, sourceID: sourceID, eligible: inboxConfirmed)
+                publishWatchWork()
                 guard let request = requests.requests.first(where: { $0.sessionID == sessionID && $0.provider == provider }) else {
                     if let item = watchRequests.values.first(where: {
                         $0.source.sourceID == sourceID && $0.generation == requests.generation
                             && $0.request.sessionID == sessionID && $0.request.provider == provider
                             && watchSubmissions[$0.id] != nil
+                            && watchTracking[$0.id]?.active == true
                             && !watchRejected.contains($0.id)
                     }) {
                         guard (item.request.contentVersion ?? 1) <= (message["contentVersion"] as? Int ?? 1) else { return ["nativeOnly": true] }

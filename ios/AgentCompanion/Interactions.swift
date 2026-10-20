@@ -5,6 +5,7 @@ struct InputRequests: Decodable {
     let sourceID: String
     let generation: String
     let requests: [InputRequest]
+    let awaitingRequestIDs: [String]?
 
     static func decode(_ data: Data, sourceID: String) throws -> Self {
         let value = try JSONDecoder().decode(Self.self, from: data)
@@ -12,6 +13,12 @@ struct InputRequests: Decodable {
               UUID(uuidString: value.generation) != nil, value.requests.count <= 32,
               Set(value.requests.map(\.id)).count == value.requests.count else {
             throw HubError.message("The computer returned invalid requests.")
+        }
+        if let awaiting = value.awaitingRequestIDs {
+            guard awaiting.count <= 256, Set(awaiting).count == awaiting.count,
+                  awaiting.allSatisfy({ UUID(uuidString: $0) != nil }) else {
+                throw HubError.message("The computer returned invalid requests.")
+            }
         }
         for request in value.requests {
             guard UUID(uuidString: request.id) != nil, request.version == 1, request.validContent,
@@ -201,13 +208,13 @@ struct InputResponseState {
         active && ProcessInfo.processInfo.systemUptime < item.expiresAtUptime
             && bySource[item.source.sourceID]?.contains(where: { $0.id == item.id }) == true
     }
-    func refresh(_ source: PairedSource, snapshot: Snapshot, client: SourceClient) async {
+    @discardableResult func refresh(_ source: PairedSource, snapshot: Snapshot, client: SourceClient) async -> InputRequests? {
         reconcile(snapshot)
-        guard active else { return }
+        guard active else { return nil }
         guard snapshot.interactionsEnabled == true else {
             remove(source.sourceID)
             availability[source.sourceID] = .disabled
-            return
+            return nil
         }
         if availability[source.sourceID] == nil { availability[source.sourceID] = .loading }
         let started = ProcessInfo.processInfo.systemUptime
@@ -216,11 +223,12 @@ struct InputResponseState {
         let revision = revisions[source.sourceID, default: 0]
         do {
             let value = try await client.inputRequests(source)
-            guard active, expectedEpoch == epoch, revision == revisions[source.sourceID, default: 0], !Task.isCancelled else { return }
+            guard active, expectedEpoch == epoch, revision == revisions[source.sourceID, default: 0], !Task.isCancelled else { return nil }
             if let previous = brokerGenerations[source.sourceID], previous != value.generation {
                 responses = responses.filter { $0.value.item.source.sourceID != source.sourceID }
             }
             brokerGenerations[source.sourceID] = value.generation
+            reconcileNativeLifetime(value, sourceID: source.sourceID)
             let pending = value.requests.compactMap { request -> PendingInput? in
                 // Account conservatively for time spent fetching the request.
                 guard started + request.remainingSeconds > ProcessInfo.processInfo.systemUptime else { return nil }
@@ -247,13 +255,29 @@ struct InputResponseState {
             Diagnostics.shared.recordInteractionFetch(sourceID: source.sourceID,
                 received: value.requests, matchedCount: pending.count,
                 duration: ProcessInfo.processInfo.systemUptime - started)
+            return value
         } catch {
-            guard !Task.isCancelled, expectedEpoch == epoch, revision == revisions[source.sourceID, default: 0] else { return }
+            guard !Task.isCancelled, expectedEpoch == epoch, revision == revisions[source.sourceID, default: 0] else { return nil }
             Diagnostics.shared.recordError("interaction_fetch_failed", error: error, sourceID: source.sourceID,
                 duration: ProcessInfo.processInfo.systemUptime - started)
             if (error as? HubError)?.isUnauthorized == true { remove(source.sourceID) }
             sourceUnavailable(source.sourceID)
+            return nil
         }
+    }
+    func reconcileNativeLifetime(_ listing: InputRequests, sourceID: String, eligible: Set<String>? = nil) {
+        guard let awaiting = listing.awaitingRequestIDs else { return }
+        let ids = Set(awaiting)
+        responses = responses.mapValues { response in
+            var value = response
+            if value.item.source.sourceID == sourceID, value.item.generation == listing.generation,
+               value.phase == .submitted, eligible?.contains(value.item.id) ?? true,
+               !ids.contains(value.item.request.id) {
+                value.tracksTask = false
+            }
+            return value
+        }
+        pruneRetiredResponses()
     }
     func didSubmit(_ item: PendingInput, submission: InputSubmission) {
         guard active, submission.generation == item.generation, submission.requestID == item.request.id,

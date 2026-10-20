@@ -35,6 +35,34 @@ class BrokerTests(unittest.TestCase):
         self.broker = InteractionBroker(clock=lambda: self.now)
         self.addCleanup(self.broker.close)
 
+    def test_submitted_live_request_tracks_native_resolution_not_receipt_expiry(self):
+        pending = self.broker.publish_live(approval())
+        payload = response(self.broker, pending)
+        self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [])
+        receipt = self.broker.submit(payload)
+        self.assertEqual(self.broker.pending()['requests'], [])
+        self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [pending.public['requestID']])
+        self.now += 301
+        self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [pending.public['requestID']])
+        self.broker.withdraw(pending)
+        self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [])
+        self.assertEqual(receipt['status'], 'submitted')
+
+    def test_release_and_access_reset_do_not_leave_native_receipts(self):
+        pending = self.broker.publish_live(approval())
+        self.broker.submit(response(self.broker, pending, 'release'))
+        self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [])
+        pending = self.broker.publish_live(approval())
+        payload = response(self.broker, pending)
+        receipt = self.broker.submit(payload)
+        self.broker.withdraw(pending)
+        self.assertEqual(self.broker.submit(payload), receipt)
+        self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [])
+        pending = self.broker.publish_live(approval())
+        self.broker.submit(response(self.broker, pending))
+        self.broker.cancel_all()
+        self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [])
+
     def test_first_answer_is_atomic_and_retry_does_not_deliver_twice(self):
         pending = self.broker._publish(approval(), 60)
         barrier = threading.Barrier(8)

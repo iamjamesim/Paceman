@@ -268,6 +268,7 @@ class DaemonRequests:
             self.retired.add(key)
             encoded = encode(handle.response or {'action': 'release'})
             if encoded is None:
+                self.broker.withdraw(handle)
                 return
             _, payload = encoded
             result = payload.get('response', payload)

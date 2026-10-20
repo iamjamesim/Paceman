@@ -345,6 +345,7 @@ class NativeRequests:
             frame = encode(handle.response or {'action': 'release'})
             self.retired.add(rid)
             if frame is None:
+                self.broker.withdraw(handle)
                 self.pending.pop(rid, None)
                 return
         try:

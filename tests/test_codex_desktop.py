@@ -67,12 +67,15 @@ class DesktopRequestTests(unittest.TestCase):
         pending = self.broker.pending()["requests"][0]
         receipt = self.broker.submit(submission(self.broker, pending, action="choose", optionID="decision-1"))
         wait_until(lambda: sent)
+        self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [pending['requestID']])
         self.assertEqual(sent, [("thread-follower-command-approval-decision", dict(
             conversationId=SESSION, requestId="1", decision="acceptForSession"), {"target": "native-owner", "connection": None})])
         self.assertEqual(self.broker.submit(submission(self.broker, pending, action="choose", optionID="decision-1")), receipt)
         self.adapter._receive(snapshot([command("1")], 2))
         self.assertEqual(self.broker.pending()["requests"], [])
         self.assertEqual(len(sent), 1)
+        self.adapter._receive(snapshot([], 3))
+        self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [])
 
     def test_connected_native_pending_does_not_expire_after_ten_minutes(self):
         now = [0]

@@ -136,6 +136,7 @@ class InteractionBroker:
         self._lock = threading.RLock()
         self._pending = {}
         self._receipts = OrderedDict()
+        self._awaiting_native = OrderedDict()
         self._closed = False
         self._provider_enabled = provider_enabled or (lambda provider: True)
         self.diagnostics = diagnostics
@@ -162,8 +163,12 @@ class InteractionBroker:
         for request_id, receipt in list(self._receipts.items()):
             if receipt[0] <= now:
                 del self._receipts[request_id]
+        for request_id, provider in list(self._awaiting_native.items()):
+            if not self._enabled(provider):
+                del self._awaiting_native[request_id]
 
     def _release(self, request_id, reason="hook_disconnected"):
+        self._awaiting_native.pop(request_id, None)
         pending = self._pending.pop(request_id, None)
         if pending:
             self._record("request_released", pending.public, reason=reason)
@@ -211,6 +216,7 @@ class InteractionBroker:
         with self._lock:
             self._prune()
             return {"generation": self.generation,
+                    "awaitingRequestIDs": list(self._awaiting_native),
                     "requests": [dict(deepcopy(p.public), remainingSeconds=(RESPONSE_TIMEOUT_SECONDS
                                      if p.deadline is None else max(0, p.deadline - self._clock())))
                                  for p in self._pending.values()
@@ -291,6 +297,12 @@ class InteractionBroker:
             result = {"status": "submitted", "generation": self.generation,
                       "requestID": request_id, "version": 1}
             self._receipts[request_id] = (self._clock() + 300, key, fingerprint, result)
+            if pending.deadline is None and action != "release":
+                # IDs only: native adapters withdraw even after submission. An
+                # HTTP receipt alone cannot establish native consumption.
+                self._awaiting_native[request_id] = request["provider"]
+                while len(self._awaiting_native) > 256:
+                    self._awaiting_native.popitem(last=False)
             while len(self._receipts) > 256:
                 self._receipts.popitem(last=False)
             pending.ready.set()
@@ -303,6 +315,7 @@ class InteractionBroker:
             for request_id in list(self._pending):
                 self._release(request_id, reason)
             self._receipts.clear()
+            self._awaiting_native.clear()
             self.generation = str(uuid.uuid4())
 
     def close(self):
