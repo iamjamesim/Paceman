@@ -134,7 +134,8 @@ final class ProtocolTests: XCTestCase {
             if let original { defaults.set(original, forKey: key) }
             else { defaults.removeObject(forKey: key) }
         }
-        let model = CompanionModel(preview: true)
+        var clearedNotificationIDs: [UUID] = []
+        let model = CompanionModel(preview: true, clearHandoffNotification: { clearedNotificationIDs.append($0) })
         model.showHandoffPreview("handoff")
         let first = try XCTUnwrap(model.handoff)
         let target = try XCTUnwrap(model.handoffTarget(first))
@@ -151,6 +152,7 @@ final class ProtocolTests: XCTestCase {
 
         // Dismissing the older visible sheet must preserve the newer pending selection.
         model.dismissHandoff()
+        XCTAssertEqual(clearedNotificationIDs, [first.id])
         let saved = try JSONDecoder().decode(PendingWatchHandoff.self,
             from: XCTUnwrap(defaults.data(forKey: key)))
         XCTAssertEqual(saved.id, second.id)

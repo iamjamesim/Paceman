@@ -27,6 +27,7 @@ final class CompanionModel: ObservableObject {
     private let appleWatchIdentity: () -> String?
     private let push: PushCoordinator
     private let postHandoffNotification: @MainActor (UUID) async -> Bool
+    private let clearHandoffNotification: @MainActor (UUID) -> Void
     private let pairedStore = PairedSourcesStore()
     private let savePairedSources: ([PairedSource]) throws -> Void
     private var polling: Task<Void, Never>?
@@ -74,7 +75,8 @@ final class CompanionModel: ObservableObject {
          savePairedSources: (([PairedSource]) throws -> Void)? = nil,
          refreshUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          appleWatchIdentity: @escaping () -> String? = { AppleWatchAllowanceBridge.shared.taskHandoffIdentity },
-         postHandoffNotification: (@MainActor (UUID) async -> Bool)? = nil) {
+         postHandoffNotification: (@MainActor (UUID) async -> Bool)? = nil,
+         clearHandoffNotification: (@MainActor (UUID) -> Void)? = nil) {
         self.client = client
         self.refreshUptime = refreshUptime
         self.appleWatchIdentity = appleWatchIdentity
@@ -83,6 +85,9 @@ final class CompanionModel: ObservableObject {
         self.push = notificationSender
         self.postHandoffNotification = postHandoffNotification ?? { id in
             await notificationSender.postHandoffNotification(id)
+        }
+        self.clearHandoffNotification = clearHandoffNotification ?? { id in
+            notificationSender.clearHandoffNotification(id)
         }
         self.savePairedSources = savePairedSources ?? PairedSourcesStore().save
         designPreview = preview
@@ -985,7 +990,7 @@ extension CompanionModel {
     private func receiveHandoff(_ pending: PendingWatchHandoff) async -> WatchHandoffResult {
         guard handoffIsCurrent(pending),
               let data = try? JSONEncoder().encode(pending) else { return .unavailable }
-        if let previous = storedHandoff { push.clearHandoffNotification(previous.id) }
+        if let previous = storedHandoff { clearHandoffNotification(previous.id) }
         UserDefaults.standard.set(data, forKey: handoffKey)
         if foreground {
             presentStoredHandoff()
@@ -995,7 +1000,7 @@ extension CompanionModel {
         // A foreground transition during notification scheduling should show the sheet
         // and remove the now-redundant notification, never interrupt twice.
         guard storedHandoff?.id == pending.id, handoffIsCurrent(pending) else {
-            push.clearHandoffNotification(pending.id)
+            clearHandoffNotification(pending.id)
             return .unavailable
         }
         if foreground {
@@ -1014,14 +1019,14 @@ extension CompanionModel {
            let link = accessories.links.first(where: { $0.preferenceID == pending.watchID }), !link.setupResolved { return }
         guard handoffIsCurrent(pending) else {
             UserDefaults.standard.removeObject(forKey: handoffKey)
-            push.clearHandoffNotification(pending.id)
+            clearHandoffNotification(pending.id)
             if handoff?.id == pending.id { handoff = nil }
             return
         }
         guard foreground, handoff != pending else { return }
         restoreWatchRequestForHandoff(pending)
         handoff = pending
-        push.clearHandoffNotification(pending.id)
+        clearHandoffNotification(pending.id)
     }
 
     private func restoreWatchRequestForHandoff(_ pending: PendingWatchHandoff) {
@@ -1048,7 +1053,7 @@ extension CompanionModel {
         guard let pending = handoff else { return }
         if pending.id == storedHandoff?.id { UserDefaults.standard.removeObject(forKey: handoffKey) }
         handoff = nil
-        push.clearHandoffNotification(pending.id)
+        clearHandoffNotification(pending.id)
     }
 
     func deferHandoff() {
