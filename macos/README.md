@@ -127,6 +127,12 @@ Watch. Claude requires native Remote Control; Codex CLI uses its native
 app-server daemon. Setup removes response hooks and keeps activity observers.
 See [request lifecycle](../docs/data-lifecycle.md#questions-and-approvals).
 
+For Claude Remote Control sessions, Paceman reads Claude's sign-in token from
+the **Claude Code-credentials** Keychain item and uses it to read pending requests
+and send your answers to **api.anthropic.com**. The first run may show a macOS
+Keychain permission prompt. Answering Claude questions from your phone requires
+Remote Control to be on and only works during an active turn.
+
 <details>
 <summary>Private Tailscale connection</summary>
 
