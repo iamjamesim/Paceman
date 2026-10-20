@@ -102,6 +102,25 @@ class MacSource:
         self.pending_questions = {}
         self.question_calls = {}
         self.published_questions = set()
+        self.native_attention = {}
+
+    def native_sessions(self):
+        with self.lock:
+            return [session for session, _ in self.turn_ids.values()] if "codex" in self.providers else []
+
+    def native_requests_changed(self, session, by_turn):
+        key = hashlib.sha256(("codex:" + session).encode()).hexdigest()
+        with self.lock:
+            if self.closed:
+                return
+            tracked = self.turn_ids.get(key)
+            if by_turn is None:
+                # Losing the response channel does not resolve native attention.
+                if not self.native_attention.get(key, (None, False))[1]:
+                    self.native_attention.pop(key, None)
+            elif tracked and tracked[1] in by_turn:
+                self.native_attention[key] = (tracked[1], by_turn[tracked[1]])
+            self.publish_current()
 
     def __enter__(self):
         self.closed = False
@@ -262,6 +281,7 @@ class MacSource:
                 if value is not None and (not isinstance(value, str) or not IDENTIFIER.fullmatch(value)):
                     raise ValueError("Invalid approval identity")
             if event == "ended":
+                self.native_attention.pop(key, None)
                 self.pending_turn_events.pop(key, None)
                 pending = self._clear_approvals(key)
                 self.resolved_approval_tools.pop(key, None)
@@ -353,6 +373,7 @@ class MacSource:
                 if command.get("hook") == "PostToolUse":
                     approval_cleared = self._resolve_approval(key, command.get("attentionKey"), tool_id)
                 if event in ("completed", "interrupted"):
+                    self.native_attention.pop(key, None)
                     self._clear_approvals(key)
                     self.resolved_approval_tools.pop(key, None)
                 question_cleared = False
@@ -422,6 +443,7 @@ class MacSource:
                 self.resolved_approval_tools.clear()
                 self.published_attention.clear()
                 self.pending_questions.clear()
+                self.native_attention.clear()
                 self.question_calls.clear()
                 self.published_questions.clear()
                 self.turn_ids.clear()
@@ -490,6 +512,7 @@ class MacSource:
                 for row in db.execute("SELECT id FROM mac_sessions WHERE state IN ('finished','failed') AND updated<=?",
                                       (time.time() - FINISHED_RETENTION,)):
                     retired += db.execute("DELETE FROM mac_sessions WHERE id=?", (row["id"],)).rowcount
+                    self.native_attention.pop(row["id"], None)
                     self._clear_approvals(row["id"])
                     self.resolved_approval_tools.pop(row["id"], None)
                     self._clear_questions(row["id"])
@@ -639,6 +662,10 @@ class MacSource:
             # question marker survives an event path we did not anticipate.
             state = ("needs_input" if row["state"] not in ("finished", "failed")
                      and waiting else row["state"])
+            native = self.native_attention.get(row["id"])
+            if native and native[0] == row["turn"] and row["state"] not in ("finished", "failed", "idle"):
+                state = ("needs_input" if native[1] else
+                         "working" if state == "needs_input" else state)
             session = {"id": row["id"], "provider": row["provider"], "state": state}
             if title := self.titles.name(row["id"]):
                 session["name"] = title

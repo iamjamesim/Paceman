@@ -734,7 +734,7 @@ def main():
     sub.add_parser("cancel-schedule")
     args = parser.parse_args()
     if args.command == "serve" and args.interaction_socket and args.source != "synthetic":
-        parser.error("Agent sources observe activity only; questions and approvals stay in the agent")
+        parser.error("Custom interaction sockets are synthetic-only; native sources use their owned adapters")
     store = Store(args.data_dir / "hub.sqlite3")
     if args.command == "serve":
         from contextlib import ExitStack
@@ -792,14 +792,19 @@ def main():
                 server.desktop_status = DesktopStatus(args.status_file, store)
                 server.desktop_status.publish(server.adapter, force=True)
                 stack.callback(server.desktop_status.publish, server.adapter, stopped=True, force=True)
-            if args.interaction_socket:
+            if args.interaction_socket or args.source == "macos":
                 from service.interactions import InteractionBroker, ResponseListener
                 server.interactions = InteractionBroker(provider_enabled=lambda provider:
                     provider in getattr(server.adapter, "providers", ("codex", "claude")),
                     diagnostics=server.diagnostics)
                 server.interaction_access = server.interaction_access_state()
                 stack.callback(server.interactions.close)
-                stack.enter_context(ResponseListener(server.interactions, args.interaction_socket))
+                interaction_path = args.interaction_socket or args.data_dir.parent / "interaction.sock"
+                stack.enter_context(ResponseListener(server.interactions, interaction_path))
+                if args.source == "macos":
+                    from service.codex_desktop import DesktopRequests
+                    stack.enter_context(DesktopRequests(server.interactions, server.adapter.native_sessions,
+                        attention=server.adapter.native_requests_changed))
             print(f"{args.source.title()} source listening on 127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever(poll_interval=0.25)

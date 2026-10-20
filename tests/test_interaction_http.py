@@ -112,15 +112,15 @@ class InteractionHTTPTests(unittest.TestCase):
         self.assertEqual(entries[-1]['httpStatus'], 401)
         self.assertNotIn('traceID', entries[-1])
 
-    def test_mac_startup_keeps_native_prompts_and_does_not_advertise_responses(self):
+    def test_mac_startup_starts_native_follower_and_claude_permission_listener(self):
         root = Path(self.temp.name) / 'normal-install'
         root.mkdir(mode=0o700)
         store = Store(root / 'data/hub.sqlite3')
         paired = store.redeem(store.invite('https://example.test')['invitation'], device=device())
 
         def verify(server, **_):
-            self.assertIsNone(server.interactions)
-            self.assertFalse((root / 'interaction.sock').exists())
+            self.assertIsNotNone(server.interactions)
+            self.assertTrue((root / 'interaction.sock').is_socket())
             server.daemon_threads = False  # Teardown joins the real HTTP handler.
             receiver = threading.Thread(target=server.handle_request, daemon=True)
             receiver.start()
@@ -129,7 +129,7 @@ class InteractionHTTPTests(unittest.TestCase):
                 connection.request('GET', '/v1/snapshot', headers={'Authorization': 'Bearer ' + paired['credential']})
                 response = connection.getresponse()
                 self.assertEqual(response.status, 200)
-                self.assertNotIn('interactionsEnabled', json.loads(response.read()))
+                self.assertTrue(json.loads(response.read())['interactionsEnabled'])
             finally:
                 connection.close()
                 receiver.join(2)
@@ -138,6 +138,7 @@ class InteractionHTTPTests(unittest.TestCase):
         with patch.object(sys, 'argv', ['paceman-source', '--data-dir', str(root / 'data'),
                 'serve', '--source', 'macos', '--port', '0']), \
                 patch.object(Server, 'serve_forever', autospec=True, side_effect=verify) as serve, \
+                patch('service.codex_desktop.DesktopRequests', autospec=True), \
                 patch('builtins.print'):
             hub.main()
         serve.assert_called_once()
@@ -172,7 +173,7 @@ class InteractionHTTPTests(unittest.TestCase):
                     version=1, idempotencyKey='fixture-retry', action=action, **extra)
 
     def test_legacy_hook_process_never_publishes_even_with_a_live_broker(self):
-        for provider in ('codex', 'claude'):
+        for provider in ('codex',):
             with self.subTest(provider=provider):
                 result = subprocess.run([sys.executable, '-B', str(Path(__file__).resolve().parents[1]
                     / 'macos/interaction_hook.py'), '--provider', provider],

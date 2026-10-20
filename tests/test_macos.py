@@ -25,6 +25,30 @@ from macos.codex_hook import workspace_label
 
 
 class MacSourceTests(unittest.TestCase):
+    def test_native_request_state_is_turn_scoped_and_disconnect_is_not_an_answer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            store = Store(root / 'hub.sqlite3')
+            with MacSource(store, socket_path=root / 'hook.sock', allowance_reader=lambda: None,
+                           turn_status_reader=lambda _: {}) as source:
+                base = dict(command='agent-event', session='one', turn='1')
+                source.receive(dict(base, event='working', hook='UserPromptSubmit'))
+                source.native_requests_changed('one', {'1': True})
+                self.assertEqual(store.snapshot()['state'], 'needs_input')
+                source.receive(dict(base, event='working', hook='PostToolUse', toolID='other'))
+                self.assertEqual(store.snapshot()['state'], 'needs_input')
+                source.native_requests_changed('one', None)
+                self.assertEqual(store.snapshot()['state'], 'needs_input')
+                source.native_requests_changed('one', {'1': False})
+                self.assertEqual(store.snapshot()['state'], 'working')
+                source.native_requests_changed('one', {'1': True})
+                source.receive(dict(base, event='completed', hook='Stop'))
+                self.assertEqual(store.snapshot()['state'], 'finished')
+                source.native_requests_changed('one', {'1': True})
+                self.assertEqual(store.snapshot()['state'], 'finished')
+                source.receive(dict(base, turn='2', event='working', hook='UserPromptSubmit'))
+                self.assertEqual(store.snapshot()['state'], 'working')
     def test_resumed_turn_uses_saved_order_and_replays_approval_lifecycle(self):
         cases = [
             ([("needs-input", "PermissionRequest")], "interrupted", "needs_input"),
