@@ -113,6 +113,7 @@ class DaemonTests(unittest.TestCase):
         wait_for(lambda: self.connection.send.called)
         self.adapter._sync('session')
         self.assertEqual(self.connection.send.call_count, 1)
+        self.connection.close.assert_called_once()
 
     def test_unknown_live_requests_preserve_native_attention(self):
         raw = request(); raw['method'] = 'item/permissions/requestApproval'

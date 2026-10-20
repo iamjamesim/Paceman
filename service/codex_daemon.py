@@ -275,4 +275,6 @@ class DaemonRequests:
             try:
                 connection.send(frame)
             except (OSError, ValueError):
-                pass  # The server, not this send, confirms native consumption.
+                # Rejoin and replay pending requests for explicit user review.
+                # Never retry this answer on a replacement connection.
+                connection.close()

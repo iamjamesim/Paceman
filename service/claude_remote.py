@@ -136,6 +136,7 @@ class NativeRequests:
         self.initializing = None
         self.last_sequence = 0
         self.confirming = set()
+        self.checkpoint_confirming = set()
         self.checkpoint_started = 0
         self.next_checkpoint = 0
         self.checkpoint_failed = False
@@ -148,6 +149,7 @@ class NativeRequests:
                 return
             self.initializing = str(uuid.uuid4())
             self.checkpoint_started = time.monotonic()
+            self.checkpoint_confirming = set(self.confirming)
             self.checkpoint_failed = False
             frame = dict(type='control_request', request_id=self.initializing, request={'subtype': 'initialize'})
         self.send(frame)
@@ -258,8 +260,15 @@ class NativeRequests:
                     current_ids = {self._request(f) for f in pending}
                     if len(current_ids) != len(pending):
                         raise ValueError('duplicate native request')
+                    # The owner still awaits these decisions. Re-present them
+                    # for explicit review; never resend the previous answer.
+                    for unanswered in self.checkpoint_confirming & self.confirming & current_ids:
+                        entry = self.pending.get(unanswered)
+                        if entry and entry[0].response and entry[0].response.get('action') in ('answer', 'choose'):
+                            self.broker.withdraw(self.pending.pop(unanswered)[0])
+                            self.retired.discard(unanswered)
+                    self.confirming.difference_update(self.checkpoint_confirming)
                     self.retired.intersection_update(current_ids)
-                    self.confirming.intersection_update(current_ids)
                     for missing in self.observed.keys() - current_ids:
                         self._resolve(missing)
                     self.native = {self._request(f): deepcopy(f) for f in pending
@@ -273,6 +282,7 @@ class NativeRequests:
                     if (reply.get('subtype') == 'success' and isinstance(decision, dict)
                             and decision.get('behavior') in ('allow', 'deny')):
                         self.confirming.add(rid)
+                        self.next_checkpoint = time.monotonic() + 1
             elif kind == 'control_cancel_request' and source == 'worker':
                 rid = frame.get('request_id')
                 if not isinstance(rid, str):
@@ -330,11 +340,15 @@ class NativeRequests:
             if frame is None:
                 self.pending.pop(rid, None)
                 return
-            self.confirming.add(rid)
         try:
             self.send(frame)
         except (OSError, ValueError, subprocess.SubprocessError):
             pass  # Never retry an uncertain decision.
+        finally:
+            with self.lock:
+                if rid in self.native:
+                    self.confirming.add(rid)
+                    self.next_checkpoint = time.monotonic() + 1
 
 
 class RemoteRequests:

@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import Mock
 from pathlib import Path
 
 from service.codex_desktop import DesktopRequests, read_frame
@@ -82,6 +83,23 @@ class DesktopRequestTests(unittest.TestCase):
         self.assertEqual(self.broker.pending()["requests"][0]["requestID"], request["requestID"])
         self.adapter._reset()
         self.assertEqual(self.broker.pending()["requests"], [])
+
+    def test_uncertain_response_reconnects_without_resending_the_decision(self):
+        connection = Mock()
+        self.adapter.connection = connection
+        self.adapter._request = Mock(side_effect=OSError("response unavailable"))
+        self.adapter._receive(snapshot([command()]))
+        first = self.broker.pending()["requests"][0]
+        self.broker.submit(submission(self.broker, first, action="choose", optionID="decision-0"))
+        wait_until(lambda: connection.shutdown.called)
+        connection.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+        self.adapter._request.assert_called_once()
+        self.adapter._reset()
+        self.adapter.owners[SESSION] = "native-owner"
+        self.adapter._receive(snapshot([command()]))
+        again = self.broker.pending()["requests"][0]
+        self.assertNotEqual(first["requestID"], again["requestID"])
+        self.adapter._request.assert_called_once()
 
     def test_access_change_releases_remote_card_without_deciding_native_request(self):
         sent = []

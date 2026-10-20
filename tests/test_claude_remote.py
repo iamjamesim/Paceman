@@ -148,6 +148,7 @@ class NativeClaudeTests(unittest.TestCase):
         self.submit(self.broker.pending()['requests'][0])
         wait_for(lambda: len(self.sent) == 2)
         self.assertTrue(self.attention[-1])
+        self.adapter.next_checkpoint = 0
         self.adapter.refresh()
         wait_for(lambda: len(self.sent) == 3)
         rid = self.sent[-1]['request_id']
@@ -155,6 +156,35 @@ class NativeClaudeTests(unittest.TestCase):
             request_id=rid, response={}, pending_permission_requests=[], pending_user_dialog_requests=[])))
         self.assertFalse(self.attention[-1])
         self.assertFalse(self.adapter.confirming)
+        self.assertEqual(sum(f['type'] == 'control_response' for f in self.sent), 1)
+
+    def test_unconsumed_answer_is_represented_only_after_native_confirmation(self):
+        self.checkpoint([approval()])
+        first = self.broker.pending()['requests'][0]
+        self.submit(first)
+        wait_for(lambda: bool(self.adapter.confirming))
+        self.assertEqual(self.broker.pending()['requests'], [])
+        self.checkpoint([approval()])
+        again = self.broker.pending()['requests'][0]
+        self.assertNotEqual(first['requestID'], again['requestID'])
+        self.assertEqual(sum(f['type'] == 'control_response' for f in self.sent), 1,
+                         'The previous answer must not be sent again')
+        self.assertTrue(self.attention[-1])
+
+    def test_checkpoint_started_before_submission_cannot_reopen_that_answer(self):
+        self.checkpoint([approval()])
+        first = self.broker.pending()['requests'][0]
+        self.adapter.initialize()
+        checkpoint_id = self.sent[-1]['request_id']
+        self.submit(first)
+        wait_for(lambda: bool(self.adapter.confirming))
+        self.receive(dict(type='control_response', session_id=REMOTE, response=dict(
+            subtype='success', request_id=checkpoint_id, pending_permission_requests=[approval()],
+            pending_user_dialog_requests=[])))
+        self.assertEqual(self.broker.pending()['requests'], [])
+        self.assertTrue(self.adapter.confirming)
+        self.checkpoint([approval()])
+        self.assertNotEqual(first['requestID'], self.broker.pending()['requests'][0]['requestID'])
         self.assertEqual(sum(f['type'] == 'control_response' for f in self.sent), 1)
 
     def test_closed_worker_cannot_republish_after_late_checkpoint(self):

@@ -107,10 +107,11 @@ login's session scope. Only control events are requested; native request IDs and
 pending-request checkpoints govern lifetime. Local answers clear immediately;
 remote submissions are confirmed against the owner's pending set. Hooks only
 observe activity. Native login refresh and permission-mode changes stay in Claude.
-Provider disable,
-source shutdown or pairing changes invalidate remote cards. Submission receipts confirm
+Provider disable, source shutdown or pairing changes invalidate remote cards. Submission receipts confirm
 Paceman acceptance, not agent consumption. Responses are never retried
-automatically. Backgrounding clears forms; uncertain submissions require an
-explicit identical retry. Watch content travels only through live
+automatically. An uncertain native delivery is reconciled against the owner's
+pending requests before offering a fresh review. Backgrounding clears forms;
+an uncertain phone submission can retry the same idempotent response.
+Watch content travels only through live
 WatchConnectivity replies, never application context or queued transfers.
 Pending sibling requests take precedence over a submission receipt.

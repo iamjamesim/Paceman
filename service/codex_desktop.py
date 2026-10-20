@@ -486,5 +486,10 @@ class DesktopRequests:
                 params["requestId"] = native_id
             self._request(method, params, target=owner, connection=connection)
         except (OSError, ValueError):
-            # Never retry an uncertain decision or target a replacement owner.
-            pass
+            # Reconcile against a new native snapshot; never resend a decision.
+            with self.lock:
+                if self.connection is connection and connection is not None:
+                    try:
+                        connection.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
