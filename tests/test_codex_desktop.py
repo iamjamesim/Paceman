@@ -385,6 +385,56 @@ class DesktopRequestTests(unittest.TestCase):
         self.assertNotIn('permissionDecision', text)
         self.assertEqual(params['input'][0]['text_elements'], [])
 
+    def test_async_reply_wire_contract_clears_only_after_native_acceptance(self):
+        # Stream v11's desktop owner dereferences restoreMessage.cwd/context,
+        # uses its attachment context to match the optimistic steering message,
+        # and only then sends turn/steer. Exercise the framed IPC, not a mocked
+        # _request that accepts a payload the native owner cannot consume.
+        attention = []
+        self.adapter.attention = lambda _, turns: attention.append(turns.get('t') if turns else None)
+        client, owner = socket.socketpair()
+        with client, owner:
+            owner.settimeout(3)
+            self.adapter.connection = client
+            self.adapter.client = 'paceman-client'
+            for selected, answer_text, expected in [([1], '', 'Green'), ([], '日本語\ncustom answer', '日本語\ncustom answer')]:
+                with self.subTest(answer=expected):
+                    message = snapshot([])
+                    turn = dict(turnId='t', status='inProgress', items=[dict(type='agentMessage', id='a',
+                        questions=[dict(title='Which?', options=['Blue', 'Green'])])])
+                    message['params']['change']['conversationState']['turns'] = [turn]
+                    self.adapter._receive(message)
+                    request = self.broker.pending()['requests'][0]
+                    self.broker.submit(submission(self.broker, request, action='answer',
+                        answers={'answer': dict(selected=selected, text=answer_text)}))
+                    call = read_frame(owner)
+                    self.assertEqual(call['method'], 'thread-follower-steer-turn')
+                    self.assertEqual(call['targetClientId'], 'native-owner')
+                    params = call['params']
+                    self.assertEqual(params['conversationId'], SESSION)
+                    restore = params['restoreMessage']
+                    self.assertIsNone(restore['cwd'], 'The native owner supplies the existing cwd')
+                    self.assertEqual(restore['context']['workspaceRoots'], [])
+                    self.assertNotIn('collaborationMode', restore['context'])
+                    self.assertEqual(restore['context']['commentAttachments'], [])
+                    self.assertEqual(restore['id'], params['clientUserMessageId'])
+                    self.assertIsInstance(restore['createdAt'], int)
+                    text = params['input'][0]['text']
+                    self.assertEqual(restore['text'], text)
+                    self.assertEqual(restore['context']['prompt'], text)
+                    self.assertEqual(json.loads(text[len('<send_user_message_question_reply>'):
+                        -len('</send_user_message_question_reply>')])[0]['answer'], expected)
+                    self.assertTrue(attention[-1], 'Paceman acceptance is not native consumption')
+                    self.adapter._receive(dict(type='response', requestId=call['requestId'], resultType='success'))
+                    wait_until(lambda: not self.adapter.calls)
+                    turn['items'].append(dict(type='steeringUserMessage', status='accepted', input=params['input']))
+                    self.adapter._receive(message)
+                    self.assertFalse(attention[-1])
+                    self.assertFalse(self.adapter.pending)
+                    self.assertEqual(self.broker.pending()['requests'], [])
+                    self.adapter._receive(message)
+                    self.assertEqual(self.broker.pending()['requests'], [], 'An answered question must stay cleared')
+
     def test_file_approval_needs_actual_patch_and_stdin_never_shows_parent_as_action(self):
         request = dict(id=1, method="item/fileChange/requestApproval", params=dict(threadId=SESSION, itemId="file"))
         self.assertIsNone(decode_request(SESSION, request))
