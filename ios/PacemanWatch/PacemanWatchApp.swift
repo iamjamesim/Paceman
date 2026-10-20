@@ -620,6 +620,7 @@ private struct WatchTaskView: View {
             guard submission == nil, !submitted else { return }
             if state != "needs_input" {
                 operation.invalidate()
+                confirming = nil
                 prompt = nil
                 answers = [:]
                 error = nil
@@ -754,7 +755,8 @@ private struct WatchTaskView: View {
     }
 
     @MainActor private func load() async {
-        guard currentTask.state == "needs_input", !currentTask.historical(at: Date()),
+        guard scenePhase != .background, !Task.isCancelled,
+              currentTask.state == "needs_input", !currentTask.historical(at: Date()),
               let token = operation.begin() else { return }
         error = nil
         defer { finish(token) }
@@ -765,6 +767,7 @@ private struct WatchTaskView: View {
             guard scenePhase != .background, operation.accepts(token) else { return }
             nativeOnly = result["nativeOnly"] as? Bool == true
             if nativeOnly {
+                confirming = nil
                 prompt = nil
                 submission = nil
                 answers = [:]
@@ -776,6 +779,7 @@ private struct WatchTaskView: View {
             guard let data = result["data"] as? Data else { return }
             let value = try JSONDecoder().decode(WatchWorkPrompt.self, from: data)
             guard value.request.validContent else {
+                confirming = nil
                 nativeOnly = true
                 prompt = nil
                 answers = [:]
