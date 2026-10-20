@@ -92,6 +92,9 @@ class MacSource:
         self.titles = SessionTitles(self._titles_changed, reader=title_reader, monotonic=monotonic)
         self.monotonic = monotonic
         self.pending_attention = {}
+        self.approval_calls = {}
+        self.resolved_approval_tools = {}
+        self.published_attention = set()
         self.claude_sessions = {}
         self.last_event_by_provider = {}
         # Async questions outlive the tool call, but end with their turn.
@@ -200,6 +203,25 @@ class MacSource:
         self.question_calls.pop(key, None)
         return self.pending_questions.pop(key, None)
 
+    def _clear_approvals(self, key):
+        self.approval_calls.pop(key, None)
+        self.published_attention.discard(key)
+        return self.pending_attention.pop(key, None)
+
+    def _resolve_approval(self, key, scope, tool_id):
+        if not scope or not tool_id or tool_id in self.resolved_approval_tools.get(key, set()):
+            return False
+        calls = self.approval_calls.get(key, {})
+        match = next((token for token, signature in calls.items() if signature == scope), None)
+        if match is None:
+            return False
+        del calls[match]
+        self.resolved_approval_tools.setdefault(key, set()).add(tool_id)
+        if not calls:
+            self._clear_approvals(key)
+            return True
+        return False
+
     def receive(self, command: dict) -> bool:
         if not isinstance(command, dict) or command.get("command") != "agent-event":
             raise ValueError("Unsupported command")
@@ -235,9 +257,14 @@ class MacSource:
             tool_id = command.get("toolID")
             if tool_id is not None and (not isinstance(tool_id, str) or not IDENTIFIER.fullmatch(tool_id)):
                 raise ValueError("Invalid tool ID")
+            for field in ("attentionKey", "approvalToken"):
+                value = command.get(field)
+                if value is not None and (not isinstance(value, str) or not IDENTIFIER.fullmatch(value)):
+                    raise ValueError("Invalid approval identity")
             if event == "ended":
                 self.pending_turn_events.pop(key, None)
-                pending = self.pending_attention.pop(key, None)
+                pending = self._clear_approvals(key)
+                self.resolved_approval_tools.pop(key, None)
                 question = self._clear_questions(key)
                 self.published_questions.discard(key)
                 self.turn_ids.pop(key, None)
@@ -261,12 +288,16 @@ class MacSource:
                         self.next_turn_recovery_at = 0.0
                     reduced = {"command": "agent-event", "session": session, "turn": turn,
                                "event": event, "hook": command.get("hook"),
-                               "workspaceLabel": workspace_label, "toolID": tool_id}
+                               "workspaceLabel": workspace_label, "toolID": tool_id,
+                               "attentionKey": command.get("attentionKey"), "approvalToken": command.get("approvalToken")}
                     if not batch["events"] or batch["events"][-1] != reduced:
                         batch["events"].append(reduced)
                     return False
                 if command.get("hook") == "UserPromptSubmit":
                     self.pending_turn_events.pop(key, None)
+                    if previous and previous["turn"] != turn:
+                        self._clear_approvals(key)
+                        self.resolved_approval_tools.pop(key, None)
                 if turn:
                     self.turn_ids[key] = (session, turn)
                     if self.confirmed_turns.get(key) != turn:
@@ -309,20 +340,27 @@ class MacSource:
                     return False
                 if event == "needs-input":
                     pending = self.pending_attention.get(key)
-                    if (pending and pending[0] == turn) or (previous and previous["turn"] == turn
-                            and previous["state"] == "needs_input"):
-                        return False
-                    self.pending_attention[key] = (turn, self.monotonic() + ATTENTION_DELAY,
-                                                   workspace_label)
+                    if pending is None or pending[0] != turn:
+                        self._clear_approvals(key)
+                        self.pending_attention[key] = (turn, self.monotonic() + ATTENTION_DELAY, workspace_label)
+                    self.approval_calls.setdefault(key, {})[command.get("approvalToken") or "legacy"] = command.get("attentionKey")
+                    if previous is None:
+                        db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
+                                   (key, turn, "working", time.time(), workspace_label))
                     self._record_event(db, "codex")
                     return False
-                self.pending_attention.pop(key, None)
+                approval_cleared = False
+                if command.get("hook") == "PostToolUse":
+                    approval_cleared = self._resolve_approval(key, command.get("attentionKey"), tool_id)
+                if event in ("completed", "interrupted"):
+                    self._clear_approvals(key)
+                    self.resolved_approval_tools.pop(key, None)
                 question_cleared = False
                 if event == "completed" or command.get("hook") in ("UserPromptSubmit", "Interrupt"):
                     question_cleared = self._clear_questions(key) is not None
                     self.published_questions.discard(key)
                 if (previous and previous["turn"] == turn and previous["state"] == EVENT_STATES[event]
-                        and previous["workspace_label"] == workspace_label and not question_cleared):
+                        and previous["workspace_label"] == workspace_label and not question_cleared and not approval_cleared):
                     return False
                 db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
                            (key, turn, EVENT_STATES[event], time.time(), workspace_label))
@@ -380,6 +418,9 @@ class MacSource:
                 self.allowance = None
                 self.allowances = []
                 self.pending_attention.clear()
+                self.approval_calls.clear()
+                self.resolved_approval_tools.clear()
+                self.published_attention.clear()
                 self.pending_questions.clear()
                 self.question_calls.clear()
                 self.published_questions.clear()
@@ -412,24 +453,11 @@ class MacSource:
                 with self.store.connect() as db:
                     db.execute("BEGIN IMMEDIATE")
                     self._publish(db, lifecycle_only=bool(retired_claude))
-            due = [(key, pending) for key, pending in self.pending_attention.items()
-                   if pending[1] <= now]
+            due = {key for key, pending in self.pending_attention.items()
+                   if pending[1] <= now and key not in self.published_attention}
             if due:
-                with self.store.connect() as db:
-                    db.execute("BEGIN IMMEDIATE")
-                    changed = False
-                    for key, (turn, _, workspace_label) in due:
-                        self.pending_attention.pop(key, None)
-                        previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
-                        if previous and previous["turn"] != turn:
-                            continue
-                        if previous and previous["state"] in ("needs_input", "finished", "failed"):
-                            continue
-                        db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
-                                   (key, turn, "needs_input", time.time(), workspace_label))
-                        changed = True
-                    if changed:
-                        self._publish(db)
+                self.published_attention.update(due)
+                self.publish_current()
             newly_due = {key for key, (_, due, _) in self.pending_questions.items()
                          if due <= now and key not in self.published_questions}
             if newly_due:
@@ -462,6 +490,8 @@ class MacSource:
                 for row in db.execute("SELECT id FROM mac_sessions WHERE state IN ('finished','failed') AND updated<=?",
                                       (time.time() - FINISHED_RETENTION,)):
                     retired += db.execute("DELETE FROM mac_sessions WHERE id=?", (row["id"],)).rowcount
+                    self._clear_approvals(row["id"])
+                    self.resolved_approval_tools.pop(row["id"], None)
                     self._clear_questions(row["id"])
                     self.published_questions.discard(row["id"])
                     self.turn_ids.pop(row["id"], None)
@@ -526,7 +556,8 @@ class MacSource:
                     db.execute("UPDATE mac_sessions SET turn=?,state='working',updated=?,workspace_label=? WHERE id=?",
                                (latest, time.time(), label, key))
                 self.pending_turn_events.pop(key, None)
-                self.pending_attention.pop(key, None)
+                self._clear_approvals(key)
+                self.resolved_approval_tools.pop(key, None)
                 self._clear_questions(key)
                 self.published_questions.discard(key)
                 self.confirmed_turns.pop(key, None)
@@ -566,7 +597,8 @@ class MacSource:
                     continue
                 self.confirmed_turns[key] = pair[1]
                 state = "failed" if status == "failed" else "finished"
-                self.pending_attention.pop(key, None)
+                self._clear_approvals(key)
+                self.resolved_approval_tools.pop(key, None)
                 question_cleared = self._clear_questions(key) is not None
                 self.published_questions.discard(key)
                 if row["state"] == state:
@@ -600,11 +632,13 @@ class MacSource:
         sessions = []
         for row in records:
             question = self.pending_questions.get(row["id"])
+            approval = self.pending_attention.get(row["id"])
+            waiting = any(marker and marker[0] == row["turn"] and marker[1] <= now_monotonic
+                          for marker in (question, approval))
             # A completed or failed turn is authoritative even if a delayed
             # question marker survives an event path we did not anticipate.
             state = ("needs_input" if row["state"] not in ("finished", "failed")
-                     and question and question[0] == row["turn"] and question[1] <= now_monotonic
-                     else row["state"])
+                     and waiting else row["state"])
             session = {"id": row["id"], "provider": row["provider"], "state": state}
             if title := self.titles.name(row["id"]):
                 session["name"] = title

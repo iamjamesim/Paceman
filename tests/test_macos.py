@@ -28,7 +28,7 @@ class MacSourceTests(unittest.TestCase):
     def test_resumed_turn_uses_saved_order_and_replays_approval_lifecycle(self):
         cases = [
             ([("needs-input", "PermissionRequest")], "interrupted", "needs_input"),
-            ([("needs-input", "PermissionRequest"), ("working", "PostToolUse")], "interrupted", "working"),
+            ([("needs-input", "PermissionRequest"), ("working", "PostToolUse")], "interrupted", "needs_input"),
             ([("question-opened", "PreToolUse"), ("working", "PostToolUse")], "interrupted", "needs_input"),
             ([("needs-input", "PermissionRequest"), ("completed", "Stop")], "completed", "finished"),
             ([("needs-input", "PermissionRequest")], "failed", "failed"),
@@ -392,6 +392,111 @@ class MacSourceTests(unittest.TestCase):
                 self.assertEqual(store.snapshot()["sessions"], [])
                 self.assertEqual(source.last_event_at, last_event)
 
+    def test_multiple_approvals_survive_unrelated_work_before_and_after_debounce(self):
+        for published in (False, True):
+            with self.subTest(published=published), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                root.chmod(0o700)
+                store = Store(root / "hub.sqlite3")
+                clock = [10.0]
+                with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                               turn_status_reader=lambda _: {}, monotonic=lambda: clock[0]) as source:
+                    source.next_turn_status_at = float("inf")
+                    base = dict(command="agent-event", session="one", turn="1")
+                    source.receive(dict(base, event="working", hook="UserPromptSubmit"))
+                    for token in ("approval-a", "approval-b"):
+                        source.receive(dict(base, event="needs-input", hook="PermissionRequest",
+                                            approvalToken=token, attentionKey="same-command"))
+                    if published:
+                        clock[0] += 6
+                        source.tick()
+                        self.assertEqual(store.snapshot()["state"], "needs_input")
+                    source.receive(dict(base, event="working", hook="UserPromptSubmit"))
+                    source.receive(dict(base, event="working", hook="PostToolUse", attentionKey="other-command", toolID="unrelated"))
+                    clock[0] += 6
+                    source.tick()
+                    self.assertEqual(store.snapshot()["state"], "needs_input")
+                    source.receive(dict(base, event="working", hook="PostToolUse", attentionKey="same-command", toolID="call-a"))
+                    self.assertEqual(store.snapshot()["state"], "needs_input")
+                    # A duplicate completion cannot consume the second identical approval.
+                    source.receive(dict(base, event="working", hook="PostToolUse", attentionKey="same-command", toolID="call-a"))
+                    self.assertEqual(store.snapshot()["state"], "needs_input")
+                    source.receive(dict(base, event="working", hook="PostToolUse", attentionKey="same-command", toolID="call-b"))
+                    self.assertEqual(store.snapshot()["state"], "working")
+                    self.assertFalse(source.pending_attention)
+                    self.assertFalse(source.approval_calls)
+
+    def test_unidentified_approval_needs_authoritative_resolution_not_other_tool_activity(self):
+        for ending in ("completed", "interrupted", "ended", "new-turn", "disable"):
+            with self.subTest(ending=ending), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                root.chmod(0o700)
+                store = Store(root / "hub.sqlite3")
+                clock = [10.0]
+                with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                               turn_status_reader=lambda _: {}, monotonic=lambda: clock[0]) as source:
+                    source.next_turn_status_at = float("inf")
+                    base = dict(command="agent-event", session="one", turn="1")
+                    source.receive(dict(base, event="working", hook="UserPromptSubmit"))
+                    source.receive(dict(base, event="needs-input", hook="PermissionRequest"))
+                    source.receive(dict(base, event="working", hook="PostToolUse"))
+                    clock[0] += 6
+                    source.tick()
+                    self.assertEqual(store.snapshot()["state"], "needs_input")
+                    if ending == "new-turn":
+                        source.receive({**base, "turn": "2", "event": "working", "hook": "UserPromptSubmit"})
+                    elif ending == "disable":
+                        source.settings_reader = lambda: ["claude"]
+                        source._apply_settings()
+                    else:
+                        source.receive(dict(base, event=ending))
+                    self.assertFalse(source.pending_attention)
+                    self.assertFalse(source.approval_calls)
+                    self.assertNotEqual(store.snapshot()["state"], "needs_input")
+
+    def test_approval_correlation_is_metadata_only_and_shell_reason_is_not_identity(self):
+        base = dict(tool_name="Bash", cwd="/private/project")
+        first = codex_hook.attention_key(dict(base, tool_input={"command": "secret command", "description": "Approval reason"}))
+        second = codex_hook.attention_key(dict(base, tool_input={"command": "secret command"}))
+        self.assertEqual(first, second)
+        self.assertEqual(len(first), 64)
+        self.assertNotIn("secret", first)
+        self.assertNotEqual(first, codex_hook.attention_key(dict(base, tool_input={"command": "different command"})))
+        self.assertNotEqual(codex_hook.attention_key(dict(tool_name="mcp__x__write", tool_input={"description": "A"})),
+                            codex_hook.attention_key(dict(tool_name="mcp__x__write", tool_input={"description": "B"})))
+
+    def test_permission_hook_correlates_completions_without_sending_command_text(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            root.chmod(0o700)
+            clock = [10.0]
+            store = Store(root / "hub.sqlite3")
+            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None,
+                           turn_status_reader=lambda _: {}, monotonic=lambda: clock[0]) as source:
+                source.next_turn_status_at = float("inf")
+                def hook(name, command="private command", call=None):
+                    payload = dict(hook_event_name=name, session_id="one", turn_id="1", tool_name="Bash",
+                                   tool_input={"command": command})
+                    if call:
+                        payload["tool_use_id"] = call
+                    subprocess.run([sys.executable, "macos/codex_hook.py"], input=json.dumps(payload),
+                                   env={"PACEMAN_HOOK_SOCKET": str(root / "hook.sock")},
+                                   capture_output=True, text=True, check=True)
+                hook("UserPromptSubmit")
+                hook("PermissionRequest")
+                hook("PermissionRequest")
+                clock[0] += 6
+                source.tick()
+                hook("PostToolUse", "unrelated", "other-call")
+                self.assertEqual(store.snapshot()["state"], "needs_input")
+                self.assertNotIn("private command", json.dumps(source.approval_calls))
+                content = live_notification(store.snapshot(), time.time())[0]["aps"]["content-state"]
+                self.assertEqual(content["needsInput"], 1)
+                hook("PostToolUse", call="call-a")
+                self.assertEqual(store.snapshot()["state"], "needs_input")
+                hook("PostToolUse", call="call-b")
+                self.assertEqual(store.snapshot()["state"], "working")
+
     def test_short_approval_does_not_publish_attention(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -403,12 +508,12 @@ class MacSourceTests(unittest.TestCase):
                 source.receive(dict(command="agent-event", session="one", turn="1", event="working"))
                 before = store.snapshot()["revision"]
                 self.assertFalse(source.receive(dict(command="agent-event", session="one", turn="1",
-                                                     event="needs-input")))
+                                                     event="needs-input", attentionKey="matching", approvalToken="approval")))
                 clock[0] += 4.0
                 source.tick()
                 self.assertEqual(store.snapshot()["revision"], before)
                 self.assertFalse(source.receive(dict(command="agent-event", session="one", turn="1",
-                                                     event="working", hook="PostToolUse")))
+                                                     event="working", hook="PostToolUse", attentionKey="matching", toolID="matching-call")))
                 clock[0] += 2.0
                 source.tick()
                 self.assertEqual(store.snapshot()["revision"], before)
