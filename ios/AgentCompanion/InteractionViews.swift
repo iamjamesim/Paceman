@@ -19,7 +19,7 @@ struct InteractionDetail: View {
     private var retryable: Bool { response?.phase == .unconfirmed }
     private var message: String? { response?.message }
     private var approvalContent: ApprovalDetailContent { ApprovalDetailContent(item.request.detail) }
-    private var approvalAction: ApprovalActionContent? { approvalContent.action.map(ApprovalActionContent.init) }
+    private var approvalAction: ApprovalActionContent? { item.request.approvalAction }
     private var requestTitle: String {
         item.request.kind == "approval" ? approvalAction?.title(item.request.title) ?? item.request.title : item.request.title
     }
@@ -51,11 +51,11 @@ struct InteractionDetail: View {
                                 Text(requestTitle).companionText(.cardTitle, theme: theme)
                                     .accessibilityAddTraits(.isHeader)
                             }
-                            if !item.request.detail.isEmpty {
+                            if !item.request.detail.isEmpty || item.request.approval != nil {
                                 if item.request.kind == "approval" {
                                     approvalDetail
                                 } else {
-                                    Text(item.request.detail).companionText(.body, theme: theme).textSelection(.enabled)
+                                    ApprovalExpandableText(text: item.request.detail, label: "Request details", theme: theme, code: false)
                                 }
                             }
                         }
@@ -106,8 +106,15 @@ struct InteractionDetail: View {
                 }.disabled(phase != .active)
             } else if editable {
                 if item.request.kind == "approval" {
-                    InputActionButton(title: "Allow once", theme: theme) { respond("allowOnce") }
-                    InputActionButton(title: "Decline", theme: theme, primary: false) { respond("deny") }
+                    ForEach(Array(item.request.approvalChoices.enumerated()), id: \.element.id) { index, option in
+                        InputActionButton(title: option.label, theme: theme, primary: index == 0) {
+                            respond(item.request.contentVersion == 2 ? "choose" : option.id,
+                                optionID: item.request.contentVersion == 2 ? option.id : nil)
+                        }
+                    }
+                    if item.request.approvalChoices.isEmpty {
+                        Text(ResponseGuidance.continuation(for: item.request.provider) + ".").companionText(.body, theme: theme)
+                    }
                 } else {
                     InputActionButton(title: "Send answer", theme: theme) { respond("answer") }
                         .disabled(!ready)
@@ -175,19 +182,29 @@ struct InteractionDetail: View {
         let content = approvalContent
         return VStack(alignment: .leading, spacing: 24) {
             if !content.explanation.isEmpty {
-                Text(content.explanation).companionText(.body, theme: theme).textSelection(.enabled)
+                ApprovalExpandableText(text: content.explanation, label: "Request details", theme: theme, code: false)
             }
             if let presentation = approvalAction {
                 if let explanation = presentation.explanation, explanation != content.explanation {
-                    Text(explanation).companionText(.body, theme: theme).textSelection(.enabled)
+                    ApprovalExpandableText(text: explanation, label: "Request details", theme: theme, code: false)
                 }
                 VStack(alignment: .leading, spacing: 12) {
-                    if !presentation.body.isEmpty {
-                        approvalCode(presentation.body)
+                    if let path = presentation.targetPath {
+                        Text(path).companionText(.body, theme: theme).textSelection(.enabled)
+                            .accessibilityLabel("File: " + path)
                     }
-                    if let arguments = presentation.otherArguments {
-                        Text("Other arguments").companionText(.label, theme: theme)
-                        approvalCode(arguments)
+                    if presentation.replacesAll {
+                        Text("Replace all matching text.").companionText(.body, theme: theme)
+                    }
+                    ForEach(Array(presentation.sections.enumerated()), id: \.offset) { _, section in
+                        if presentation.sections.count > 1 {
+                            Text(section.label).companionText(.label, theme: theme)
+                        }
+                        ApprovalExpandableText(text: section.text, label: section.label, theme: theme, summarizeJSON: presentation.kind == .tool)
+                    }
+                    if presentation.otherArguments != nil {
+                        ApprovalExpandableText(text: presentation.originalInput, label: "Tool input", theme: theme,
+                            startsCollapsed: true)
                     }
                     if let tool = presentation.tool, presentation.kind == .tool, item.request.title != "Allow \(tool)?" {
                         Text("Tool: " + tool).companionText(.supporting, theme: theme).textSelection(.enabled)
@@ -201,19 +218,10 @@ struct InteractionDetail: View {
         }
     }
 
-    private func approvalCode(_ value: String) -> some View {
-        Text(value).companionText(.code, theme: theme)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(12)
-            .background(theme.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private func respond(_ action: String) {
+    private func respond(_ action: String, optionID: String? = nil) {
         guard inbox.isCurrent(item), phase == .active else { return }
         focusedQuestion = nil
-        inbox.submit(item, action: action, answers: action == "answer" ? answers : [:])
+        inbox.submit(item, action: action, answers: action == "answer" ? answers : [:], optionID: optionID)
     }
 }
 
@@ -227,5 +235,43 @@ private struct InputActionButton: View {
         Button(action: action) {
             TaskCardActionLabel(title: title, theme: theme, primary: primary)
         }.buttonStyle(.plain)
+    }
+}
+
+/// Preview only; expansion always reveals the untouched input. The decision
+/// controls remain outside this content in InteractionDetail's bottom inset.
+private struct ApprovalExpandableText: View {
+    let text: String
+    let label: String
+    let theme: CompanionTheme
+    var code = true
+    var startsCollapsed = false
+    var summarizeJSON = false
+    @State private var expanded = false
+
+    var body: some View {
+        let preview = ApprovalTextPreview(text, surface: .phone)
+        let collapsible = startsCollapsed || preview.needsExpansion
+        let summary = !expanded && preview.needsExpansion && summarizeJSON ? preview.jsonSummary : nil
+        VStack(alignment: .leading, spacing: 8) {
+            if expanded && collapsible { expansionButton }
+            if expanded || !startsCollapsed {
+                Text(text.isEmpty ? "Empty text" : expanded ? preview.fullText : summary ?? (preview.excerpt + (preview.needsExpansion ? "…" : "")))
+                    .companionText(code && summary == nil ? .code : .body, theme: theme)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(code ? 12 : 0)
+                    .background(code ? theme.ink.opacity(0.05) : .clear, in: RoundedRectangle(cornerRadius: 12))
+            }
+            if !expanded && collapsible { expansionButton }
+        }
+    }
+
+    private var expansionButton: some View {
+        Button(expanded ? "Show less" : "Show full \(label.lowercased())") { expanded.toggle() }
+            .font(CompanionTextRole.label.font).foregroundStyle(theme.tint)
+            .frame(minHeight: 44).contentShape(Rectangle()).buttonStyle(.plain)
+            .accessibilityLabel(expanded ? "Show less \(label.lowercased())" : "Show full \(label.lowercased())")
+            .accessibilityHint(expanded ? "Collapse \(label.lowercased())" : "Read the complete \(label.lowercased())")
     }
 }

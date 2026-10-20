@@ -491,6 +491,27 @@ Implementations: [source API](../service/hub.py),
 
 This is a compatibility contract for older computers and synthetic tests. Current
 agent sources omit `interactionsEnabled` and leave questions and approvals native.
+Provider input is decoded on the desktop before transfer. Approval content v2
+adds `contentVersion: 2`, `approval`, and ordered `responseOptions: [{id, label}]`;
+`detail` is empty. `approval` contains `toolName`, optional `workingDirectory`
+and `reason`, complete JSON `input`, normalized `action`, and
+`hasAdditionalInput`. Actions are `command`/`patch` (`text`), `fileWrite`
+(`filePath`, `text`), `fileEdit` (`filePath`, `before`, `text`, `replaceAll`), or
+`tool` (uninterpreted JSON). Only documented built-ins are unpacked; MCP
+arguments retain every field. Views render this model without provider decoding.
+
+GET must advertise `X-Paceman-Content-Version: 2` to receive v2 requests. Watch
+request messages similarly advertise `contentVersion: 2`; older Watch clients
+receive native continuation for v2 content. The phone forwards the same request
+model to Watch. Selecting a v2 choice submits `action: "choose", optionID`;
+the broker accepts only offered IDs and returns the ID unchanged. Empty choices
+require native review. This contract does not enable interception or establish
+ownership of a native dialog. Unknown versions cannot be answered remotely.
+
+Input is bounded to 32 KiB and normalized requests to 64 KiB; oversize content
+is rejected, never truncated. The older v1 `detail` uses Paceman-owned headers
+with a separate compatibility decoder. Both clients collapse long display bodies
+and retain complete input for expansion; no arguments are stripped by field name.
 
 Snapshot `interactionsEnabled: true` advertises these endpoints; sources that omit
 it provide activity only. Both endpoints use the paired bearer credential.
@@ -501,7 +522,8 @@ it provide activity only. Both endpoints use the paired bearer credential.
   `remainingSeconds`. Questions contain `id`, `prompt`, `multiple`, and `options`
   with label/description. Request IDs identify hook invocations, not tools or titles.
 - `POST /v1/interactions`: supplies generation, requestID, version, idempotencyKey,
-  and action (`allowOnce`, `deny`, `answer`, `release`). Answers map question IDs to
+  and action (`allowOnce`, `deny`, `answer`, `release`; v2 approvals use `choose`
+  with `optionID`). Answers map question IDs to
   `{selected: [option indices], text}`. First valid response wins; identical retries
   return the same `submitted` receipt. Stale requests or conflicting retries return
   409. A receipt confirms submission, not agent consumption. Release resumes native

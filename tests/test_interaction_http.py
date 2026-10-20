@@ -41,16 +41,33 @@ class InteractionHTTPTests(unittest.TestCase):
         self.server.shutdown()
         self.thread.join(2)
 
-    def call(self, method, path, payload=None, authorized=True, trace_id=None):
+    def call(self, method, path, payload=None, authorized=True, trace_id=None, content_version=None):
         connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=2)
         self.addCleanup(connection.close)
         headers = {'Authorization': 'Bearer ' + self.client['credential']} if authorized else {}
         if trace_id is not None:
             headers['X-Paceman-Trace-ID'] = trace_id
+        if content_version is not None:
+            headers['X-Paceman-Content-Version'] = str(content_version)
         body = json.dumps(payload) if payload is not None else None
         connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         return response.status, json.loads(response.read())
+
+    def test_structured_content_requires_capability_and_preserves_session_choice(self):
+        from tests.test_interaction_content import request
+        pending = self.broker._publish(request(), 60)
+        self.assertEqual(self.call('GET', '/v1/interactions')[1]['requests'], [])
+        status, listing = self.call('GET', '/v1/interactions', content_version=2)
+        self.assertEqual(status, 200)
+        item = listing['requests'][0]
+        self.assertEqual(item['approval']['action']['text'], 'printf 日本語')
+        self.assertEqual(len(item['responseOptions']), 3)
+        status, _ = self.call('POST', '/v1/interactions', dict(generation=listing['generation'],
+            requestID=item['requestID'], version=item['version'], idempotencyKey='choice',
+            action='choose', optionID='session'))
+        self.assertEqual(status, 200)
+        self.assertEqual(pending.response, {'action': 'choose', 'optionID': 'session'})
 
     def completed_replies(self):
         replies = queue.Queue()

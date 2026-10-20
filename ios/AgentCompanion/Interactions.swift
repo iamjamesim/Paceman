@@ -14,7 +14,7 @@ struct InputRequests: Decodable {
             throw HubError.message("The computer returned invalid requests.")
         }
         for request in value.requests {
-            guard UUID(uuidString: request.id) != nil, request.version == 1,
+            guard UUID(uuidString: request.id) != nil, request.version == 1, request.validContent,
                   ["claude", "codex"].contains(request.provider),
                   ["approval", "question"].contains(request.kind),
                   request.sessionID.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil, !request.title.isEmpty,
@@ -298,17 +298,12 @@ struct InputResponseState {
     /// Submission belongs to the inbox, not to a sheet's lifetime. Reopening a
     /// card cannot create another decision while the original POST is in flight.
     @discardableResult func submit(_ item: PendingInput, action: String, answers: [String: InputAnswer] = [:],
-                client: SourceClient? = nil) -> Task<Void, Never>? {
-        guard isCurrent(item), responses[item.id] == nil, operations[item.id] == nil,
-              ["answer", "allowOnce", "deny", "release"].contains(action) else { return nil }
-        if action == "answer" {
-            guard item.request.kind == "question", Set(answers.keys) == Set(item.request.questions.map(\.id)),
-                  item.request.questions.allSatisfy({ answers[$0.id]?.valid(for: $0) == true }) else { return nil }
-        } else if action != "release" && item.request.kind != "approval" { return nil }
+                client: SourceClient? = nil, optionID: String? = nil) -> Task<Void, Never>? {
+        guard isCurrent(item), responses[item.id] == nil, operations[item.id] == nil else { return nil }
         let submission = InputSubmission(generation: item.generation, requestID: item.request.id,
             version: item.request.version, idempotencyKey: UUID().uuidString, action: action,
-            answers: action == "answer" ? answers : [:])
-        guard submission.fitsWireLimit else { return nil }
+            answers: action == "answer" ? answers : [:], optionID: optionID)
+        guard submission.valid(for: item.request) else { return nil }
         responses[item.id] = InputResponseState(item: item, submission: submission,
             startedAt: ProcessInfo.processInfo.systemUptime, phase: .sending)
         return send(item, submission: submission, client: client ?? self.client)
@@ -371,7 +366,8 @@ struct InputResponseState {
                        .init(label: "During setup", description: "Have notifications ready for the first task.")])
             let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: approval ? "codex" : "claude",
                 sessionID: "review-" + kind, kind: approval ? "approval" : "question",
-                title: approval ? "Run the tests?" : "Question", detail: approval ? "Command: npm test -- checkout" : "",
+                title: approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? "Allow \(ApprovalPreviewFixtures.pageTool)?" : approval ? "Run the tests?" : "Question",
+                detail: approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? ApprovalPreviewFixtures.largePageEdit : approval ? "Command: npm test -- checkout" : "",
                 questions: approval ? [] : [question], remainingSeconds: 120)
             return PendingInput(source: source, generation: generation, request: request,
                 expiresAtUptime: ProcessInfo.processInfo.systemUptime + 3600)

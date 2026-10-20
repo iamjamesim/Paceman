@@ -603,7 +603,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.server.check_interaction_access()
                 self.reply(200, {"sourceID": self.server.store.metadata("source_id"),
-                                 **self.server.interactions.pending()})
+                                 **self.server.interactions.pending(content_version=
+                                     2 if self.headers.get("X-Paceman-Content-Version") == "2" else 1)})
             return
         if self.path == "/v1/push":
             value = self.server.store.push_device(token)

@@ -1181,6 +1181,7 @@ extension CompanionModel {
                         watchSubmissions[item.id] = response.submission
                         if response.phase == .submitted { watchConfirmed.insert(item.id) }
                     }
+                    guard item.request.contentVersion != 2 || message["contentVersion"] as? Int == 2 else { return ["nativeOnly": true] }
                     return encoded(WatchWorkPrompt(generation: item.generation, request: item.request,
                         remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
                         submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
@@ -1198,6 +1199,7 @@ extension CompanionModel {
                             && watchSubmissions[$0.id] != nil
                             && !watchRejected.contains($0.id)
                     }) {
+                        guard item.request.contentVersion != 2 || message["contentVersion"] as? Int == 2 else { return ["nativeOnly": true] }
                         return encoded(WatchWorkPrompt(generation: item.generation, request: item.request,
                             remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
                             submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
@@ -1219,6 +1221,7 @@ extension CompanionModel {
                 }
                 interactions.observeWatchRequest(item)
                 publishWatchWork()
+                guard request.contentVersion != 2 || message["contentVersion"] as? Int == 2 else { return ["nativeOnly": true] }
                 return encoded(WatchWorkPrompt(generation: requests.generation, request: request,
                     remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
                     submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))

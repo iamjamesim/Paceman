@@ -38,7 +38,24 @@ struct InputRequest: Codable, Identifiable, Equatable {
     let detail: String
     let questions: [InteractionQuestion]
     let remainingSeconds: Double
+    var contentVersion: Int? = nil
+    var approval: ApprovalPayload? = nil
+    var responseOptions: [ApprovalResponseOption]? = nil
     var id: String { requestID }
+    var approvalAction: ApprovalActionContent? {
+        if contentVersion == 2, let approval { return ApprovalActionContent(approval) }
+        return ApprovalDetailContent(detail).action.map { ApprovalActionContent($0) }
+    }
+    var approvalChoices: [ApprovalResponseOption] {
+        contentVersion == 2 ? responseOptions ?? [] : [.init(id: "allowOnce", label: "Allow once"), .init(id: "deny", label: "Decline")]
+    }
+    var validContent: Bool {
+        if contentVersion == nil || contentVersion == 1 { return approval == nil && responseOptions == nil }
+        guard contentVersion == 2, kind == "approval", detail.isEmpty, approval?.valid == true,
+              let options = responseOptions, options.count <= 16,
+              Set(options.map(\.id)).count == options.count else { return false }
+        return options.allSatisfy { !$0.id.isEmpty && $0.id.count <= 160 && !$0.label.isEmpty && $0.label.unicodeScalars.count <= 512 }
+    }
 }
 
 struct InputAnswer: Codable, Equatable {
@@ -59,6 +76,7 @@ struct InputSubmission: Codable, Equatable {
     let idempotencyKey: String
     let action: String
     let answers: [String: InputAnswer]
+    var optionID: String? = nil
     var fitsWireLimit: Bool {
         guard let data = try? JSONEncoder().encode(self) else { return false }
         return data.count <= 65536
@@ -253,20 +271,23 @@ struct WatchWorkPrompt: Codable {
     var submission: InputSubmission? = nil
     var submitted: Bool? = nil
     var supportsWatchAnswer: Bool {
-        request.kind == "approval" || (request.kind == "question" && (1...4).contains(request.questions.count)
-            && Set(request.questions.map(\.id)).count == request.questions.count)
+        request.validContent && ((request.kind == "approval" && !request.approvalChoices.isEmpty) || (request.kind == "question" && (1...4).contains(request.questions.count)
+            && Set(request.questions.map(\.id)).count == request.questions.count))
     }
 }
 
 extension InputSubmission {
     func valid(for request: InputRequest) -> Bool {
         guard requestID == request.id, version == request.version,
-              UUID(uuidString: idempotencyKey) != nil, fitsWireLimit else { return false }
+              UUID(uuidString: idempotencyKey) != nil, fitsWireLimit, request.validContent,
+              action == "choose" || optionID == nil else { return false }
         switch action {
         case "answer":
             return request.kind == "question" && Set(answers.keys) == Set(request.questions.map(\.id))
                 && request.questions.allSatisfy { answers[$0.id]?.valid(for: $0) == true }
-        case "allowOnce", "deny": return request.kind == "approval" && answers.isEmpty
+        case "choose": return request.contentVersion == 2 && request.kind == "approval" && answers.isEmpty
+            && request.approvalChoices.contains { $0.id == optionID }
+        case "allowOnce", "deny": return request.contentVersion != 2 && request.kind == "approval" && answers.isEmpty
         case "release": return answers.isEmpty
         default: return false
         }

@@ -95,6 +95,96 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(content.explanation, "Remove the obsolete file.")
     }
 
+    func testLegacyDetailGrammarDoesNotExtractHeaderLikeProse() {
+        for detail in ["The instructions mention\nTool: Bash\nwithout a header paragraph.",
+                       "This is prose containing {braces}, not a tool call.", "{not valid JSON}"] {
+            XCTAssertEqual(ApprovalDetailContent(detail).explanation, detail)
+            XCTAssertNil(ApprovalDetailContent(detail).action)
+        }
+        let array = "[{\"path\":\"/tmp/a\"}]"
+        XCTAssertEqual(ApprovalDetailContent(array).action, array)
+    }
+
+    func testStructuredApprovalRoundTripsToWatchWithoutProviderDecodingAndPreservesEveryChoice() throws {
+        let original = ApprovalPreviewFixtures.file(true)
+        var request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+            sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow Edit?", detail: "",
+            questions: [], remainingSeconds: 60, contentVersion: 2, approval: original,
+            responseOptions: ApprovalPreviewFixtures.choices)
+        let wire = try JSONEncoder().encode(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60))
+        let watch = try JSONDecoder().decode(WatchWorkPrompt.self, from: wire)
+        XCTAssertEqual(watch.request, request)
+        XCTAssertTrue(watch.supportsWatchAnswer)
+        let action = try XCTUnwrap(watch.request.approvalAction)
+        XCTAssertEqual(action.kind, .fileEdit)
+        XCTAssertEqual(action.sections.map(\.text), ["Previous wording.", original.action.text!])
+        XCTAssertTrue(action.replacesAll)
+        XCTAssertEqual(watch.request.approvalChoices.map(\.id), ["once", "session", "decline"])
+        let selected = InputSubmission(generation: "g", requestID: request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "choose", answers: [:], optionID: "session")
+        XCTAssertTrue(selected.valid(for: request))
+        XCTAssertFalse(InputSubmission(generation: "g", requestID: request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "allowOnce", answers: [:]).valid(for: request))
+        request.responseOptions = []
+        XCTAssertFalse(selected.valid(for: request))
+        XCTAssertFalse(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60).supportsWatchAnswer)
+        request.contentVersion = 3
+        XCTAssertFalse(request.validContent)
+    }
+
+    func testStructuredUnknownInputPreservesNestedJSONNumbersNullsAndUnicode() throws {
+        let data = Data(#"{"toolName":"mcp__pages__edit","input":{"operations":[{"metadata":{"width":210.5,"id":9007199254740993,"flag":true,"nil":null},"markdown":"日本語"}]},"action":{"kind":"tool"},"hasAdditionalInput":false}"#.utf8)
+        let payload = try JSONDecoder().decode(ApprovalPayload.self, from: data)
+        let roundTrip = try JSONDecoder().decode(ApprovalPayload.self, from: JSONEncoder().encode(payload))
+        XCTAssertEqual(roundTrip, payload)
+        let content = ApprovalActionContent(payload)
+        XCTAssertEqual(content.kind, .tool)
+        XCTAssertTrue(content.body.contains("9007199254740993"))
+        XCTAssertTrue(content.body.contains("日本語"))
+        XCTAssertNil(content.explanation)
+    }
+
+    func testLargeMCPPageEditIsSummarizedWithoutDiscardingOperationsOrMetadata() throws {
+        let input: [String: Any] = ["page_id": "page_fixture", "stream_kind": "content",
+            "operations": [["op": "replace_block_markdown", "expected_hash": "exact-hash",
+                "block_units": [["kind": "markdown", "markdown": String(repeating: "Long content. ", count: 500),
+                                 "metadata": ["image": ["file_id": "original-file", "width": 210.5]]]]]]]
+        let data = try JSONSerialization.data(withJSONObject: input)
+        let original = String(decoding: data, as: UTF8.self)
+        let value = ApprovalActionContent("Tool: mcp__pages__edit_page\n\n" + original)
+        XCTAssertEqual(value.kind, .tool)
+        XCTAssertEqual(value.body, original)
+        XCTAssertNil(value.explanation, "An arbitrary tool's description is not necessarily display metadata")
+        let preview = ApprovalTextPreview(value.body, surface: .watch)
+        XCTAssertTrue(preview.needsExpansion)
+        XCTAssertEqual(preview.jsonSummary, "3 fields: operations, page_id, stream_kind")
+        XCTAssertEqual(preview.fullText, original)
+        XCTAssertLessThanOrEqual(preview.excerpt.count, 180)
+        XCTAssertTrue(preview.fullText.contains("expected_hash"))
+        XCTAssertTrue(preview.fullText.contains("file_id"))
+    }
+
+    func testApprovalExcerptsBoundBothOneLineAndMultilineBodiesWithoutChangingOriginal() {
+        let emoji = String(repeating: "👨‍👩‍👧‍👦", count: 600)
+        for text in [String(repeating: "x", count: 16000), String(repeating: "line\n", count: 1000), emoji] {
+            let watch = ApprovalTextPreview(text, surface: .watch)
+            let phone = ApprovalTextPreview(text, surface: .phone)
+            XCTAssertEqual(watch.fullText, text)
+            XCTAssertEqual(phone.fullText, text)
+            XCTAssertTrue(watch.needsExpansion)
+            XCTAssertTrue(phone.needsExpansion)
+            XCTAssertLessThanOrEqual(watch.excerpt.count, 180)
+            XCTAssertLessThanOrEqual(phone.excerpt.count, 500)
+            XCTAssertLessThanOrEqual(watch.excerpt.split(separator: "\n", omittingEmptySubsequences: false).count, 4)
+            XCTAssertTrue(text.hasPrefix(watch.excerpt))
+        }
+        for text in ["", "swift test", "first\nsecond\n"] {
+            let preview = ApprovalTextPreview(text, surface: .watch)
+            XCTAssertFalse(preview.needsExpansion)
+            XCTAssertEqual(preview.excerpt, text)
+        }
+    }
+
     @MainActor func testCatalogPreservesDistinctSessionIdentityAndLegacyActivity() throws {
         let model = CompanionModel(preview: true)
         model.showHandoffPreview("handoff-codex-working")
@@ -1757,6 +1847,43 @@ extension InteractionTests {
         let unmatched = await model.handleWatchWork(message)
         XCTAssertNotNil(unmatched["error"])
         XCTAssertNil(unmatched["data"], "A response form must match the exact task identity")
+    }
+
+    @MainActor func testStructuredApprovalRequiresWatchCapabilityAndSourceNegotiation() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
+            clientID: "client", credential: "fixture")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
+        model.pairedSources = [source]
+        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+            sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow Edit?", detail: "",
+            questions: [], remainingSeconds: 60, contentVersion: 2, approval: ApprovalPreviewFixtures.file(true),
+            responseOptions: ApprovalPreviewFixtures.choices)
+        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
+        let listing = try JSONSerialization.data(withJSONObject: ["sourceID": sourceID,
+            "generation": UUID().uuidString, "requests": [object]])
+        InteractionURLProtocol.start = { transport in
+            Task { @MainActor in
+                if transport.request.url?.path == "/v1/snapshot" {
+                    transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                } else {
+                    XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), "2")
+                    transport.finish(listing)
+                }
+            }
+        }
+        defer { InteractionURLProtocol.start = nil }
+        var message: [String: Any] = ["operation": "request", "sourceID": sourceID,
+            "sessionID": request.sessionID, "provider": "claude"]
+        let legacy = await model.handleWatchWork(message)
+        XCTAssertEqual(legacy["nativeOnly"] as? Bool, true)
+        XCTAssertNil(legacy["data"])
+        message["contentVersion"] = 2
+        let modern = await model.handleWatchWork(message)
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(modern["data"] as? Data))
+        XCTAssertEqual(prompt.request, request)
+        XCTAssertEqual(prompt.request.approvalChoices.count, 3)
     }
 
     func testWatchAnswerValidationAndActivityLease() throws {

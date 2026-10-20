@@ -604,8 +604,13 @@ private struct WatchTaskView: View {
         let request = prompt.request
         if request.kind == "approval" {
             approvalContent(request)
-            Button("Allow once") { respond("allowOnce") }.buttonStyle(.borderedProminent).foregroundStyle(.black)
-            Button("Decline", role: .destructive) { respond("deny") }
+            ForEach(request.approvalChoices) { option in
+                Button(option.label) {
+                    respond(request.contentVersion == 2 ? "choose" : option.id,
+                        optionID: request.contentVersion == 2 ? option.id : nil)
+                }.buttonStyle(.bordered)
+            }
+            if request.approvalChoices.isEmpty { Text(ResponseGuidance.continuation(for: request.provider) + ".") }
         } else if !prompt.supportsWatchAnswer {
             Text("Answer these questions in Paceman on iPhone.")
         } else {
@@ -624,7 +629,7 @@ private struct WatchTaskView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(question.prompt).font(.headline).fixedSize(horizontal: false, vertical: true)
             if !detail.isEmpty, detail != question.prompt {
-                Text(detail).font(.body).fixedSize(horizontal: false, vertical: true)
+                WatchApprovalText(text: detail, label: "Request details", code: false)
             }
             VStack(spacing: 8) {
                 ForEach(question.options.indices, id: \.self) { index in
@@ -686,15 +691,22 @@ private struct WatchTaskView: View {
 
     @ViewBuilder private func approvalContent(_ request: InputRequest) -> some View {
         let content = ApprovalDetailContent(request.detail)
-        let action = content.action.map(ApprovalActionContent.init)
+        let action = request.approvalAction
         Text(action?.title(request.title) ?? request.title).font(.headline)
-        if !content.explanation.isEmpty { Text(content.explanation).font(.body) }
+        if !content.explanation.isEmpty { WatchApprovalText(text: content.explanation, label: "Request details", code: false) }
         if let action {
-            if let reason = action.explanation, reason != content.explanation { Text(reason).font(.body) }
-            if !action.body.isEmpty { approvalCode(action.body) }
-            if let arguments = action.otherArguments {
-                Text("Other arguments").font(.headline)
-                approvalCode(arguments)
+            if let reason = action.explanation, reason != content.explanation { WatchApprovalText(text: reason, label: "Request details", code: false) }
+            if let path = action.targetPath {
+                Text(path).font(.body).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("File: " + path)
+            }
+            if action.replacesAll { Text("Replace all matching text.").font(.body) }
+            ForEach(Array(action.sections.enumerated()), id: \.offset) { _, section in
+                if action.sections.count > 1 { Text(section.label).font(.headline) }
+                WatchApprovalText(text: section.text, label: section.label, summarizeJSON: action.kind == .tool)
+            }
+            if action.otherArguments != nil {
+                WatchApprovalText(text: action.originalInput, label: "Tool input", startsCollapsed: true)
             }
             if let tool = action.tool, action.kind == .tool, request.title != "Allow \(tool)?" {
                 Text("Tool: " + tool).font(.caption).foregroundStyle(.secondary)
@@ -706,14 +718,6 @@ private struct WatchTaskView: View {
         }
     }
 
-    private func approvalCode(_ value: String) -> some View {
-        Text(value).font(.system(.body, design: .monospaced))
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-    }
-
     @MainActor private func load() async {
         guard currentTask.state == "needs_input", !currentTask.historical(at: Date()),
               let token = operation.begin() else { return }
@@ -722,7 +726,7 @@ private struct WatchTaskView: View {
         let started = ProcessInfo.processInfo.systemUptime
         do {
             let result = try await store.workMessage(["operation": "request", "sourceID": task.sourceID,
-                "sessionID": task.sessionID, "provider": task.provider])
+                "sessionID": task.sessionID, "provider": task.provider, "contentVersion": 2])
             guard scenePhase != .background, operation.accepts(token) else { return }
             nativeOnly = result["nativeOnly"] as? Bool == true
             if nativeOnly {
@@ -735,6 +739,11 @@ private struct WatchTaskView: View {
             }
             guard let data = result["data"] as? Data else { return }
             let value = try JSONDecoder().decode(WatchWorkPrompt.self, from: data)
+            guard value.request.validContent else {
+                nativeOnly = true
+                prompt = nil
+                return
+            }
             prompt = value
             submission = value.submission
             if let submission = value.submission { answers = submission.answers }
@@ -748,11 +757,11 @@ private struct WatchTaskView: View {
         }
     }
 
-    private func respond(_ action: String) {
+    private func respond(_ action: String, optionID: String? = nil) {
         guard let prompt, submission == nil, ProcessInfo.processInfo.systemUptime < deadline else { return }
         let value = InputSubmission(generation: prompt.generation, requestID: prompt.request.id,
             version: prompt.request.version, idempotencyKey: UUID().uuidString, action: action,
-            answers: action == "answer" ? answers : [:])
+            answers: action == "answer" ? answers : [:], optionID: optionID)
         guard value.valid(for: prompt.request) else { return }
         submission = value
         Task { await send() }
@@ -781,6 +790,41 @@ private struct WatchTaskView: View {
         if operation.finish(token), scenePhase == .active, !submitted {
             Task { await load() }
         }
+    }
+}
+
+/// Short excerpts and optional full input keep a large payload from pushing
+/// every decision behind pages of JSON. Expanded text uses native Dynamic Type.
+private struct WatchApprovalText: View {
+    let text: String
+    let label: String
+    var code = true
+    var startsCollapsed = false
+    var summarizeJSON = false
+    @State private var expanded = false
+
+    var body: some View {
+        let preview = ApprovalTextPreview(text, surface: .watch)
+        let collapsible = startsCollapsed || preview.needsExpansion
+        let summary = !expanded && preview.needsExpansion && summarizeJSON ? preview.jsonSummary : nil
+        VStack(alignment: .leading, spacing: 8) {
+            if expanded && collapsible { expansionButton }
+            if expanded || !startsCollapsed {
+                Text(text.isEmpty ? "Empty text" : expanded ? preview.fullText : summary ?? (preview.excerpt + (preview.needsExpansion ? "…" : "")))
+                    .font(code && summary == nil ? .system(.body, design: .monospaced) : .body)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(code ? 10 : 0)
+                    .background(code ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 12))
+            }
+            if !expanded && collapsible { expansionButton }
+        }
+    }
+
+    private var expansionButton: some View {
+        Button(expanded ? "Show less" : "Show full \(label.lowercased())") { expanded.toggle() }
+            .accessibilityLabel(expanded ? "Show less \(label.lowercased())" : "Show full \(label.lowercased())")
+            .accessibilityHint(expanded ? "Collapse \(label.lowercased())" : "Read the complete \(label.lowercased())")
     }
 }
 
@@ -847,11 +891,11 @@ private enum WatchWorkPreview {
     static var scenario: String? {
         ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--work-preview=") }.map { String($0.dropFirst(15)) }
     }
-    static let detailScenarios = ["native-input", "native-long", "approval", "approval-json", "approval-unknown", "question", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
+    static let detailScenarios = ["native-input", "native-long", "approval", "approval-json", "approval-unknown", "approval-large", "approval-long-command", "approval-write", "approval-edit", "question", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
     static var responseSent = false
     static var task: WatchWorkTask {
         let state = ["working-detail": "working", "finished-detail": "finished", "failed-detail": "failed", "idle-detail": "idle", "historical-detail": "working"][scenario ?? ""] ?? "needs_input"
-        return WatchWorkTask(sourceID: "preview", sessionID: "task", provider: "codex", title: scenario == "native-long" ? "Review accessibility and notifications throughout the entire onboarding experience" : "Simplify onboarding",
+        return WatchWorkTask(sourceID: "preview", sessionID: "task", provider: ["approval-write", "approval-edit"].contains(scenario) ? "claude" : "codex", title: scenario == "native-long" ? "Review accessibility and notifications throughout the entire onboarding experience" : "Simplify onboarding",
             computer: "MacBook Pro", state: state, freshUntil: Date().timeIntervalSince1970 + (scenario == "historical-detail" ? -600 : 300),
             project: "Paceman", observedAt: Date().timeIntervalSince1970 - (scenario == "historical-detail" ? 900 : 15))
     }
@@ -905,13 +949,21 @@ private enum WatchWorkPreview {
             options: [.init(label: scenario == "long-option" ? "Homepage https://paceman.ai opens on the hero with the tagline and TestFlight button" : "After the first result", description: scenario == "long-option" ? "" : "Let people try Paceman first."),
                       .init(label: "During setup", description: "Ready for the first task.")])
         let approval = scenario.hasPrefix("approval") || scenario == "live-approval"
-        let request = InputRequest(requestID: "preview", version: 1, provider: "codex", sessionID: "task",
-            kind: approval ? "approval" : "question", title: approval ? "Run the tests?" : "Question for you",
-            detail: scenario == "approval-json" ? "Tool: Bash\nWorking directory: /Projects/Paceman\n\n{\"command\":\"swift test --filter WatchWorkTests\",\"description\":\"Verify the Watch response flow.\",\"timeout\":120000}"
+        let request = InputRequest(requestID: "preview", version: 1, provider: task.provider, sessionID: "task",
+            kind: approval ? "approval" : "question", title: scenario == "approval-large" ? "Allow \(ApprovalPreviewFixtures.pageTool)?"
+                : scenario == "approval-write" ? "Allow Write?" : scenario == "approval-edit" ? "Allow Edit?"
+                : approval ? "Run the tests?" : "Question for you",
+            detail: scenario == "approval-large" ? ApprovalPreviewFixtures.largePageEdit
+                : scenario == "approval-long-command" ? ApprovalPreviewFixtures.longCommand
+                : ["approval-write", "approval-edit"].contains(scenario) ? ""
+                : scenario == "approval-json" ? "Tool: Bash\nWorking directory: /Projects/Paceman\n\n{\"command\":\"swift test --filter WatchWorkTests\",\"description\":\"Verify the Watch response flow.\",\"timeout\":120000}"
                 : scenario == "approval-unknown" ? "Tool: mcp__review__inspect\n\n{\"description\":\"Keep this exact tool input.\",\"mode\":\"review\"}"
                 : approval ? "Tool: Bash\nWorking directory: /Projects/Paceman\nCommand: swift test" : "",
             questions: approval ? [] : scenario == "multiple" ? [question, .init(id: "q1", prompt: "Which screens?", multiple: true, options: [])]
-                : scenario == "free-text" ? [.init(id: "q0", prompt: "What should we improve next?", multiple: false, options: [])] : [question], remainingSeconds: 120)
+                : scenario == "free-text" ? [.init(id: "q0", prompt: "What should we improve next?", multiple: false, options: [])] : [question], remainingSeconds: 120,
+            contentVersion: ["approval-write", "approval-edit"].contains(scenario) ? 2 : nil,
+            approval: ["approval-write", "approval-edit"].contains(scenario) ? ApprovalPreviewFixtures.file(scenario == "approval-edit") : nil,
+            responseOptions: ["approval-write", "approval-edit"].contains(scenario) ? ApprovalPreviewFixtures.choices : nil)
         return try encoded(WatchWorkPrompt(generation: "preview", request: request, remainingSeconds: scenario == "expired-request" ? -1 : 120))
     }
 }
