@@ -1,7 +1,7 @@
-"""Ephemeral responses to live agent hook invocations.
+"""Ephemeral responses to live agent-owned requests.
 
 An HTTP receipt confirms submission to Paceman, never agent consumption. The
-private socket lifetime owns each request; neither requests nor answers persist.
+native adapter owns each request's lifetime; neither requests nor answers persist.
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ import time
 import uuid
 
 from service.diagnostics import fingerprint as support_fingerprint
+from service.interaction_content import normalize_approval
 
 
 MAX_WIRE_BYTES = 65536
@@ -57,15 +58,41 @@ def _keys(value, required, optional=()):
 
 
 def _request(value):
-    _keys(value, ("provider", "sessionID", "kind", "title", "detail"), ("questions",))
-    if value["provider"] not in ("codex", "claude") or value["kind"] not in ("approval", "question"):
+    _keys(value, ("provider", "sessionID", "kind", "title", "detail"),
+          ("questions", "contentVersion", "approval", "responseOptions"))
+    if value["kind"] not in ("approval", "question"):
         raise BrokerError("invalid_request")
     if (not isinstance(value["sessionID"], str)
             or not re.fullmatch(r"[0-9a-f]{64}", value["sessionID"])):
         raise BrokerError("invalid_request")
-    result = {"provider": value["provider"], "sessionID": _identifier(value["sessionID"]),
+    result = {"provider": _identifier(value["provider"]), "sessionID": _identifier(value["sessionID"]),
               "kind": value["kind"], "title": _text(value["title"], 256),
               "detail": _text(value["detail"], 16384, empty=True), "questions": []}
+    content_version = value.get("contentVersion", 1)
+    if type(content_version) is not int or content_version not in (1, 2, 3):
+        raise BrokerError("invalid_request")
+    if content_version == 2:
+        if value["kind"] != "approval" or value["detail"]:
+            raise BrokerError("invalid_request")
+        try:
+            result["approval"] = normalize_approval(value["provider"], value.get("approval"))
+        except (ValueError, TypeError, OverflowError, RecursionError):
+            raise BrokerError("invalid_request") from None
+        options = value.get("responseOptions")
+        if not isinstance(options, list) or len(options) > 16:
+            raise BrokerError("invalid_request")
+        result.update(contentVersion=2, responseOptions=[])
+        for option in options:
+            _keys(option, ("id", "label"))
+            result["responseOptions"].append({"id": _identifier(option["id"]), "label": _text(option["label"], 512)})
+        if len({o["id"] for o in options}) != len(options):
+            raise BrokerError("invalid_request")
+    elif any(k in value for k in ("approval", "responseOptions")):
+        raise BrokerError("invalid_request")
+    if content_version == 3:
+        if value["kind"] != "question":
+            raise BrokerError("invalid_request")
+        result["contentVersion"] = 3
     questions = value.get("questions", [])
     if not isinstance(questions, list) or len(questions) > 4:
         raise BrokerError("invalid_request")
@@ -73,7 +100,10 @@ def _request(value):
         raise BrokerError("invalid_request")
     ids = set()
     for q in questions:
-        _keys(q, ("id", "prompt", "multiple", "options"))
+        _keys(q, ("id", "prompt", "multiple", "options", "allowsText") if content_version == 3
+              else ("id", "prompt", "multiple", "options"))
+        if content_version == 3 and (type(q["allowsText"]) is not bool or not q["allowsText"] and not q["options"]):
+            raise BrokerError("invalid_request")
         qid = _identifier(q["id"])
         if qid in ids or type(q["multiple"]) is not bool or not isinstance(q["options"], list) or len(q["options"]) > 16:
             raise BrokerError("invalid_request")
@@ -84,7 +114,8 @@ def _request(value):
             options.append({"label": _text(option["label"], 512),
                             "description": _text(option["description"], 2048, empty=True)})
         result["questions"].append({"id": qid, "prompt": _text(q["prompt"], 4096),
-                                    "multiple": q["multiple"], "options": options})
+                                    "multiple": q["multiple"], "options": options,
+                                    **({"allowsText": q["allowsText"]} if content_version == 3 else {})})
     if len(json.dumps(result).encode()) > MAX_WIRE_BYTES:
         raise BrokerError("invalid_request")
     return result
@@ -93,7 +124,7 @@ def _request(value):
 @dataclass
 class _Pending:
     public: dict
-    deadline: float
+    deadline: float | None
     ready: threading.Event = field(default_factory=threading.Event)
     response: dict | None = None
 
@@ -124,7 +155,7 @@ class InteractionBroker:
     def _prune(self):
         now = self._clock()
         for request_id, pending in list(self._pending.items()):
-            if pending.deadline <= now:
+            if pending.deadline is not None and pending.deadline <= now:
                 self._release(request_id, "deadline")
             elif not self._enabled(pending.public["provider"]):
                 self._release(request_id, "provider_disabled")
@@ -162,22 +193,41 @@ class InteractionBroker:
         with self._lock:
             self._release(pending.public["requestID"])
 
-    def pending(self):
+    def publish_live(self, request):
+        """The adapter owns lifetime and must withdraw on resolution/disconnect.
+
+        The phone still gets a bounded display lease; elapsed time cannot expire
+        an operation that the connected agent confirms is pending.
+        """
+        with self._lock:
+            pending = self._publish(request, RESPONSE_TIMEOUT_SECONDS)
+            pending.deadline = None
+            return pending
+
+    def withdraw(self, pending):
+        self._cancel(pending)
+
+    def pending(self, content_version=3):
         with self._lock:
             self._prune()
             return {"generation": self.generation,
-                    "requests": [dict(deepcopy(p.public), remainingSeconds=max(0, p.deadline - self._clock()))
-                                 for p in self._pending.values()]}
+                    "requests": [dict(deepcopy(p.public), remainingSeconds=(RESPONSE_TIMEOUT_SECONDS
+                                     if p.deadline is None else max(0, p.deadline - self._clock())))
+                                 for p in self._pending.values()
+                                 if p.public.get("contentVersion", 1) <= content_version]}
 
     def submit(self, payload):
-        _keys(payload, ("generation", "requestID", "version", "idempotencyKey", "action"), ("answers",))
+        _keys(payload, ("generation", "requestID", "version", "idempotencyKey", "action"), ("answers", "optionID"))
         generation = _identifier(payload["generation"])
         request_id = _identifier(payload["requestID"])
         key = _identifier(payload["idempotencyKey"])
         if type(payload["version"]) is not int or payload["version"] != 1:
             raise BrokerError("invalid_request")
         action = payload["action"]
-        if action not in ("allowOnce", "deny", "answer", "release"):
+        if action not in ("allowOnce", "deny", "answer", "release", "choose"):
+            raise BrokerError("invalid_request")
+        option_id = _identifier(payload.get("optionID")) if action == "choose" else None
+        if action != "choose" and "optionID" in payload:
             raise BrokerError("invalid_request")
         # Validate bounded answer data before looking up receipts. Receipt hashes
         # retain no answer text, and identical retries do not need the prompt.
@@ -197,6 +247,8 @@ class InteractionBroker:
         if action != "answer" and answers:
             raise BrokerError("invalid_request")
         response = {"action": action}
+        if action == "choose":
+            response["optionID"] = option_id
         if action == "answer":
             response["answers"] = normalized_answers
         fingerprint = hashlib.sha256(json.dumps(response, sort_keys=True).encode()).hexdigest()
@@ -217,12 +269,18 @@ class InteractionBroker:
             if pending is None:
                 raise BrokerError("stale_request", 409)
             request = pending.public
+            if action == "choose":
+                if request.get("contentVersion") != 2 or option_id not in {o["id"] for o in request["responseOptions"]}:
+                    raise BrokerError("invalid_response")
+            elif request.get("contentVersion") == 2 and action != "release":
+                raise BrokerError("invalid_response")
             if action == "answer":
                 if request["kind"] != "question" or set(answers) != {q["id"] for q in request["questions"]}:
                     raise BrokerError("invalid_response")
                 for question in request["questions"]:
                     answer = normalized_answers[question["id"]]
                     if (not answer["selected"] and not answer["text"].strip()
+                            or not question.get("allowsText", True) and bool(answer["text"])
                             or not question["multiple"] and len(answer["selected"]) > 1
                             or any(i >= len(question["options"]) for i in answer["selected"])):
                         raise BrokerError("invalid_response")

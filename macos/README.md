@@ -14,18 +14,17 @@ Prefer to build locally? Use [source setup](#build-and-install-from-source). Bot
 
 ## Review agent hooks
 
-Normal setup prepares activity, questions and approvals for each selected agent.
-Review both installed commands shown in Paceman. Activity sends task IDs, states
-and project labels. Questions send their text and choices; approvals send the
-tool name, arguments and working directory. Your answers and decisions return
-to the agent. Sharing pauses all of this.
+Review the activity hook command shown in Paceman. Hooks send task IDs, states
+and project labels. Native connections mirror question text and choices, or
+approval tool names, arguments and working directories, and return your answers
+to the agent. Sharing pauses both activity and remote responses.
 
 ### Codex
 
 Hooks let Codex send activity events to Paceman. Review them yourself before trusting them:
 
 1. In Codex, open **Settings → Hooks → User config (All projects)**.
-2. Expand the Paceman rows, labelled **Hook 1**, under the eight events listed in Paceman. `PreToolUse` and `PermissionRequest` also have a response command. Review both against the commands in Paceman’s setup window before trusting them.
+2. Expand the Paceman rows, labelled **Hook 1**, under the eight events listed in Paceman. Compare each command against the command in Paceman’s setup window before trusting it.
 3. Start a **new saved local Codex task** in the interface you use on this Mac and send a short prompt. Paceman should show **A new Codex event reached Paceman.** Wait for a successful reply and confirm Paceman shows the task as **Finished**.
 
 Keep Paceman’s hook-review window open while checking. If you use the Codex CLI, enter `/hooks` or select **Review hooks** at startup instead.
@@ -61,8 +60,8 @@ Project labels may appear on your iPhone Lock Screen. Session titles come from p
 ### Claude Code
 
 Use Claude Code **2.1.196 or later**. Paceman adds twelve observer commands to
-`~/.claude/settings.json` (or the saved `CLAUDE_CONFIG_DIR`), plus response commands
-in `PreToolUse` and `PermissionRequest`, preserving unrelated hooks and settings.
+`~/.claude/settings.json` (or the saved `CLAUDE_CONFIG_DIR`), preserving unrelated
+hooks and settings.
 In the CLI, `/hooks` is a read-only list of loaded hooks. In
 VS Code, use **/ → Customize → Hooks** (Claude Code 2.1.269+); for local desktop Code sessions,
 inspect the same user settings. Hooks run after workspace trust; there is no
@@ -105,8 +104,7 @@ alone does not prove delivery. See coverage limits below for unobserved activity
 
 Usage limits are **Codex-only**, including the Apple Watch **Codex Limit** and
 **Codex Reset** complications (watchOS 26+) and the ESP32 meter. Claude Code
-activity is supported; its usage limits are not. Paceman does not access Claude
-credentials.
+activity is supported; its usage limits are not.
 
 Usage assumes the same Codex account across computers. See [source selection and
 Apple Watch delivery](../docs/architecture.md#watches).
@@ -123,10 +121,17 @@ Apple Watch delivery](../docs/architecture.md#watches).
 
 Codes expire after five minutes; choose **New code** if needed. Keep the pairing code private.
 
-Verify a question, approval and denial in each agent from the phone. Confirm the
-agent consumes the response; a submission receipt is insufficient. Keep Paceman
-open to answer within ten minutes. Timeout or hook disconnection returns to the
-agent without approving. Secret Codex questions stay in Codex.
+Questions and approvals stay in Codex or Claude Code with all native response
+choices. Paceman mirrors supported live requests for answering from phone or
+Watch. Claude requires native Remote Control; Codex CLI uses its native
+app-server daemon. Setup removes response hooks and keeps activity observers.
+See [request lifecycle](../docs/data-lifecycle.md#questions-and-approvals).
+
+For Claude Remote Control sessions, Paceman reads Claude's sign-in token from
+the **Claude Code-credentials** Keychain item and uses it to read pending requests
+and send your answers to **api.anthropic.com**. The first run may show a macOS
+Keychain permission prompt. Answering Claude questions from your phone requires
+Remote Control to be on and only works during an active turn.
 
 <details>
 <summary>Private Tailscale connection</summary>

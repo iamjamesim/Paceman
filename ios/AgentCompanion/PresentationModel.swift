@@ -145,7 +145,8 @@ struct AgentSession: Codable, Identifiable, Equatable {
     }
     var appLinkTitle: String {
         if provider == "codex" { return "Open Codex" }
-        return appURL?.path.isEmpty == false ? "Open in Claude" : "Open Claude"
+        if provider == "claude" { return appURL?.path.isEmpty == false ? "Open in Claude" : "Open Claude" }
+        return "Open agent app"
     }
     var title: String? {
         guard let name else { return nil }

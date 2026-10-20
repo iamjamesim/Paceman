@@ -91,24 +91,29 @@ statuses and hook lifecycle reasons; the phone records matching IDs and request 
 
 ## Questions and approvals
 
-Requests and answers are memory-only, excluded from snapshots, SQLite, APNs,
-BLE accessories, and diagnostics. Apple Watch receives them only through live
+Native approval attention is independent of mobile request lifetime. Unrelated
+same-turn activity cannot clear it. A matching completion resolves one approval;
+new turns or confirmed terminal outcomes clear the old turn's attention. Hooks
+do not expose every native approval decision.
+
+Requests and answers are RAM-only and excluded from snapshots, SQLite, APNs,
+accessory BLE and diagnostics. Codex desktop requests use private versioned IPC
+and belong to the existing native owner until resolution or disconnect. CLI
+requests rejoin active, already-loaded threads on the native app-server daemon
+without changing their settings. Paceman never starts the daemon or a turn.
+Async question replies use native steering and exact question IDs.
+Claude uses an already-enabled native Remote Control connection and the native
+login's session scope. Only control events are requested; native request IDs and
+pending-request checkpoints govern lifetime. Local answers clear immediately;
+remote submissions are confirmed against the owner's pending set. Hooks only
+observe activity. Native login refresh and permission-mode changes stay in Claude.
+Provider disable, source shutdown or pairing changes invalidate remote cards. Submission receipts confirm
+Paceman acceptance, not agent consumption. Responses are never retried
+automatically. An uncertain native delivery is reconciled against the owner's
+pending requests before offering a fresh review. Backgrounding clears forms;
+an uncertain phone submission can retry the same idempotent response.
+Watch content travels only through live
 WatchConnectivity replies, never application context or queued transfers.
-Each request belongs to a live hook connection;
-disconnect, timeout (up to ten minutes), provider disable, source
-shutdown, or pairing changes invalidate it. Restart never replays approvals.
-An approval can remain pending in the agent after its hook ends; Paceman cannot
-recover or answer that native prompt.
-Deduplication retains response hashes and receipt metadata, at most 256 for five minutes.
-
-The phone clears actionable requests on connection failure and refetches on return,
-but preserves in-flight and uncertain submissions for confirmation or an explicit
-retry with the same payload and idempotency key. Backgrounding, access removal,
-and source-generation changes clear request/response content. An already-submitted
-operation may finish in the background. There are no automatic response retries
-or background polling. Late confirmations can complete the original card without
-overriding newer task state. Unknown delivery remains unconfirmed.
-
-Watch forms clear on backgrounding. The phone retains up to 256 Watch requests
-and exact submissions in RAM until their original deadlines; pairing changes clear
-them. Reopened forms can retry the same submission explicitly.
+An active Watch review renews its display lease; drafts survive only an identical
+request in the same generation.
+Pending sibling requests take precedence over a submission receipt.

@@ -185,15 +185,9 @@ class MacInstallTests(unittest.TestCase):
                          "hooks": [{"type": "command", "command": command}]}]
                 for event in EVENTS if event != "Stop"
             }}))
-            self.assertEqual(set(missing_hooks(config, script)), {"Stop", "PermissionRequest", "PreToolUse"})
+            self.assertEqual(set(missing_hooks(config, script)), {"Stop"})
             document = json.loads(config.read_text())
             document["hooks"]["Stop"] = [{"hooks": [{"type": "command", "command": command}]}]
-            for event in ("PreToolUse", "PermissionRequest"):
-                group = {"hooks": [{"type": "command", "command": shlex.join([sys.executable, '-B',
-                    str(script.with_name('interaction_hook.py')), '--provider', 'codex']), "timeout": 605}]}
-                if event == "PreToolUse":
-                    group["matcher"] = QUESTION_MATCHER
-                document["hooks"][event].append(group)
             config.write_text(json.dumps(document))
             self.assertEqual(missing_hooks(config, script), [])
 

@@ -1163,7 +1163,7 @@ extension CompanionModel {
                 guard let snapshot = snapshots[sourceID], errors[sourceID] == nil,
                       snapshotIsFresh(sourceID) else { return ["error": "Couldn’t refresh this chat. Check Paceman on iPhone."] }
                 let destination = ResponseGuidance.destination(for: provider)
-                guard snapshot.interactionsEnabled == true else { return ["error": "Phone responses are off. Open \(destination)."] }
+                guard snapshot.interactionsEnabled == true else { return ["nativeOnly": true] }
                 let identity = WorkIdentity(sourceID: sourceID, sessionID: sessionID, provider: provider)
                 let known = interactions.items.first { $0.source.sourceID == sourceID
                     && $0.request.sessionID == sessionID && $0.request.provider == provider && interactions.isCurrent($0) }
@@ -1181,6 +1181,7 @@ extension CompanionModel {
                         watchSubmissions[item.id] = response.submission
                         if response.phase == .submitted { watchConfirmed.insert(item.id) }
                     }
+                    guard (item.request.contentVersion ?? 1) <= (message["contentVersion"] as? Int ?? 1) else { return ["nativeOnly": true] }
                     return encoded(WatchWorkPrompt(generation: item.generation, request: item.request,
                         remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
                         submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
@@ -1198,6 +1199,7 @@ extension CompanionModel {
                             && watchSubmissions[$0.id] != nil
                             && !watchRejected.contains($0.id)
                     }) {
+                        guard (item.request.contentVersion ?? 1) <= (message["contentVersion"] as? Int ?? 1) else { return ["nativeOnly": true] }
                         return encoded(WatchWorkPrompt(generation: item.generation, request: item.request,
                             remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
                             submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
@@ -1219,6 +1221,7 @@ extension CompanionModel {
                 }
                 interactions.observeWatchRequest(item)
                 publishWatchWork()
+                guard (request.contentVersion ?? 1) <= (message["contentVersion"] as? Int ?? 1) else { return ["nativeOnly": true] }
                 return encoded(WatchWorkPrompt(generation: requests.generation, request: request,
                     remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
                     submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))

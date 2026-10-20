@@ -603,7 +603,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.server.check_interaction_access()
                 self.reply(200, {"sourceID": self.server.store.metadata("source_id"),
-                                 **self.server.interactions.pending()})
+                                 **self.server.interactions.pending(content_version=
+                                     {"2": 2, "3": 3}.get(self.headers.get("X-Paceman-Content-Version"), 1))})
             return
         if self.path == "/v1/push":
             value = self.server.store.push_device(token)
@@ -709,7 +710,7 @@ def main():
     run = sub.add_parser("serve")
     run.add_argument("--port", type=int, default=8765)
     run.add_argument("--interaction-socket", type=Path,
-                     help="Private response hook socket (automatic for Mac sources)")
+                     help="Interaction test socket (synthetic sources only)")
     run.add_argument("--source", choices=("synthetic", "omarchy", "macos"), default="synthetic")
     run.add_argument("--status-file", type=Path, help="Private desktop status JSON (optional)")
     run.add_argument("--relay-config", type=Path, help="Installed relay config, when notifications use a relay")
@@ -732,8 +733,8 @@ def main():
     sub.add_parser("events")
     sub.add_parser("cancel-schedule")
     args = parser.parse_args()
-    if args.command == "serve" and args.source == "macos" and args.interaction_socket is None:
-        args.interaction_socket = args.data_dir.parent / "interaction.sock"
+    if args.command == "serve" and args.interaction_socket and args.source != "synthetic":
+        parser.error("Custom interaction sockets are synthetic-only; native sources use their owned adapters")
     store = Store(args.data_dir / "hub.sqlite3")
     if args.command == "serve":
         from contextlib import ExitStack
@@ -791,14 +792,31 @@ def main():
                 server.desktop_status = DesktopStatus(args.status_file, store)
                 server.desktop_status.publish(server.adapter, force=True)
                 stack.callback(server.desktop_status.publish, server.adapter, stopped=True, force=True)
-            if args.interaction_socket:
+            if args.interaction_socket or args.source == "macos":
                 from service.interactions import InteractionBroker, ResponseListener
                 server.interactions = InteractionBroker(provider_enabled=lambda provider:
                     provider in getattr(server.adapter, "providers", ("codex", "claude")),
                     diagnostics=server.diagnostics)
                 server.interaction_access = server.interaction_access_state()
                 stack.callback(server.interactions.close)
-                stack.enter_context(ResponseListener(server.interactions, args.interaction_socket))
+                if args.interaction_socket:
+                    stack.enter_context(ResponseListener(server.interactions, args.interaction_socket))
+                if args.source == "macos":
+                    from service.codex_desktop import DesktopRequests
+                    from service.codex_daemon import DaemonRequests
+                    desktop = DesktopRequests(server.interactions,
+                        lambda: [s for s in server.adapter.native_sessions() if not daemon.owns(s)],
+                        attention=server.adapter.native_requests_changed)
+                    daemon = DaemonRequests(server.interactions,
+                        lambda: {s: turn for s, turn in server.adapter.native_active_sessions().items()
+                                 if daemon.owns(s) or desktop.unavailable(s)},
+                        attention=server.adapter.native_requests_changed)
+                    stack.enter_context(desktop)
+                    stack.enter_context(daemon)
+                    from service.claude_remote import RemoteRequests
+                    stack.enter_context(RemoteRequests(server.interactions, server.adapter.native_claude_sessions,
+                        attention=server.adapter.native_claude_requests_changed,
+                        resolved=server.adapter.native_claude_requests_resolved))
             print(f"{args.source.title()} source listening on 127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever(poll_interval=0.25)

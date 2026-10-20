@@ -2,7 +2,7 @@
 
 Each paired computer reports its own agent activity. Mac and Omarchy support Codex and Claude Code. The iPhone fetches that status over private HTTPS, groups tasks across computers by attention and activity, and forwards current activity to compatible Bluetooth accessories.
 
-Activity updates carry task identity and state, plus available titles, project labels and Codex usage. On Mac, questions send text and choices to the phone; approvals send the tool name, arguments and working directory. Answers and decisions return to the waiting agent hook. The phone does not request chat history; text inside a question or tool argument is included as supplied.
+Activity updates carry task identity and state, plus available titles, project labels and Codex usage. Activity hooks send lifecycle metadata; live request content uses private response endpoints and remains in memory.
 
 Individual session rows include an optional provider title. Codex titles come from metadata-only App Server reads; Claude titles come from explicit local `custom-title` / `ai-title` records. Prompt previews are never used as titles. Titles travel over private HTTPS to the phone and, on compatible Pebble firmware, owner-authenticated BLE; APNs activity payloads stay aggregate.
 
@@ -53,8 +53,8 @@ window in Codex Limit and Codex Reset. Older or empty data from another computer
 cannot erase that reading.
 
 WatchConnectivity also supplies the paired-computer list and cached readings.
-The Watch app uses the phone's session presentation and supports questions,
-one-time approvals and continuation on iPhone through live WatchConnectivity.
+The Watch app uses the phone's session presentation to answer supported questions
+and approvals, with continuation on iPhone through live WatchConnectivity.
 Codex usage remains available in complications.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
@@ -62,15 +62,11 @@ are in [data lifecycle](data-lifecycle.md).
 
 ## Questions and approvals
 
-Normal Mac [setup](../macos/README.md#review-agent-hooks) prepares the hooks for
-selected agents. Sharing pauses activity, questions and approvals.
-
-Claude supplies answers through `AskUserQuestion` input updates. Codex skips the
-blocking or async question tool and returns the answer as `PreToolUse` feedback.
-Secret Codex questions stay native. Waiting hooks delay the native prompt;
-release or timeout returns control without granting permission.
-See the [wire contract](protocol.md#pending-interactions) and
-[request lifecycle](data-lifecycle.md#questions-and-approvals).
+The Mac mirrors supported requests from Codex's existing desktop owner or local
+CLI app-server daemon, and from Claude's existing Remote Control connection.
+Native prompts remain available; unsupported interactions continue there. Setup
+removes response hooks; lifecycle observers never answer requests. See
+[interaction lifecycle](data-lifecycle.md#questions-and-approvals).
 
 ## iPhone Activity
 
@@ -78,9 +74,10 @@ Sessions are keyed by source, provider, and session ID, never title. Activity ow
 and responses; Devices owns connections, accessories, and Live Activities.
 Ordering is stable and phone-observed, not durable task chronology: answerable
 requests lead Needs you, Working follows state-entry order, and Recent is newest
-first. Review freezes its membership and order; new arrivals wait for the next
-Review. Each form stays pinned to its exact request. Confirmed responses dismiss
-or advance Review and use Working presentation without changing observed agent state.
+first. Review freezes session order and drains each session after confirmed
+responses. Row visits stay in the selected session until dismissed. New requests
+never replace a draft or uncertain response; other sessions do not auto-present.
+Submission receipts show Response sent until native activity advances.
 
 Live Activity taps open a unique session only when its source generation and
 revision match; otherwise they open source-filtered Activity. Watch resolves through

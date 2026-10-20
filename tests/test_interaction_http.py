@@ -1,5 +1,6 @@
-"""Paired HTTP to live response-hook tests; no installed agent is touched."""
+"""Legacy response protocol compatibility and current observational startup."""
 import http.client
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -17,7 +18,6 @@ from service import hub
 from service.hub import Server, Store
 from service.diagnostics import DeliveryDiagnostics
 from service.interactions import InteractionBroker, ResponseListener
-from macos.interaction_hook import normalize, native_response
 from tests.identity import device
 
 
@@ -41,16 +41,51 @@ class InteractionHTTPTests(unittest.TestCase):
         self.server.shutdown()
         self.thread.join(2)
 
-    def call(self, method, path, payload=None, authorized=True, trace_id=None):
+    def call(self, method, path, payload=None, authorized=True, trace_id=None, content_version=None):
         connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=2)
         self.addCleanup(connection.close)
         headers = {'Authorization': 'Bearer ' + self.client['credential']} if authorized else {}
         if trace_id is not None:
             headers['X-Paceman-Trace-ID'] = trace_id
+        if content_version is not None:
+            headers['X-Paceman-Content-Version'] = str(content_version)
         body = json.dumps(payload) if payload is not None else None
         connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         return response.status, json.loads(response.read())
+
+    def test_structured_content_requires_capability_and_preserves_session_choice(self):
+        from tests.test_interaction_content import request
+        pending = self.broker._publish(request(), 60)
+        self.assertEqual(self.call('GET', '/v1/interactions')[1]['requests'], [])
+        status, listing = self.call('GET', '/v1/interactions', content_version=2)
+        self.assertEqual(status, 200)
+        item = listing['requests'][0]
+        self.assertEqual(item['approval']['action']['text'], 'printf 日本語')
+        self.assertEqual(len(item['responseOptions']), 3)
+        status, _ = self.call('POST', '/v1/interactions', dict(generation=listing['generation'],
+            requestID=item['requestID'], version=item['version'], idempotencyKey='choice',
+            action='choose', optionID='session'))
+        self.assertEqual(status, 200)
+        self.assertEqual(pending.response, {'action': 'choose', 'optionID': 'session'})
+
+    def test_selection_only_questions_negotiate_and_reject_unoffered_text(self):
+        pending = self.broker.publish_live(dict(provider='codex', sessionID='a'*64, kind='question',
+            title='Choose', detail='', contentVersion=3, questions=[dict(id='q', prompt='Which?',
+                multiple=False, allowsText=False, options=[dict(label='First', description='')])]))
+        for version in (None, 1, 2):
+            self.assertEqual(self.call('GET', '/v1/interactions', content_version=version)[1]['requests'], [])
+        status, listing = self.call('GET', '/v1/interactions', content_version=3)
+        self.assertEqual(status, 200)
+        item = listing['requests'][0]
+        self.assertFalse(item['questions'][0]['allowsText'])
+        response = dict(generation=listing['generation'], requestID=item['requestID'],
+            version=1, idempotencyKey='selection', action='answer', answers={'q': dict(selected=[0], text='Custom')})
+        self.assertEqual(self.call('POST', '/v1/interactions', response)[0], 400)
+        self.assertFalse(pending.ready.is_set())
+        response['answers']['q']['text'] = ''
+        self.assertEqual(self.call('POST', '/v1/interactions', response)[0], 200)
+        self.assertEqual(pending.response['answers'], {'q': dict(selected=[0], text='')})
 
     def completed_replies(self):
         replies = queue.Queue()
@@ -95,7 +130,7 @@ class InteractionHTTPTests(unittest.TestCase):
         self.assertEqual(entries[-1]['httpStatus'], 401)
         self.assertNotIn('traceID', entries[-1])
 
-    def test_mac_startup_advertises_responses_without_extra_configuration(self):
+    def test_mac_startup_starts_native_followers_without_hook_response_socket(self):
         root = Path(self.temp.name) / 'normal-install'
         root.mkdir(mode=0o700)
         store = Store(root / 'data/hub.sqlite3')
@@ -103,7 +138,7 @@ class InteractionHTTPTests(unittest.TestCase):
 
         def verify(server, **_):
             self.assertIsNotNone(server.interactions)
-            self.assertTrue((root / 'interaction.sock').is_socket())
+            self.assertFalse((root / 'interaction.sock').exists())
             server.daemon_threads = False  # Teardown joins the real HTTP handler.
             receiver = threading.Thread(target=server.handle_request, daemon=True)
             receiver.start()
@@ -121,6 +156,8 @@ class InteractionHTTPTests(unittest.TestCase):
         with patch.object(sys, 'argv', ['paceman-source', '--data-dir', str(root / 'data'),
                 'serve', '--source', 'macos', '--port', '0']), \
                 patch.object(Server, 'serve_forever', autospec=True, side_effect=verify) as serve, \
+                patch('service.codex_desktop.DesktopRequests', autospec=True), \
+                patch('service.claude_remote.RemoteRequests', autospec=True), \
                 patch('builtins.print'):
             hub.main()
         serve.assert_called_once()
@@ -134,7 +171,12 @@ class InteractionHTTPTests(unittest.TestCase):
                         'options': [{'label': 'Small change', 'description': 'Keep the layout.'},
                                     {'label': 'New layout', 'description': 'Explore more.'}]}]}
                         if question else {'command': 'echo fixture'}}
-        request = normalize(provider, original)
+        request = {'provider': provider,
+            'sessionID': hashlib.sha256(f'{provider}:local-fixture'.encode()).hexdigest(),
+            'kind': 'question' if question else 'approval', 'title': 'Which approach?' if question else 'Allow Bash?',
+            'detail': '' if question else 'Tool: Bash\nWorking directory: /Projects/example\n\n{"command":"echo fixture"}',
+            'questions': [{'id': 'q0', 'prompt': 'Which approach?', 'multiple': False,
+                'options': original['tool_input']['questions'][0]['options']}] if question else []}
         peer = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.addCleanup(peer.close)
         peer.settimeout(2); peer.connect(str(self.listener.path))
@@ -149,57 +191,19 @@ class InteractionHTTPTests(unittest.TestCase):
         return dict(generation=listing['generation'], requestID=listing['requests'][0]['requestID'],
                     version=1, idempotencyKey='fixture-retry', action=action, **extra)
 
-    def test_installed_hook_process_consumes_http_response_and_emits_native_decision(self):
-        for provider, action in (('codex', 'allowOnce'), ('codex', 'deny'), ('codex', 'answer'),
-                                 ('claude', 'allowOnce'), ('claude', 'deny'), ('claude', 'answer')):
-            with self.subTest(provider=provider, action=action):
-                is_question = action == 'answer'
-                original = {'session_id': 'process-fixture', 'cwd': '/Projects/fixture',
-                            'hook_event_name': 'PreToolUse' if is_question else 'PermissionRequest',
-                            'tool_name': 'AskUserQuestion' if is_question else 'Bash',
-                            'tool_input': {'questions': [{'question': 'Which approach?', 'multiSelect': False,
-                                'options': [{'label': 'Small', 'description': 'Keep it simple'},
-                                            {'label': 'Large', 'description': 'More detail'}]}]}
-                                if is_question else {'command': 'echo fixture'}}
-                if is_question and provider == 'codex':
-                    original['tool_name'] = 'request_user_input'
-                    original['tool_input']['questions'][0]['id'] = 'approach'
-                process = subprocess.Popen([sys.executable, '-B', str(Path(__file__).resolve().parents[1]
-                    / 'macos/interaction_hook.py'), '--provider', provider], stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    def test_legacy_hook_process_never_publishes_even_with_a_live_broker(self):
+        for provider in ('codex',):
+            with self.subTest(provider=provider):
+                result = subprocess.run([sys.executable, '-B', str(Path(__file__).resolve().parents[1]
+                    / 'macos/interaction_hook.py'), '--provider', provider],
+                    input=json.dumps({'hook_event_name': 'PermissionRequest', 'session_id': 'process-fixture',
+                        'cwd': '/Projects/fixture', 'tool_name': 'Bash', 'tool_input': {'command': 'echo fixture'}}),
+                    capture_output=True, text=True, timeout=2,
                     env=dict(os.environ, PACEMAN_INTERACTION_SOCKET=str(self.listener.path)))
-                try:
-                    process.stdin.write(json.dumps(original).encode())
-                    process.stdin.close()
-                    deadline = time.monotonic() + 3
-                    listing = self.call('GET', '/v1/interactions')[1]
-                    while not listing['requests']:
-                        if time.monotonic() >= deadline:
-                            self.fail('Executable hook did not publish its request')
-                        time.sleep(.01)
-                        listing = self.call('GET', '/v1/interactions')[1]
-                    self.assertGreater(listing['requests'][0]['remainingSeconds'], 590)
-                    extra = {'answers': {'q0': {'selected': [0], 'text': ''}}} if is_question else {}
-                    self.assertEqual(self.call('POST', '/v1/interactions',
-                        self.answer(listing, action, **extra))[0], 200)
-                    process.wait(3)
-                    output = json.loads(process.stdout.read())['hookSpecificOutput']
-                    self.assertEqual(process.stderr.read(), b'')
-                    self.assertEqual(process.returncode, 0)
-                    if is_question and provider == 'codex':
-                        self.assertEqual(output['permissionDecision'], 'deny')
-                        feedback = json.loads(output['permissionDecisionReason'].split('\n', 1)[1])
-                        self.assertEqual(feedback, {'approach': {'question': 'Which approach?', 'answer': 'Small'}})
-                    elif is_question:
-                        self.assertEqual(output['updatedInput']['answers'], {'Which approach?': 'Small'})
-                    else:
-                        self.assertEqual(output['decision']['behavior'], 'allow' if action == 'allowOnce' else 'deny')
-                finally:
-                    if process.poll() is None:
-                        process.kill()
-                        process.wait(3)
-                    process.stdout.close()
-                    process.stderr.close()
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, '')
+                self.assertEqual(result.stderr, '')
+                self.assertEqual(self.call('GET', '/v1/interactions')[1]['requests'], [])
 
     def test_authorized_approval_round_trip_and_idempotent_retry(self):
         peer, original, request = self.hook()
@@ -211,7 +215,7 @@ class InteractionHTTPTests(unittest.TestCase):
         status, receipt = self.call('POST', '/v1/interactions', payload)
         self.assertEqual((status, receipt['status']), (200, 'submitted'))
         reply = json.loads(peer.recv(65536))
-        self.assertEqual(native_response('codex', original, request, reply)['hookSpecificOutput']['decision'], {'behavior': 'allow'})
+        self.assertEqual(reply, {'action': 'allowOnce'})
         self.assertEqual(self.call('POST', '/v1/interactions', payload), (200, receipt))
         self.assertEqual(self.call('GET', '/v1/interactions')[1]['requests'], [])
         snapshot = self.call('GET', '/v1/snapshot')[1]
@@ -220,15 +224,14 @@ class InteractionHTTPTests(unittest.TestCase):
         with self.store.connect() as db:
             self.assertNotIn('echo fixture', '\n'.join(db.iterdump()))
 
-    def test_claude_question_round_trip_preserves_exact_original(self):
+    def test_legacy_question_round_trip_preserves_exact_answer(self):
         peer, original, request = self.hook('claude', question=True)
         listing = self.call('GET', '/v1/interactions')[1]
         payload = self.answer(listing, 'answer', answers={'q0': {'selected': [], 'text': 'Keep it simple — 日本語'}})
         self.assertEqual(self.call('POST', '/v1/interactions', payload)[0], 200)
-        result = native_response('claude', original, request, json.loads(peer.recv(65536)))
-        updated = result['hookSpecificOutput']['updatedInput']
-        self.assertEqual(updated['questions'], original['tool_input']['questions'])
-        self.assertEqual(updated['answers'], {'Which approach?': 'Keep it simple — 日本語'})
+        reply = json.loads(peer.recv(65536))
+        self.assertEqual(reply, {'action': 'answer', 'answers': {
+            'q0': {'selected': [], 'text': 'Keep it simple — 日本語'}}})
 
     def test_auth_and_revocation_release_live_hook(self):
         peer, _, _ = self.hook()

@@ -184,6 +184,10 @@ struct CompanionRoot: View {
         if presentation.previewScreen.hasPrefix("handoff") {
             model.showHandoffPreview(presentation.previewScreen)
         }
+        if ProcessInfo.processInfo.arguments.contains("--open-preview-request") {
+            selectedTask = WorkCatalog.live(model: model, presentation: presentation, inbox: model.interactions)
+                .first(where: { $0.request != nil })?.id
+        }
         #endif
         var previewPath: [FeedDestination] = []
         switch presentation.previewScreen {

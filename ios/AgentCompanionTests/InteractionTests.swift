@@ -2,6 +2,67 @@ import XCTest
 @testable import AgentCompanion
 
 final class InteractionTests: XCTestCase {
+    func testReviewLeaseRenewalCannotReuseDraftForChangedContent() throws {
+        let original = InputRequest(requestID: "request", version: 1, provider: "codex", sessionID: "session",
+            kind: "question", title: "Choose", detail: "", questions: [.init(id: "q", prompt: "Which?",
+                multiple: false, options: [.init(label: "First", description: "")], allowsText: false)],
+            remainingSeconds: 10, contentVersion: 3)
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        wire["remainingSeconds"] = 600
+        func decode(_ value: [String: Any]) throws -> InputRequest {
+            try JSONDecoder().decode(InputRequest.self, from: JSONSerialization.data(withJSONObject: value))
+        }
+        XCTAssertTrue(original.hasSameReview(as: try decode(wire)))
+        for (key, value) in [("requestID", "replacement"), ("sessionID", "another"), ("provider", "claude"),
+                             ("title", "Different question"), ("detail", "Additional required context")] {
+            var changed = wire
+            changed[key] = value
+            XCTAssertFalse(original.hasSameReview(as: try decode(changed)), key)
+        }
+        var changed = wire
+        changed["questions"] = [["id": "q", "prompt": "Which?", "multiple": false,
+            "options": [["label": "Different", "description": ""]], "allowsText": false]]
+        XCTAssertFalse(original.hasSameReview(as: try decode(changed)))
+    }
+    func testSelectionOnlyQuestionProfilePreservesNativeAnswerConstraints() throws {
+        let question = InteractionQuestion(id: "q", prompt: "Which?", multiple: false,
+            options: [.init(label: "First", description: "")], allowsText: false)
+        var request = InputRequest(requestID: "request", version: 1, provider: "codex",
+            sessionID: "session", kind: "question", title: "Choose", detail: "",
+            questions: [question], remainingSeconds: 60, contentVersion: 3)
+        XCTAssertTrue(request.validContent)
+        XCTAssertFalse(question.acceptsText)
+        XCTAssertTrue(InputAnswer(selected: [0]).valid(for: question))
+        XCTAssertFalse(InputAnswer(selected: [], text: "Custom").valid(for: question))
+        XCTAssertFalse(InputAnswer(selected: [0], text: "Custom").valid(for: question))
+        let decoded = try JSONDecoder().decode(InputRequest.self, from: JSONEncoder().encode(request))
+        XCTAssertEqual(decoded, request)
+        XCTAssertFalse(InteractionQuestion(id: "q", prompt: "Which?", multiple: false,
+            options: [], allowsText: false).valid)
+        request.contentVersion = 1
+        XCTAssertFalse(request.validContent, "Required constraints must not silently downgrade")
+        let legacy = InteractionQuestion(id: "q", prompt: "Which?", multiple: false, options: [])
+        XCTAssertTrue(legacy.acceptsText)
+        XCTAssertTrue(InputAnswer(text: "Custom").valid(for: legacy))
+    }
+    func testApprovalProvenanceAndProviderDisplayKeepCompleteInputAccessible() throws {
+        let original = "{\"page_id\":\"page\",\"operations\":[{\"op\":\"replace\"}]}"
+        let data = try JSONSerialization.data(withJSONObject: ["toolName": "edit_page", "inputJSON": original,
+            "inputKind": "approvalRequest", "displayText": "Replace paragraph", "action": ["kind": "tool"],
+            "hasAdditionalInput": true])
+        let payload = try JSONDecoder().decode(ApprovalPayload.self, from: data)
+        XCTAssertTrue(payload.valid)
+        let presentation = ApprovalActionContent(payload)
+        XCTAssertEqual(presentation.body, "Replace paragraph")
+        XCTAssertEqual(presentation.originalInput, original)
+        XCTAssertEqual(presentation.otherArguments, original)
+        XCTAssertEqual(presentation.sections.first?.label, "Request details")
+        var preview = payload
+        preview.inputKind = "providerPreview"
+        XCTAssertEqual(ApprovalActionContent(preview).inputLabel, "Provider preview")
+        preview.inputKind = "unknown"
+        XCTAssertFalse(preview.valid)
+    }
     private func submission(_ item: PendingInput, action: String = "answer") -> InputSubmission {
         InputSubmission(generation: item.generation, requestID: item.request.id, version: item.request.version,
                         idempotencyKey: UUID().uuidString, action: action, answers: [:])
@@ -93,6 +154,189 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(content.title("Allow apply_patch?"), "Apply these changes?")
         XCTAssertEqual(content.body, patch)
         XCTAssertEqual(content.explanation, "Remove the obsolete file.")
+    }
+
+    func testLegacyDetailGrammarDoesNotExtractHeaderLikeProse() {
+        for detail in ["The instructions mention\nTool: Bash\nwithout a header paragraph.",
+                       "This is prose containing {braces}, not a tool call.", "{not valid JSON}"] {
+            XCTAssertEqual(ApprovalDetailContent(detail).explanation, detail)
+            XCTAssertNil(ApprovalDetailContent(detail).action)
+        }
+        let array = "[{\"path\":\"/tmp/a\"}]"
+        XCTAssertEqual(ApprovalDetailContent(array).action, array)
+    }
+
+    func testStructuredApprovalRoundTripsToWatchWithoutProviderDecodingAndPreservesEveryChoice() throws {
+        let original = ApprovalPreviewFixtures.file(true)
+        var request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+            sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow Edit?", detail: "",
+            questions: [], remainingSeconds: 60, contentVersion: 2, approval: original,
+            responseOptions: ApprovalPreviewFixtures.choices)
+        let wire = try JSONEncoder().encode(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60))
+        let watch = try JSONDecoder().decode(WatchWorkPrompt.self, from: wire)
+        XCTAssertEqual(watch.request, request)
+        XCTAssertTrue(watch.supportsWatchAnswer)
+        let action = try XCTUnwrap(watch.request.approvalAction)
+        XCTAssertEqual(action.kind, .fileEdit)
+        XCTAssertEqual(action.sections.map(\.text), ["Previous wording.", original.action.text!])
+        XCTAssertTrue(action.replacesAll)
+        XCTAssertEqual(watch.request.approvalChoices.map(\.id), ["once", "session", "decline"])
+        let selected = InputSubmission(generation: "g", requestID: request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "choose", answers: [:], optionID: "session")
+        XCTAssertTrue(selected.valid(for: request))
+        XCTAssertFalse(InputSubmission(generation: "g", requestID: request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "allowOnce", answers: [:]).valid(for: request))
+        request.responseOptions = []
+        XCTAssertFalse(selected.valid(for: request))
+        XCTAssertFalse(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60).supportsWatchAnswer)
+        request.contentVersion = 3
+        XCTAssertFalse(request.validContent)
+    }
+
+    func testCommonRequestsAcceptNewProviderNamespacesWithoutGuessingTheirToolSchemas() throws {
+        var listing = fixture()
+        var requests = try XCTUnwrap(listing["requests"] as? [[String: Any]])
+        requests[0]["provider"] = "next-agent"
+        listing["requests"] = requests
+        let decoded = try InputRequests.decode(JSONSerialization.data(withJSONObject: listing), sourceID: sourceID)
+        XCTAssertEqual(decoded.requests.first?.provider, "next-agent")
+        XCTAssertEqual(ResponseGuidance.continuation(for: "next-agent"), "Continue in the agent app")
+        let session = AgentSession(id: "same-native-id", provider: "next-agent", state: .needsInput)
+        XCTAssertNil(session.appURL)
+        XCTAssertEqual(session.appLinkTitle, "Open agent app")
+        requests[0]["provider"] = "invalid provider"
+        listing["requests"] = requests
+        XCTAssertThrowsError(try InputRequests.decode(JSONSerialization.data(withJSONObject: listing), sourceID: sourceID))
+    }
+
+    func testCommonContentRejectsMixedVariantsUnknownVersionsAndInconsistentActions() {
+        let question = InteractionQuestion(id: "q0", prompt: "Which?", multiple: false,
+            options: [.init(label: "First", description: "")])
+        func approval(_ action: ApprovalPayload.Action, questions: [InteractionQuestion] = []) -> InputRequest {
+            InputRequest(requestID: UUID().uuidString, version: 1, provider: "next-agent", sessionID: String(repeating: "a", count: 64),
+                kind: "approval", title: "Review", detail: "", questions: questions, remainingSeconds: 60,
+                contentVersion: 2, approval: ApprovalPayload(toolName: "tool", inputJSON: "{}", action: action, hasAdditionalInput: false),
+                responseOptions: [.init(id: "yes", label: "Proceed")])
+        }
+        for action in [ApprovalPayload.Action(kind: "fileEdit", text: "After", filePath: "/tmp/a"),
+                       .init(kind: "command"), .init(kind: "command", text: "ls", filePath: "/tmp/a"),
+                       .init(kind: "terminalInput", text: "ordinary input", terminalSessionID: "terminal-α", operation: "interrupt"),
+                       .init(kind: "terminalInput", text: "\u{03}", terminalSessionID: "terminal-α", operation: "poll"),
+                       .init(kind: "future-action", text: "Unknown semantics")] {
+            let request = approval(action)
+            XCTAssertNil(request.content)
+            XCTAssertTrue(request.approvalChoices.isEmpty)
+            XCTAssertNil(request.approvalAction)
+        }
+        XCTAssertNil(approval(.init(kind: "command", text: "ls"), questions: [question]).content)
+        var supported = approval(.init(kind: "terminalInput", text: "\u{03}", terminalSessionID: "terminal-α", operation: "interrupt"))
+        guard case .approval(let payload, let choices) = supported.content,
+              case .terminalInput(let sessionID, _, .interrupt, _) = payload.action.content else {
+            return XCTFail("A supported action has a typed, provider-independent representation")
+        }
+        XCTAssertEqual(sessionID, "terminal-α")
+        XCTAssertEqual(choices.map(\.id), ["yes"])
+        supported.contentVersion = 99
+        XCTAssertNil(supported.content)
+        XCTAssertTrue(supported.approvalChoices.isEmpty, "An unknown version cannot invent legacy allow/deny choices")
+        let questionRequest = InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+            sessionID: "session", kind: "question", title: "Question", detail: "", questions: [question], remainingSeconds: 60)
+        guard case .questions = questionRequest.content else { return XCTFail("Expected a question profile") }
+        XCTAssertTrue(questionRequest.approvalChoices.isEmpty)
+        XCTAssertNil(questionRequest.approvalAction)
+    }
+
+    func testQuestionProfileValidatesTheSameBoundsForPhoneAndWatch() {
+        let validID = String(repeating: "q", count: 160)
+        let valid = InteractionQuestion(id: validID, prompt: "Which?", multiple: true,
+            options: [.init(label: "A", description: ""), .init(label: "B", description: "")])
+        XCTAssertTrue(valid.valid)
+        XCTAssertTrue(InputAnswer(selected: [1, 0], text: "日本語").valid(for: valid))
+        XCTAssertFalse(InputAnswer(selected: [0], text: "hidden\u{00}input").valid(for: valid))
+        for question in [InteractionQuestion(id: validID + "q", prompt: "Which?", multiple: false, options: []),
+                         .init(id: "id with spaces", prompt: "Which?", multiple: false, options: []),
+                         .init(id: "q0", prompt: "   ", multiple: false, options: []),
+                         .init(id: "q0", prompt: "Which?", multiple: false, options: [.init(label: " ", description: "")])] {
+            XCTAssertFalse(question.valid)
+            XCTAssertFalse(InputAnswer(text: "Answer").valid(for: question))
+        }
+    }
+
+    func testStructuredUnknownInputPreservesNestedJSONNumbersNullsAndUnicode() throws {
+        let original = #"{"operations":[{"metadata":{"width":210.5,"id":12345678901234567890123456789012345678901234567890,"magnitude":1e300,"flag":true,"nil":null},"markdown":"日本語"}]}"#
+        let data = try JSONSerialization.data(withJSONObject: ["toolName": "mcp__pages__edit", "inputJSON": original,
+            "action": ["kind": "tool"], "hasAdditionalInput": false])
+        let payload = try JSONDecoder().decode(ApprovalPayload.self, from: data)
+        let roundTrip = try JSONDecoder().decode(ApprovalPayload.self, from: JSONEncoder().encode(payload))
+        XCTAssertEqual(roundTrip, payload)
+        let content = ApprovalActionContent(payload)
+        XCTAssertEqual(content.kind, .tool)
+        XCTAssertEqual(content.originalInput, original)
+        XCTAssertTrue(content.body.contains("12345678901234567890123456789012345678901234567890"))
+        XCTAssertTrue(content.body.contains("1e300"))
+        XCTAssertTrue(content.body.contains("日本語"))
+        XCTAssertNil(content.explanation)
+    }
+
+    func testLargeMCPPageEditIsSummarizedWithoutDiscardingOperationsOrMetadata() throws {
+        let input: [String: Any] = ["page_id": "page_fixture", "stream_kind": "content",
+            "operations": [["op": "replace_block_markdown", "expected_hash": "exact-hash",
+                "block_units": [["kind": "markdown", "markdown": String(repeating: "Long content. ", count: 500),
+                                 "metadata": ["image": ["file_id": "original-file", "width": 210.5]]]]]]]
+        let data = try JSONSerialization.data(withJSONObject: input)
+        let original = String(decoding: data, as: UTF8.self)
+        let value = ApprovalActionContent("Tool: mcp__pages__edit_page\n\n" + original)
+        XCTAssertEqual(value.kind, .tool)
+        XCTAssertEqual(value.body, original)
+        XCTAssertNil(value.explanation, "An arbitrary tool's description is not necessarily display metadata")
+        let preview = ApprovalTextPreview(value.body, surface: .watch)
+        XCTAssertTrue(preview.needsExpansion)
+        XCTAssertEqual(preview.jsonSummary, "3 fields: operations, page_id, stream_kind")
+        XCTAssertEqual(preview.fullText, original)
+        XCTAssertLessThanOrEqual(preview.excerpt.count, 180)
+        XCTAssertTrue(preview.fullText.contains("expected_hash"))
+        XCTAssertTrue(preview.fullText.contains("file_id"))
+    }
+
+    func testApprovalExcerptsBoundBothOneLineAndMultilineBodiesWithoutChangingOriginal() {
+        let emoji = String(repeating: "👨‍👩‍👧‍👦", count: 600)
+        for text in [String(repeating: "x", count: 16000), String(repeating: "line\n", count: 1000), emoji] {
+            let watch = ApprovalTextPreview(text, surface: .watch)
+            let phone = ApprovalTextPreview(text, surface: .phone)
+            XCTAssertEqual(watch.fullText, text)
+            XCTAssertEqual(phone.fullText, text)
+            XCTAssertTrue(watch.needsExpansion)
+            XCTAssertTrue(phone.needsExpansion)
+            XCTAssertLessThanOrEqual(watch.excerpt.count, 180)
+            XCTAssertLessThanOrEqual(phone.excerpt.count, 500)
+            XCTAssertLessThanOrEqual(watch.excerpt.split(separator: "\n", omittingEmptySubsequences: false).count, 4)
+            XCTAssertTrue(text.hasPrefix(watch.excerpt))
+        }
+        for text in ["", "swift test", "first\nsecond\n"] {
+            let preview = ApprovalTextPreview(text, surface: .watch)
+            XCTAssertFalse(preview.needsExpansion)
+            XCTAssertEqual(preview.excerpt, text)
+        }
+    }
+
+    func testTypedTerminalPresentationExplainsExactActionWithoutGuessingParentCommand() throws {
+        let interrupt = ApprovalActionContent(ApprovalPreviewFixtures.terminal())
+        XCTAssertEqual(interrupt.title("Allow write_stdin?"), "Interrupt this terminal?")
+        XCTAssertEqual(interrupt.body, "Ctrl-C × 2")
+        XCTAssertEqual(interrupt.terminalSessionID, "35467")
+        XCTAssertEqual(interrupt.sections.map(\.label), ["Input", "Running command"])
+        XCTAssertTrue(interrupt.originalInput.contains("\\u0003"))
+        let write = ApprovalActionContent(ApprovalPreviewFixtures.terminal("write", parent: false))
+        XCTAssertEqual(write.title("Allow write_stdin?"), "Send input to this terminal?")
+        XCTAssertEqual(write.body, "\"echo ready\\n\"")
+        XCTAssertNil(write.parentCommand)
+        XCTAssertEqual(write.sections.count, 1)
+        let poll = ApprovalActionContent(ApprovalPreviewFixtures.terminal("poll", parent: false))
+        XCTAssertEqual(poll.title("Allow write_stdin?"), "Read terminal output?")
+        XCTAssertEqual(poll.body, "No characters will be sent.")
+        let roundTrip = try JSONDecoder().decode(ApprovalPayload.self,
+            from: JSONEncoder().encode(ApprovalPreviewFixtures.terminal()))
+        XCTAssertEqual(roundTrip.action.text, "\u{03}\u{03}")
     }
 
     @MainActor func testCatalogPreservesDistinctSessionIdentityAndLegacyActivity() throws {
@@ -396,12 +640,12 @@ final class InteractionTests: XCTestCase {
                            "options": [["label": "Small change", "description": "Keep the layout."],
                                        ["label": "New layout", "description": "Explore more."]]]]]]]
     }
-    func testRequestValidationRejectsWrongSourceUnsupportedProviderAndDuplicateIdentity() throws {
+    func testRequestValidationRejectsWrongSourceInvalidProviderAndDuplicateIdentity() throws {
         let value = fixture()
         let data = try JSONSerialization.data(withJSONObject: value)
         XCTAssertEqual(try InputRequests.decode(data, sourceID: sourceID).requests.count, 1)
         XCTAssertThrowsError(try InputRequests.decode(data, sourceID: "another-source"))
-        for change in ["provider": "unknown", "remainingSeconds": 0, "sessionID": "not-hashed", "version": 2] as [String: Any] {
+        for change in ["provider": "invalid provider", "remainingSeconds": 0, "sessionID": "not-hashed", "version": 2] as [String: Any] {
             var invalid = value
             var requests = try XCTUnwrap(invalid["requests"] as? [[String: Any]])
             requests[0][change.key] = change.value
@@ -443,7 +687,7 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(decoded.requests[0].provider, "codex")
         XCTAssertTrue(InputAnswer(text: "Keep it simple").valid(for: decoded.requests[0].questions[0]))
     }
-    func testQuestionAnswersRequireOneValidModeAndRespectCardinality() {
+    func testQuestionAnswersPreserveSelectionAndCommentAndRespectCardinality() {
         let single = InteractionQuestion(id: "q0", prompt: "Which?", multiple: false,
             options: [.init(label: "A", description: ""), .init(label: "B", description: "")])
         XCTAssertFalse(InputAnswer().valid(for: single))
@@ -452,7 +696,7 @@ final class InteractionTests: XCTestCase {
         XCTAssertFalse(InputAnswer(selected: [0, 1]).valid(for: single))
         XCTAssertFalse(InputAnswer(selected: [2]).valid(for: single))
         XCTAssertFalse(InputAnswer(selected: [0, 0]).valid(for: single))
-        XCTAssertFalse(InputAnswer(selected: [0], text: "other").valid(for: single))
+        XCTAssertTrue(InputAnswer(selected: [0], text: "other").valid(for: single), "The wire contract preserves a selection plus a comment")
         let multiple = InteractionQuestion(id: "q0", prompt: "Which?", multiple: true, options: single.options)
         XCTAssertTrue(InputAnswer(selected: [0, 1]).valid(for: multiple))
     }
@@ -1060,7 +1304,7 @@ final class InteractionTests: XCTestCase {
         }
     }
 
-    @MainActor func testActivityCardsCloseOnlyOnConfirmedResponseAndRetainTaskDetails() throws {
+    @MainActor func testActivityCardsFollowSessionUntilExplicitReleaseAndRetainTaskDetails() throws {
         let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
                                   clientID: "client", credential: "fixture")
         let inbox = InteractionInbox()
@@ -1076,7 +1320,7 @@ final class InteractionTests: XCTestCase {
             let envelope = submission(pending, action: action)
             for phase in [InputResponsePhase.sending, .unconfirmed, .rejected, .submitted] {
                 let response = InputResponseState(item: pending, submission: envelope, startedAt: 1, phase: phase)
-                XCTAssertEqual(selection.shouldDismiss(response: response), phase == .submitted)
+                XCTAssertEqual(selection.shouldDismiss(response: response), phase == .submitted && action == "release")
             }
         }
         item.request = nil
@@ -1174,6 +1418,148 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(lock.request?.id, replacement.id, "An explicit new visit can open the new request")
     }
 
+    @MainActor func testWatchReadsPreserveSiblingRequestsAndStableSessionOrder() throws {
+        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
+                                  clientID: "client", credential: "fixture")
+        let inbox = InteractionInbox()
+        inbox.setForeground(true)
+        let generation = UUID().uuidString
+        func pending(_ session: String, provider: String = "claude", expires: Double = 60) -> PendingInput {
+            let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: provider,
+                sessionID: session, kind: "question", title: "Question", detail: "", questions: [], remainingSeconds: 60)
+            return PendingInput(source: source, generation: generation, request: request,
+                                expiresAtUptime: ProcessInfo.processInfo.systemUptime + expires)
+        }
+        let first = pending("one"), second = pending("one"), otherSession = pending("two")
+        let otherAgent = pending("one", provider: "codex"), expired = pending("one", expires: -1)
+        for item in [first, second, otherSession, otherAgent, expired] { inbox.observeWatchRequest(item) }
+        // Re-reading the second request on Watch cannot delete or reorder its sibling.
+        inbox.observeWatchRequest(second)
+        let identity = WorkIdentity(sourceID: sourceID, sessionID: "one", provider: "claude")
+        XCTAssertEqual(inbox.pendingRequests(for: identity).map(\.id), [first.id, second.id])
+        let envelope = submission(first)
+        inbox.observeWatchSubmission(first, submission: envelope, phase: .unconfirmed)
+        XCTAssertEqual(inbox.pendingRequests(for: identity).first?.id, first.id)
+        inbox.didSubmit(first, submission: envelope)
+        XCTAssertEqual(inbox.pendingRequests(for: identity).map(\.id), [second.id])
+        inbox.sourceUnavailable(sourceID)
+        XCTAssertTrue(inbox.pendingRequests(for: identity).isEmpty)
+    }
+
+    @MainActor func testSiblingAttentionSurvivesPhoneAndWatchReceiptsInEitherOrder() throws {
+        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
+                                  clientID: "client", credential: "fixture")
+        let model = CompanionModel(preview: true)
+        let identity = WorkIdentity(sourceID: sourceID, sessionID: "one", provider: "codex")
+        let session = AgentSession(id: identity.sessionID, provider: identity.provider, state: .needsInput)
+        for kinds in [["approval", "approval"], ["approval", "question"], ["question", "approval"]] {
+            for firstIndex in [0, 1] {
+                for viaWatch in [false, true] {
+                    let inbox = InteractionInbox()
+                    inbox.setForeground(true)
+                    defer { inbox.setForeground(false) }
+                    let generation = UUID().uuidString
+                    let pending = kinds.map { kind in
+                        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: identity.provider,
+                            sessionID: identity.sessionID, kind: kind, title: "Request", detail: "",
+                            questions: kind == "question" ? [.init(id: "q0", prompt: "Which?", multiple: false,
+                                options: [.init(label: "First", description: "")])] : [], remainingSeconds: 60)
+                        return PendingInput(source: source, generation: generation, request: request,
+                            expiresAtUptime: ProcessInfo.processInfo.systemUptime + 60)
+                    }
+                    pending.forEach { inbox.observeWatchRequest($0) }
+                    let first = pending[firstIndex], sibling = pending[1 - firstIndex]
+                    let response = InputSubmission(generation: generation, requestID: first.request.id, version: 1,
+                        idempotencyKey: UUID().uuidString, action: first.request.kind == "approval" ? "allowOnce" : "answer",
+                        answers: first.request.kind == "question" ? ["q0": InputAnswer(selected: [0])] : [:])
+                    XCTAssertTrue(response.valid(for: first.request))
+                    inbox.observeWatchSubmission(first, submission: response, phase: .unconfirmed)
+                    XCTAssertEqual(inbox.pendingRequests(for: identity).map(\.id), pending.map(\.id))
+                    XCTAssertEqual(inbox.response(for: first)?.submission, response, "Uncertain retries retain the exact decision")
+                    if viaWatch { inbox.observeWatchSubmission(first, submission: response, phase: .submitted) }
+                    else { inbox.didSubmit(first, submission: response) }
+                    // Duplicate receipts and delayed single-request reads cannot consume a sibling.
+                    inbox.observeWatchSubmission(first, submission: response, phase: .submitted)
+                    inbox.observeWatchRequest(first)
+                    XCTAssertEqual(inbox.pendingRequests(for: identity).map(\.id), [sibling.id])
+                    let row = WorkCatalog.item(session: session, source: source, model: model, inbox: inbox,
+                        computer: "Mac", connected: true, current: true)
+                    XCTAssertEqual(row.request?.id, sibling.id)
+                    XCTAssertEqual(row.group, .attention, "Shared phone/Watch presentation prioritizes pending input over a receipt")
+                    XCTAssertEqual(row.phase, sibling.request.kind == "approval" ? .approval : .question)
+                    XCTAssertEqual(session.state, .needsInput, "Transport acceptance does not change native source state")
+                    let expired = PendingInput(source: source, generation: generation, request: first.request,
+                        expiresAtUptime: ProcessInfo.processInfo.systemUptime - 1)
+                    inbox.observeWatchRequest(expired)
+                    XCTAssertEqual(inbox.pendingRequests(for: identity).map(\.id), [sibling.id], "Expiry affects only that request")
+                }
+            }
+        }
+    }
+
+    @MainActor func testSessionFlowProtectsDraftThenAdvancesOnlyOnExactAcknowledgement() throws {
+        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
+                                  clientID: "client", credential: "fixture")
+        let inbox = InteractionInbox()
+        inbox.preview(source, kind: "question")
+        let first = try XCTUnwrap(inbox.items.first)
+        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: first.request.provider,
+            sessionID: first.request.sessionID, kind: "question", title: "Follow-up", detail: "", questions: [], remainingSeconds: 60)
+        let next = PendingInput(source: source, generation: first.generation, request: request, expiresAtUptime: first.expiresAtUptime)
+        var lock = TaskCardRequestLock()
+        lock.capture(first)
+        lock.capture(next)
+        XCTAssertEqual(lock.request?.id, first.id)
+        for phase in [InputResponsePhase.sending, .unconfirmed, .rejected] {
+            let result = InputResponseState(item: first, submission: submission(first), startedAt: 1, phase: phase)
+            XCTAssertFalse(lock.advance(after: result, to: next))
+            XCTAssertEqual(lock.request?.id, first.id)
+        }
+        let wrong = InputResponseState(item: next, submission: submission(next), startedAt: 1, phase: .submitted)
+        XCTAssertFalse(lock.advance(after: wrong, to: next))
+        let confirmed = InputResponseState(item: first, submission: submission(first), startedAt: 1, phase: .submitted)
+        XCTAssertFalse(lock.advance(after: confirmed, to: first), "A stale listing cannot repeat the answered form")
+        XCTAssertTrue(lock.advance(after: confirmed, to: next))
+        XCTAssertEqual(lock.request?.id, next.id)
+        XCTAssertFalse(lock.advance(after: confirmed, to: nil), "A delayed duplicate acknowledgement cannot advance another form")
+        let last = InputResponseState(item: next, submission: submission(next), startedAt: 1, phase: .submitted)
+        XCTAssertTrue(lock.advance(after: last, to: nil))
+        XCTAssertNil(lock.request)
+        let laterRequest = InputRequest(requestID: UUID().uuidString, version: 1, provider: first.request.provider,
+            sessionID: first.request.sessionID, kind: "question", title: "Later follow-up", detail: "", questions: [], remainingSeconds: 60)
+        let later = PendingInput(source: source, generation: first.generation, request: laterRequest, expiresAtUptime: first.expiresAtUptime)
+        lock.capture(later)
+        XCTAssertEqual(lock.request?.id, later.id, "An empty flow can display the next available request")
+    }
+
+    @MainActor func testConfirmedSessionFlowCannotSwitchComputerSessionProviderOrBroker() throws {
+        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
+                                  clientID: "client", credential: "fixture")
+        let inbox = InteractionInbox()
+        inbox.preview(source, kind: "question")
+        let first = try XCTUnwrap(inbox.items.first)
+        let confirmed = InputResponseState(item: first, submission: submission(first), startedAt: 1, phase: .submitted)
+        for difference in ["computer", "session", "provider", "generation"] {
+            let otherSource = PairedSource(endpoint: source.endpoint, sourceID: UUID().uuidString,
+                                          clientID: "client", credential: "fixture")
+            let request = InputRequest(requestID: UUID().uuidString, version: 1,
+                provider: difference == "provider" ? "codex" : first.request.provider,
+                sessionID: difference == "session" ? "other-session" : first.request.sessionID,
+                kind: "question", title: "Other", detail: "", questions: [], remainingSeconds: 60)
+            let other = PendingInput(source: difference == "computer" ? otherSource : source,
+                generation: difference == "generation" ? UUID().uuidString : first.generation,
+                request: request, expiresAtUptime: first.expiresAtUptime)
+            var lock = TaskCardRequestLock()
+            lock.capture(first)
+            XCTAssertFalse(lock.advance(after: confirmed, to: other), difference)
+            XCTAssertEqual(lock.request?.id, first.id)
+        }
+        var lock = TaskCardRequestLock()
+        lock.capture(first)
+        let released = InputResponseState(item: first, submission: submission(first, action: "release"), startedAt: 1, phase: .submitted)
+        XCTAssertFalse(lock.advance(after: released, to: nil), "Opening the agent is not a decision to follow more phone forms")
+    }
+
     @MainActor func testTaskStatusAndSectionsStayConsistentAcrossLiveTransitions() throws {
         let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: "mac",
                                   clientID: "client", credential: "fixture")
@@ -1191,11 +1577,11 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(approval.group, .attention)
         XCTAssertEqual(approval.statusToken, .approval)
         let sent = item(.needsInput, delivery: .sent)
-        XCTAssertEqual(sent.group, .working, "A confirmed response no longer needs a user action")
+        XCTAssertEqual(sent.group, .attention, "A submission receipt cannot establish that the native agent resumed")
         XCTAssertEqual(sent.state, .needsInput, "Submission does not manufacture an agent state transition")
-        XCTAssertEqual(sent.statusToken, .working)
-        XCTAssertNil(sent.statusDetail)
-        XCTAssertEqual(sent.status, "Working")
+        XCTAssertEqual(sent.statusToken, .responded)
+        XCTAssertEqual(sent.statusDetail, "Response sent")
+        XCTAssertEqual(sent.status, "Response sent")
         let running = item(.working)
         XCTAssertEqual(running.group, .working)
         XCTAssertEqual(running.statusToken, .working)
@@ -1273,9 +1659,9 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(returned.status, "Continue in Claude Code")
         var submitted = first
         submitted.delivery = .sent
-        XCTAssertEqual(submitted.group, .working)
-        XCTAssertEqual(submitted.statusToken, .working)
-        XCTAssertEqual(submitted.status, "Working")
+        XCTAssertEqual(submitted.group, .attention)
+        XCTAssertEqual(submitted.statusToken, .responded)
+        XCTAssertEqual(submitted.status, "Response sent")
         inbox.remove(pending.source.sourceID)
         XCTAssertNil(inbox.receipt(for: id))
     }
@@ -1506,15 +1892,17 @@ extension InteractionTests {
         XCTAssertEqual(sent["submitted"] as? Bool, true)
         watch = try await exported()
         XCTAssertEqual(try phone().phase, .responded)
-        XCTAssertEqual(watch.status, "Working")
+        XCTAssertEqual(watch.status, "Response sent")
+        XCTAssertEqual(watch.symbol(at: Date()), "paperplane")
         XCTAssertEqual(watch.group(at: Date()), try phone().group.rawValue)
         XCTAssertEqual(watch.state, "needs_input", "Native routing still checks the exact observed state")
         let receiptList = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(sent["workSnapshot"] as? Data))
-        XCTAssertEqual(receiptList.tasks.first?.group(at: Date()), "Working", "The acknowledgement carries the phone's new list without another source read")
+        XCTAssertEqual(receiptList.tasks.first?.group(at: Date()), "Needs you", "The acknowledgement preserves the native pending state")
         let snapshot = try XCTUnwrap(model.snapshots[sourceID])
         let duringConnectionGap = WorkCatalog.item(session: try XCTUnwrap(snapshot.sessions?.first), source: source,
             model: model, inbox: model.interactions, computer: "Test", connected: false, current: true)
-        XCTAssertEqual(duringConnectionGap.group, .working, "A short connection lease cannot undo an accepted answer")
+        XCTAssertEqual(duringConnectionGap.group, .attention)
+        XCTAssertEqual(duringConnectionGap.status, "Response sent", "A connection gap neither undoes the receipt nor proves native progress")
         let historical = WorkCatalog.item(session: try XCTUnwrap(snapshot.sessions?.first), source: source,
             model: model, inbox: model.interactions, computer: "Test", connected: false, current: false)
         XCTAssertEqual(historical.group, .lastKnown)
@@ -1589,7 +1977,7 @@ extension InteractionTests {
         XCTAssertTrue(model.interactions.items.isEmpty, "Lifecycle-cleared sensitive inbox content must stay cleared")
         let cached = await model.handleWatchWork(["operation": "cachedTasks"])
         let exported = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(cached["data"] as? Data))
-        XCTAssertEqual(exported.tasks.first?.status, "Working", "The bounded Watch receipt still supplies presentation metadata")
+        XCTAssertEqual(exported.tasks.first?.status, "Response sent", "The bounded Watch receipt cannot manufacture native progress")
     }
 
     @MainActor func testWatchResponseKeepsExactSubmissionAcrossLostReplyAndReopening() async throws {
@@ -1724,12 +2112,13 @@ extension InteractionTests {
         XCTAssertNil(nextPrompt.submission)
     }
 
-    @MainActor func testWatchRejectsUnmatchedTaskAndDisabledResponses() async throws {
+    @MainActor func testWatchUsesNativeContinuationAndRejectsUnmatchedResponseTasks() async throws {
         let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
             clientID: "client", credential: "fixture")
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [InteractionURLProtocol.self]
-        let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
+        var now: TimeInterval = 100
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration), refreshUptime: { now })
         model.pairedSources = [source]
         var enabled = false
         var interactionReads = 0
@@ -1747,24 +2136,76 @@ extension InteractionTests {
         let message: [String: Any] = ["operation": "request", "sourceID": sourceID,
             "sessionID": String(repeating: "b", count: 64), "provider": "claude"]
         let disabled = await model.handleWatchWork(message)
-        XCTAssertNotNil(disabled["error"])
+        XCTAssertEqual(disabled["nativeOnly"] as? Bool, true)
+        XCTAssertNil(disabled["error"], "Native continuation is normal, not a retryable failure")
+        XCTAssertNil(disabled["data"])
         XCTAssertEqual(interactionReads, 0)
         enabled = true
+        now += 6 // The Watch fetch owner gates healthy reads for five seconds.
         let unmatched = await model.handleWatchWork(message)
         XCTAssertNotNil(unmatched["error"])
         XCTAssertNil(unmatched["data"], "A response form must match the exact task identity")
     }
 
+    @MainActor func testContentProfilesRequireWatchCapabilityAndSourceNegotiation() async throws {
+        for version in [2, 3] {
+            let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
+                clientID: "client", credential: "fixture")
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [InteractionURLProtocol.self]
+            let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
+            model.pairedSources = [source]
+            let request = version == 2 ? InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+                sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow Edit?", detail: "",
+                questions: [], remainingSeconds: 60, contentVersion: 2, approval: ApprovalPreviewFixtures.file(true),
+                responseOptions: ApprovalPreviewFixtures.choices) : InputRequest(requestID: UUID().uuidString,
+                version: 1, provider: "claude", sessionID: String(repeating: "a", count: 64), kind: "question",
+                title: "Choose", detail: "", questions: [.init(id: "q", prompt: "Which?", multiple: false,
+                    options: [.init(label: "First", description: "")], allowsText: false)], remainingSeconds: 60,
+                contentVersion: 3)
+            let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
+            let listing = try JSONSerialization.data(withJSONObject: ["sourceID": sourceID,
+                "generation": UUID().uuidString, "requests": [object]])
+            InteractionURLProtocol.start = { transport in
+                Task { @MainActor in
+                    if transport.request.url?.path == "/v1/snapshot" {
+                        transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                    } else {
+                        XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), "3")
+                        transport.finish(listing)
+                    }
+                }
+            }
+            defer { InteractionURLProtocol.start = nil }
+            var message: [String: Any] = ["operation": "request", "sourceID": sourceID,
+                "sessionID": request.sessionID, "provider": "claude"]
+            let legacy = await model.handleWatchWork(message)
+            XCTAssertEqual(legacy["nativeOnly"] as? Bool, true)
+            XCTAssertNil(legacy["data"])
+            if version == 3 {
+                message["contentVersion"] = 2
+                let older = await model.handleWatchWork(message)
+                XCTAssertEqual(older["nativeOnly"] as? Bool, true)
+            }
+            message["contentVersion"] = version
+            let modern = await model.handleWatchWork(message)
+            let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(modern["data"] as? Data))
+            XCTAssertEqual(prompt.request, request)
+            XCTAssertEqual(prompt.request.approvalChoices.count, version == 2 ? 3 : 0)
+        }
+    }
+
     func testWatchAnswerValidationAndActivityLease() throws {
         let data = try JSONSerialization.data(withJSONObject: fixture())
         let request = try XCTUnwrap(InputRequests.decode(data, sourceID: sourceID).requests.first)
-        for answers in [["q0": InputAnswer(selected: [0])], ["q0": InputAnswer(text: "After the first result")]] {
+        for answers in [["q0": InputAnswer(selected: [0])], ["q0": InputAnswer(text: "After the first result")],
+                        ["q0": InputAnswer(selected: [0], text: "Both")]] {
             let submission = InputSubmission(generation: "generation", requestID: request.id, version: 1,
                 idempotencyKey: UUID().uuidString, action: "answer", answers: answers)
             XCTAssertTrue(submission.valid(for: request))
         }
         for answers in [[:], ["other": InputAnswer(selected: [0])], ["q0": InputAnswer(selected: [2])],
-                        ["q0": InputAnswer(selected: [0], text: "Both")], ["q0": InputAnswer(selected: [0, 1])]] {
+                        ["q0": InputAnswer(selected: [0, 1])]] {
             let submission = InputSubmission(generation: "generation", requestID: request.id, version: 1,
                 idempotencyKey: UUID().uuidString, action: "answer", answers: answers)
             XCTAssertFalse(submission.valid(for: request))
@@ -1976,7 +2417,7 @@ extension InteractionTests {
         model.interactions.observeWatchRequest(newer)
         _ = await model.handleWatchWork(continuation)
         XCTAssertTrue(model.interactions.isCurrent(newer), "Handoff cannot replace a newer phone request")
-        XCTAssertFalse(model.interactions.isCurrent(restored))
+        XCTAssertTrue(model.interactions.isCurrent(restored), "Reading one follow-up cannot invalidate an uncertain sibling without an authoritative listing")
         model.setForeground(false)
         definitive = true
         let rejected = await model.handleWatchWork(payload)
@@ -2005,7 +2446,7 @@ extension InteractionTests {
         XCTAssertFalse(valid(["timing": InputAnswer(selected: [0])]))
         XCTAssertTrue(valid(["timing": InputAnswer(selected: [0]), "screens": InputAnswer(selected: [0, 1])]))
         XCTAssertTrue(valid(["timing": InputAnswer(selected: [0]), "screens": InputAnswer(text: "Both screens")]))
-        XCTAssertFalse(valid(["timing": InputAnswer(selected: [0]), "screens": InputAnswer(selected: [0], text: "Both")]))
+        XCTAssertTrue(valid(["timing": InputAnswer(selected: [0]), "screens": InputAnswer(selected: [0], text: "Both")]))
         let largeQuestions = (0..<4).map {
             InteractionQuestion(id: "q\($0)", prompt: "Explain", multiple: false, options: [])
         }

@@ -14,8 +14,8 @@ struct InputRequests: Decodable {
             throw HubError.message("The computer returned invalid requests.")
         }
         for request in value.requests {
-            guard UUID(uuidString: request.id) != nil, request.version == 1,
-                  ["claude", "codex"].contains(request.provider),
+            guard UUID(uuidString: request.id) != nil, request.version == 1, request.validContent,
+                  InteractionWire.identifier(request.provider),
                   ["approval", "question"].contains(request.kind),
                   request.sessionID.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil, !request.title.isEmpty,
                   request.title.unicodeScalars.count <= 256, request.detail.unicodeScalars.count <= 16384,
@@ -24,13 +24,6 @@ struct InputRequests: Decodable {
                   Set(request.questions.map(\.id)).count == request.questions.count,
                   request.kind == "question" ? !request.questions.isEmpty : request.questions.isEmpty else {
                 throw HubError.message("The computer returned an unsupported request.")
-            }
-            for question in request.questions {
-                guard !question.id.isEmpty, question.id.count <= 128, !question.prompt.isEmpty,
-                      question.prompt.unicodeScalars.count <= 4096, question.options.count <= 16,
-                      question.options.allSatisfy({ !$0.label.isEmpty && $0.label.unicodeScalars.count <= 512 && $0.description.unicodeScalars.count <= 2048 }) else {
-                    throw HubError.message("The computer returned an invalid question.")
-                }
             }
         }
         return value
@@ -78,6 +71,9 @@ struct InputResponseState {
 /// Request content lives in RAM only and is discarded on backgrounding.
 @MainActor final class InteractionInbox: ObservableObject {
     private let client: SourceClient
+    #if DEBUG
+    private var previewQueueSourceID: String?
+    #endif
     init(client: SourceClient = SourceClient()) { self.client = client }
     @Published private(set) var bySource: [String: [PendingInput]] = [:]
     @Published private(set) var responses: [String: InputResponseState] = [:]
@@ -116,6 +112,17 @@ struct InputResponseState {
     var lifecycleID: UUID { epoch }
     private var revisions: [String: Int] = [:]
     var items: [PendingInput] { bySource.keys.sorted().flatMap { bySource[$0] ?? [] } }
+    func pendingRequests(for identity: WorkIdentity) -> [PendingInput] {
+        items.enumerated().filter { _, item in
+            item.source.sourceID == identity.sourceID && item.request.provider == identity.provider
+                && item.request.sessionID == identity.sessionID && isCurrent(item)
+                && response(for: item)?.phase != .submitted && response(for: item)?.phase != .rejected
+        }.sorted { a, b in
+            let first = ordering.requestOrder(a.element) ?? UInt64.max
+            let second = ordering.requestOrder(b.element) ?? UInt64.max
+            return first == second ? a.offset < b.offset : first < second
+        }.map(\.element)
+    }
     func setForeground(_ value: Bool) {
         guard active != value else { return }
         active = value
@@ -263,8 +270,10 @@ struct InputResponseState {
     func observeWatchRequest(_ item: PendingInput) {
         guard active else { return }
         let sourceID = item.source.sourceID
+        // This observes one request, not an authoritative inbox listing.
+        // A delayed Watch read cannot invalidate any other pending identity.
         bySource[sourceID, default: []].removeAll {
-            $0.request.sessionID == item.request.sessionID && $0.request.provider == item.request.provider
+            $0.id == item.id
         }
         bySource[sourceID, default: []].append(item)
         responses = responses.mapValues { response in
@@ -298,17 +307,12 @@ struct InputResponseState {
     /// Submission belongs to the inbox, not to a sheet's lifetime. Reopening a
     /// card cannot create another decision while the original POST is in flight.
     @discardableResult func submit(_ item: PendingInput, action: String, answers: [String: InputAnswer] = [:],
-                client: SourceClient? = nil) -> Task<Void, Never>? {
-        guard isCurrent(item), responses[item.id] == nil, operations[item.id] == nil,
-              ["answer", "allowOnce", "deny", "release"].contains(action) else { return nil }
-        if action == "answer" {
-            guard item.request.kind == "question", Set(answers.keys) == Set(item.request.questions.map(\.id)),
-                  item.request.questions.allSatisfy({ answers[$0.id]?.valid(for: $0) == true }) else { return nil }
-        } else if action != "release" && item.request.kind != "approval" { return nil }
+                client: SourceClient? = nil, optionID: String? = nil) -> Task<Void, Never>? {
+        guard isCurrent(item), responses[item.id] == nil, operations[item.id] == nil else { return nil }
         let submission = InputSubmission(generation: item.generation, requestID: item.request.id,
             version: item.request.version, idempotencyKey: UUID().uuidString, action: action,
-            answers: action == "answer" ? answers : [:])
-        guard submission.fitsWireLimit else { return nil }
+            answers: action == "answer" ? answers : [:], optionID: optionID)
+        guard submission.valid(for: item.request) else { return nil }
         responses[item.id] = InputResponseState(item: item, submission: submission,
             startedAt: ProcessInfo.processInfo.systemUptime, phase: .sending)
         return send(item, submission: submission, client: client ?? self.client)
@@ -327,6 +331,12 @@ struct InputResponseState {
         let started = ProcessInfo.processInfo.systemUptime
         let operation = Task { @MainActor [weak self] in
             defer { self?.operations.removeValue(forKey: item.id) }
+            #if DEBUG
+            if self?.previewQueueSourceID == item.source.sourceID {
+                self?.didSubmit(item, submission: submission)
+                return
+            }
+            #endif
             do {
                 try await client.submitInput(submission, source: item.source)
                 Diagnostics.shared.record("interaction_submit_confirmed", sourceID: item.source.sourceID,
@@ -362,19 +372,40 @@ struct InputResponseState {
         let generation = UUID().uuidString
         bySource[source.sourceID] = ["approval", "question", "multiple"].map { kind in
             let approval = kind == "approval"
+            let selectionOnly = approval && ProcessInfo.processInfo.arguments.contains("--selection-only-question")
+            let terminal = approval && ProcessInfo.processInfo.arguments.contains("--approval-terminal-payload")
             let question = InteractionQuestion(id: "q0",
                 prompt: kind == "multiple" ? "What should appear on the watch?" : "When should we ask people to enable notifications?",
                 multiple: kind == "multiple", options: kind == "multiple"
                     ? [.init(label: "Tasks that need me", description: "Questions and approvals."),
                        .init(label: "Finished tasks", description: "A quiet update when work is done.")]
                     : [.init(label: "After the first result", description: "Let people try it before asking for notification access."),
-                       .init(label: "During setup", description: "Have notifications ready for the first task.")])
+                       .init(label: "During setup", description: "Have notifications ready for the first task.")],
+                allowsText: selectionOnly ? false : nil)
             let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: approval ? "codex" : "claude",
-                sessionID: "review-" + kind, kind: approval ? "approval" : "question",
-                title: approval ? "Run the tests?" : "Question", detail: approval ? "Command: npm test -- checkout" : "",
-                questions: approval ? [] : [question], remainingSeconds: 120)
+                sessionID: "review-" + kind, kind: approval && !selectionOnly ? "approval" : "question",
+                title: terminal ? "Allow write_stdin?" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? "Allow \(ApprovalPreviewFixtures.pageTool)?" : approval ? "Run the tests?" : "Question",
+                detail: terminal || selectionOnly ? "" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? ApprovalPreviewFixtures.largePageEdit : approval ? "Command: npm test -- checkout" : "",
+                questions: approval && !selectionOnly ? [] : [question], remainingSeconds: 120,
+                contentVersion: selectionOnly ? 3 : terminal ? 2 : nil, approval: terminal ? ApprovalPreviewFixtures.terminal() : nil,
+                responseOptions: terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : nil)
             return PendingInput(source: source, generation: generation, request: request,
                 expiresAtUptime: ProcessInfo.processInfo.systemUptime + 3600)
+        }
+        if ProcessInfo.processInfo.arguments.contains("--response-sent-preview"), let item = bySource[source.sourceID]?.first {
+            didSubmit(item, submission: .init(generation: generation, requestID: item.request.id, version: 1,
+                idempotencyKey: UUID().uuidString, action: "allowOnce", answers: [:]))
+        }
+        if ProcessInfo.processInfo.arguments.contains("--request-queue-preview") {
+            previewQueueSourceID = source.sourceID
+            let question = InteractionQuestion(id: "next", prompt: "Which checks should run next?", multiple: false,
+                options: [.init(label: "Full test suite", description: "Verify all behavior."),
+                          .init(label: "Changed files only", description: "Check this change.")])
+            let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "codex",
+                sessionID: "review-approval", kind: "question", title: "Follow-up", detail: "",
+                questions: [question], remainingSeconds: 120)
+            bySource[source.sourceID]?.insert(PendingInput(source: source, generation: generation, request: request,
+                expiresAtUptime: ProcessInfo.processInfo.systemUptime + 3600), at: 1)
         }
         ordering.observeRequests(bySource[source.sourceID] ?? [], sourceID: source.sourceID)
     }

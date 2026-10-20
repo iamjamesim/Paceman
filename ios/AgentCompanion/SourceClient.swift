@@ -186,6 +186,7 @@ final class SourceClient {
     func inputRequests(_ source: PairedSource) async throws -> InputRequests {
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/interactions"))
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
+        request.setValue(String(InputRequest.maximumContentVersion), forHTTPHeaderField: "X-Paceman-Content-Version")
         let data = try await response(request, maximumBytes: 2_200_000)
         return try InputRequests.decode(data, sourceID: source.sourceID)
     }

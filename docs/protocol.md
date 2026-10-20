@@ -476,6 +476,10 @@ defines readiness and recovery.
 - New states, changed event meanings or required phone behavior need a new
   schema or endpoint with explicit capability handling. APNs display formats
   and BLE packet versions evolve separately.
+- Interaction adapters own native decoding and correlation. New required content,
+  answer constraints or decision semantics need a negotiated content version.
+  Unsupported interactions stay native; the v1 text/selection question profile
+  cannot represent arbitrary forms, permission subsets or authentication flows.
 - Published BLE layouts keep their sizes and meanings; new profile fields
   require negotiation. Update examples, encoders, decoders and cross-version
   tests together when changing a wire format.
@@ -489,6 +493,42 @@ Implementations: [source API](../service/hub.py),
 
 ## Pending interactions
 
+Mac sources advertise `interactionsEnabled` for supported live native requests.
+Approval content v2 adds `contentVersion: 2`,
+`approval`, and ordered `responseOptions: [{id, label}]`; `detail` is empty.
+`approval` contains `toolName`, optional `workingDirectory` and `reason`, complete
+serialized `inputJSON`, normalized `action`, and `hasAdditionalInput`.
+Optional `inputKind` distinguishes complete `toolInput` (default), an
+`approvalRequest`, and a `providerPreview`. Optional `displayText` is provider
+presentation; it never replaces `inputJSON` or determines the approved action.
+
+| Action kind | Fields |
+| --- | --- |
+| `command`, `patch` | `text` |
+| `fileWrite` | `filePath`, `text` |
+| `fileEdit` | `filePath`, `before`, `text`, `replaceAll` |
+| `terminalInput` | Opaque string `terminalSessionID`, exact `text`, `operation` (`interrupt`, `poll`, `write`); optional confirmed `parentCommand` |
+| `tool` | Uninterpreted input |
+
+The desktop decodes documented provider schemas once. Clients retain `inputJSON`
+as text to preserve unknown fields and numbers; it is not native JSON byte identity.
+`parentCommand` requires adapter context matching the terminal session, not a
+guess from a parent call ID.
+
+Question content v3 requires a Boolean `allowsText` on each question, preserving
+selection-only requests without adding a custom-answer option. V1 questions
+continue to allow text. Secret entry and arbitrary forms require native review.
+
+GET advertises its maximum `X-Paceman-Content-Version` (currently `3`); Watch
+request messages similarly advertise `contentVersion`. Older clients receive only
+supported profiles, with native continuation for newer content. Selecting a v2 choice submits
+`action: "choose", optionID`; the broker accepts only offered IDs. Empty choices
+or unknown content versions require native review.
+
+Input is bounded to 32 KiB and normalized requests to 64 KiB; oversize content
+is rejected, never truncated. V1 `detail` uses Paceman-owned headers with a separate
+compatibility decoder. Display excerpts never replace the complete input.
+
 Snapshot `interactionsEnabled: true` advertises these endpoints; sources that omit
 it provide activity only. Both endpoints use the paired bearer credential.
 
@@ -496,15 +536,19 @@ it provide activity only. Both endpoints use the paired bearer credential.
   Requests contain `requestID`, `version: 1`, provider, canonical hashed `sessionID`,
   kind (`approval` or `question`), title, detail, questions, and monotonic
   `remainingSeconds`. Questions contain `id`, `prompt`, `multiple`, and `options`
-  with label/description. Request IDs identify hook invocations, not tools or titles.
+  with label/description. Request IDs identify live invocations, not tools or titles.
+  Provider identifiers are extensible ASCII namespaces, not a two-provider enum;
+  enabled providers remain an adapter-owned capability. Native tool names are
+  interpreted only within their provider's documented schema.
 - `POST /v1/interactions`: supplies generation, requestID, version, idempotencyKey,
-  and action (`allowOnce`, `deny`, `answer`, `release`). Answers map question IDs to
-  `{selected: [option indices], text}`. First valid response wins; identical retries
+  and action (`allowOnce`, `deny`, `answer`, `release`; v2 approvals use `choose`
+  with `optionID`). Answers map question IDs to
+  `{selected: [option indices], text}`; a selection may include a text comment.
+  Indices refer to the immutable options of that exact request/version.
+  First valid response wins; identical retries
   return the same `submitted` receipt. Stale requests or conflicting retries return
-  409. A receipt confirms submission, not agent consumption. Release resumes native
-  handling without a decision. Access invalidation changes the broker generation.
+  409. A receipt confirms submission, not agent consumption. Release relinquishes
+  the remote card without deciding the native request. Access invalidation changes the broker generation.
 
-The separate private socket accepts newline JSON `{request, timeoutSeconds}` and
-returns one action/answers object. Limits: 64 KiB per request or HTTP submission,
-32 concurrent requests, four questions and 16 options per question. See
+Limits: 32 concurrent requests, four questions and 16 options per question. See
 [retention and expiry](data-lifecycle.md#questions-and-approvals).

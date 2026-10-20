@@ -20,8 +20,6 @@ from service.network import ensure_private_route
 from macos.codex_hook import EVENTS as CODEX_EVENTS, QUESTION_MATCHER
 from service.hub import Store, endpoint
 from macos.paths import installed_app
-from macos import responses
-from service.interactions import RESPONSE_TIMEOUT_SECONDS
 
 ROOT = Path.home() / "Library/Application Support/Paceman"
 PLIST = Path.home() / "Library/LaunchAgents/ai.paceman.source.plist"
@@ -44,18 +42,13 @@ def missing_hooks(config_path: Path | None = None, script_path: Path | None = No
     except (OSError, ValueError, AttributeError):
         return list(events)
 
-    def installed(item, *, response=False):
+    def installed(item):
         if not isinstance(item, dict) or item.get("type") != "command":
             return False
         try:
             arguments = shlex.split(item.get("command", ""))
         except (TypeError, ValueError):
             return False
-        if response:
-            return (len(arguments) == 5 and arguments[1:] == ["-B", str(script_path.with_name("interaction_hook.py")),
-                    "--provider", provider] and Path(arguments[0]).is_file()
-                    and script_path.with_name("interaction_hook.py").is_file()
-                    and item.get("timeout") == RESPONSE_TIMEOUT_SECONDS + 5)
         return (len(arguments) in (2, 3) and arguments[-1] == str(script_path)
                 and (len(arguments) == 2 or arguments[1] == "-B")
                 and Path(arguments[0]).is_file())
@@ -70,15 +63,7 @@ def missing_hooks(config_path: Path | None = None, script_path: Path | None = No
             and any(installed(item) and not item.get("if") and not item.get("async") and not item.get("asyncRewake") for item in group["hooks"])
             for group in groups
         )
-        responder = event not in ("PreToolUse", "PermissionRequest") or isinstance(groups, list) and any(
-            isinstance(group, dict) and isinstance(group.get("hooks"), list)
-            and (group.get("matcher") in (None, "", "*", ".*") if event == "PermissionRequest"
-                 else group.get("matcher") == ("^AskUserQuestion$" if provider == "claude" else QUESTION_MATCHER))
-            and any(installed(item, response=True) and not item.get("if") and not item.get("async")
-                    and not item.get("asyncRewake") for item in group["hooks"])
-            for group in groups
-        )
-        if not observer or not responder:
+        if not observer:
             missing.append(event)
     return missing
 
@@ -109,6 +94,7 @@ def status():
     value["configuredProviders"] = providers
     value["detectedProviders"] = detected_providers(root=ROOT)
     value["setupProviders"] = setup_providers(ROOT)
+    value.pop("responseHookCommands", None)
     value["missingHooksByProvider"] = {p: missing_hooks(provider=p) for p in providers}
     value["missingHooks"] = [event for missing in value["missingHooksByProvider"].values() for event in missing]
     try:
@@ -117,8 +103,6 @@ def status():
             value["hookCommands"] = {p: installed_hook_command(p, ROOT) or shlex.quote(arguments[1]) + " -B " +
                                     shlex.quote(str(ROOT / f"lib/macos/{p}_hook.py")) for p in providers}
             value["hookCommand"] = value["hookCommands"].get("codex")
-            value["responseHookCommands"] = {p: installed_hook_command(p, ROOT, response=True)
-                or responses.command(ROOT, arguments[1], p) for p in providers}
     except (OSError, ValueError, TypeError, plistlib.InvalidFileException):
         pass
     return value

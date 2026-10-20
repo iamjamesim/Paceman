@@ -121,7 +121,7 @@ struct WorkItem: Identifiable {
         // row still needs to say what was observed, without relying on a glyph.
         if historical { return session.state == .needsInput ? "Needs attention" : session.state.title }
         if request != nil { return nil }
-        if phase == .responded { return nil }
+        if phase == .responded { return status }
         if state == .needsInput && (returnedToComputer || response != nil) { return status }
         if state == .needsInput {
             return inputAvailability == .available || inputAvailability == .disabled
@@ -148,7 +148,7 @@ enum WorkPhase: Hashable {
     var group: WorkGroup {
         switch self {
         case .idle, .finished: return .recent
-        case .working, .responded: return .working
+        case .working: return .working
         default: return .attention
         }
     }
@@ -157,7 +157,7 @@ enum WorkPhase: Hashable {
         case .approval: return "Approval needed"
         case .question: return "Question for you"
         case .attention, .resolving: return "Needs your attention"
-        case .responded: return "Working"
+        case .responded: return "Response sent"
         case .continued: return "Continue in the agent app"
         default: return activity.title
         }
@@ -167,7 +167,8 @@ enum WorkPhase: Hashable {
         case .approval, .resolving: return .approval
         case .question: return .question
         case .attention, .continued: return .attention
-        case .working, .responded: return .working
+        case .working: return .working
+        case .responded: return .responded
         case .failed: return .failed
         case .finished: return .finished
         case .idle: return .idle
@@ -176,7 +177,7 @@ enum WorkPhase: Hashable {
 }
 
 enum WorkStatusToken: Hashable {
-    case approval, question, attention, working, failed, finished, idle
+    case approval, question, attention, working, failed, finished, idle, responded
     var symbol: String? {
         switch self {
         case .approval: return "hand.raised"
@@ -186,6 +187,7 @@ enum WorkStatusToken: Hashable {
         case .finished: return "checkmark.circle"
         case .idle: return "ellipsis.circle"
         case .working: return nil
+        case .responded: return "paperplane"
         }
     }
 }
@@ -258,7 +260,7 @@ struct WorkSectionData: Identifiable {
     static func item(session: AgentSession, source: PairedSource, model: CompanionModel,
                      inbox: InteractionInbox, computer: String, connected: Bool, current: Bool) -> WorkItem {
         let id = WorkIdentity(sourceID: source.sourceID, sessionID: session.id, provider: session.provider)
-        let pending = connected ? inbox.items.first { $0.source.sourceID == id.sourceID && $0.request.sessionID == id.sessionID && $0.request.provider == id.provider && inbox.isCurrent($0) }
+        let pending = connected ? inbox.pendingRequests(for: id).first
             ?? model.watchPending(for: id) : nil
         return WorkItem(id: id, session: session,
             computer: computer, historical: !current,

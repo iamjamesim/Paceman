@@ -14,6 +14,7 @@ class WatchWorkTests(unittest.TestCase):
             result = subprocess.run([
                 "xcrun", "swiftc", "-warnings-as-errors", "-parse-as-library",
                 str(root / "ios/Shared/LiveActivityRoute.swift"),
+                str(root / "ios/Shared/ApprovalContent.swift"),
                 str(root / "ios/Shared/WatchWork.swift"),
                 str(root / "tests/WatchWorkTransitions.swift"), "-o", str(binary),
             ], capture_output=True, text=True)

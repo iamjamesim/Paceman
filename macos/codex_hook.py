@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Small, non-blocking Codex lifecycle adapter; no prompts or transcript content."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,7 @@ import socket
 import sys
 import time
 import unicodedata
+import uuid
 
 
 EVENTS = {
@@ -58,6 +60,23 @@ def workspace_label(cwd):
     return label
 
 
+def attention_key(data):
+    """Match documented tool input without exporting it to the source.
+
+    PermissionRequest has no documented tool_use_id. Count each invocation and
+    correlate completions by tool/input scope, never by unrelated tool activity.
+    """
+    tool, arguments = data.get("tool_name"), data.get("tool_input")
+    if not isinstance(tool, str) or arguments is None:
+        return None
+    if tool in ("Bash", "PowerShell", "apply_patch") and isinstance(arguments, dict):
+        # Description is an approval reason for these canonical built-ins only.
+        arguments = {k: v for k, v in arguments.items() if k != "description"}
+    encoded = json.dumps([tool, data.get("cwd"), arguments], sort_keys=True,
+                         separators=(",", ":"), allow_nan=False).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def main():
     data = {}
     try:
@@ -76,6 +95,11 @@ def main():
             path = Path(os.environ.get("PACEMAN_HOOK_SOCKET", str(Path.home() / "Library/Application Support/Paceman/hook.sock")))
             message = {"command": "agent-event", "session": session, "turn": turn,
                        "event": event, "hook": data["hook_event_name"]}
+            if data.get("hook_event_name") in ("PermissionRequest", "PostToolUse"):
+                if scope := attention_key(data):
+                    message["attentionKey"] = scope
+                if data.get("hook_event_name") == "PermissionRequest":
+                    message["approvalToken"] = str(uuid.uuid4())
             tool_id = data.get("tool_use_id")
             if isinstance(tool_id, str) and 0 < len(tool_id) <= 160:
                 message["toolID"] = tool_id
