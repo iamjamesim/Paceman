@@ -550,10 +550,5 @@ it provide activity only. Both endpoints use the paired bearer credential.
   409. A receipt confirms submission, not agent consumption. Release relinquishes
   the remote card without deciding the native request. Access invalidation changes the broker generation.
 
-The separate private socket accepts newline JSON `{request, timeoutSeconds}` and
-returns one action/answers object. For v2 ingress, `approval.input` is the complete
-JSON value; the desktop normalizer produces the public `inputJSON` and typed
-`action`. Adapters do not submit the normalized public object back as ingress.
-Limits: 64 KiB per request or HTTP submission,
-32 concurrent requests, four questions and 16 options per question. See
+Limits: 32 concurrent requests, four questions and 16 options per question. See
 [retention and expiry](data-lifecycle.md#questions-and-approvals).

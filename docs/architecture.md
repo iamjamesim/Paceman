@@ -53,8 +53,8 @@ window in Codex Limit and Codex Reset. Older or empty data from another computer
 cannot erase that reading.
 
 WatchConnectivity also supplies the paired-computer list and cached readings.
-The Watch app uses the phone's session presentation and supports continuation
-on iPhone through live WatchConnectivity.
+The Watch app uses the phone's session presentation to answer supported questions
+and approvals, with continuation on iPhone through live WatchConnectivity.
 Codex usage remains available in complications.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
