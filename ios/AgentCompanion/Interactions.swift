@@ -372,6 +372,7 @@ struct InputResponseState {
         let generation = UUID().uuidString
         bySource[source.sourceID] = ["approval", "question", "multiple"].map { kind in
             let approval = kind == "approval"
+            let selectionOnly = approval && ProcessInfo.processInfo.arguments.contains("--selection-only-question")
             let terminal = approval && ProcessInfo.processInfo.arguments.contains("--approval-terminal-payload")
             let question = InteractionQuestion(id: "q0",
                 prompt: kind == "multiple" ? "What should appear on the watch?" : "When should we ask people to enable notifications?",
@@ -379,16 +380,21 @@ struct InputResponseState {
                     ? [.init(label: "Tasks that need me", description: "Questions and approvals."),
                        .init(label: "Finished tasks", description: "A quiet update when work is done.")]
                     : [.init(label: "After the first result", description: "Let people try it before asking for notification access."),
-                       .init(label: "During setup", description: "Have notifications ready for the first task.")])
+                       .init(label: "During setup", description: "Have notifications ready for the first task.")],
+                allowsText: selectionOnly ? false : nil)
             let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: approval ? "codex" : "claude",
-                sessionID: "review-" + kind, kind: approval ? "approval" : "question",
+                sessionID: "review-" + kind, kind: approval && !selectionOnly ? "approval" : "question",
                 title: terminal ? "Allow write_stdin?" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? "Allow \(ApprovalPreviewFixtures.pageTool)?" : approval ? "Run the tests?" : "Question",
-                detail: terminal ? "" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? ApprovalPreviewFixtures.largePageEdit : approval ? "Command: npm test -- checkout" : "",
-                questions: approval ? [] : [question], remainingSeconds: 120,
-                contentVersion: terminal ? 2 : nil, approval: terminal ? ApprovalPreviewFixtures.terminal() : nil,
+                detail: terminal || selectionOnly ? "" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? ApprovalPreviewFixtures.largePageEdit : approval ? "Command: npm test -- checkout" : "",
+                questions: approval && !selectionOnly ? [] : [question], remainingSeconds: 120,
+                contentVersion: selectionOnly ? 3 : terminal ? 2 : nil, approval: terminal ? ApprovalPreviewFixtures.terminal() : nil,
                 responseOptions: terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : nil)
             return PendingInput(source: source, generation: generation, request: request,
                 expiresAtUptime: ProcessInfo.processInfo.systemUptime + 3600)
+        }
+        if ProcessInfo.processInfo.arguments.contains("--response-sent-preview"), let item = bySource[source.sourceID]?.first {
+            didSubmit(item, submission: .init(generation: generation, requestID: item.request.id, version: 1,
+                idempotencyKey: UUID().uuidString, action: "allowOnce", answers: [:]))
         }
         if ProcessInfo.processInfo.arguments.contains("--request-queue-preview") {
             previewQueueSourceID = source.sourceID

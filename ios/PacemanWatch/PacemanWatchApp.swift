@@ -897,7 +897,7 @@ private enum WatchWorkPreview {
     static var scenario: String? {
         ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--work-preview=") }.map { String($0.dropFirst(15)) }
     }
-    static let detailScenarios = ["native-input", "native-long", "approval", "approval-json", "approval-unknown", "approval-large", "approval-long-command", "approval-write", "approval-edit", "approval-terminal", "approval-terminal-text", "approval-terminal-poll", "question", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
+    static let detailScenarios = ["native-input", "native-long", "approval", "approval-json", "approval-unknown", "approval-large", "approval-long-command", "approval-write", "approval-edit", "approval-terminal", "approval-terminal-text", "approval-terminal-poll", "question", "selection-only", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
     static var responseSent = false
     static var task: WatchWorkTask {
         let state = ["working-detail": "working", "finished-detail": "finished", "failed-detail": "failed", "idle-detail": "idle", "historical-detail": "working"][scenario ?? ""] ?? "needs_input"
@@ -922,9 +922,10 @@ private enum WatchWorkPreview {
                     freshUntil: now + (scenario == "stale" ? -600 : 300))
             }
             var values = scenario == "stale" ? tasks.dropFirst().map { $0 } : tasks
-            if responseSent, !values.isEmpty {
-                values[0].presentationStatus = "Working"
-                values[0].presentationGroup = "Working"
+            if responseSent || scenario == "response-sent", !values.isEmpty {
+                values[0].presentationStatus = "Response sent"
+                values[0].presentationGroup = "Needs you"
+                values[0].presentationSymbol = "paperplane"
             }
             if scenario == "ambiguous" {
                 values.append(WatchWorkTask(sourceID: "preview", sessionID: "another", provider: "claude",
@@ -953,7 +954,8 @@ private enum WatchWorkPreview {
             ? "When should we ask people to enable notifications, so they understand the benefit before granting access?"
             : "When should we ask for notifications?", multiple: false,
             options: [.init(label: scenario == "long-option" ? "Homepage https://paceman.ai opens on the hero with the tagline and TestFlight button" : "After the first result", description: scenario == "long-option" ? "" : "Let people try Paceman first."),
-                      .init(label: "During setup", description: "Ready for the first task.")])
+                      .init(label: "During setup", description: "Ready for the first task.")],
+            allowsText: scenario == "selection-only" ? false : nil)
         let approval = scenario.hasPrefix("approval") || scenario == "live-approval"
         let terminal = scenario.hasPrefix("approval-terminal")
         let payload: ApprovalPayload? = terminal ? ApprovalPreviewFixtures.terminal(scenario == "approval-terminal-poll" ? "poll" : scenario == "approval-terminal-text" ? "write" : "interrupt")
@@ -970,7 +972,7 @@ private enum WatchWorkPreview {
                 : approval ? "Tool: Bash\nWorking directory: /Projects/Paceman\nCommand: swift test" : "",
             questions: approval ? [] : scenario == "multiple" ? [question, .init(id: "q1", prompt: "Which screens?", multiple: true, options: [])]
                 : scenario == "free-text" ? [.init(id: "q0", prompt: "What should we improve next?", multiple: false, options: [])] : [question], remainingSeconds: 120,
-            contentVersion: payload == nil ? nil : 2, approval: payload,
+            contentVersion: scenario == "selection-only" ? 3 : payload == nil ? nil : 2, approval: payload,
             responseOptions: terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : payload == nil ? nil : ApprovalPreviewFixtures.choices)
         return try encoded(WatchWorkPrompt(generation: "preview", request: request, remainingSeconds: scenario == "expired-request" ? -1 : 120))
     }

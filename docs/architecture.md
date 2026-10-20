@@ -77,7 +77,7 @@ requests lead Needs you, Working follows state-entry order, and Recent is newest
 first. Review freezes session order and drains each session after confirmed
 responses. Row visits stay in the selected session until dismissed. New requests
 never replace a draft or uncertain response; other sessions do not auto-present.
-Confirmed responses use Working presentation without changing observed agent state.
+Submission receipts show Response sent until native activity advances.
 
 Live Activity taps open a unique session only when its source generation and
 revision match; otherwise they open source-filtered Activity. Watch resolves through

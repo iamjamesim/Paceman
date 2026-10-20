@@ -1555,11 +1555,11 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(approval.group, .attention)
         XCTAssertEqual(approval.statusToken, .approval)
         let sent = item(.needsInput, delivery: .sent)
-        XCTAssertEqual(sent.group, .working, "A confirmed response no longer needs a user action")
+        XCTAssertEqual(sent.group, .attention, "A submission receipt cannot establish that the native agent resumed")
         XCTAssertEqual(sent.state, .needsInput, "Submission does not manufacture an agent state transition")
-        XCTAssertEqual(sent.statusToken, .working)
-        XCTAssertNil(sent.statusDetail)
-        XCTAssertEqual(sent.status, "Working")
+        XCTAssertEqual(sent.statusToken, .responded)
+        XCTAssertEqual(sent.statusDetail, "Response sent")
+        XCTAssertEqual(sent.status, "Response sent")
         let running = item(.working)
         XCTAssertEqual(running.group, .working)
         XCTAssertEqual(running.statusToken, .working)
@@ -1637,9 +1637,9 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(returned.status, "Continue in Claude Code")
         var submitted = first
         submitted.delivery = .sent
-        XCTAssertEqual(submitted.group, .working)
-        XCTAssertEqual(submitted.statusToken, .working)
-        XCTAssertEqual(submitted.status, "Working")
+        XCTAssertEqual(submitted.group, .attention)
+        XCTAssertEqual(submitted.statusToken, .responded)
+        XCTAssertEqual(submitted.status, "Response sent")
         inbox.remove(pending.source.sourceID)
         XCTAssertNil(inbox.receipt(for: id))
     }
@@ -1870,15 +1870,17 @@ extension InteractionTests {
         XCTAssertEqual(sent["submitted"] as? Bool, true)
         watch = try await exported()
         XCTAssertEqual(try phone().phase, .responded)
-        XCTAssertEqual(watch.status, "Working")
+        XCTAssertEqual(watch.status, "Response sent")
+        XCTAssertEqual(watch.symbol(at: Date()), "paperplane")
         XCTAssertEqual(watch.group(at: Date()), try phone().group.rawValue)
         XCTAssertEqual(watch.state, "needs_input", "Native routing still checks the exact observed state")
         let receiptList = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(sent["workSnapshot"] as? Data))
-        XCTAssertEqual(receiptList.tasks.first?.group(at: Date()), "Working", "The acknowledgement carries the phone's new list without another source read")
+        XCTAssertEqual(receiptList.tasks.first?.group(at: Date()), "Needs you", "The acknowledgement preserves the native pending state")
         let snapshot = try XCTUnwrap(model.snapshots[sourceID])
         let duringConnectionGap = WorkCatalog.item(session: try XCTUnwrap(snapshot.sessions?.first), source: source,
             model: model, inbox: model.interactions, computer: "Test", connected: false, current: true)
-        XCTAssertEqual(duringConnectionGap.group, .working, "A short connection lease cannot undo an accepted answer")
+        XCTAssertEqual(duringConnectionGap.group, .attention)
+        XCTAssertEqual(duringConnectionGap.status, "Response sent", "A connection gap neither undoes the receipt nor proves native progress")
         let historical = WorkCatalog.item(session: try XCTUnwrap(snapshot.sessions?.first), source: source,
             model: model, inbox: model.interactions, computer: "Test", connected: false, current: false)
         XCTAssertEqual(historical.group, .lastKnown)
@@ -1953,7 +1955,7 @@ extension InteractionTests {
         XCTAssertTrue(model.interactions.items.isEmpty, "Lifecycle-cleared sensitive inbox content must stay cleared")
         let cached = await model.handleWatchWork(["operation": "cachedTasks"])
         let exported = try JSONDecoder().decode(WatchWorkSnapshot.self, from: XCTUnwrap(cached["data"] as? Data))
-        XCTAssertEqual(exported.tasks.first?.status, "Working", "The bounded Watch receipt still supplies presentation metadata")
+        XCTAssertEqual(exported.tasks.first?.status, "Response sent", "The bounded Watch receipt cannot manufacture native progress")
     }
 
     @MainActor func testWatchResponseKeepsExactSubmissionAcrossLostReplyAndReopening() async throws {
