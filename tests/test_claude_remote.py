@@ -266,6 +266,25 @@ class NativeClaudeTests(unittest.TestCase):
         self.assertEqual(updated['annotations'], {'preserve': True})
         self.assertEqual(updated['answers'], {'Question 0?': 'Blue', 'Question 1?': 'Green'})
 
+    def test_question_option_previews_do_not_prevent_remote_answers(self):
+        raw = approval()
+        original = dict(questions=[dict(question='Which layout?', header='Layout', multiSelect=False,
+            options=[dict(label='Compact', description='Less space', preview='<div>Compact</div>'),
+                     dict(label='Spacious', description='More space', preview='```\nWide card\n```')])],
+            annotations={'preserve': True})
+        raw['request'].update(tool_name='AskUserQuestion', input=original, requires_user_interaction=True)
+        self.checkpoint([raw])
+        public = self.broker.pending()['requests'][0]
+        self.assertEqual(public.get('contentVersion', 1), 1)
+        self.assertEqual(public['questions'][0]['options'], [
+            dict(label='Compact', description='Less space'), dict(label='Spacious', description='More space')])
+        _, encode = decode_request(SESSION, raw)
+        response = encode(dict(action='answer', answers=dict(q0=dict(selected=[1], text=''))))
+        self.assertEqual(response['response']['request_id'], 'first')
+        self.assertEqual(response['response']['response']['updatedInput'],
+                         {**original, 'answers': {'Which layout?': 'Spacious'}})
+        self.assertNotIn('answers', original)
+
     def test_missing_native_checkpoint_is_not_assumed_to_mean_no_pending_requests(self):
         self.adapter.initialize()
         with self.assertRaises(ValueError):

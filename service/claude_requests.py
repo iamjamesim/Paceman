@@ -116,7 +116,7 @@ def question_content(payload):
         prompts.add(q['question'])
         options = []
         for option in q['options']:
-            if not isinstance(option, dict) or set(option) - {'label', 'description'}:
+            if not isinstance(option, dict) or set(option) - {'label', 'description', 'preview'}:
                 return None
             options.append(dict(label=option.get('label'), description=option.get('description', '')))
         normalized.append(dict(id=f'q{i}', prompt=q['question'], multiple=q.get('multiSelect', False), options=options))
