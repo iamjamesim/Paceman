@@ -331,7 +331,7 @@ struct TaskCardHeading: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(item?.session.displayName ?? "Task unavailable")
+                Text(item?.session.displayName ?? "Session unavailable")
                     .companionText(.label, theme: theme).accessibilityAddTraits(.isHeader)
                 if let item { Text(item.context).companionText(.supporting, theme: theme) }
             }.frame(maxWidth: .infinity, alignment: .leading)
