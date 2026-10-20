@@ -15,7 +15,7 @@ struct InputRequests: Decodable {
         }
         for request in value.requests {
             guard UUID(uuidString: request.id) != nil, request.version == 1, request.validContent,
-                  ["claude", "codex"].contains(request.provider),
+                  InteractionWire.identifier(request.provider),
                   ["approval", "question"].contains(request.kind),
                   request.sessionID.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil, !request.title.isEmpty,
                   request.title.unicodeScalars.count <= 256, request.detail.unicodeScalars.count <= 16384,
@@ -24,13 +24,6 @@ struct InputRequests: Decodable {
                   Set(request.questions.map(\.id)).count == request.questions.count,
                   request.kind == "question" ? !request.questions.isEmpty : request.questions.isEmpty else {
                 throw HubError.message("The computer returned an unsupported request.")
-            }
-            for question in request.questions {
-                guard !question.id.isEmpty, question.id.count <= 128, !question.prompt.isEmpty,
-                      question.prompt.unicodeScalars.count <= 4096, question.options.count <= 16,
-                      question.options.allSatisfy({ !$0.label.isEmpty && $0.label.unicodeScalars.count <= 512 && $0.description.unicodeScalars.count <= 2048 }) else {
-                    throw HubError.message("The computer returned an invalid question.")
-                }
             }
         }
         return value

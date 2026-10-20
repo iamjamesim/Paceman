@@ -38,11 +38,11 @@ def normalize_approval(provider, value):
             and isinstance(fields.get("chars", ""), str)):
         text = fields.get("chars", "")
         operation = "poll" if not text else "interrupt" if set(text) == {"\x03"} else "write"
-        action.update(kind="terminalInput", text=text, terminalSessionID=fields["session_id"], operation=operation)
+        action.update(kind="terminalInput", text=text, terminalSessionID=str(fields["session_id"]), operation=operation)
         if context is not None:
             action["parentCommand"] = context["command"]
         consumed = {"session_id", "chars"}
-    elif (tool in ("Bash", "PowerShell", "apply_patch")
+    elif (tool in {"codex": ("Bash", "PowerShell", "apply_patch"), "claude": ("Bash",)}.get(provider, ())
             and isinstance(fields.get("command"), str) and fields["command"].strip()):
         action.update(kind="patch" if tool == "apply_patch" else "command", text=fields["command"])
         consumed.add("command")

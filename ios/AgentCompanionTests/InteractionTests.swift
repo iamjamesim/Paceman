@@ -132,6 +132,75 @@ final class InteractionTests: XCTestCase {
         XCTAssertFalse(request.validContent)
     }
 
+    func testCommonRequestsAcceptNewProviderNamespacesWithoutGuessingTheirToolSchemas() throws {
+        var listing = fixture()
+        var requests = try XCTUnwrap(listing["requests"] as? [[String: Any]])
+        requests[0]["provider"] = "next-agent"
+        listing["requests"] = requests
+        let decoded = try InputRequests.decode(JSONSerialization.data(withJSONObject: listing), sourceID: sourceID)
+        XCTAssertEqual(decoded.requests.first?.provider, "next-agent")
+        XCTAssertEqual(ResponseGuidance.continuation(for: "next-agent"), "Continue in the agent app")
+        let session = AgentSession(id: "same-native-id", provider: "next-agent", state: .needsInput)
+        XCTAssertNil(session.appURL)
+        XCTAssertEqual(session.appLinkTitle, "Open agent app")
+        requests[0]["provider"] = "invalid provider"
+        listing["requests"] = requests
+        XCTAssertThrowsError(try InputRequests.decode(JSONSerialization.data(withJSONObject: listing), sourceID: sourceID))
+    }
+
+    func testCommonContentRejectsMixedVariantsUnknownVersionsAndInconsistentActions() {
+        let question = InteractionQuestion(id: "q0", prompt: "Which?", multiple: false,
+            options: [.init(label: "First", description: "")])
+        func approval(_ action: ApprovalPayload.Action, questions: [InteractionQuestion] = []) -> InputRequest {
+            InputRequest(requestID: UUID().uuidString, version: 1, provider: "next-agent", sessionID: String(repeating: "a", count: 64),
+                kind: "approval", title: "Review", detail: "", questions: questions, remainingSeconds: 60,
+                contentVersion: 2, approval: ApprovalPayload(toolName: "tool", input: .object([:]), action: action, hasAdditionalInput: false),
+                responseOptions: [.init(id: "yes", label: "Proceed")])
+        }
+        for action in [ApprovalPayload.Action(kind: "fileEdit", text: "After", filePath: "/tmp/a"),
+                       .init(kind: "command"), .init(kind: "command", text: "ls", filePath: "/tmp/a"),
+                       .init(kind: "terminalInput", text: "ordinary input", terminalSessionID: "terminal-α", operation: "interrupt"),
+                       .init(kind: "terminalInput", text: "\u{03}", terminalSessionID: "terminal-α", operation: "poll"),
+                       .init(kind: "future-action", text: "Unknown semantics")] {
+            let request = approval(action)
+            XCTAssertNil(request.content)
+            XCTAssertTrue(request.approvalChoices.isEmpty)
+            XCTAssertNil(request.approvalAction)
+        }
+        XCTAssertNil(approval(.init(kind: "command", text: "ls"), questions: [question]).content)
+        var supported = approval(.init(kind: "terminalInput", text: "\u{03}", terminalSessionID: "terminal-α", operation: "interrupt"))
+        guard case .approval(let payload, let choices) = supported.content,
+              case .terminalInput(let sessionID, _, .interrupt, _) = payload.action.content else {
+            return XCTFail("A supported action has a typed, provider-independent representation")
+        }
+        XCTAssertEqual(sessionID, "terminal-α")
+        XCTAssertEqual(choices.map(\.id), ["yes"])
+        supported.contentVersion = 99
+        XCTAssertNil(supported.content)
+        XCTAssertTrue(supported.approvalChoices.isEmpty, "An unknown version cannot invent legacy allow/deny choices")
+        let questionRequest = InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+            sessionID: "session", kind: "question", title: "Question", detail: "", questions: [question], remainingSeconds: 60)
+        guard case .questions = questionRequest.content else { return XCTFail("Expected a question profile") }
+        XCTAssertTrue(questionRequest.approvalChoices.isEmpty)
+        XCTAssertNil(questionRequest.approvalAction)
+    }
+
+    func testQuestionProfileValidatesTheSameBoundsForPhoneAndWatch() {
+        let validID = String(repeating: "q", count: 160)
+        let valid = InteractionQuestion(id: validID, prompt: "Which?", multiple: true,
+            options: [.init(label: "A", description: ""), .init(label: "B", description: "")])
+        XCTAssertTrue(valid.valid)
+        XCTAssertTrue(InputAnswer(selected: [1, 0], text: "日本語").valid(for: valid))
+        XCTAssertFalse(InputAnswer(selected: [0], text: "hidden\u{00}input").valid(for: valid))
+        for question in [InteractionQuestion(id: validID + "q", prompt: "Which?", multiple: false, options: []),
+                         .init(id: "id with spaces", prompt: "Which?", multiple: false, options: []),
+                         .init(id: "q0", prompt: "   ", multiple: false, options: []),
+                         .init(id: "q0", prompt: "Which?", multiple: false, options: [.init(label: " ", description: "")])] {
+            XCTAssertFalse(question.valid)
+            XCTAssertFalse(InputAnswer(text: "Answer").valid(for: question))
+        }
+    }
+
     func testStructuredUnknownInputPreservesNestedJSONNumbersNullsAndUnicode() throws {
         let data = Data(#"{"toolName":"mcp__pages__edit","input":{"operations":[{"metadata":{"width":210.5,"id":9007199254740993,"flag":true,"nil":null},"markdown":"日本語"}]},"action":{"kind":"tool"},"hasAdditionalInput":false}"#.utf8)
         let payload = try JSONDecoder().decode(ApprovalPayload.self, from: data)
@@ -189,7 +258,7 @@ final class InteractionTests: XCTestCase {
         let interrupt = ApprovalActionContent(ApprovalPreviewFixtures.terminal())
         XCTAssertEqual(interrupt.title("Allow write_stdin?"), "Interrupt this terminal?")
         XCTAssertEqual(interrupt.body, "Ctrl-C × 2")
-        XCTAssertEqual(interrupt.terminalSessionID, 35467)
+        XCTAssertEqual(interrupt.terminalSessionID, "35467")
         XCTAssertEqual(interrupt.sections.map(\.label), ["Input", "Running command"])
         XCTAssertTrue(interrupt.originalInput.contains("\\u0003"))
         let write = ApprovalActionContent(ApprovalPreviewFixtures.terminal("write", parent: false))
@@ -506,12 +575,12 @@ final class InteractionTests: XCTestCase {
                            "options": [["label": "Small change", "description": "Keep the layout."],
                                        ["label": "New layout", "description": "Explore more."]]]]]]]
     }
-    func testRequestValidationRejectsWrongSourceUnsupportedProviderAndDuplicateIdentity() throws {
+    func testRequestValidationRejectsWrongSourceInvalidProviderAndDuplicateIdentity() throws {
         let value = fixture()
         let data = try JSONSerialization.data(withJSONObject: value)
         XCTAssertEqual(try InputRequests.decode(data, sourceID: sourceID).requests.count, 1)
         XCTAssertThrowsError(try InputRequests.decode(data, sourceID: "another-source"))
-        for change in ["provider": "unknown", "remainingSeconds": 0, "sessionID": "not-hashed", "version": 2] as [String: Any] {
+        for change in ["provider": "invalid provider", "remainingSeconds": 0, "sessionID": "not-hashed", "version": 2] as [String: Any] {
             var invalid = value
             var requests = try XCTUnwrap(invalid["requests"] as? [[String: Any]])
             requests[0][change.key] = change.value
@@ -553,7 +622,7 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(decoded.requests[0].provider, "codex")
         XCTAssertTrue(InputAnswer(text: "Keep it simple").valid(for: decoded.requests[0].questions[0]))
     }
-    func testQuestionAnswersRequireOneValidModeAndRespectCardinality() {
+    func testQuestionAnswersPreserveSelectionAndCommentAndRespectCardinality() {
         let single = InteractionQuestion(id: "q0", prompt: "Which?", multiple: false,
             options: [.init(label: "A", description: ""), .init(label: "B", description: "")])
         XCTAssertFalse(InputAnswer().valid(for: single))
@@ -562,7 +631,7 @@ final class InteractionTests: XCTestCase {
         XCTAssertFalse(InputAnswer(selected: [0, 1]).valid(for: single))
         XCTAssertFalse(InputAnswer(selected: [2]).valid(for: single))
         XCTAssertFalse(InputAnswer(selected: [0, 0]).valid(for: single))
-        XCTAssertFalse(InputAnswer(selected: [0], text: "other").valid(for: single))
+        XCTAssertTrue(InputAnswer(selected: [0], text: "other").valid(for: single), "The wire contract preserves a selection plus a comment")
         let multiple = InteractionQuestion(id: "q0", prompt: "Which?", multiple: true, options: single.options)
         XCTAssertTrue(InputAnswer(selected: [0, 1]).valid(for: multiple))
     }
@@ -2051,13 +2120,14 @@ extension InteractionTests {
     func testWatchAnswerValidationAndActivityLease() throws {
         let data = try JSONSerialization.data(withJSONObject: fixture())
         let request = try XCTUnwrap(InputRequests.decode(data, sourceID: sourceID).requests.first)
-        for answers in [["q0": InputAnswer(selected: [0])], ["q0": InputAnswer(text: "After the first result")]] {
+        for answers in [["q0": InputAnswer(selected: [0])], ["q0": InputAnswer(text: "After the first result")],
+                        ["q0": InputAnswer(selected: [0], text: "Both")]] {
             let submission = InputSubmission(generation: "generation", requestID: request.id, version: 1,
                 idempotencyKey: UUID().uuidString, action: "answer", answers: answers)
             XCTAssertTrue(submission.valid(for: request))
         }
         for answers in [[:], ["other": InputAnswer(selected: [0])], ["q0": InputAnswer(selected: [2])],
-                        ["q0": InputAnswer(selected: [0], text: "Both")], ["q0": InputAnswer(selected: [0, 1])]] {
+                        ["q0": InputAnswer(selected: [0, 1])]] {
             let submission = InputSubmission(generation: "generation", requestID: request.id, version: 1,
                 idempotencyKey: UUID().uuidString, action: "answer", answers: answers)
             XCTAssertFalse(submission.valid(for: request))
@@ -2298,7 +2368,7 @@ extension InteractionTests {
         XCTAssertFalse(valid(["timing": InputAnswer(selected: [0])]))
         XCTAssertTrue(valid(["timing": InputAnswer(selected: [0]), "screens": InputAnswer(selected: [0, 1])]))
         XCTAssertTrue(valid(["timing": InputAnswer(selected: [0]), "screens": InputAnswer(text: "Both screens")]))
-        XCTAssertFalse(valid(["timing": InputAnswer(selected: [0]), "screens": InputAnswer(selected: [0], text: "Both")]))
+        XCTAssertTrue(valid(["timing": InputAnswer(selected: [0]), "screens": InputAnswer(selected: [0], text: "Both")]))
         let largeQuestions = (0..<4).map {
             InteractionQuestion(id: "q\($0)", prompt: "Explain", multiple: false, options: [])
         }

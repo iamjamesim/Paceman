@@ -60,12 +60,12 @@ def _keys(value, required, optional=()):
 def _request(value):
     _keys(value, ("provider", "sessionID", "kind", "title", "detail"),
           ("questions", "contentVersion", "approval", "responseOptions"))
-    if value["provider"] not in ("codex", "claude") or value["kind"] not in ("approval", "question"):
+    if value["kind"] not in ("approval", "question"):
         raise BrokerError("invalid_request")
     if (not isinstance(value["sessionID"], str)
             or not re.fullmatch(r"[0-9a-f]{64}", value["sessionID"])):
         raise BrokerError("invalid_request")
-    result = {"provider": value["provider"], "sessionID": _identifier(value["sessionID"]),
+    result = {"provider": _identifier(value["provider"]), "sessionID": _identifier(value["sessionID"]),
               "kind": value["kind"], "title": _text(value["title"], 256),
               "detail": _text(value["detail"], 16384, empty=True), "questions": []}
     content_version = value.get("contentVersion", 1)

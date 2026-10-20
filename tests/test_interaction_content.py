@@ -25,7 +25,7 @@ class ApprovalContentTests(unittest.TestCase):
             self.assertEqual(result['action']['kind'], 'terminalInput')
             self.assertEqual(result['action']['operation'], operation)
             self.assertEqual(result['action']['text'], text)
-            self.assertEqual(result['action']['terminalSessionID'], 35467)
+            self.assertEqual(result['action']['terminalSessionID'], '35467')
             self.assertEqual(result['input'], raw['input'])
             self.assertTrue(result['hasAdditionalInput'])
             self.assertNotIn('parentCommand', result['action'])
@@ -45,7 +45,7 @@ class ApprovalContentTests(unittest.TestCase):
 
     def test_documented_commands_and_files_decode_at_source_and_preserve_extensions(self):
         for provider in ('codex', 'claude'):
-            for tool in ('Bash', 'PowerShell', 'apply_patch'):
+            for tool in (('Bash', 'PowerShell', 'apply_patch') if provider == 'codex' else ('Bash',)):
                 raw = request(tool)['approval']
                 result = normalize_approval(provider, raw)
                 self.assertEqual(result['input'], raw['input'])
@@ -73,6 +73,25 @@ class ApprovalContentTests(unittest.TestCase):
             self.assertEqual(result['input'], fields)
             self.assertEqual(result['action'], {'kind': 'tool'})
             self.assertNotIn('reason', result)
+
+    def test_tool_names_are_scoped_to_their_provider_and_new_providers_stay_opaque(self):
+        for provider, tool in [('claude', 'PowerShell'), ('claude', 'apply_patch'),
+                               ('next-agent', 'Bash'), ('next-agent', 'Write')]:
+            with self.subTest(provider=provider, tool=tool):
+                raw = request(tool)['approval']
+                result = normalize_approval(provider, raw)
+                self.assertEqual(result['action'], {'kind': 'tool'})
+                self.assertEqual(result['input'], raw['input'])
+                self.assertNotIn('reason', result)
+        broker = InteractionBroker(provider_enabled=lambda provider: provider == 'next-agent')
+        self.addCleanup(broker.close)
+        pending = broker._publish(dict(request(), provider='next-agent'), 60)
+        self.assertEqual(pending.public['provider'], 'next-agent')
+        self.assertEqual(pending.public['approval']['action'], {'kind': 'tool'})
+        with self.assertRaises(BrokerError):
+            broker._publish(request(), 60)
+        with self.assertRaises(BrokerError):
+            broker._publish(dict(request(), provider='not an identifier'), 60)
 
     def test_v2_choices_are_explicit_exact_and_retried_by_id(self):
         broker = InteractionBroker()

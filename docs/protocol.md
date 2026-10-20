@@ -499,7 +499,7 @@ and `reason`, complete JSON `input`, normalized `action`, and
 (`filePath`, `text`), `fileEdit` (`filePath`, `before`, `text`, `replaceAll`), or
 `tool` (uninterpreted JSON). Only documented built-ins are unpacked; MCP
 arguments retain every field. Views render this model without provider decoding.
-`terminalInput` actions carry `terminalSessionID`, exact `text`, and an
+`terminalInput` actions carry an opaque string `terminalSessionID`, exact `text`, and an
 `operation` of `interrupt`, `poll`, or `write`. An optional `parentCommand` comes
 only from adapter-supplied terminal context with a matching session ID; a parent
 call ID alone never establishes a human-readable command. Complete original
@@ -526,10 +526,15 @@ it provide activity only. Both endpoints use the paired bearer credential.
   kind (`approval` or `question`), title, detail, questions, and monotonic
   `remainingSeconds`. Questions contain `id`, `prompt`, `multiple`, and `options`
   with label/description. Request IDs identify hook invocations, not tools or titles.
+  Provider identifiers are extensible ASCII namespaces, not a two-provider enum;
+  enabled providers remain an adapter-owned capability. Native tool names are
+  interpreted only within their provider's documented schema.
 - `POST /v1/interactions`: supplies generation, requestID, version, idempotencyKey,
   and action (`allowOnce`, `deny`, `answer`, `release`; v2 approvals use `choose`
   with `optionID`). Answers map question IDs to
-  `{selected: [option indices], text}`. First valid response wins; identical retries
+  `{selected: [option indices], text}`; a selection may include a text comment.
+  Indices refer to the immutable options of that exact request/version.
+  First valid response wins; identical retries
   return the same `submitted` receipt. Stale requests or conflicting retries return
   409. A receipt confirms submission, not agent consumption. Release resumes native
   handling without a decision. Access invalidation changes the broker generation.

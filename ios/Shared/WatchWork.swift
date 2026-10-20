@@ -21,14 +21,40 @@ enum ResponseGuidance {
 struct InteractionOption: Codable, Equatable {
     let label: String
     let description: String
+    var valid: Bool { InteractionWire.text(label, limit: 512) && InteractionWire.text(description, limit: 2048, empty: true) }
 }
 struct InteractionQuestion: Codable, Identifiable, Equatable {
     let id: String
     let prompt: String
     let multiple: Bool
     let options: [InteractionOption]
+    // This is the bounded text/selection profile, not an arbitrary native form.
+    var valid: Bool {
+        InteractionWire.identifier(id) && InteractionWire.text(prompt, limit: 4096)
+            && options.count <= 16 && options.allSatisfy(\.valid)
+    }
 }
+
+enum InteractionWire {
+    static func identifier(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 160 && value.utf8.allSatisfy {
+            (65...90).contains($0) || (97...122).contains($0) || (48...57).contains($0) || [45, 46, 58, 95].contains($0)
+        }
+    }
+    static func text(_ value: String, limit: Int, empty: Bool = false) -> Bool {
+        value.unicodeScalars.count <= limit && (empty || !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            && value.unicodeScalars.allSatisfy { $0.value >= 32 || [9, 10, 13].contains($0.value) }
+    }
+}
+
+/// A versioned wire envelope. `content` is the validated common representation;
+/// provider-native methods and correlation IDs belong to the desktop adapter.
 struct InputRequest: Codable, Identifiable, Equatable {
+    enum Content {
+        case legacyApproval(String)
+        case approval(ApprovalPayload, choices: [ApprovalResponseOption])
+        case questions([InteractionQuestion])
+    }
     let requestID: String
     let version: Int
     let provider: String
@@ -43,18 +69,38 @@ struct InputRequest: Codable, Identifiable, Equatable {
     var responseOptions: [ApprovalResponseOption]? = nil
     var id: String { requestID }
     var approvalAction: ApprovalActionContent? {
-        if contentVersion == 2, let approval { return ApprovalActionContent(approval) }
-        return ApprovalDetailContent(detail).action.map { ApprovalActionContent($0) }
+        switch content {
+        case .approval(let approval, _): return ApprovalActionContent(approval)
+        case .legacyApproval(let detail): return ApprovalDetailContent(detail).action.map { ApprovalActionContent($0) }
+        default: return nil
+        }
     }
     var approvalChoices: [ApprovalResponseOption] {
-        contentVersion == 2 ? responseOptions ?? [] : [.init(id: "allowOnce", label: "Allow once"), .init(id: "deny", label: "Decline")]
+        switch content {
+        case .approval(_, let choices): return choices
+        case .legacyApproval: return [.init(id: "allowOnce", label: "Allow once"), .init(id: "deny", label: "Decline")]
+        default: return []
+        }
     }
-    var validContent: Bool {
-        if contentVersion == nil || contentVersion == 1 { return approval == nil && responseOptions == nil }
-        guard contentVersion == 2, kind == "approval", detail.isEmpty, approval?.valid == true,
+    var validContent: Bool { content != nil }
+    var content: Content? {
+        if contentVersion == nil || contentVersion == 1 {
+            guard approval == nil, responseOptions == nil else { return nil }
+            switch kind {
+            case "approval": return questions.isEmpty ? .legacyApproval(detail) : nil
+            case "question":
+                guard (1...4).contains(questions.count), Set(questions.map(\.id)).count == questions.count,
+                      questions.allSatisfy(\.valid) else { return nil }
+                return .questions(questions)
+            default: return nil
+            }
+        }
+        guard contentVersion == 2, kind == "approval", detail.isEmpty, questions.isEmpty,
+              let approval, approval.valid,
               let options = responseOptions, options.count <= 16,
-              Set(options.map(\.id)).count == options.count else { return false }
-        return options.allSatisfy { !$0.id.isEmpty && $0.id.count <= 160 && !$0.label.isEmpty && $0.label.unicodeScalars.count <= 512 }
+              Set(options.map(\.id)).count == options.count,
+              options.allSatisfy({ InteractionWire.identifier($0.id) && InteractionWire.text($0.label, limit: 512) }) else { return nil }
+        return .approval(approval, choices: options)
     }
 }
 
@@ -63,10 +109,10 @@ struct InputAnswer: Codable, Equatable {
     var text: String = ""
     func valid(for question: InteractionQuestion) -> Bool {
         let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return text.unicodeScalars.count <= 4096 && Set(selected).count == selected.count
+        return question.valid && InteractionWire.text(text, limit: 4096, empty: true) && Set(selected).count == selected.count
             && selected.allSatisfy { question.options.indices.contains($0) }
             && (question.multiple || selected.count <= 1)
-            && (hasText != !selected.isEmpty)
+            && (hasText || !selected.isEmpty)
     }
 }
 struct InputSubmission: Codable, Equatable {

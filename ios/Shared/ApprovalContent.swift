@@ -59,14 +59,46 @@ indirect enum ApprovalJSON: Codable, Equatable {
 }
 struct ApprovalPayload: Codable, Equatable {
     struct Action: Codable, Equatable {
+        enum TerminalOperation: String { case interrupt, poll, write }
+        enum Content {
+            case command(String), patch(String)
+            case fileWrite(path: String, text: String)
+            case fileEdit(path: String, before: String, after: String, replaceAll: Bool)
+            case terminalInput(sessionID: String, text: String, operation: TerminalOperation, parentCommand: String?)
+            case tool
+        }
         let kind: String
         var text: String? = nil
         var filePath: String? = nil
         var before: String? = nil
         var replaceAll: Bool? = nil
-        var terminalSessionID: Int? = nil
+        var terminalSessionID: String? = nil
         var operation: String? = nil
         var parentCommand: String? = nil
+        var content: Content? {
+            guard (kind == "terminalInput" || (terminalSessionID == nil && operation == nil && parentCommand == nil)),
+                  (kind == "fileEdit" || (before == nil && replaceAll == nil)),
+                  (["fileWrite", "fileEdit"].contains(kind) || filePath == nil) else { return nil }
+            switch kind {
+            case "command": return text.map(Content.command)
+            case "patch": return text.map(Content.patch)
+            case "fileWrite":
+                guard let filePath, !filePath.isEmpty, let text else { return nil }
+                return .fileWrite(path: filePath, text: text)
+            case "fileEdit":
+                guard let filePath, !filePath.isEmpty, let before, let text else { return nil }
+                return .fileEdit(path: filePath, before: before, after: text, replaceAll: replaceAll == true)
+            case "terminalInput":
+                guard let terminalSessionID, !terminalSessionID.isEmpty, let text,
+                      let operation = operation.flatMap(TerminalOperation.init(rawValue:)) else { return nil }
+                let interrupt = !text.isEmpty && text.allSatisfy { $0 == "\u{03}" }
+                guard (operation == .interrupt && interrupt) || (operation == .poll && text.isEmpty)
+                    || (operation == .write && !text.isEmpty && !interrupt) else { return nil }
+                return .terminalInput(sessionID: terminalSessionID, text: text, operation: operation, parentCommand: parentCommand)
+            case "tool": return text == nil ? .tool : nil
+            default: return nil
+            }
+        }
     }
     let toolName: String
     var workingDirectory: String? = nil
@@ -76,15 +108,7 @@ struct ApprovalPayload: Codable, Equatable {
     let hasAdditionalInput: Bool
     var valid: Bool {
         guard !toolName.isEmpty, toolName.count <= 256 else { return false }
-        switch action.kind {
-        case "command", "patch": return action.text != nil
-        case "fileWrite": return action.text != nil && action.filePath?.isEmpty == false
-        case "fileEdit": return action.text != nil && action.before != nil && action.filePath?.isEmpty == false
-        case "terminalInput": return action.text != nil && action.terminalSessionID != nil
-            && ["interrupt", "poll", "write"].contains(action.operation ?? "")
-        case "tool": return true
-        default: return false
-        }
+        return action.content != nil
     }
 }
 struct ApprovalResponseOption: Codable, Identifiable, Equatable {
@@ -110,8 +134,8 @@ struct ApprovalActionContent {
     let targetPath: String?
     let previousBody: String?
     let replacesAll: Bool
-    let terminalSessionID: Int?
-    let terminalOperation: String?
+    let terminalSessionID: String?
+    let terminalOperation: ApprovalPayload.Action.TerminalOperation?
     let parentCommand: String?
 
     init(_ action: String) {
@@ -182,28 +206,30 @@ struct ApprovalActionContent {
         explanation = payload.reason
         originalInput = payload.input.formatted
         otherArguments = payload.hasAdditionalInput ? originalInput : nil
-        let text = payload.action.text ?? originalInput
-        if payload.action.kind == "terminalInput" {
-            switch payload.action.operation {
-            case "interrupt": body = text.count == 1 ? "Ctrl-C" : "Ctrl-C × \(text.count)"
-            case "poll": body = "No characters will be sent."
-            default: body = ApprovalJSON.string(text).formatted
+        var path: String?, before: String?, terminal: String?, command: String?
+        var replaces = false
+        var operation: ApprovalPayload.Action.TerminalOperation?
+        switch payload.action.content {
+        case .command(let text): kind = .command; body = text
+        case .patch(let text): kind = .patch; body = text
+        case .fileWrite(let filePath, let text): kind = .fileWrite; body = text; path = filePath
+        case .fileEdit(let filePath, let previous, let text, let all):
+            kind = .fileEdit; body = text; path = filePath; before = previous; replaces = all
+        case .terminalInput(let sessionID, let text, let terminalOperation, let parent):
+            kind = .terminalInput; terminal = sessionID; operation = terminalOperation; command = parent
+            switch terminalOperation {
+            case .interrupt: body = text.count == 1 ? "Ctrl-C" : "Ctrl-C × \(text.count)"
+            case .poll: body = "No characters will be sent."
+            case .write: body = ApprovalJSON.string(text).formatted
             }
-        } else { body = text }
-        targetPath = payload.action.filePath
-        previousBody = payload.action.before
-        replacesAll = payload.action.replaceAll == true
-        terminalSessionID = payload.action.terminalSessionID
-        terminalOperation = payload.action.operation
-        parentCommand = payload.action.parentCommand
-        switch payload.action.kind {
-        case "command": kind = .command
-        case "patch": kind = .patch
-        case "fileWrite": kind = .fileWrite
-        case "fileEdit": kind = .fileEdit
-        case "terminalInput": kind = .terminalInput
-        default: kind = .tool
+        default: kind = .tool; body = originalInput
         }
+        targetPath = path
+        previousBody = before
+        replacesAll = replaces
+        terminalSessionID = terminal
+        self.terminalOperation = operation
+        parentCommand = command
     }
 
     var sections: [Section] {
@@ -230,8 +256,8 @@ struct ApprovalActionContent {
         case .fileEdit: return "Edit this file?"
         case .terminalInput:
             switch terminalOperation {
-            case "interrupt": return "Interrupt this terminal?"
-            case "poll": return "Read terminal output?"
+            case .interrupt: return "Interrupt this terminal?"
+            case .poll: return "Read terminal output?"
             default: return "Send input to this terminal?"
             }
         case .tool: return original
@@ -290,7 +316,7 @@ enum ApprovalPreviewFixtures {
             : .object(["file_path": .string(path), "content": .string(text)])
         return ApprovalPayload(toolName: editing ? "Edit" : "Write", workingDirectory: "/Projects/Paceman",
             input: input, action: .init(kind: editing ? "fileEdit" : "fileWrite", text: text,
-                filePath: path, before: editing ? before : nil, replaceAll: editing), hasAdditionalInput: false)
+                filePath: path, before: editing ? before : nil, replaceAll: editing ? true : nil), hasAdditionalInput: false)
     }
     static let choices: [ApprovalResponseOption] = [
         .init(id: "once", label: "Allow once"), .init(id: "session", label: "Allow for this session"),
@@ -300,7 +326,7 @@ enum ApprovalPreviewFixtures {
         let input: ApprovalJSON = .object(["session_id": .number(35467), "chars": .string(text),
             "parent_call_id": .string("parent_fixture"), "approval_id": .string("approval_fixture")])
         return ApprovalPayload(toolName: "write_stdin", input: input,
-            action: .init(kind: "terminalInput", text: text, terminalSessionID: 35467, operation: operation,
+            action: .init(kind: "terminalInput", text: text, terminalSessionID: "35467", operation: operation,
                 parentCommand: parent ? "xcodebuild test-without-building -resultBundlePath /private/tmp/paceman-watch-tests.xcresult\n" + String(repeating: "  -only-testing:AgentCompanionTests/InteractionTests\n", count: 40) : nil),
             hasAdditionalInput: true)
     }
