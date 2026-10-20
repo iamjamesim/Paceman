@@ -143,5 +143,6 @@ def question_answer(original, request, reply):
         parts = [q['options'][i]['label'] for i in selected]
         if text.strip():
             parts.append(text)
+        # Claude Code's native multi-select answer format joins labels with ", ".
         native[q['prompt']] = ', '.join(parts)
     return dict(behavior='allow', updatedInput={**deepcopy(original), 'answers': native})

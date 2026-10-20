@@ -304,6 +304,17 @@ class NativeClaudeTests(unittest.TestCase):
         wait_for(lambda: 'first' in self.adapter.retired)
         self.assertEqual(len(self.sent), 1, 'Only the read-only checkpoint was sent')
 
+    def test_multi_select_question_uses_native_comma_space_answer_format(self):
+        raw = approval()
+        raw['request'].update(tool_name='AskUserQuestion', input=dict(questions=[dict(
+            question='Which colors?', multiSelect=True, options=[dict(label='Blue'), dict(label='Red')])]))
+        _, encode = decode_request(SESSION, raw)
+        for text, expected in [('', 'Blue, Red'), ('Green', 'Blue, Red, Green')]:
+            with self.subTest(text=text):
+                response = encode(dict(action='answer', answers=dict(q0=dict(selected=[0, 1], text=text))))
+                self.assertEqual(response['response']['response']['updatedInput'],
+                    {**raw['request']['input'], 'answers': {'Which colors?': expected}})
+
     def test_missing_native_checkpoint_is_not_assumed_to_mean_no_pending_requests(self):
         self.adapter.initialize()
         with self.assertRaises(ValueError):
