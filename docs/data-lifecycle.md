@@ -96,6 +96,12 @@ content or answering prompts. Native questions and approvals retain their full
 content, choices and lifetime in the agent. Phone and Watch continue in that
 agent rather than offering a reduced decision.
 
+Native approval attention survives unrelated tool completions and prompts in the
+same turn. A matching tool completion resolves one approval; another pending
+approval or question still keeps the session in Needs input. The hooks do not
+expose a complete decision-resolved lifecycle, so an uncorrelated approval stays
+pending until a confirmed turn outcome. A mobile request deadline cannot clear it.
+
 For compatibility with older computers, clients still support the retired
 response protocol. Those requests and answers are RAM-only and excluded from
 snapshots, SQLite, APNs, accessory BLE and diagnostics. A request belongs to one
@@ -105,3 +111,6 @@ Paceman acceptance, not agent consumption. Responses are never retried
 automatically. Backgrounding clears forms; uncertain submissions require an
 explicit identical retry. Watch content travels only through live
 WatchConnectivity replies, never application context or queued transfers.
+Pending sibling requests take precedence over a submission receipt. A selected
+session advances after confirmation, retaining the current form while a response
+is uncertain. Only an explicit Review flow advances between sessions.

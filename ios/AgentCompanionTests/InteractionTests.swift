@@ -1312,6 +1312,57 @@ final class InteractionTests: XCTestCase {
         XCTAssertTrue(inbox.pendingRequests(for: identity).isEmpty)
     }
 
+    @MainActor func testSiblingAttentionSurvivesPhoneAndWatchReceiptsInEitherOrder() throws {
+        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
+                                  clientID: "client", credential: "fixture")
+        let model = CompanionModel(preview: true)
+        let identity = WorkIdentity(sourceID: sourceID, sessionID: "one", provider: "codex")
+        let session = AgentSession(id: identity.sessionID, provider: identity.provider, state: .needsInput)
+        for kinds in [["approval", "approval"], ["approval", "question"], ["question", "approval"]] {
+            for firstIndex in [0, 1] {
+                for viaWatch in [false, true] {
+                    let inbox = InteractionInbox()
+                    inbox.setForeground(true)
+                    defer { inbox.setForeground(false) }
+                    let generation = UUID().uuidString
+                    let pending = kinds.map { kind in
+                        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: identity.provider,
+                            sessionID: identity.sessionID, kind: kind, title: "Request", detail: "",
+                            questions: kind == "question" ? [.init(id: "q0", prompt: "Which?", multiple: false,
+                                options: [.init(label: "First", description: "")])] : [], remainingSeconds: 60)
+                        return PendingInput(source: source, generation: generation, request: request,
+                            expiresAtUptime: ProcessInfo.processInfo.systemUptime + 60)
+                    }
+                    pending.forEach { inbox.observeWatchRequest($0) }
+                    let first = pending[firstIndex], sibling = pending[1 - firstIndex]
+                    let response = InputSubmission(generation: generation, requestID: first.request.id, version: 1,
+                        idempotencyKey: UUID().uuidString, action: first.request.kind == "approval" ? "allowOnce" : "answer",
+                        answers: first.request.kind == "question" ? ["q0": InputAnswer(selected: [0])] : [:])
+                    XCTAssertTrue(response.valid(for: first.request))
+                    inbox.observeWatchSubmission(first, submission: response, phase: .unconfirmed)
+                    XCTAssertEqual(inbox.pendingRequests(for: identity).map(\.id), pending.map(\.id))
+                    XCTAssertEqual(inbox.response(for: first)?.submission, response, "Uncertain retries retain the exact decision")
+                    if viaWatch { inbox.observeWatchSubmission(first, submission: response, phase: .submitted) }
+                    else { inbox.didSubmit(first, submission: response) }
+                    // Duplicate receipts and delayed single-request reads cannot consume a sibling.
+                    inbox.observeWatchSubmission(first, submission: response, phase: .submitted)
+                    inbox.observeWatchRequest(first)
+                    XCTAssertEqual(inbox.pendingRequests(for: identity).map(\.id), [sibling.id])
+                    let row = WorkCatalog.item(session: session, source: source, model: model, inbox: inbox,
+                        computer: "Mac", connected: true, current: true)
+                    XCTAssertEqual(row.request?.id, sibling.id)
+                    XCTAssertEqual(row.group, .attention, "Shared phone/Watch presentation prioritizes pending input over a receipt")
+                    XCTAssertEqual(row.phase, sibling.request.kind == "approval" ? .approval : .question)
+                    XCTAssertEqual(session.state, .needsInput, "Transport acceptance does not change native source state")
+                    let expired = PendingInput(source: source, generation: generation, request: first.request,
+                        expiresAtUptime: ProcessInfo.processInfo.systemUptime - 1)
+                    inbox.observeWatchRequest(expired)
+                    XCTAssertEqual(inbox.pendingRequests(for: identity).map(\.id), [sibling.id], "Expiry affects only that request")
+                }
+            }
+        }
+    }
+
     @MainActor func testSessionFlowProtectsDraftThenAdvancesOnlyOnExactAcknowledgement() throws {
         let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
                                   clientID: "client", credential: "fixture")
