@@ -217,6 +217,8 @@ class NativeRequests:
         with self.lock:
             if self.closed:
                 return
+            if event == 'catch_up_truncated' and self.initializing and not self.connected:
+                return  # The in-flight owner checkpoint replaces incomplete history.
             if event in ('catch_up_truncated', 'error'):
                 raise ValueError('native stream gap')
             if event == 'session_update':
@@ -241,6 +243,11 @@ class NativeRequests:
                 ('claude:' + native_session).encode()).hexdigest() == self.session
             service_alias = 'cse_' + self.remote[len('session_'):]
             if native_session not in (self.remote, service_alias) and not local_match:
+                reply = frame.get('response')
+                checkpoint = (frame.get('type') == 'control_response' and isinstance(reply, dict)
+                              and reply.get('request_id') == self.initializing)
+                if self.initializing and not self.connected and not checkpoint:
+                    return  # A resumed remote session can replay an earlier local owner.
                 raise ValueError('wrong native session')
             kind = frame.get('type')
             if kind == 'control_response':

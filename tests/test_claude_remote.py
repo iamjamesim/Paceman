@@ -80,6 +80,32 @@ class NativeClaudeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.adapter.receive('client_event', envelope(frame, self.sequence+1))
 
+    def test_join_recovers_truncated_history_and_earlier_local_owner_from_current_checkpoint(self):
+        self.adapter.initialize()
+        checkpoint_id = self.sent[-1]['request_id']
+        self.adapter.receive('catch_up_truncated', {})
+        old = approval('old'); old['session_id'] = 'earlier-local-owner'
+        self.receive(old)
+        self.assertEqual(self.broker.pending()['requests'], [])
+        self.assertFalse(self.adapter.connected)
+        self.receive(dict(type='control_response', session_id='cse_native_proof', response=dict(
+            subtype='success', request_id=checkpoint_id, pending_permission_requests=[approval('current')],
+            pending_user_dialog_requests=[])))
+        self.assertTrue(self.adapter.connected)
+        self.assertEqual(set(self.adapter.native), {'current'})
+        self.assertEqual(len(self.broker.pending()['requests']), 1)
+        with self.assertRaises(ValueError):
+            self.adapter.receive('catch_up_truncated', {})
+        self.assertEqual(len(self.sent), 1, 'Recovery only sent the read-only checkpoint')
+
+    def test_checkpoint_from_a_different_session_is_still_rejected_during_join(self):
+        self.adapter.initialize()
+        with self.assertRaises(ValueError):
+            self.receive(dict(type='control_response', session_id='different-owner', response=dict(
+                subtype='success', request_id=self.sent[-1]['request_id'], pending_permission_requests=[],
+                pending_user_dialog_requests=[])))
+        self.assertFalse(self.adapter.connected)
+
     def test_local_answer_immediately_withdraws_exact_card_without_waiting_for_tool_completion(self):
         self.checkpoint([approval('first'), approval('sibling')])
         first, sibling = self.broker.pending()['requests']
