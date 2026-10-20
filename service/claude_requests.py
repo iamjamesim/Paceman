@@ -137,6 +137,7 @@ def question_answer(original, request, reply):
         if (not isinstance(selected, list) or not isinstance(text, str) or len(text) > 4096
                 or any(type(i) is not int or not 0 <= i < len(q['options']) for i in selected)
                 or len(set(selected)) != len(selected) or not q['multiple'] and len(selected) > 1
+                or not q['multiple'] and selected and text.strip()
                 or not selected and not text.strip()):
             return None
         parts = [q['options'][i]['label'] for i in selected]
