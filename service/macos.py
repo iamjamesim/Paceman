@@ -108,6 +108,14 @@ class MacSource:
         with self.lock:
             return [session for session, _ in self.turn_ids.values()] if "codex" in self.providers else []
 
+    def native_active_sessions(self):
+        with self.lock, self.store.connect() as db:
+            if self.closed or "codex" not in self.providers:
+                return {}
+            active = {row['id'] for row in db.execute(
+                "SELECT id FROM mac_sessions WHERE state IN ('working','needs_input')")}
+            return {session: turn for key, (session, turn) in self.turn_ids.items() if key in active}
+
     def native_requests_changed(self, session, by_turn):
         key = hashlib.sha256(("codex:" + session).encode()).hexdigest()
         with self.lock:

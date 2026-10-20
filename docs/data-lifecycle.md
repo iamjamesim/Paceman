@@ -98,9 +98,10 @@ do not expose every native approval decision.
 
 Requests and answers are RAM-only and excluded from snapshots, SQLite, APNs,
 accessory BLE and diagnostics. Codex desktop requests use private versioned IPC
-and belong to the existing native owner until resolution or disconnect; this
-does not attach to CLI sessions. Async question replies use native steering,
-whose follower interface does not expose a caller-supplied turn fence.
+and belong to the existing native owner until resolution or disconnect. CLI
+requests rejoin active, already-loaded threads on the native app-server daemon
+without changing their settings. Paceman never starts the daemon or a turn.
+Async question replies use native steering and exact question IDs.
 Claude uses an already-enabled native Remote Control connection and the native
 login's session scope. Only control events are requested; native request IDs and
 pending-request checkpoints govern lifetime. Local answers clear immediately;

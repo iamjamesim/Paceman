@@ -1,7 +1,7 @@
 """Ephemeral responses to live agent-owned requests.
 
 An HTTP receipt confirms submission to Paceman, never agent consumption. The
-private socket lifetime owns each request; neither requests nor answers persist.
+native adapter owns each request's lifetime; neither requests nor answers persist.
 """
 from __future__ import annotations
 

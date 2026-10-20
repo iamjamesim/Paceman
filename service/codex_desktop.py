@@ -138,6 +138,10 @@ class DesktopRequests:
         self.thread.start()
         return self
 
+    def unavailable(self, session):
+        with self.lock:
+            return session not in self.owners and (self.connection is None or session in self.retry_at)
+
     def __exit__(self, *_):
         self.stop.set()
         if self.connection is not None:

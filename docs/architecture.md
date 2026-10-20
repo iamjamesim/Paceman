@@ -62,8 +62,8 @@ are in [data lifecycle](data-lifecycle.md).
 
 ## Questions and approvals
 
-The Mac mirrors supported requests from Codex's existing desktop owner through
-versioned IPC, and from Claude's existing Remote Control connection.
+The Mac mirrors supported requests from Codex's existing desktop owner or local
+CLI app-server daemon, and from Claude's existing Remote Control connection.
 Native prompts remain available; unsupported interactions continue there. Setup
 removes response hooks; lifecycle observers never answer requests. See
 [interaction lifecycle](data-lifecycle.md#questions-and-approvals).

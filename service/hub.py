@@ -803,8 +803,16 @@ def main():
                     stack.enter_context(ResponseListener(server.interactions, args.interaction_socket))
                 if args.source == "macos":
                     from service.codex_desktop import DesktopRequests
-                    stack.enter_context(DesktopRequests(server.interactions, server.adapter.native_sessions,
-                        attention=server.adapter.native_requests_changed))
+                    from service.codex_daemon import DaemonRequests
+                    desktop = DesktopRequests(server.interactions,
+                        lambda: [s for s in server.adapter.native_sessions() if not daemon.owns(s)],
+                        attention=server.adapter.native_requests_changed)
+                    daemon = DaemonRequests(server.interactions,
+                        lambda: {s: turn for s, turn in server.adapter.native_active_sessions().items()
+                                 if daemon.owns(s) or desktop.unavailable(s)},
+                        attention=server.adapter.native_requests_changed)
+                    stack.enter_context(desktop)
+                    stack.enter_context(daemon)
                     from service.claude_remote import RemoteRequests
                     stack.enter_context(RemoteRequests(server.interactions, server.adapter.native_claude_sessions,
                         attention=server.adapter.native_claude_requests_changed,

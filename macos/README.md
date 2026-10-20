@@ -125,7 +125,8 @@ Codes expire after five minutes; choose **New code** if needed. Keep the pairing
 
 Questions and approvals stay in Codex or Claude Code with all native response
 choices. Paceman mirrors supported live requests for answering from phone or
-Watch. Enable Remote Control in Claude for remote answers. Setup removes response
+Watch. Claude requires native Remote Control; Codex CLI uses its native
+app-server daemon. Setup removes response
 hooks and keeps activity observers. Native integration remains under
 validation; see [current limits](../docs/data-lifecycle.md#questions-and-approvals).
 
