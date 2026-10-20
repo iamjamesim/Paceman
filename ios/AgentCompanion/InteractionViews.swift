@@ -200,7 +200,7 @@ struct InteractionDetail: View {
                         if presentation.sections.count > 1 {
                             Text(section.label).companionText(.label, theme: theme)
                         }
-                        ApprovalExpandableText(text: section.text, label: section.label, theme: theme, summarizeJSON: presentation.kind == .tool)
+                        ApprovalExpandableText(text: section.text, label: section.label, theme: theme)
                     }
                     if presentation.otherArguments != nil {
                         ApprovalExpandableText(text: presentation.originalInput, label: "Tool input", theme: theme,
@@ -246,18 +246,16 @@ private struct ApprovalExpandableText: View {
     let theme: CompanionTheme
     var code = true
     var startsCollapsed = false
-    var summarizeJSON = false
     @State private var expanded = false
 
     var body: some View {
         let preview = ApprovalTextPreview(text, surface: .phone)
         let collapsible = startsCollapsed || preview.needsExpansion
-        let summary = !expanded && preview.needsExpansion && summarizeJSON ? preview.jsonSummary : nil
         VStack(alignment: .leading, spacing: 8) {
             if expanded && collapsible { expansionButton }
             if expanded || !startsCollapsed {
-                Text(text.isEmpty ? "Empty text" : expanded ? preview.fullText : summary ?? (preview.excerpt + (preview.needsExpansion ? "…" : "")))
-                    .companionText(code && summary == nil ? .code : .body, theme: theme)
+                Text(text.isEmpty ? "Empty text" : expanded ? preview.fullText : preview.excerpt + (preview.needsExpansion ? "…" : ""))
+                    .companionText(code ? .code : .body, theme: theme)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(code ? 12 : 0)
