@@ -390,12 +390,15 @@ class OmarchySource:
     def identity(row):
         return ProcessIdentity(row["pid"], row["start_ticks"], row["boot_id"])
 
+    def _tracking_maps(self):
+        return (self.session_refs, self.native_turns, self.pending_questions,
+                self.native_attention, self.pending_turn_events, self.confirmed_turns)
+
     def _persist_tracking(self, db):
         # Restore only while the same kernel-verified owner is still alive.
         # Monotonic deadlines are valid within that owner's Linux boot.
         live = {row[0] for row in db.execute("SELECT session_id FROM omarchy_processes WHERE closed=0")}
-        for mapping in (self.session_refs, self.native_turns, self.pending_questions,
-                        self.native_attention, self.pending_turn_events, self.confirmed_turns):
+        for mapping in self._tracking_maps():
             for key in mapping.keys() - live:
                 mapping.pop(key, None)
         db.execute("DELETE FROM omarchy_tracking WHERE id NOT IN "
@@ -491,7 +494,8 @@ class OmarchySource:
                 if self.pending_turn_events.get(key) is not batch or not self.processes.is_alive(batch['owner']):
                     continue
                 rows = metadata.get(batch['session'])
-                if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+                if not isinstance(rows, list) or not rows or not all(
+                        isinstance(row, dict) and isinstance(row.get('id'), str) for row in rows):
                     continue
                 latest = rows[0].get('id')
                 events = [event for event in batch['events'] if event['turn'] == latest]
@@ -512,8 +516,18 @@ class OmarchySource:
                 self.pending_turn_events.pop(key, None)
                 self.pending_questions.pop(key, None)
                 self.native_attention.pop(key, None)
+                self.confirmed_turns.pop(key, None)
+                known = {row['id'] for row in rows}
+                remaining = [event for event in batch['events'] if event['turn'] not in known]
                 for event in events:
                     self.receive(event, peer_pid=batch['owner'].pid)
+                if remaining:
+                    # Hooks arriving during the read may describe a newer turn
+                    # that has not reached saved metadata. Verify them again
+                    # against the turn we just recovered, preserving order.
+                    self.pending_turn_events[key] = dict(session=batch['session'], previous=latest,
+                        owner=batch['owner'], events=remaining)
+                    self.next_recovery_at = 0.0
                 tracked.append(({'id': key, 'turn': latest}, batch['owner']))
                 refs[key] = batch['session']
             with self.store.connect() as db:
@@ -543,8 +557,11 @@ class OmarchySource:
                 db.execute("UPDATE omarchy_sessions SET state='idle' WHERE id=?", (row["session_id"],))
                 db.execute("DELETE FROM omarchy_processes WHERE session_id=?", (row["session_id"],))
                 db.execute("DELETE FROM omarchy_claude WHERE id=?", (row["session_id"],))
-                self.pending_questions.pop(row["session_id"], None)
-                self.native_turns.pop(row["session_id"], None)
+                db.execute("DELETE FROM omarchy_tracking WHERE id=?", (row["session_id"],))
+                # Clear before a hook can register a replacement owner under
+                # the same session key, even when the turn ID is unchanged.
+                for mapping in self._tracking_maps():
+                    mapping.pop(row["session_id"], None)
 
     def tick(self, *, force=False):
         with self.lock:

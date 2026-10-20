@@ -247,6 +247,75 @@ class LinuxSourceParityTests(unittest.TestCase):
         self.assertEqual(self.store.snapshot()['state'], 'working')
         self.assertEqual(self.source.native_active_sessions(), {'session': 'next'})
 
+    def test_recovery_preserves_newer_turn_hook_received_during_metadata_read(self):
+        self.codex(hook='UserPromptSubmit')
+        self.codex('needs-input', turn='resumed', hook='PermissionRequest')
+        started, done = threading.Event(), threading.Event()
+        self.addCleanup(done.set)
+        def reader(_sessions):
+            started.set()
+            if not done.wait(2):
+                raise TimeoutError('metadata fixture was not released')
+            return {'session': [{'id': 'resumed', 'status': 'completed'},
+                                {'id': 'turn', 'status': 'completed'}]}
+        self.source.turn_metadata_reader = reader
+        self.source.next_recovery_at = 0
+        self.source.tick(force=True)
+        self.assertTrue(started.wait(1))
+        self.codex('needs-input', turn='newest', hook='PermissionRequest')
+        done.set()
+        self.source.recovery_thread.join(2)
+        self.assertFalse(self.source.recovery_thread.is_alive())
+        key = hashlib.sha256(b'codex:session').hexdigest()
+        self.assertIn(key, self.source.pending_turn_events)
+        pending = self.source.pending_turn_events[key]
+        self.assertEqual(pending['previous'], 'resumed')
+        self.assertEqual([event['turn'] for event in pending['events']], ['newest'])
+        self.assertEqual(self.source.next_recovery_at, 0)
+        current = self.recover({'session': [{'id': 'newest', 'status': 'inProgress'},
+            {'id': 'resumed', 'status': 'completed'}, {'id': 'turn', 'status': 'completed'}]})
+        self.assertEqual(current['state'], 'needs_input')
+        self.assertEqual(self.source.native_active_sessions(), {'session': 'newest'})
+        self.assertFalse(self.source.pending_turn_events)
+
+    def test_replacement_codex_owner_cannot_inherit_attention_or_pending_recovery(self):
+        self.codex(hook='UserPromptSubmit')
+        self.source.native_requests_changed('session', {'turn': True})
+        self.codex('needs-input', turn='unknown', hook='PermissionRequest')
+        key = hashlib.sha256(b'codex:session').hexdigest()
+        self.assertIn(key, self.source.pending_turn_events)
+        self.owner = ProcessIdentity(100, '2', 'boot')
+        current = self.codex(hook='UserPromptSubmit')
+        self.assertEqual(current['state'], 'working')
+        self.assertNotIn(key, self.source.native_attention)
+        self.assertNotIn(key, self.source.pending_turn_events)
+        with self.store.connect() as db:
+            tracking = db.execute('SELECT * FROM omarchy_tracking WHERE id=?', (key,)).fetchone()
+            self.assertIsNone(tracking['attention_turn'])
+            self.assertIsNone(tracking['waiting'])
+        self.restart()
+        self.assertEqual(self.store.snapshot()['state'], 'working')
+
+    def test_replacement_owner_clears_previous_confirmed_turn(self):
+        self.codex(hook='UserPromptSubmit')
+        self.recover({'session': [{'id': 'turn', 'status': 'completed'}]})
+        self.assertTrue(self.source.confirmed_turns)
+        self.owner = ProcessIdentity(100, '2', 'boot')
+        self.codex(hook='UserPromptSubmit')
+        self.assertFalse(self.source.confirmed_turns)
+
+    def test_replacement_claude_owner_cannot_inherit_native_attention(self):
+        self.claude('UserPromptSubmit')
+        key = self.source.native_claude_sessions()[0][0]
+        self.source.native_claude_requests_changed(key, 'turn', True)
+        self.assertEqual(self.store.snapshot()['state'], 'needs_input')
+        self.owner = ProcessIdentity(100, '2', 'boot')
+        current = self.claude('UserPromptSubmit')
+        self.assertEqual(current['state'], 'working')
+        self.assertNotIn(key, self.source.native_attention)
+        self.restart()
+        self.assertEqual(self.store.snapshot()['state'], 'working')
+
     def test_native_claude_rejoin_resolves_hook_wait_without_hiding_parallel_native_request(self):
         self.claude('UserPromptSubmit')
         self.claude('PreToolUse', tool_name='AskUserQuestion', tool_use_id='ask')
