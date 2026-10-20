@@ -191,6 +191,16 @@ final class InteractionTests: XCTestCase {
         XCTAssertFalse(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60).supportsWatchAnswer)
         request.contentVersion = 3
         XCTAssertFalse(request.validContent)
+        request.responseOptions = [.init(id: "session", label: "Always allow this command prefix",
+            confirmation: String(repeating: "Exact argument prefix\n", count: 100))]
+        request.contentVersion = 2
+        XCTAssertFalse(request.validContent, "An older client must not overlook required confirmation")
+        request.contentVersion = 4
+        let confirmedWire = try JSONEncoder().encode(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60))
+        let confirmed = try JSONDecoder().decode(WatchWorkPrompt.self, from: confirmedWire)
+        XCTAssertEqual(confirmed.request.approvalChoices[0].confirmation, request.responseOptions![0].confirmation)
+        XCTAssertTrue(confirmed.supportsWatchAnswer)
+        XCTAssertTrue(selected.valid(for: confirmed.request))
     }
 
     func testCommonRequestsAcceptNewProviderNamespacesWithoutGuessingTheirToolSchemas() throws {
@@ -2170,17 +2180,18 @@ extension InteractionTests {
     }
 
     @MainActor func testContentProfilesRequireWatchCapabilityAndSourceNegotiation() async throws {
-        for version in [2, 3] {
+        for version in [2, 3, 4] {
             let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
                 clientID: "client", credential: "fixture")
             let configuration = URLSessionConfiguration.ephemeral
             configuration.protocolClasses = [InteractionURLProtocol.self]
             let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
             model.pairedSources = [source]
-            let request = version == 2 ? InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+            let request = version != 3 ? InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
                 sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow Edit?", detail: "",
-                questions: [], remainingSeconds: 60, contentVersion: 2, approval: ApprovalPreviewFixtures.file(true),
-                responseOptions: ApprovalPreviewFixtures.choices) : InputRequest(requestID: UUID().uuidString,
+                questions: [], remainingSeconds: 60, contentVersion: version, approval: ApprovalPreviewFixtures.file(true),
+                responseOptions: version == 4 ? [.init(id: "confirm", label: "Allow this scope", confirmation: "Exact scope")]
+                    : ApprovalPreviewFixtures.choices) : InputRequest(requestID: UUID().uuidString,
                 version: 1, provider: "claude", sessionID: String(repeating: "a", count: 64), kind: "question",
                 title: "Choose", detail: "", questions: [.init(id: "q", prompt: "Which?", multiple: false,
                     options: [.init(label: "First", description: "")], allowsText: false)], remainingSeconds: 60,
@@ -2193,7 +2204,7 @@ extension InteractionTests {
                     if transport.request.url?.path == "/v1/snapshot" {
                         transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
                     } else {
-                        XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), "3")
+                        XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), "4")
                         transport.finish(listing)
                     }
                 }
@@ -2204,8 +2215,8 @@ extension InteractionTests {
             let legacy = await model.handleWatchWork(message)
             XCTAssertEqual(legacy["nativeOnly"] as? Bool, true)
             XCTAssertNil(legacy["data"])
-            if version == 3 {
-                message["contentVersion"] = 2
+            for olderVersion in 1..<version {
+                message["contentVersion"] = olderVersion
                 let older = await model.handleWatchWork(message)
                 XCTAssertEqual(older["nativeOnly"] as? Bool, true)
             }
@@ -2213,7 +2224,7 @@ extension InteractionTests {
             let modern = await model.handleWatchWork(message)
             let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(modern["data"] as? Data))
             XCTAssertEqual(prompt.request, request)
-            XCTAssertEqual(prompt.request.approvalChoices.count, version == 2 ? 3 : 0)
+            XCTAssertEqual(prompt.request.approvalChoices.count, version == 2 ? 3 : version == 4 ? 1 : 0)
         }
     }
 

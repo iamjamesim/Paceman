@@ -69,6 +69,22 @@ class InteractionHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(pending.response, {'action': 'choose', 'optionID': 'session'})
 
+    def test_approval_confirmation_requires_a_capable_client(self):
+        from tests.test_interaction_content import request
+        raw = request()
+        raw['contentVersion'] = 4
+        raw['responseOptions'][1]['confirmation'] = 'Allow this exact permission scope.'
+        handle = self.broker.publish_live(raw)
+        for version in (None, 1, 2, 3):
+            self.assertEqual(self.call('GET', '/v1/interactions', content_version=version)[1]['requests'], [])
+        status, listing = self.call('GET', '/v1/interactions', content_version=4)
+        self.assertEqual(status, 200)
+        self.assertEqual(listing['requests'][0]['responseOptions'][1]['confirmation'], raw['responseOptions'][1]['confirmation'])
+        status, _ = self.call('POST', '/v1/interactions', dict(generation=listing['generation'],
+            requestID=handle.public['requestID'], version=1, idempotencyKey='confirmed', action='choose', optionID='session'))
+        self.assertEqual(status, 200)
+        self.assertEqual(handle.response, {'action': 'choose', 'optionID': 'session'})
+
     def test_selection_only_questions_negotiate_and_reject_unoffered_text(self):
         pending = self.broker.publish_live(dict(provider='codex', sessionID='a'*64, kind='question',
             title='Choose', detail='', contentVersion=3, questions=[dict(id='q', prompt='Which?',

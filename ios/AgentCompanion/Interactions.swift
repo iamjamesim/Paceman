@@ -398,6 +398,7 @@ struct InputResponseState {
             let approval = kind == "approval"
             let selectionOnly = approval && ProcessInfo.processInfo.arguments.contains("--selection-only-question")
             let terminal = approval && ProcessInfo.processInfo.arguments.contains("--approval-terminal-payload")
+            let policy = approval && ProcessInfo.processInfo.arguments.contains("--approval-policy-payload")
             let question = InteractionQuestion(id: "q0",
                 prompt: kind == "multiple" ? "What should appear on the watch?" : "When should we ask people to enable notifications?",
                 multiple: kind == "multiple", options: kind == "multiple"
@@ -409,10 +410,12 @@ struct InputResponseState {
             let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: approval ? "codex" : "claude",
                 sessionID: "review-" + kind, kind: approval && !selectionOnly ? "approval" : "question",
                 title: terminal ? "Allow write_stdin?" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? "Allow \(ApprovalPreviewFixtures.pageTool)?" : approval ? "Run the tests?" : "Question",
-                detail: terminal || selectionOnly ? "" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? ApprovalPreviewFixtures.largePageEdit : approval ? "Command: npm test -- checkout" : "",
+                detail: terminal || selectionOnly || policy ? "" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? ApprovalPreviewFixtures.largePageEdit : approval ? "Command: npm test -- checkout" : "",
                 questions: approval && !selectionOnly ? [] : [question], remainingSeconds: 120,
-                contentVersion: selectionOnly ? 3 : terminal ? 2 : nil, approval: terminal ? ApprovalPreviewFixtures.terminal() : nil,
-                responseOptions: terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : nil)
+                contentVersion: selectionOnly ? 3 : policy ? 4 : terminal ? 2 : nil,
+                approval: policy ? ApprovalPreviewFixtures.policy : terminal ? ApprovalPreviewFixtures.terminal() : nil,
+                responseOptions: policy ? ApprovalPreviewFixtures.policyChoices
+                    : terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : nil)
             return PendingInput(source: source, generation: generation, request: request,
                 expiresAtUptime: ProcessInfo.processInfo.systemUptime + 3600)
         }

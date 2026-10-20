@@ -6,6 +6,7 @@ opaque handles to the exact offered decision, never reconstructed permissions.
 from copy import deepcopy
 import hashlib
 import json
+import shlex
 import uuid
 from service.interaction_content import codex_terminal_input
 
@@ -122,6 +123,7 @@ def decode_request(session, request, items=()):
     labels = {"accept": "Allow once", "acceptForSession": "Allow for this session",
               "decline": "Decline", "cancel": "Cancel this turn"}
     for i, decision in enumerate(decisions):
+        confirmation = None
         label = labels.get(decision) if isinstance(decision, str) else None
         if isinstance(decision, dict) and set(decision) == {"acceptWithExecpolicyAmendment"}:
             amendment = decision["acceptWithExecpolicyAmendment"]
@@ -129,6 +131,9 @@ def decode_request(session, request, items=()):
             if (isinstance(amendment, dict) and set(amendment) == {"execpolicy_amendment"} and isinstance(prefix, list)
                     and prefix and all(isinstance(p, str) for p in prefix)):
                 label = "Always allow commands starting with: " + json.dumps(prefix, ensure_ascii=False)
+                if len(label) > 512:
+                    label = "Always allow this command prefix"
+                    confirmation = "Allow future commands starting with these exact arguments:\n\n" + shlex.join(prefix)
         if isinstance(decision, dict) and set(decision) == {"applyNetworkPolicyAmendment"}:
             amendment = decision["applyNetworkPolicyAmendment"]
             rule = amendment.get("network_policy_amendment") if isinstance(amendment, dict) else None
@@ -142,7 +147,7 @@ def decode_request(session, request, items=()):
             return None
         key = f"decision-{i}"
         mapped[key] = deepcopy(decision)
-        choices.append(dict(id=key, label=label))
+        choices.append(dict(id=key, label=label, **({"confirmation": confirmation} if confirmation else {})))
     approval = dict(toolName=tool, input=original, inputKind="approvalRequest")
     if terminal:
         parent = next((i for i in items if i.get("type") == "commandExecution"
@@ -157,6 +162,8 @@ def decode_request(session, request, items=()):
         approval["reason"] = params["reason"]
     public = dict(base, kind="approval", title=f"Allow {tool}?", contentVersion=2,
                   approval=approval, responseOptions=choices)
+    if any('confirmation' in option for option in choices):
+        public['contentVersion'] = 4
 
     def answer(response):
         if response["action"] != "choose" or response["optionID"] not in mapped:

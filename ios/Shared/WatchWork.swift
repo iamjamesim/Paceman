@@ -53,7 +53,7 @@ enum InteractionWire {
 /// A versioned wire envelope. `content` is the validated common representation;
 /// provider-native methods and correlation IDs belong to the desktop adapter.
 struct InputRequest: Codable, Identifiable, Equatable {
-    static let maximumContentVersion = 3
+    static let maximumContentVersion = 4
     enum Content {
         case legacyApproval(String)
         case approval(ApprovalPayload, choices: [ApprovalResponseOption])
@@ -87,6 +87,7 @@ struct InputRequest: Codable, Identifiable, Equatable {
         }
     }
     var validContent: Bool { content != nil }
+    var usesApprovalChoices: Bool { contentVersion == 2 || contentVersion == 4 }
     func hasSameReview(as other: InputRequest) -> Bool {
         requestID == other.requestID && version == other.version && provider == other.provider
             && sessionID == other.sessionID && kind == other.kind && title == other.title
@@ -111,11 +112,12 @@ struct InputRequest: Codable, Identifiable, Equatable {
             default: return nil
             }
         }
-        guard contentVersion == 2, kind == "approval", detail.isEmpty, questions.isEmpty,
+        guard usesApprovalChoices, kind == "approval", detail.isEmpty, questions.isEmpty,
               let approval, approval.valid,
               let options = responseOptions, options.count <= 16,
               Set(options.map(\.id)).count == options.count,
-              options.allSatisfy({ InteractionWire.identifier($0.id) && InteractionWire.text($0.label, limit: 512) }) else { return nil }
+              options.allSatisfy({ InteractionWire.identifier($0.id) && InteractionWire.text($0.label, limit: 512)
+                  && ($0.confirmation == nil || contentVersion == 4 && InteractionWire.text($0.confirmation!, limit: 32768)) }) else { return nil }
         return .approval(approval, choices: options)
     }
 }
@@ -348,9 +350,9 @@ extension InputSubmission {
         case "answer":
             return request.kind == "question" && Set(answers.keys) == Set(request.questions.map(\.id))
                 && request.questions.allSatisfy { answers[$0.id]?.valid(for: $0) == true }
-        case "choose": return request.contentVersion == 2 && request.kind == "approval" && answers.isEmpty
+        case "choose": return request.usesApprovalChoices && request.kind == "approval" && answers.isEmpty
             && request.approvalChoices.contains { $0.id == optionID }
-        case "allowOnce", "deny": return request.contentVersion != 2 && request.kind == "approval" && answers.isEmpty
+        case "allowOnce", "deny": return !request.usesApprovalChoices && request.kind == "approval" && answers.isEmpty
         case "release": return answers.isEmpty
         default: return false
         }

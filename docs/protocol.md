@@ -544,7 +544,8 @@ it provide activity only. Both endpoints use the paired bearer credential.
   interpreted only within their provider's documented schema.
 - `POST /v1/interactions`: supplies generation, requestID, version, idempotencyKey,
   and action (`allowOnce`, `deny`, `answer`, `release`; v2 approvals use `choose`
-  with `optionID`). Answers map question IDs to
+  with `optionID`; v4 choices may require a separate `confirmation` review).
+  Answers map question IDs to
   `{selected: [option indices], text}`; a selection may include a text comment.
   Indices refer to the immutable options of that exact request/version.
   First valid response wins; identical retries

@@ -604,7 +604,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.check_interaction_access()
                 self.reply(200, {"sourceID": self.server.store.metadata("source_id"),
                                  **self.server.interactions.pending(content_version=
-                                     {"2": 2, "3": 3}.get(self.headers.get("X-Paceman-Content-Version"), 1))})
+                                     {"2": 2, "3": 3, "4": 4}.get(self.headers.get("X-Paceman-Content-Version"), 1))})
             return
         if self.path == "/v1/push":
             value = self.server.store.push_device(token)

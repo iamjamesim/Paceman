@@ -13,6 +13,7 @@ struct InteractionDetail: View {
     @Environment(\.scenePhase) private var phase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var answers: [String: InputAnswer] = [:]
+    @State private var confirming: ApprovalResponseOption?
     private var response: InputResponseState? { inbox.response(for: item) }
     private var submission: InputSubmission? { response?.submission }
     private var sending: Bool { response?.phase == .sending || inbox.isSubmitting(item) }
@@ -96,7 +97,30 @@ struct InteractionDetail: View {
         }
         .onAppear {
             if let submission { answers = submission.answers }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--approval-confirmation-preview") {
+                confirming = item.request.approvalChoices.first { $0.confirmation != nil }
+            }
+            #endif
         }
+        .sheet(item: $confirming) { option in
+            NavigationStack {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(option.label).companionText(.cardTitle, theme: theme)
+                        ApprovalExpandableText(text: option.confirmation ?? "", label: "Permission scope", theme: theme)
+                    }.padding(CompanionLayout.pageInset)
+                }
+                .safeAreaInset(edge: .bottom) {
+                    InputActionButton(title: "Confirm", theme: theme) {
+                        confirming = nil
+                        if editable { respond("choose", optionID: option.id) }
+                    }.disabled(!editable).padding(CompanionLayout.pageInset)
+                }
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { confirming = nil } } }
+            }
+        }
+        .onChange(of: item.id) { _, _ in confirming = nil }
     }
 
     @ViewBuilder private var responseActions: some View {
@@ -112,8 +136,11 @@ struct InteractionDetail: View {
                 if item.request.kind == "approval" {
                     ForEach(Array(item.request.approvalChoices.enumerated()), id: \.element.id) { index, option in
                         InputActionButton(title: option.label, theme: theme, primary: index == 0) {
-                            respond(item.request.contentVersion == 2 ? "choose" : option.id,
-                                optionID: item.request.contentVersion == 2 ? option.id : nil)
+                            if option.confirmation != nil { confirming = option }
+                            else {
+                                respond(item.request.usesApprovalChoices ? "choose" : option.id,
+                                    optionID: item.request.usesApprovalChoices ? option.id : nil)
+                            }
                         }
                     }
                     if item.request.approvalChoices.isEmpty {

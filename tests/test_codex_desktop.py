@@ -197,6 +197,22 @@ class DesktopRequestTests(unittest.TestCase):
         raw["params"]["availableDecisions"].append({"futureDecision": {}})
         self.assertIsNone(decode_request(SESSION, raw))
 
+    def test_long_command_policy_is_confirmed_without_dropping_the_whole_approval(self):
+        prefix = ['/bin/zsh', '-lc', 'print("example")\n' * 150]
+        decision = {'acceptWithExecpolicyAmendment': {'execpolicy_amendment': prefix}}
+        raw = command()
+        raw['params']['availableDecisions'] = ['accept', decision, 'decline']
+        public, encode = decode_request(SESSION, raw)
+        handle = self.broker.publish_live(public)
+        self.assertEqual(public['contentVersion'], 4)
+        self.assertEqual(self.broker.pending(content_version=3)['requests'], [])
+        options = handle.public['responseOptions']
+        self.assertEqual(len(options), 3)
+        self.assertEqual(options[1]['label'], 'Always allow this command prefix')
+        self.assertEqual(shlex.split(options[1]['confirmation'].split('\n\n', 1)[1]), prefix)
+        self.assertEqual(encode(dict(action='choose', optionID='decision-1'))[1]['decision'], decision)
+        self.assertEqual(json.loads(handle.public['approval']['inputJSON']), raw['params'])
+
     def test_mcp_approval_unpacks_actual_input_and_every_offered_persistence_choice(self):
         raw = dict(id=8, method='mcpServer/elicitation/request', params=dict(threadId=SESSION,
             mode='form', serverName='codex_apps', message='Allow edit page?', requestedSchema={'type': 'object', 'properties': {}},

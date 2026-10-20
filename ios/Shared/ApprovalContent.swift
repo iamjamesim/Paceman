@@ -89,6 +89,7 @@ struct ApprovalPayload: Codable, Equatable {
 struct ApprovalResponseOption: Codable, Identifiable, Equatable {
     let id: String
     let label: String
+    var confirmation: String? = nil
 }
 
 /// Known tool contracts get a useful presentation. Arbitrary MCP arguments are
@@ -297,6 +298,16 @@ enum ApprovalPreviewFixtures {
     static let choices: [ApprovalResponseOption] = [
         .init(id: "once", label: "Allow once"), .init(id: "session", label: "Allow for this session"),
         .init(id: "decline", label: "Decline")]
+    static var policyCommand: String { "python3 -c '" + String(repeating: "print(\"Verify the output\")\n", count: 100) + "'" }
+    static var policy: ApprovalPayload {
+        ApprovalPayload(toolName: "commandExecution", inputJSON: json(["command": policyCommand]),
+            action: .init(kind: "command", text: policyCommand), hasAdditionalInput: false)
+    }
+    static var policyChoices: [ApprovalResponseOption] {
+        [.init(id: "once", label: "Allow once"), .init(id: "policy", label: "Always allow this command prefix",
+            confirmation: "Allow future commands starting with these exact arguments:\n\n" + policyCommand),
+         .init(id: "decline", label: "Decline")]
+    }
     static func terminal(_ operation: String = "interrupt", parent: Bool = true) -> ApprovalPayload {
         let text = operation == "interrupt" ? "\u{03}\u{03}" : operation == "poll" ? "" : "echo ready\n"
         let input: [String: Any] = ["session_id": 35467, "chars": text,
