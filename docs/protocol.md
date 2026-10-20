@@ -476,6 +476,10 @@ defines readiness and recovery.
 - New states, changed event meanings or required phone behavior need a new
   schema or endpoint with explicit capability handling. APNs display formats
   and BLE packet versions evolve separately.
+- Interaction adapters own native decoding and correlation. New required content,
+  answer constraints or decision semantics need a negotiated content version.
+  Unsupported interactions stay native; the v1 text/selection question profile
+  cannot represent arbitrary forms, permission subsets or authentication flows.
 - Published BLE layouts keep their sizes and meanings; new profile fields
   require negotiation. Update examples, encoders, decoders and cross-version
   tests together when changing a wire format.
@@ -489,38 +493,34 @@ Implementations: [source API](../service/hub.py),
 
 ## Pending interactions
 
-This is a compatibility contract for older computers and synthetic tests. Current
-agent sources omit `interactionsEnabled` and leave questions and approvals native.
-Provider input is decoded on the desktop before transfer. Approval content v2
-adds `contentVersion: 2`, `approval`, and ordered `responseOptions: [{id, label}]`;
-`detail` is empty. `approval` contains `toolName`, optional `workingDirectory`
-and `reason`, complete serialized `inputJSON`, normalized `action`, and
-`hasAdditionalInput`. Actions are `command`/`patch` (`text`), `fileWrite`
-(`filePath`, `text`), `fileEdit` (`filePath`, `before`, `text`, `replaceAll`), or
-`tool` (uninterpreted JSON). Only documented built-ins are unpacked; MCP
-arguments retain every field. Views render this model without provider decoding.
-`terminalInput` actions carry an opaque string `terminalSessionID`, exact `text`, and an
-`operation` of `interrupt`, `poll`, or `write`. An optional `parentCommand` comes
-only from adapter-supplied terminal context with a matching session ID; a parent
-call ID alone never establishes a human-readable command. Complete original
-terminal input, including permission and parent-call metadata, remains in `inputJSON`.
-The desktop serializes this display copy from the complete input value; clients
-retain it as text rather than decoding and re-encoding arbitrary numbers. Typed
-actions remain structured. JSON formatting is not native payload byte identity.
+Current agent sources omit `interactionsEnabled`. This contract serves older
+computers and synthetic tests. Approval content v2 adds `contentVersion: 2`,
+`approval`, and ordered `responseOptions: [{id, label}]`; `detail` is empty.
+`approval` contains `toolName`, optional `workingDirectory` and `reason`, complete
+serialized `inputJSON`, normalized `action`, and `hasAdditionalInput`.
+
+| Action kind | Fields |
+| --- | --- |
+| `command`, `patch` | `text` |
+| `fileWrite` | `filePath`, `text` |
+| `fileEdit` | `filePath`, `before`, `text`, `replaceAll` |
+| `terminalInput` | Opaque string `terminalSessionID`, exact `text`, `operation` (`interrupt`, `poll`, `write`); optional confirmed `parentCommand` |
+| `tool` | Uninterpreted input |
+
+The desktop decodes documented provider schemas once. Clients retain `inputJSON`
+as text to preserve unknown fields and numbers; it is not native JSON byte identity.
+`parentCommand` requires adapter context matching the terminal session, not a
+guess from a parent call ID.
 
 GET must advertise `X-Paceman-Content-Version: 2` to receive v2 requests. Watch
 request messages similarly advertise `contentVersion: 2`; older Watch clients
-receive native continuation for v2 content. The phone forwards the same request
-model to Watch. Selecting a v2 choice submits `action: "choose", optionID`;
-the broker accepts only offered IDs and returns the ID unchanged. Empty choices
-require native review. This contract does not enable interception or establish
-ownership of a native dialog. Unknown versions cannot be answered remotely.
+receive native continuation for v2 content. Selecting a v2 choice submits
+`action: "choose", optionID`; the broker accepts only offered IDs. Empty choices
+or unknown content versions require native review.
 
 Input is bounded to 32 KiB and normalized requests to 64 KiB; oversize content
-is rejected, never truncated. The older v1 `detail` uses Paceman-owned headers
-with a separate compatibility decoder. Both clients collapse long display bodies
-and retain complete input for expansion; no arguments are stripped by field name.
-See [agent model boundaries](agent-models.md) for supported concepts and extension rules.
+is rejected, never truncated. V1 `detail` uses Paceman-owned headers with a separate
+compatibility decoder. Display excerpts never replace the complete input.
 
 Snapshot `interactionsEnabled: true` advertises these endpoints; sources that omit
 it provide activity only. Both endpoints use the paired bearer credential.

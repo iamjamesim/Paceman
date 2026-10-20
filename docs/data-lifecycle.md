@@ -91,16 +91,10 @@ statuses and hook lifecycle reasons; the phone records matching IDs and request 
 
 ## Questions and approvals
 
-Current agent sources observe input-needed state without collecting request
-content or answering prompts. Native questions and approvals retain their full
-content, choices and lifetime in the agent. Phone and Watch continue in that
-agent rather than offering a reduced decision.
-
-Native approval attention survives unrelated tool completions and prompts in the
-same turn. A matching tool completion resolves one approval; another pending
-approval or question still keeps the session in Needs input. The hooks do not
-expose a complete decision-resolved lifecycle, so an uncorrelated approval stays
-pending until a confirmed turn outcome. A mobile request deadline cannot clear it.
+Native approval attention is independent of mobile request lifetime. Unrelated
+same-turn activity cannot clear it. A matching completion resolves one approval;
+new turns or confirmed terminal outcomes clear the old turn's attention. Hooks
+do not expose every native approval decision.
 
 For compatibility with older computers, clients still support the retired
 response protocol. Those requests and answers are RAM-only and excluded from
@@ -111,6 +105,4 @@ Paceman acceptance, not agent consumption. Responses are never retried
 automatically. Backgrounding clears forms; uncertain submissions require an
 explicit identical retry. Watch content travels only through live
 WatchConnectivity replies, never application context or queued transfers.
-Pending sibling requests take precedence over a submission receipt. A selected
-session advances after confirmation, retaining the current form while a response
-is uncertain. Only an explicit Review flow advances between sessions.
+Pending sibling requests take precedence over a submission receipt.

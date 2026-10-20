@@ -54,8 +54,7 @@ cannot erase that reading.
 
 WatchConnectivity also supplies the paired-computer list and cached readings.
 The Watch app uses the phone's session presentation and supports continuation
-on iPhone through live WatchConnectivity. Questions and approvals are reviewed
-in the source agent with their complete native choices.
+on iPhone through live WatchConnectivity.
 Codex usage remains available in complications.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
@@ -63,12 +62,9 @@ are in [data lifecycle](data-lifecycle.md).
 
 ## Questions and approvals
 
-Mac setup installs observational hooks and removes the retired blocking response
-hooks. Legacy response-script invocations exit without reading the prompt or
-emitting a decision. Questions and approvals remain immediately available in
-Codex or Claude Code; phone and Watch direct the user to the agent. Current agent
-sources do not advertise remote response capability. Clients retain the older
-response protocol for compatibility with computers that have not upgraded.
+Agent sources observe attention; questions and approvals stay native. Mac setup
+removes retired blocking hooks. Phone and Watch direct users to the agent. See
+[interaction lifecycle](data-lifecycle.md#questions-and-approvals).
 
 ## iPhone Activity
 
@@ -76,13 +72,10 @@ Sessions are keyed by source, provider, and session ID, never title. Activity ow
 and responses; Devices owns connections, accessories, and Live Activities.
 Ordering is stable and phone-observed, not durable task chronology: answerable
 requests lead Needs you, Working follows state-entry order, and Recent is newest
-first. Review freezes session membership and order. Within the selected session,
-requests retain their observed order and advance only after exact submission
-confirmation; a new arrival never replaces a draft or uncertain response. Row
-visits remain open for follow-up requests until dismissed. Review drains pending
-requests in its current session before advancing, and its final session remains
-open until Done. Confirmed responses use Working presentation without changing
-observed agent state. Other sessions never present unsolicited question sheets.
+first. Review freezes session order and drains each session after confirmed
+responses. Row visits stay in the selected session until dismissed. New requests
+never replace a draft or uncertain response; other sessions do not auto-present.
+Confirmed responses use Working presentation without changing observed agent state.
 
 Live Activity taps open a unique session only when its source generation and
 revision match; otherwise they open source-filtered Activity. Watch resolves through
