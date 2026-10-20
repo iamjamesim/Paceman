@@ -96,11 +96,15 @@ class PairingTests(unittest.TestCase):
         for pair in (second, probe):
             self.assertEqual(self.request('GET', '/v1/snapshot', token=pair['credential'])[0], 200)
         deadline = time.monotonic() + 2
-        while not self.store.clients()[2]['lastContactAt'] and time.monotonic() < deadline:
-            time.sleep(.01)
+        contacted = (second['clientID'], probe['clientID'])
+        # Each handler records contact after replying; completion order can differ.
         rows = {row['id']: row for row in self.store.clients()}
+        while not all(rows[client]['lastContactAt'] for client in contacted) and time.monotonic() < deadline:
+            time.sleep(.01)
+            rows = {row['id']: row for row in self.store.clients()}
         self.assertEqual(rows[first['clientID']]['lastContactAt'], 0)
         self.assertGreater(rows[second['clientID']]['lastContactAt'], 0)
+        self.assertGreater(rows[probe['clientID']]['lastContactAt'], 0)
         self.assertEqual(rows[probe['clientID']]['name'], self.device['name'])
         self.assertEqual(Store(self.store.path).clients(), self.store.clients())
 
