@@ -120,3 +120,32 @@ https://code.claude.com/docs/en/hooks
 https://modelcontextprotocol.io/specification/2025-11-25/server/tools
 https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/approvals.rs
 https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/handlers/unified_exec/write_stdin.rs
+
+14. Review common agent concepts and their evolution boundaries.
+    c451290 removes the provider whitelist from the common request contract while
+    leaving provider enablement with adapters. Native schema interpretation is
+    provider-scoped: another agent's tool named Bash is not assumed to be a shell.
+    Wire envelopes project into validated content/action unions; mixed variants,
+    missing fields, inconsistent terminal operations and unknown versions cannot
+    expose decision controls. Terminal targets are opaque strings. Phone/Watch
+    share question validation, including the server's selection-plus-comment
+    semantics; question IDs use the same 160-character bound as the source.
+    New provider launch labels fall back to a generic agent label.
+
+    4d6d9d5 fixes a newly demonstrated fidelity bug: Swift Decimal rounds very
+    large integers and rejects 1e300. Complete opaque input now travels as desktop-
+    serialized inputJSON text, independently of structured typed actions. Clients
+    preserve that text through round trips, without converting unknown numbers.
+    Ingress still accepts a structured input value for proper desktop decoding.
+    This refines the unreleased v2 contract; deployed v1 compatibility is retained.
+
+    docs/agent-models.md defines session/activity/request/submission distinctions,
+    adapter ownership and evolution rules. Current questions are a bounded legacy
+    text/selection profile, not arbitrary native forms. Permission subsets, richer
+    forms, secure inputs and URL flows need faithful new negotiated variants;
+    unsupported semantics remain native. CodexAllowance stays explicitly Codex-
+    specific instead of implying equivalent quotas for other providers.
+
+    Latest checks: 193 Swift interaction/protocol tests and 36 targeted Python
+    content/broker/HTTP/Watch tests passed; iPhone and Watch Debug builds passed.
+    No product layout or installed source behavior changed in this model review.
