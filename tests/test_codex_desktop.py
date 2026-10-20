@@ -172,10 +172,15 @@ class DesktopRequestTests(unittest.TestCase):
         result = encode(dict(action="answer", answers=dict(q0=dict(selected=[0], text=""),
                                                           q1=dict(selected=[], text="Custom"))))
         self.assertEqual(result[1], dict(response=dict(answers=dict(q0=dict(answers=["First"]), q1=dict(answers=["Custom"])))))
-        for key in ("isSecret", "isOther"):
-            questions[0][key] = not questions[0][key]
-            self.assertIsNone(decode_request(SESSION, request))
-            questions[0][key] = not questions[0][key]
+        questions[0]["isSecret"] = True
+        self.assertIsNone(decode_request(SESSION, request))
+        questions[0]["isSecret"] = False
+        questions[0]["isOther"] = False
+        public, encode = decode_request(SESSION, request)
+        self.assertEqual(public["contentVersion"], 3)
+        self.assertEqual([q["allowsText"] for q in public["questions"]], [False, True])
+        self.assertEqual(encode(dict(action="answer", answers=dict(q0=dict(selected=[0], text=""),
+            q1=dict(selected=[], text="Custom"))))[1]["response"]["answers"]["q0"], {"answers": ["First"]})
 
     def test_policy_choices_are_exact_and_scope_is_visible(self):
         decisions = ["accept", {"acceptWithExecpolicyAmendment": {"execpolicy_amendment": ["git", "status"]}},

@@ -58,10 +58,9 @@ def decode_request(session, request, items=()):
         ids = set()
         for q in questions:
             if (not isinstance(q, dict) or q.get("isSecret") is not False
-                    or q.get("isOther") is not True or not isinstance(q.get("id"), str)
+                    or type(q.get("isOther")) is not bool or not isinstance(q.get("id"), str)
                     or q["id"] in ids or not isinstance(q.get("question"), str)):
-                # The current mobile question profile has free text. It cannot
-                # faithfully represent a secret or a selection-only question.
+                # Secret entry needs its own secure input profile.
                 return None
             ids.add(q["id"])
             options = q.get("options")
@@ -70,8 +69,16 @@ def decode_request(session, request, items=()):
                     or not isinstance(o.get("description"), str) for o in options)):
                 return None
             normalized.append(dict(id=q["id"], prompt=q["question"], multiple=False,
-                                   options=deepcopy(options or [])))
+                                   options=deepcopy(options or []), allowsText=q["isOther"]))
+            if not q["isOther"] and not options:
+                return None
+        constrained = any(not q["allowsText"] for q in normalized)
+        if not constrained:
+            for q in normalized:
+                del q["allowsText"]
         public = dict(base, kind="question", title="Answer questions", questions=normalized)
+        if constrained:
+            public["contentVersion"] = 3
 
         def answer(response):
             if response["action"] != "answer":

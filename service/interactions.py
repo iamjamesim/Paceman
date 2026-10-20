@@ -69,7 +69,7 @@ def _request(value):
               "kind": value["kind"], "title": _text(value["title"], 256),
               "detail": _text(value["detail"], 16384, empty=True), "questions": []}
     content_version = value.get("contentVersion", 1)
-    if type(content_version) is not int or content_version not in (1, 2):
+    if type(content_version) is not int or content_version not in (1, 2, 3):
         raise BrokerError("invalid_request")
     if content_version == 2:
         if value["kind"] != "approval" or value["detail"]:
@@ -89,6 +89,10 @@ def _request(value):
             raise BrokerError("invalid_request")
     elif any(k in value for k in ("approval", "responseOptions")):
         raise BrokerError("invalid_request")
+    if content_version == 3:
+        if value["kind"] != "question":
+            raise BrokerError("invalid_request")
+        result["contentVersion"] = 3
     questions = value.get("questions", [])
     if not isinstance(questions, list) or len(questions) > 4:
         raise BrokerError("invalid_request")
@@ -96,7 +100,10 @@ def _request(value):
         raise BrokerError("invalid_request")
     ids = set()
     for q in questions:
-        _keys(q, ("id", "prompt", "multiple", "options"))
+        _keys(q, ("id", "prompt", "multiple", "options", "allowsText") if content_version == 3
+              else ("id", "prompt", "multiple", "options"))
+        if content_version == 3 and (type(q["allowsText"]) is not bool or not q["allowsText"] and not q["options"]):
+            raise BrokerError("invalid_request")
         qid = _identifier(q["id"])
         if qid in ids or type(q["multiple"]) is not bool or not isinstance(q["options"], list) or len(q["options"]) > 16:
             raise BrokerError("invalid_request")
@@ -107,7 +114,8 @@ def _request(value):
             options.append({"label": _text(option["label"], 512),
                             "description": _text(option["description"], 2048, empty=True)})
         result["questions"].append({"id": qid, "prompt": _text(q["prompt"], 4096),
-                                    "multiple": q["multiple"], "options": options})
+                                    "multiple": q["multiple"], "options": options,
+                                    **({"allowsText": q["allowsText"]} if content_version == 3 else {})})
     if len(json.dumps(result).encode()) > MAX_WIRE_BYTES:
         raise BrokerError("invalid_request")
     return result
@@ -199,7 +207,7 @@ class InteractionBroker:
     def withdraw(self, pending):
         self._cancel(pending)
 
-    def pending(self, content_version=2):
+    def pending(self, content_version=3):
         with self._lock:
             self._prune()
             return {"generation": self.generation,
@@ -272,6 +280,7 @@ class InteractionBroker:
                 for question in request["questions"]:
                     answer = normalized_answers[question["id"]]
                     if (not answer["selected"] and not answer["text"].strip()
+                            or not question.get("allowsText", True) and bool(answer["text"])
                             or not question["multiple"] and len(answer["selected"]) > 1
                             or any(i >= len(question["options"]) for i in answer["selected"])):
                         raise BrokerError("invalid_response")

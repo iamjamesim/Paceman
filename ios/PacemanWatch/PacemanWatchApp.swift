@@ -665,13 +665,15 @@ private struct WatchTaskView: View {
                     .accessibilityAddTraits(chosen ? .isSelected : [])
                 }
             }
-            TextField("Your answer", text: Binding(get: { answers[question.id]?.text ?? "" }, set: { text in
-                var answer = answers[question.id] ?? InputAnswer()
-                answer.text = text
-                if !text.isEmpty { answer.selected = [] }
-                answers[question.id] = answer
-            }))
-                .accessibilityLabel("Your answer: " + question.prompt)
+            if question.acceptsText {
+                TextField("Your answer", text: Binding(get: { answers[question.id]?.text ?? "" }, set: { text in
+                    var answer = answers[question.id] ?? InputAnswer()
+                    answer.text = text
+                    if !text.isEmpty { answer.selected = [] }
+                    answers[question.id] = answer
+                }))
+                    .accessibilityLabel("Your answer: " + question.prompt)
+            }
         }
     }
 
@@ -727,7 +729,7 @@ private struct WatchTaskView: View {
         let started = ProcessInfo.processInfo.systemUptime
         do {
             let result = try await store.workMessage(["operation": "request", "sourceID": task.sourceID,
-                "sessionID": task.sessionID, "provider": task.provider, "contentVersion": 2])
+                "sessionID": task.sessionID, "provider": task.provider, "contentVersion": InputRequest.maximumContentVersion])
             guard scenePhase != .background, operation.accepts(token) else { return }
             nativeOnly = result["nativeOnly"] as? Bool == true
             if nativeOnly {

@@ -2,6 +2,27 @@ import XCTest
 @testable import AgentCompanion
 
 final class InteractionTests: XCTestCase {
+    func testSelectionOnlyQuestionProfilePreservesNativeAnswerConstraints() throws {
+        let question = InteractionQuestion(id: "q", prompt: "Which?", multiple: false,
+            options: [.init(label: "First", description: "")], allowsText: false)
+        var request = InputRequest(requestID: "request", version: 1, provider: "codex",
+            sessionID: "session", kind: "question", title: "Choose", detail: "",
+            questions: [question], remainingSeconds: 60, contentVersion: 3)
+        XCTAssertTrue(request.validContent)
+        XCTAssertFalse(question.acceptsText)
+        XCTAssertTrue(InputAnswer(selected: [0]).valid(for: question))
+        XCTAssertFalse(InputAnswer(selected: [], text: "Custom").valid(for: question))
+        XCTAssertFalse(InputAnswer(selected: [0], text: "Custom").valid(for: question))
+        let decoded = try JSONDecoder().decode(InputRequest.self, from: JSONEncoder().encode(request))
+        XCTAssertEqual(decoded, request)
+        XCTAssertFalse(InteractionQuestion(id: "q", prompt: "Which?", multiple: false,
+            options: [], allowsText: false).valid)
+        request.contentVersion = 1
+        XCTAssertFalse(request.validContent, "Required constraints must not silently downgrade")
+        let legacy = InteractionQuestion(id: "q", prompt: "Which?", multiple: false, options: [])
+        XCTAssertTrue(legacy.acceptsText)
+        XCTAssertTrue(InputAnswer(text: "Custom").valid(for: legacy))
+    }
     func testApprovalProvenanceAndProviderDisplayKeepCompleteInputAccessible() throws {
         let original = "{\"page_id\":\"page\",\"operations\":[{\"op\":\"replace\"}]}"
         let data = try JSONSerialization.data(withJSONObject: ["toolName": "edit_page", "inputJSON": original,
@@ -2102,41 +2123,52 @@ extension InteractionTests {
         XCTAssertNil(unmatched["data"], "A response form must match the exact task identity")
     }
 
-    @MainActor func testStructuredApprovalRequiresWatchCapabilityAndSourceNegotiation() async throws {
-        let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
-            clientID: "client", credential: "fixture")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [InteractionURLProtocol.self]
-        let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
-        model.pairedSources = [source]
-        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
-            sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow Edit?", detail: "",
-            questions: [], remainingSeconds: 60, contentVersion: 2, approval: ApprovalPreviewFixtures.file(true),
-            responseOptions: ApprovalPreviewFixtures.choices)
-        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
-        let listing = try JSONSerialization.data(withJSONObject: ["sourceID": sourceID,
-            "generation": UUID().uuidString, "requests": [object]])
-        InteractionURLProtocol.start = { transport in
-            Task { @MainActor in
-                if transport.request.url?.path == "/v1/snapshot" {
-                    transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
-                } else {
-                    XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), "2")
-                    transport.finish(listing)
+    @MainActor func testContentProfilesRequireWatchCapabilityAndSourceNegotiation() async throws {
+        for version in [2, 3] {
+            let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
+                clientID: "client", credential: "fixture")
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [InteractionURLProtocol.self]
+            let model = CompanionModel(preview: true, client: SourceClient(configuration: configuration))
+            model.pairedSources = [source]
+            let request = version == 2 ? InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
+                sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow Edit?", detail: "",
+                questions: [], remainingSeconds: 60, contentVersion: 2, approval: ApprovalPreviewFixtures.file(true),
+                responseOptions: ApprovalPreviewFixtures.choices) : InputRequest(requestID: UUID().uuidString,
+                version: 1, provider: "claude", sessionID: String(repeating: "a", count: 64), kind: "question",
+                title: "Choose", detail: "", questions: [.init(id: "q", prompt: "Which?", multiple: false,
+                    options: [.init(label: "First", description: "")], allowsText: false)], remainingSeconds: 60,
+                contentVersion: 3)
+            let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request))
+            let listing = try JSONSerialization.data(withJSONObject: ["sourceID": sourceID,
+                "generation": UUID().uuidString, "requests": [object]])
+            InteractionURLProtocol.start = { transport in
+                Task { @MainActor in
+                    if transport.request.url?.path == "/v1/snapshot" {
+                        transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                    } else {
+                        XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), "3")
+                        transport.finish(listing)
+                    }
                 }
             }
+            defer { InteractionURLProtocol.start = nil }
+            var message: [String: Any] = ["operation": "request", "sourceID": sourceID,
+                "sessionID": request.sessionID, "provider": "claude"]
+            let legacy = await model.handleWatchWork(message)
+            XCTAssertEqual(legacy["nativeOnly"] as? Bool, true)
+            XCTAssertNil(legacy["data"])
+            if version == 3 {
+                message["contentVersion"] = 2
+                let older = await model.handleWatchWork(message)
+                XCTAssertEqual(older["nativeOnly"] as? Bool, true)
+            }
+            message["contentVersion"] = version
+            let modern = await model.handleWatchWork(message)
+            let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(modern["data"] as? Data))
+            XCTAssertEqual(prompt.request, request)
+            XCTAssertEqual(prompt.request.approvalChoices.count, version == 2 ? 3 : 0)
         }
-        defer { InteractionURLProtocol.start = nil }
-        var message: [String: Any] = ["operation": "request", "sourceID": sourceID,
-            "sessionID": request.sessionID, "provider": "claude"]
-        let legacy = await model.handleWatchWork(message)
-        XCTAssertEqual(legacy["nativeOnly"] as? Bool, true)
-        XCTAssertNil(legacy["data"])
-        message["contentVersion"] = 2
-        let modern = await model.handleWatchWork(message)
-        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(modern["data"] as? Data))
-        XCTAssertEqual(prompt.request, request)
-        XCTAssertEqual(prompt.request.approvalChoices.count, 3)
     }
 
     func testWatchAnswerValidationAndActivityLease() throws {

@@ -137,17 +137,19 @@ struct InteractionDetail: View {
                 }
                 if !question.options.isEmpty { questionChoices(question) }
             }
-            TextField(question.options.isEmpty ? "Your answer" : "Or write a response", text: Binding(get: { answers[question.id]?.text ?? "" }, set: { text in
-                guard (answers[question.id]?.text ?? "") != text else { return }
-                answers[question.id] = InputAnswer(selected: [], text: text)
-            }), axis: .vertical)
-                .companionText(.body, theme: theme)
-                .fixedSize(horizontal: false, vertical: true)
-                .focused($focusedQuestion, equals: question.id)
-                .accessibilityLabel("Your answer: " + question.prompt)
-                .padding(12)
-                .background(theme.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
-                .disabled(!editable)
+            if question.acceptsText {
+                TextField(question.options.isEmpty ? "Your answer" : "Or write a response", text: Binding(get: { answers[question.id]?.text ?? "" }, set: { text in
+                    guard (answers[question.id]?.text ?? "") != text else { return }
+                    answers[question.id] = InputAnswer(selected: [], text: text)
+                }), axis: .vertical)
+                    .companionText(.body, theme: theme)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .focused($focusedQuestion, equals: question.id)
+                    .accessibilityLabel("Your answer: " + question.prompt)
+                    .padding(12)
+                    .background(theme.ink.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+                    .disabled(!editable)
+            }
         }
     }
 

@@ -515,9 +515,13 @@ as text to preserve unknown fields and numbers; it is not native JSON byte ident
 `parentCommand` requires adapter context matching the terminal session, not a
 guess from a parent call ID.
 
-GET must advertise `X-Paceman-Content-Version: 2` to receive v2 requests. Watch
-request messages similarly advertise `contentVersion: 2`; older Watch clients
-receive native continuation for v2 content. Selecting a v2 choice submits
+Question content v3 requires a Boolean `allowsText` on each question, preserving
+selection-only requests without adding a custom-answer option. V1 questions
+continue to allow text. Secret entry and arbitrary forms require native review.
+
+GET advertises its maximum `X-Paceman-Content-Version` (currently `3`); Watch
+request messages similarly advertise `contentVersion`. Older clients receive only
+supported profiles, with native continuation for newer content. Selecting a v2 choice submits
 `action: "choose", optionID`; the broker accepts only offered IDs. Empty choices
 or unknown content versions require native review.
 

@@ -69,6 +69,24 @@ class InteractionHTTPTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(pending.response, {'action': 'choose', 'optionID': 'session'})
 
+    def test_selection_only_questions_negotiate_and_reject_unoffered_text(self):
+        pending = self.broker.publish_live(dict(provider='codex', sessionID='a'*64, kind='question',
+            title='Choose', detail='', contentVersion=3, questions=[dict(id='q', prompt='Which?',
+                multiple=False, allowsText=False, options=[dict(label='First', description='')])]))
+        for version in (None, 1, 2):
+            self.assertEqual(self.call('GET', '/v1/interactions', content_version=version)[1]['requests'], [])
+        status, listing = self.call('GET', '/v1/interactions', content_version=3)
+        self.assertEqual(status, 200)
+        item = listing['requests'][0]
+        self.assertFalse(item['questions'][0]['allowsText'])
+        response = dict(generation=listing['generation'], requestID=item['requestID'],
+            version=1, idempotencyKey='selection', action='answer', answers={'q': dict(selected=[0], text='Custom')})
+        self.assertEqual(self.call('POST', '/v1/interactions', response)[0], 400)
+        self.assertFalse(pending.ready.is_set())
+        response['answers']['q']['text'] = ''
+        self.assertEqual(self.call('POST', '/v1/interactions', response)[0], 200)
+        self.assertEqual(pending.response['answers'], {'q': dict(selected=[0], text='')})
+
     def completed_replies(self):
         replies = queue.Queue()
         record = self.diagnostics.record

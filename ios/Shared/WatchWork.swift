@@ -28,10 +28,13 @@ struct InteractionQuestion: Codable, Identifiable, Equatable {
     let prompt: String
     let multiple: Bool
     let options: [InteractionOption]
+    var allowsText: Bool? = nil
+    var acceptsText: Bool { allowsText ?? true }
     // This is the bounded text/selection profile, not an arbitrary native form.
     var valid: Bool {
         InteractionWire.identifier(id) && InteractionWire.text(prompt, limit: 4096)
             && options.count <= 16 && options.allSatisfy(\.valid)
+            && (acceptsText || !options.isEmpty)
     }
 }
 
@@ -50,6 +53,7 @@ enum InteractionWire {
 /// A versioned wire envelope. `content` is the validated common representation;
 /// provider-native methods and correlation IDs belong to the desktop adapter.
 struct InputRequest: Codable, Identifiable, Equatable {
+    static let maximumContentVersion = 3
     enum Content {
         case legacyApproval(String)
         case approval(ApprovalPayload, choices: [ApprovalResponseOption])
@@ -84,13 +88,19 @@ struct InputRequest: Codable, Identifiable, Equatable {
     }
     var validContent: Bool { content != nil }
     var content: Content? {
+        if contentVersion == 3 {
+            guard kind == "question", approval == nil, responseOptions == nil,
+                  (1...4).contains(questions.count), Set(questions.map(\.id)).count == questions.count,
+                  questions.allSatisfy({ $0.valid && $0.allowsText != nil }) else { return nil }
+            return .questions(questions)
+        }
         if contentVersion == nil || contentVersion == 1 {
             guard approval == nil, responseOptions == nil else { return nil }
             switch kind {
             case "approval": return questions.isEmpty ? .legacyApproval(detail) : nil
             case "question":
                 guard (1...4).contains(questions.count), Set(questions.map(\.id)).count == questions.count,
-                      questions.allSatisfy(\.valid) else { return nil }
+                      questions.allSatisfy({ $0.valid && $0.allowsText == nil }) else { return nil }
                 return .questions(questions)
             default: return nil
             }
@@ -112,6 +122,7 @@ struct InputAnswer: Codable, Equatable {
         return question.valid && InteractionWire.text(text, limit: 4096, empty: true) && Set(selected).count == selected.count
             && selected.allSatisfy { question.options.indices.contains($0) }
             && (question.multiple || selected.count <= 1)
+            && (question.acceptsText || text.isEmpty)
             && (hasText || !selected.isEmpty)
     }
 }
