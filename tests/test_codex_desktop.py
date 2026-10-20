@@ -220,6 +220,21 @@ class DesktopRequestTests(unittest.TestCase):
         raw['params']['_meta']['tool_params']['plan_token'] = 'bound-execution'
         self.assertIsNone(decode_request(SESSION, raw))
 
+    def test_plan_confirmation_is_attention_after_planning_turn_completes(self):
+        attention = []
+        self.adapter.attention = lambda _, turns: attention.append(turns)
+        raw = dict(id='implement-plan:turn', method='item/plan/requestImplementation',
+                   params=dict(threadId=SESSION, turnId='turn', planContent='A plan'))
+        message = snapshot([raw])
+        message['params']['change']['conversationState']['turns'] = [
+            dict(turnId='turn', status='completed', items=[])]
+        self.adapter._receive(message)
+        self.assertEqual(attention[-1], {'turn': 'planImplementation'})
+        self.assertEqual(self.broker.pending()['requests'], [], 'Do not fake a user-input response to a synthetic plan')
+        message['params']['change']['conversationState']['requests'] = []
+        self.adapter._receive(message)
+        self.assertEqual(attention[-1], {'turn': False})
+
     def test_canonical_history_tracks_async_attention_without_retaining_conversation_text(self):
         attention = []
         self.adapter.attention = lambda _, turns: attention.append(turns.get('t') if turns else None)

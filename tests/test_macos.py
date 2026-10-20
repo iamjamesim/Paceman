@@ -86,6 +86,15 @@ class MacSourceTests(unittest.TestCase):
                 self.assertEqual(store.snapshot()['state'], 'finished')
                 source.native_requests_changed('one', {'1': True})
                 self.assertEqual(store.snapshot()['state'], 'finished')
+                source.native_requests_changed('one', {'1': 'planImplementation'})
+                self.assertEqual(store.snapshot()['state'], 'needs_input')
+                self.assertNotIn('one', source.native_active_sessions(), 'A plan decision must not resume a CLI turn')
+                with store.connect() as db:
+                    db.execute('UPDATE mac_sessions SET updated=?', (time.time() - 601,))
+                source.tick()
+                self.assertEqual(store.snapshot()['state'], 'needs_input', 'An unanswered plan does not retire as finished')
+                source.native_requests_changed('one', {'1': False})
+                self.assertEqual(store.snapshot()['state'], 'finished')
                 source.receive(dict(base, turn='2', event='working', hook='UserPromptSubmit'))
                 self.assertEqual(store.snapshot()['state'], 'working')
     def test_resumed_turn_uses_saved_order_and_replays_approval_lifecycle(self):

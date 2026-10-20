@@ -454,6 +454,8 @@ class DesktopRequests:
             turn = request.get("params", {}).get("turnId")
             if request.get("method") in human and isinstance(turn, str):
                 by_turn[turn] = True
+            elif request.get("method") == "item/plan/requestImplementation" and isinstance(turn, str):
+                by_turn[turn] = "planImplementation"
         self.attention(session, by_turn)
 
     def _answer(self, key, handle, encode):

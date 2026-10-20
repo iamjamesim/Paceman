@@ -562,6 +562,8 @@ class MacSource:
                 retired = 0
                 for row in db.execute("SELECT id FROM mac_sessions WHERE state IN ('finished','failed') AND updated<=?",
                                       (time.time() - FINISHED_RETENTION,)):
+                    if self.native_attention.get(row['id'], (None, False))[1] == 'planImplementation':
+                        continue
                     retired += db.execute("DELETE FROM mac_sessions WHERE id=?", (row["id"],)).rowcount
                     self.native_attention.pop(row["id"], None)
                     self._clear_approvals(row["id"])
@@ -714,7 +716,12 @@ class MacSource:
             state = ("needs_input" if row["state"] not in ("finished", "failed")
                      and waiting else row["state"])
             native = self.native_attention.get(row["id"])
-            if native and native[0] == row["turn"] and row["state"] not in ("finished", "failed", "idle"):
+            if (native and native[0] == row["turn"] and native[1] == 'planImplementation'
+                    and row["state"] == 'finished'):
+                # Implement this plan is a desktop-owned decision after the
+                # planning turn completes, not a delayed tool approval.
+                state = 'needs_input'
+            elif native and native[0] == row["turn"] and row["state"] not in ("finished", "failed", "idle"):
                 state = ("needs_input" if native[1] else
                          "working" if state == "needs_input" else state)
             session = {"id": row["id"], "provider": row["provider"], "state": state}
