@@ -93,6 +93,11 @@ def decode_request(session, frame):
                              if reply.get('action') == 'choose' and i == reply.get('optionID')), None)
         if decision is None:
             return None
+        if decision['behavior'] == 'allow':
+            # Echo unchanged input for native versions that require this field.
+            decision.setdefault('updatedInput', deepcopy(payload))
+        else:
+            decision['message'] = 'User declined this request in Paceman.'
         return dict(type='control_response', response=dict(subtype='success',
                     request_id=frame['request_id'], response=decision))
     return public, encode

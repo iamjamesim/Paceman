@@ -102,9 +102,23 @@ class NativeClaudeTests(unittest.TestCase):
         self.submit(first, 'suggestion-0')
         wait_for(lambda: len(self.sent) == 2)
         self.assertEqual(self.sent[-1], dict(type='control_response', response=dict(subtype='success',
-            request_id='first', response=dict(behavior='allow', updatedPermissions=[suggestion]))))
+            request_id='first', response=dict(behavior='allow', updatedPermissions=[suggestion],
+                                             updatedInput=approval()['request']['input']))))
         self.assertEqual([r['requestID'] for r in self.broker.pending()['requests']], [sibling['requestID']])
         self.assertTrue(self.attention[-1], 'Submission is not native consumption')
+
+    def test_approval_response_preserves_input_and_decline_supplies_native_reason(self):
+        frame = approval()
+        frame['request']['input']['extra'] = {'large_id': 9007199254740993, 'text': '$(literal)\n'}
+        _, encode = decode_request(SESSION, frame)
+        allowed = encode(dict(action='choose', optionID='once'))['response']['response']
+        self.assertEqual(allowed['updatedInput'], frame['request']['input'])
+        allowed['updatedInput']['extra']['text'] = 'changed copy'
+        self.assertEqual(frame['request']['input']['extra']['text'], '$(literal)\n')
+        denied = encode(dict(action='choose', optionID='decline'))['response']['response']
+        self.assertEqual(denied['behavior'], 'deny')
+        self.assertTrue(denied['message'])
+        self.assertNotIn('updatedInput', denied)
 
     def test_native_lifetime_survives_ten_minutes_and_disconnect_rejects_stale_response(self):
         now = [0]
