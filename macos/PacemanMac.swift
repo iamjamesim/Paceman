@@ -44,7 +44,6 @@ private struct SourceStatus: Decodable {
     var providerCounts: [String: [String: Int]]? = nil
     var missingHooksByProvider: [String: [String]]? = nil
     var hookCommands: [String: String]? = nil
-    var responseHookCommands: [String: String]? = nil
     var lastAgentEventByProvider: [String: Double]? = nil
     var selectedProviders: [String] { configuredProviders ?? ["codex"] }
     func providerLabel(_ provider: String, selected: Bool? = nil) -> String {
@@ -785,7 +784,6 @@ private struct HookReviewView: View {
                              : "Check Paceman’s commands under each of the 12 events. Claude runs configured hooks in trusted workspaces; there is no separate acceptance step for each hook.")
                             .fixedSize(horizontal: false, vertical: true)
                         if let command = model.status.hookCommands?[provider] ?? (provider == "codex" ? model.status.hookCommand : nil) {
-                            Text("Activity").font(.callout.weight(.medium))
                             Text(command).font(.system(.callout, design: .monospaced))
                                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                                 .padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -793,13 +791,6 @@ private struct HookReviewView: View {
                         } else {
                             Text(model.hasReadStatus ? "The installed command is unavailable. Run Paceman setup again." : "Loading hook details…")
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        }
-                        if provider == "claude", let command = model.status.responseHookCommands?[provider] {
-                            Text("PermissionRequest response").font(.callout.weight(.medium))
-                            Text(command).font(.system(.callout, design: .monospaced))
-                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                         }
                         DisclosureGroup("Event reference (\(provider == "codex" ? 8 : 12))") {
                             VStack(alignment: .leading, spacing: 10) {
@@ -817,6 +808,10 @@ private struct HookReviewView: View {
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Text("Native prompts remain available. Paceman shares supported pending questions, choices, and tool input with paired phones in memory. Request content is excluded from notifications and diagnostics.")
                             .font(.callout).fixedSize(horizontal: false, vertical: true)
+                        if provider == "claude" {
+                            Text("Enable Remote Control in Claude to answer questions and approvals on your phone or Watch.")
+                                .font(.body).fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     VStack(alignment: .leading, spacing: 6) {
                         Text("3. Check activity").font(.headline)

@@ -122,6 +122,42 @@ class MacSource:
                 self.native_attention[key] = (tracked[1], by_turn[tracked[1]])
             self.publish_current()
 
+    def native_claude_sessions(self):
+        with self.lock:
+            return [(key, item.remote_session_id, item.turn) for key, item in self.claude_sessions.items()
+                    if 'claude' in self.providers and item.remote_session_id and item.turn
+                    and item.base_state == 'working']
+
+    def native_claude_requests_changed(self, session, turn, waiting):
+        with self.lock:
+            current = self.claude_sessions.get(session)
+            if self.closed or current is None or current.turn != turn:
+                return
+            if waiting is None:
+                if not self.native_attention.get(session, (None, False))[1]:
+                    self.native_attention.pop(session, None)
+            elif not waiting:
+                self.native_attention.pop(session, None)
+            else:
+                self.native_attention[session] = turn, waiting
+            self.publish_current()
+
+    def native_claude_requests_resolved(self, session, turn, tools, pending_tools):
+        with self.lock:
+            current = self.claude_sessions.get(session)
+            if self.closed or current is None or current.turn != turn:
+                return
+            pending_hashes = {hashlib.sha256(tool.encode()).hexdigest() for tool in pending_tools
+                              if isinstance(tool, str)}
+            for tool_id, tool in tools:
+                tool_hash = hashlib.sha256(tool.encode()).hexdigest()
+                if current.tools.get(tool_id) != tool_hash:
+                    continue  # Historical replay cannot clear a newer turn's wait.
+                current.waits.pop('question:' + tool_id, None)
+                if tool_hash not in pending_hashes:
+                    current.waits.pop('permission:' + tool_hash, None)
+            self.publish_current()
+
     def __enter__(self):
         self.closed = False
         self.titles.start()
@@ -410,6 +446,7 @@ class MacSource:
             previous = self.claude_sessions.get(key)
             if event == "ended":
                 self.claude_sessions.pop(key, None)
+                self.native_attention.pop(key, None)
             elif event == "started":
                 if previous is None:
                     self.claude_sessions[key] = ClaudeSession(workspace_label=command.get("workspaceLabel"), remote_session_id=remote_id)
@@ -420,6 +457,8 @@ class MacSource:
                 if not current.receive(command, self.monotonic(), ATTENTION_DELAY):
                     return False
                 self.claude_sessions[key] = current
+                if event in ('completed', 'failed', 'interrupted'):
+                    self.native_attention.pop(key, None)
             self._record_event(db, "claude")
             return self._publish(db)
 
@@ -443,7 +482,8 @@ class MacSource:
                 self.resolved_approval_tools.clear()
                 self.published_attention.clear()
                 self.pending_questions.clear()
-                self.native_attention.clear()
+                for key in self.turn_ids:
+                    self.native_attention.pop(key, None)
                 self.question_calls.clear()
                 self.published_questions.clear()
                 self.turn_ids.clear()
@@ -452,6 +492,8 @@ class MacSource:
                 with self.store.connect() as db:
                     db.execute("DELETE FROM mac_sessions")
         if "claude" not in providers:
+            for key in self.claude_sessions:
+                self.native_attention.pop(key, None)
             self.claude_sessions.clear()
         self.providers = providers
         self.publish_current()
@@ -471,6 +513,7 @@ class MacSource:
                                   and session.updated <= time.time() - FINISHED_RETENTION]
                 for key in retired_claude:
                     del self.claude_sessions[key]
+                    self.native_attention.pop(key, None)
                 # Publish only if a debounced attention state actually changed.
                 with self.store.connect() as db:
                     db.execute("BEGIN IMMEDIATE")

@@ -627,11 +627,9 @@ def print_claude_review_steps(wrapper: Path):
     for event, purpose in CLAUDE_PURPOSES:
         print(f"     {event}: {purpose}")
     print("  Activity hooks send lifecycle metadata, an optional project label and Remote Control session ID.")
-    print("  PermissionRequest also contains this separate response command:")
-    from macos.responses import command
-    print("     " + (installed_hook_command("claude", ROOT, response=True) or command(ROOT, PYTHON, "claude")))
-    print("  It shares pending main-session questions, tool input and offered permission updates with paired phones in memory.")
-    print("  Claude's native prompt stays available; tool completion withdraws the remote request.")
+    print("  Hooks only observe activity. Remote answers use Claude's existing Remote Control connection.")
+    print("  Enable Remote Control in Claude for questions and approvals on your paired phone or Watch.")
+    print("  Native prompts remain available; answering either surface resolves the same request.")
     print("  Activity requires Claude Code 2.1.196+; specific session links require 2.1.199+ with Remote Control.")
     print("  Hook reference: https://code.claude.com/docs/en/hooks#the-hooks-menu")
     print("  Send a prompt in a fresh local Claude session and verify lastAgentEventByProvider.claude.")

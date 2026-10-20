@@ -63,9 +63,9 @@ are in [data lifecycle](data-lifecycle.md).
 ## Questions and approvals
 
 The Mac mirrors supported requests from Codex's existing desktop owner through
-versioned IPC, and competes with Claude's native main-session PermissionRequest.
+versioned IPC, and from Claude's existing Remote Control connection.
 Native prompts remain available; unsupported interactions continue there. Setup
-removes PreToolUse interceptors. See
+removes response hooks; lifecycle observers never answer requests. See
 [interaction lifecycle](data-lifecycle.md#questions-and-approvals).
 
 ## iPhone Activity

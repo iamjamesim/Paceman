@@ -25,10 +25,11 @@ class ResponseSetupTests(unittest.TestCase):
         self.enterContext(patch.multiple(control, ROOT=self.root, PLIST=self.root / 'source.plist'))
         self.enterContext(patch.object(uninstall, 'ROOT', self.root))
 
-    def test_agent_server_starts_native_follower_and_permission_competitor(self):
+    def test_agent_server_starts_native_followers_without_response_socket(self):
         with patch.object(hub, 'Server') as server_factory, \
              patch('service.macos.MacSource'), \
              patch('service.codex_desktop.DesktopRequests'), \
+             patch('service.claude_remote.RemoteRequests') as claude, \
              patch('builtins.print'), \
              patch('service.interactions.ResponseListener') as listener, \
              patch('service.interactions.InteractionBroker') as broker, \
@@ -37,7 +38,8 @@ class ResponseSetupTests(unittest.TestCase):
             server.interactions = None
             hub.main()
             self.assertIs(server.interactions, broker.return_value)
-            listener.assert_called_once()
+            listener.assert_not_called()
+            claude.assert_called_once()
             broker.assert_called_once()
 
     def test_agent_sources_cannot_opt_back_into_the_blocking_bridge(self):
@@ -56,7 +58,7 @@ class ResponseSetupTests(unittest.TestCase):
                 document = json.loads(path.read_text())
                 response_events = [event for event, groups in document['hooks'].items() for group in groups
                     for item in group['hooks'] if responses.owns_hook(item, self.root, provider)]
-                self.assertEqual(response_events, ['PermissionRequest'] if provider == 'claude' else [])
+                self.assertEqual(response_events, [])
                 self.assertEqual(control.missing_hooks(provider=provider), [])
 
     def test_upgrade_removes_legacy_responders_preserving_shared_groups_and_reviewed_observers(self):
@@ -131,16 +133,22 @@ class ResponseSetupTests(unittest.TestCase):
             self.assertTrue(json.loads(path.read_text())['disableAllHooks'])
             self.assertTrue(control.missing_hooks(provider=provider))
 
-    def test_setup_status_and_instructions_identify_claude_response_command_separately(self):
+    def test_setup_status_and_instructions_describe_observers_and_native_remote_control(self):
         plist = self.root / 'source.plist'
         plist.write_bytes(plistlib.dumps({'ProgramArguments': ['/app/background', sys.executable, str(self.root)]}))
         for provider, path in self.paths.items():
             install.install_hooks(path, provider=provider)
         result = control.status()
-        self.assertEqual(set(result['responseHookCommands']), {'claude'})
+        self.assertNotIn('responseHookCommands', result)
         self.assertEqual(set(result['hookCommands']), set(self.paths))
         with patch('builtins.print') as output:
             install.print_hook_review_steps(self.root / 'pacemanctl')
         text = '\n'.join(str(call.args[0]) for call in output.call_args_list)
         self.assertIn('Codex hooks never answer or delay prompts', text)
+        self.assertNotIn('interaction_hook.py', text)
+
+        with patch('builtins.print') as output:
+            install.print_claude_review_steps(self.root / 'pacemanctl')
+        text = '\n'.join(str(call.args[0]) for call in output.call_args_list)
+        self.assertIn('Remote Control', text)
         self.assertNotIn('interaction_hook.py', text)

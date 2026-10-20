@@ -1,4 +1,5 @@
 from contextlib import closing, ExitStack
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,44 @@ from macos.codex_hook import workspace_label
 
 
 class MacSourceTests(unittest.TestCase):
+    def test_claude_native_resolution_clears_only_matching_live_tool_waits(self):
+        from macos.claude_hook import message_for
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = Store(root / 'hub.sqlite3')
+            with MacSource(store, socket_path=root / 'hook.sock', providers=('claude',),
+                           allowance_reader=lambda: None, turn_status_reader=lambda _: {},
+                           monotonic=lambda: 100) as source:
+                base = dict(session_id='native-local', prompt_id='turn')
+                def hook(event, **fields):
+                    source.receive(message_for(dict(base, hook_event_name=event, **fields)))
+                key = hashlib.sha256(b'claude:native-local').hexdigest()
+                hook('UserPromptSubmit')
+                hook('PreToolUse', tool_name='Bash', tool_use_id='a')
+                hook('PreToolUse', tool_name='Bash', tool_use_id='b')
+                hook('PermissionRequest', tool_name='Bash')
+                hook('Elicitation', elicitation_id='form')
+                current = source.claude_sessions[key]
+                permission = 'permission:' + hashlib.sha256(b'Bash').hexdigest()
+                input_wait = 'input:' + hashlib.sha256(b'form').hexdigest()
+                source.native_claude_requests_changed(key, 'turn', True)
+                source.native_claude_requests_resolved(key, 'turn', [('a', 'Bash')], {'Bash'})
+                self.assertIn(permission, current.waits, 'Sibling permission is still pending')
+                source.native_claude_requests_resolved(key, 'old-turn', [('b', 'Bash')], set())
+                self.assertIn(permission, current.waits)
+                source.native_claude_requests_resolved(key, 'turn', [('unknown', 'Bash')], set())
+                self.assertIn(permission, current.waits)
+                source.native_claude_requests_resolved(key, 'turn', [('b', 'Bash')], set())
+                source.native_claude_requests_changed(key, 'turn', False)
+                self.assertNotIn(permission, current.waits)
+                self.assertIn(input_wait, current.waits, 'Unrelated input is not an approval')
+                self.assertIn('b', current.tools, 'Approving does not finish the tool')
+                hook('PreToolUse', tool_name='AskUserQuestion', tool_use_id='q')
+                source.native_claude_requests_resolved(key, 'turn', [('q', 'AskUserQuestion')], set())
+                self.assertNotIn('question:q', current.waits)
+                hook('ElicitationResult', elicitation_id='form')
+                self.assertEqual(store.snapshot()['state'], 'working')
+
     def test_native_request_state_is_turn_scoped_and_disconnect_is_not_an_answer(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

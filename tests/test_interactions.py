@@ -60,21 +60,6 @@ class BrokerTests(unittest.TestCase):
         self.assertEqual(pending.response, {"action": "allowOnce"})
         self.assertEqual(self.broker.pending()["requests"], [])
 
-    def test_native_completion_is_scoped_and_prevents_late_republication(self):
-        first = dict(scope='1' * 64, turn='2' * 64, session='3' * 64)
-        sibling = dict(first, scope='4' * 64)
-        a = self.broker._publish(approval(), 60, first)
-        b = self.broker._publish(approval(), 60, sibling)
-        self.broker.native_resolved('scope', first['scope'])
-        self.assertEqual(a.response, {'action': 'release'})
-        self.assertFalse(b.ready.is_set())
-        with self.assertRaises(BrokerError):
-            self.broker._publish(approval(), 60, first)
-        self.broker.native_resolved('turn', first['turn'])
-        self.assertEqual(b.response, {'action': 'release'})
-        next_turn = dict(first, turn='5' * 64, scope='6' * 64)
-        self.assertFalse(self.broker._publish(approval(), 60, next_turn).ready.is_set())
-
     def test_duplicate_tool_calls_are_distinct_and_snapshot_is_a_copy(self):
         a = self.broker._publish(approval(), 60)
         b = self.broker._publish(approval(), 60)

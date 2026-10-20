@@ -112,7 +112,7 @@ class InteractionHTTPTests(unittest.TestCase):
         self.assertEqual(entries[-1]['httpStatus'], 401)
         self.assertNotIn('traceID', entries[-1])
 
-    def test_mac_startup_starts_native_follower_and_claude_permission_listener(self):
+    def test_mac_startup_starts_native_followers_without_hook_response_socket(self):
         root = Path(self.temp.name) / 'normal-install'
         root.mkdir(mode=0o700)
         store = Store(root / 'data/hub.sqlite3')
@@ -120,7 +120,7 @@ class InteractionHTTPTests(unittest.TestCase):
 
         def verify(server, **_):
             self.assertIsNotNone(server.interactions)
-            self.assertTrue((root / 'interaction.sock').is_socket())
+            self.assertFalse((root / 'interaction.sock').exists())
             server.daemon_threads = False  # Teardown joins the real HTTP handler.
             receiver = threading.Thread(target=server.handle_request, daemon=True)
             receiver.start()
@@ -139,6 +139,7 @@ class InteractionHTTPTests(unittest.TestCase):
                 'serve', '--source', 'macos', '--port', '0']), \
                 patch.object(Server, 'serve_forever', autospec=True, side_effect=verify) as serve, \
                 patch('service.codex_desktop.DesktopRequests', autospec=True), \
+                patch('service.claude_remote.RemoteRequests', autospec=True), \
                 patch('builtins.print'):
             hub.main()
         serve.assert_called_once()

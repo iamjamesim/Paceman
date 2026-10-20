@@ -101,11 +101,11 @@ accessory BLE and diagnostics. Codex desktop requests use private versioned IPC
 and belong to the existing native owner until resolution or disconnect; this
 does not attach to CLI sessions. Async question replies use native steering,
 whose follower interface does not expose a caller-supplied turn fence.
-Claude main-session requests compete at PermissionRequest for at most ten minutes.
-Its hook omits native request IDs and the exact native menu. Local approval can
-leave a remote card pending until tool completion; completion withdraws the
-matching scope and prevents late publication. Indistinguishable identical inputs
-remain native for the rest of that turn. These integration limits remain open.
+Claude uses an already-enabled native Remote Control connection and the native
+login's session scope. Only control events are requested; native request IDs and
+pending-request checkpoints govern lifetime. Local answers clear immediately;
+remote submissions are confirmed against the owner's pending set. Hooks only
+observe activity. Native login refresh and permission-mode changes stay in Claude.
 Provider disable,
 source shutdown or pairing changes invalidate remote cards. Submission receipts confirm
 Paceman acceptance, not agent consumption. Responses are never retried

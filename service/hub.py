@@ -799,12 +799,16 @@ def main():
                     diagnostics=server.diagnostics)
                 server.interaction_access = server.interaction_access_state()
                 stack.callback(server.interactions.close)
-                interaction_path = args.interaction_socket or args.data_dir.parent / "interaction.sock"
-                stack.enter_context(ResponseListener(server.interactions, interaction_path))
+                if args.interaction_socket:
+                    stack.enter_context(ResponseListener(server.interactions, args.interaction_socket))
                 if args.source == "macos":
                     from service.codex_desktop import DesktopRequests
                     stack.enter_context(DesktopRequests(server.interactions, server.adapter.native_sessions,
                         attention=server.adapter.native_requests_changed))
+                    from service.claude_remote import RemoteRequests
+                    stack.enter_context(RemoteRequests(server.interactions, server.adapter.native_claude_sessions,
+                        attention=server.adapter.native_claude_requests_changed,
+                        resolved=server.adapter.native_claude_requests_resolved))
             print(f"{args.source.title()} source listening on 127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever(poll_interval=0.25)
