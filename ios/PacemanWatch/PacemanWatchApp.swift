@@ -446,7 +446,8 @@ private struct WatchActivityRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(task.title).font(.body).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
-                    if ["Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed" {
+                    if ["Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed"
+                        || task.status(at: date) == "Response sent" {
                         Text(task.status(at: date)).font(.caption)
                     }
                 }
@@ -506,10 +507,14 @@ private struct WatchTaskView: View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    if let prompt, !submitted, !rejected {
+                    if let prompt, !submitted, !rejected, currentTask.state == "needs_input",
+                       !currentTask.historical(at: Date()) {
                         if ProcessInfo.processInfo.systemUptime >= deadline {
                             Text(unconfirmed ? "Delivery is unconfirmed. Check \(responseDestination)."
-                                : "This request expired. Check \(responseDestination).")
+                                : "Refresh this request before responding.")
+                            if submission == nil {
+                                Button("Check again") { Task { await load(renewing: prompt) } }.disabled(sending)
+                            }
                         } else {
                             requestContent(prompt).disabled(sending || submission != nil)
                             if unconfirmed {
@@ -564,6 +569,9 @@ private struct WatchTaskView: View {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
                 _ = try? await store.workMessage(["operation": "refreshTasks", "sourceID": task.sourceID])
+                if let prompt, submission == nil, !submitted, ProcessInfo.processInfo.systemUptime >= deadline {
+                    await load(renewing: prompt)
+                }
                 do { try await Task.sleep(for: .seconds(5)) } catch { return }
             }
         }
@@ -594,7 +602,13 @@ private struct WatchTaskView: View {
             }
         }
         .onChange(of: currentTask.state) { _, state in
-            if state == "needs_input", prompt == nil, !submitted, scenePhase == .active {
+            guard submission == nil, !submitted else { return }
+            if state != "needs_input" {
+                operation.invalidate()
+                prompt = nil
+                answers = [:]
+                error = nil
+            } else if scenePhase == .active, prompt == nil, !sending {
                 Task { await load() }
             }
         }
@@ -721,7 +735,7 @@ private struct WatchTaskView: View {
         }
     }
 
-    @MainActor private func load() async {
+    @MainActor private func load(renewing previous: WatchWorkPrompt? = nil) async {
         guard currentTask.state == "needs_input", !currentTask.historical(at: Date()),
               let token = operation.begin() else { return }
         error = nil
@@ -745,6 +759,15 @@ private struct WatchTaskView: View {
             guard value.request.validContent else {
                 nativeOnly = true
                 prompt = nil
+                answers = [:]
+                submission = nil
+                return
+            }
+            if let previous, previous.generation != value.generation || !previous.request.hasSameReview(as: value.request) {
+                prompt = nil
+                answers = [:]
+                submission = nil
+                error = "This request changed. Check again to review what's pending."
                 return
             }
             prompt = value
@@ -761,7 +784,8 @@ private struct WatchTaskView: View {
     }
 
     private func respond(_ action: String, optionID: String? = nil) {
-        guard let prompt, submission == nil, ProcessInfo.processInfo.systemUptime < deadline else { return }
+        guard let prompt, submission == nil, currentTask.state == "needs_input",
+              !currentTask.historical(at: Date()), ProcessInfo.processInfo.systemUptime < deadline else { return }
         let value = InputSubmission(generation: prompt.generation, requestID: prompt.request.id,
             version: prompt.request.version, idempotencyKey: UUID().uuidString, action: action,
             answers: action == "answer" ? answers : [:], optionID: optionID)
@@ -897,8 +921,9 @@ private enum WatchWorkPreview {
     static var scenario: String? {
         ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--work-preview=") }.map { String($0.dropFirst(15)) }
     }
-    static let detailScenarios = ["native-input", "native-long", "approval", "approval-json", "approval-unknown", "approval-large", "approval-long-command", "approval-write", "approval-edit", "approval-terminal", "approval-terminal-text", "approval-terminal-poll", "question", "selection-only", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
+    static let detailScenarios = ["native-input", "native-long", "approval", "approval-json", "approval-unknown", "approval-large", "approval-long-command", "approval-write", "approval-edit", "approval-terminal", "approval-terminal-text", "approval-terminal-poll", "question", "selection-only", "renewing-request", "free-text", "multiple", "long-question", "long-option", "expired-request", "unconfirmed", "working-detail", "finished-detail", "failed-detail", "idle-detail", "historical-detail"]
     static var responseSent = false
+    static var requestReads = 0
     static var task: WatchWorkTask {
         let state = ["working-detail": "working", "finished-detail": "finished", "failed-detail": "failed", "idle-detail": "idle", "historical-detail": "working"][scenario ?? ""] ?? "needs_input"
         return WatchWorkTask(sourceID: "preview", sessionID: "task", provider: ["approval-write", "approval-edit"].contains(scenario) ? "claude" : "codex", title: scenario == "native-long" ? "Review accessibility and notifications throughout the entire onboarding experience" : "Simplify onboarding",
@@ -974,7 +999,9 @@ private enum WatchWorkPreview {
                 : scenario == "free-text" ? [.init(id: "q0", prompt: "What should we improve next?", multiple: false, options: [])] : [question], remainingSeconds: 120,
             contentVersion: scenario == "selection-only" ? 3 : payload == nil ? nil : 2, approval: payload,
             responseOptions: terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : payload == nil ? nil : ApprovalPreviewFixtures.choices)
-        return try encoded(WatchWorkPrompt(generation: "preview", request: request, remainingSeconds: scenario == "expired-request" ? -1 : 120))
+        requestReads += 1
+        return try encoded(WatchWorkPrompt(generation: "preview", request: request,
+            remainingSeconds: scenario == "expired-request" ? -1 : scenario == "renewing-request" && requestReads == 1 ? 1 : 120))
     }
 }
 #endif

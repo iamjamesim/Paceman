@@ -2,6 +2,28 @@ import XCTest
 @testable import AgentCompanion
 
 final class InteractionTests: XCTestCase {
+    func testReviewLeaseRenewalCannotReuseDraftForChangedContent() throws {
+        let original = InputRequest(requestID: "request", version: 1, provider: "codex", sessionID: "session",
+            kind: "question", title: "Choose", detail: "", questions: [.init(id: "q", prompt: "Which?",
+                multiple: false, options: [.init(label: "First", description: "")], allowsText: false)],
+            remainingSeconds: 10, contentVersion: 3)
+        var wire = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [String: Any])
+        wire["remainingSeconds"] = 600
+        func decode(_ value: [String: Any]) throws -> InputRequest {
+            try JSONDecoder().decode(InputRequest.self, from: JSONSerialization.data(withJSONObject: value))
+        }
+        XCTAssertTrue(original.hasSameReview(as: try decode(wire)))
+        for (key, value) in [("requestID", "replacement"), ("sessionID", "another"), ("provider", "claude"),
+                             ("title", "Different question"), ("detail", "Additional required context")] {
+            var changed = wire
+            changed[key] = value
+            XCTAssertFalse(original.hasSameReview(as: try decode(changed)), key)
+        }
+        var changed = wire
+        changed["questions"] = [["id": "q", "prompt": "Which?", "multiple": false,
+            "options": [["label": "Different", "description": ""]], "allowsText": false]]
+        XCTAssertFalse(original.hasSameReview(as: try decode(changed)))
+    }
     func testSelectionOnlyQuestionProfilePreservesNativeAnswerConstraints() throws {
         let question = InteractionQuestion(id: "q", prompt: "Which?", multiple: false,
             options: [.init(label: "First", description: "")], allowsText: false)

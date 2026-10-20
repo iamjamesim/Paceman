@@ -87,6 +87,12 @@ struct InputRequest: Codable, Identifiable, Equatable {
         }
     }
     var validContent: Bool { content != nil }
+    func hasSameReview(as other: InputRequest) -> Bool {
+        requestID == other.requestID && version == other.version && provider == other.provider
+            && sessionID == other.sessionID && kind == other.kind && title == other.title
+            && detail == other.detail && questions == other.questions && contentVersion == other.contentVersion
+            && approval == other.approval && responseOptions == other.responseOptions
+    }
     var content: Content? {
         if contentVersion == 3 {
             guard kind == "question", approval == nil, responseOptions == nil,
