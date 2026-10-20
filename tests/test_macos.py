@@ -95,6 +95,8 @@ class MacSourceTests(unittest.TestCase):
                 self.assertEqual(store.snapshot()['state'], 'needs_input', 'An unanswered plan does not retire as finished')
                 source.native_requests_changed('one', {'1': False})
                 self.assertEqual(store.snapshot()['state'], 'finished')
+                source.tick()
+                self.assertEqual(store.snapshot()['state'], 'finished', 'Resolving an older plan starts the normal result retention')
                 source.receive(dict(base, turn='2', event='working', hook='UserPromptSubmit'))
                 self.assertEqual(store.snapshot()['state'], 'working')
                 source.native_requests_changed('one', {'2': 'planImplementation'})

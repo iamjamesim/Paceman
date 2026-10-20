@@ -127,7 +127,12 @@ class MacSource:
                 if not self.native_attention.get(key, (None, False))[1]:
                     self.native_attention.pop(key, None)
             elif tracked and tracked[1] in by_turn:
+                previous = self.native_attention.get(key)
                 self.native_attention[key] = (tracked[1], by_turn[tracked[1]])
+                if previous == (tracked[1], 'planImplementation') and not by_turn[tracked[1]]:
+                    with self.store.connect() as db:
+                        db.execute("UPDATE mac_sessions SET updated=? WHERE id=? AND turn=? AND state='finished'",
+                                   (time.time(), key, tracked[1]))
             self.publish_current()
 
     def native_claude_sessions(self):
@@ -562,9 +567,9 @@ class MacSource:
             with self.store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 retired = 0
-                for row in db.execute("SELECT id FROM mac_sessions WHERE state IN ('finished','failed') AND updated<=?",
+                for row in db.execute("SELECT id,turn FROM mac_sessions WHERE state IN ('finished','failed') AND updated<=?",
                                       (time.time() - FINISHED_RETENTION,)):
-                    if self.native_attention.get(row['id'], (None, False))[1] == 'planImplementation':
+                    if self.native_attention.get(row['id']) == (row['turn'], 'planImplementation'):
                         continue
                     retired += db.execute("DELETE FROM mac_sessions WHERE id=?", (row["id"],)).rowcount
                     self.native_attention.pop(row["id"], None)
