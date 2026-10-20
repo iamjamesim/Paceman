@@ -117,3 +117,5 @@ WatchConnectivity replies, never application context or queued transfers.
 An active Watch review renews its display lease; drafts survive only an identical
 request in the same generation.
 Pending sibling requests take precedence over a submission receipt.
+Visible Watch reviews advance within the selected session; uncertain submissions
+remain available for explicit retry.

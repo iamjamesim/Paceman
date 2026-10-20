@@ -2127,7 +2127,7 @@ extension InteractionTests {
         for clearInbox in [false, true] {
             if clearInbox { model.interactions.setForeground(false) }
             let reopened = await model.handleWatchWork(request)
-            XCTAssertNotNil(reopened["error"])
+            XCTAssertTrue(reopened["error"] != nil || reopened["nativeOnly"] as? Bool == true)
             XCTAssertNil(reopened["data"], "A definitive rejection must not reopen as an uncertain form")
             let retried = await model.handleWatchWork(payload)
             XCTAssertNotNil(retried["error"])
@@ -2142,6 +2142,83 @@ extension InteractionTests {
         let nextPrompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(next["data"] as? Data))
         XCTAssertEqual(nextPrompt.request.id, nextID, "Rejection belongs to one request, not the entire chat")
         XCTAssertNil(nextPrompt.submission)
+    }
+
+    @MainActor func testWatchAdvancesOnlyWithinSelectedSessionAndKeepsUncertainSubmission() async throws {
+        for foreground in [false, true] {
+            let source = PairedSource(endpoint: URL(string: "https://watch-queue.example")!, sourceID: sourceID,
+                clientID: "client", credential: "fixture")
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [InteractionURLProtocol.self]
+            let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+            model.pairedSources = [source]
+            model.snapshots = [:]
+            model.interactions.setForeground(foreground)
+            var listing = fixture()
+            let first = (listing["requests"] as! [[String: Any]])[0]
+            var second = first
+            second["requestID"] = UUID().uuidString
+            var other = first
+            other["requestID"] = UUID().uuidString
+            other["sessionID"] = String(repeating: "b", count: 64)
+            listing["requests"] = [first, other, second]
+            listing["awaitingRequestIDs"] = []
+            var posts: [InputSubmission] = []
+            var envelope: InputSubmission?
+            InteractionURLProtocol.start = { transport in
+                Task { @MainActor in
+                    if transport.request.url?.path == "/v1/snapshot" {
+                        transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+                    } else if transport.request.httpMethod == "POST" {
+                        let answer = envelope!
+                        posts.append(answer)
+                        if posts.count == 1 {
+                            listing["requests"] = [other, second]
+                            listing["awaitingRequestIDs"] = [answer.requestID]
+                            transport.finish(try! JSONSerialization.data(withJSONObject: ["status": "submitted",
+                                "generation": answer.generation, "requestID": answer.requestID, "version": 1]))
+                        } else {
+                            transport.client?.urlProtocol(transport, didFailWithError: URLError(.networkConnectionLost))
+                        }
+                    } else { transport.finish(try! JSONSerialization.data(withJSONObject: listing)) }
+                }
+            }
+            defer {
+                model.interactions.setForeground(false)
+                InteractionURLProtocol.start = nil
+                SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+            }
+            let request: [String: Any] = ["operation": "request", "sourceID": sourceID,
+                "sessionID": String(repeating: "a", count: 64), "provider": "claude"]
+            func read() async throws -> WatchWorkPrompt {
+                let reply = await model.handleWatchWork(request)
+                return try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reply["data"] as? Data))
+            }
+            func answer(_ prompt: WatchWorkPrompt) -> InputSubmission {
+                .init(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+                    idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": .init(selected: [0])])
+            }
+            let initial = try await read()
+            let firstAnswer = answer(initial)
+            envelope = firstAnswer
+            _ = await model.handleWatchWork(["operation": "submit", "sourceID": sourceID,
+                "submission": try JSONEncoder().encode(firstAnswer)])
+            let next = try await read()
+            XCTAssertEqual(next.request.id, second["requestID"] as? String)
+            XCTAssertEqual(next.request.sessionID, initial.request.sessionID)
+            XCTAssertNil(next.submission)
+            let renewed = try await read()
+            XCTAssertTrue(next.request.hasSameReview(as: renewed.request))
+            let secondAnswer = answer(next)
+            envelope = secondAnswer
+            let uncertain = await model.handleWatchWork(["operation": "submit", "sourceID": sourceID,
+                "submission": try JSONEncoder().encode(secondAnswer)])
+            XCTAssertEqual(uncertain["unconfirmed"] as? Bool, true)
+            let reopened = try await read()
+            XCTAssertEqual(reopened.submission, secondAnswer)
+            XCTAssertEqual(reopened.submitted, false)
+            XCTAssertEqual(posts.map(\.requestID), [initial.request.id, next.request.id])
+        }
     }
 
     @MainActor func testWatchUsesNativeContinuationAndRejectsUnmatchedResponseTasks() async throws {

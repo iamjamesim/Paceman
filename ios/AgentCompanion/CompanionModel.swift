@@ -1177,8 +1177,7 @@ extension CompanionModel {
                 let destination = ResponseGuidance.destination(for: provider)
                 guard snapshot.interactionsEnabled == true else { return ["nativeOnly": true] }
                 let identity = WorkIdentity(sourceID: sourceID, sessionID: sessionID, provider: provider)
-                let known = interactions.items.first { $0.source.sourceID == sourceID
-                    && $0.request.sessionID == sessionID && $0.request.provider == provider && interactions.isCurrent($0) }
+                let known = interactions.pendingRequests(for: identity).first
                 let response = interactions.response(for: identity).flatMap {
                     known == nil || known?.id == $0.item.id ? $0 : nil
                 }
@@ -1223,7 +1222,9 @@ extension CompanionModel {
                             remainingSeconds: item.expiresAtUptime - ProcessInfo.processInfo.systemUptime,
                             submission: watchSubmissions[item.id], submitted: watchConfirmed.contains(item.id)))
                     }
-                    return ["error": "No response is available. Check \(destination)."]
+                    var reply: [String: Any] = ["nativeOnly": true]
+                    reply["workSnapshot"] = encoded(watchWorkSnapshot())["data"]
+                    return reply
                 }
                 guard started + request.remainingSeconds > ProcessInfo.processInfo.systemUptime else {
                     return ["error": "This request expired. Check \(destination)."]
