@@ -268,7 +268,7 @@ private struct ApprovalExpandableText: View {
     }
 
     private var expansionButton: some View {
-        Button(expanded ? "Show less" : "Show full \(label.lowercased())") { expanded.toggle() }
+        Button(expanded ? "Show less" : startsCollapsed ? "Show tool input" : "Show more") { expanded.toggle() }
             .font(CompanionTextRole.label.font).foregroundStyle(theme.tint)
             .frame(minHeight: 44).contentShape(Rectangle()).buttonStyle(.plain)
             .accessibilityLabel(expanded ? "Show less \(label.lowercased())" : "Show full \(label.lowercased())")

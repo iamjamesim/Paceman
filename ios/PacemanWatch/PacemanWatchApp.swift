@@ -822,7 +822,10 @@ private struct WatchApprovalText: View {
     }
 
     private var expansionButton: some View {
-        Button(expanded ? "Show less" : "Show full \(label.lowercased())") { expanded.toggle() }
+        Button(expanded ? "Show less" : startsCollapsed ? "Show tool input" : "Show more") { expanded.toggle() }
+            .font(.body).foregroundStyle(WatchPalette.tint)
+            .frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            .buttonStyle(.plain)
             .accessibilityLabel(expanded ? "Show less \(label.lowercased())" : "Show full \(label.lowercased())")
             .accessibilityHint(expanded ? "Collapse \(label.lowercased())" : "Read the complete \(label.lowercased())")
     }
