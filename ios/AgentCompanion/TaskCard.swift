@@ -311,7 +311,9 @@ struct TaskCard: View {
                 detailRow("Agent", symbol: "terminal", value: item.session.provider == "claude" ? "Claude Code" : item.session.provider.capitalized)
             }
             if item.historical {
-                Text("Last received activity. This session’s current status is unavailable.")
+                Text(item.session.attentionUncertain == true
+                    ? "Paceman couldn’t verify whether this request is still waiting. Check the agent app for its current status."
+                    : "Last received activity. This session’s current status is unavailable.")
                     .companionText(.body, theme: theme)
             }
         }

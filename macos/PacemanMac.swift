@@ -42,6 +42,7 @@ private struct SourceStatus: Decodable {
     var setupProviders: [String]? = nil
     var providers: [String]? = nil
     var providerCounts: [String: [String: Int]]? = nil
+    var unverifiedSessions: Int? = nil
     var missingHooksByProvider: [String: [String]]? = nil
     var hookCommands: [String: String]? = nil
     var lastAgentEventByProvider: [String: Double]? = nil
@@ -1084,6 +1085,9 @@ private struct Panel: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var activity: String {
+        if model.status.activity == "idle", (model.status.unverifiedSessions ?? 0) > 0 {
+            return "Status unverified"
+        }
         switch model.status.activity {
         case "working": return "Working"
         case "needs_input": return "Needs input"

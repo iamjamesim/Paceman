@@ -111,6 +111,7 @@ example, an allowance change raised `revision` to 12 without changing activity
 | `state` | `idle`, `working`, `needs_input`, `finished`, or `failed`. |
 | `eventID` | Opaque activity identity, 1–128 UTF-8 bytes without control characters; stable across presentation-only revisions. |
 | `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded session `name` titles, workspace labels and Claude `remoteSessionID` (the Remote Control ID, distinct from the opaque row ID); no prompts or transcripts. |
+| Session `attentionUncertain` | Optional boolean. True means the row's Needs input state is last-known and cannot currently be verified. Keep it in history with native continuation; exclude it from current counts, alerts and accessory activity. Absence retains the existing state semantics. |
 | `allowance` | Optional selected Codex reading; may advance `revision` without a new activity event. |
 | `allowances` | Optional array of up to two Codex usage windows, each with its own observation and reset time. |
 | `configuredProviders` | Optional enabled activity providers (`codex`, `claude`), including providers without a received event. |

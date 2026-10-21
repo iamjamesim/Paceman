@@ -100,6 +100,10 @@ Needs input remains. Owner-confirmed removal of the last matching decision
 restores that outcome and starts its normal display retention. Turn-scoped
 decisions cannot affect a newer turn; session-scoped elicitation remains
 session-scoped. Disconnect or a stream gap means unknown, not confirmed empty.
+Previously observed decisions that cannot be reconfirmed stay as last-known
+rows marked Status unverified, outside current activity counts and alerts. A
+fresh source fetch cannot turn those rows back into confirmed attention; fresh
+native evidence can. Confirmed sibling decisions still take precedence.
 
 Omarchy persists local session references and attention metadata, without request
 content, for restart recovery. Restoring them requires the same live process,

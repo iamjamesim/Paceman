@@ -26,7 +26,7 @@ from service.codex_limits import read_codex_allowances
 from service.usage import selected_reading, valid_reading
 from service.session_titles import SessionTitles, read_session_titles
 from service.codex_turns import read_codex_turn_metadata, read_codex_turn_statuses
-from service.native_attention import PendingDecisions, native_waiting, native_empty
+from service.native_attention import PendingDecisions, native_waiting, native_empty, native_unverified
 
 
 EVENT_STATES = {
@@ -122,8 +122,14 @@ class MacSource:
             if self.closed or 'codex' not in self.providers:
                 return
             tracked = self.turn_ids.get(key)
-            if tracked is None or by_turn is None:
+            if tracked is None:
                 # A missing owner/channel is unknown, not confirmed empty.
+                return
+            if by_turn is None:
+                previous = self.native_attention.get(key)
+                if isinstance(previous, PendingDecisions):
+                    self.native_attention[key] = previous.disconnected()
+                    self.publish_current()
                 return
             previous = self._native_codex_waiting(key, tracked[1])
             if isinstance(by_turn, PendingDecisions):
@@ -737,6 +743,7 @@ class MacSource:
             state = ("needs_input" if row["state"] not in ("finished", "failed")
                      and waiting else row["state"])
             native = self.native_attention.get(row["id"])
+            hook_waiting = state == 'needs_input'
             if native_waiting(native, row['turn']):
                 state = 'needs_input'
             elif native_empty(native, row['turn']) and row['state'] not in ('finished', 'failed', 'idle'):
@@ -746,6 +753,8 @@ class MacSource:
                 state = ("needs_input" if native[1] else
                          "working" if state == "needs_input" else state)
             session = {"id": row["id"], "provider": row["provider"], "state": state}
+            if native_unverified(native, row['turn']) and not hook_waiting:
+                session['attentionUncertain'] = True
             if title := self.titles.name(row["id"]):
                 session["name"] = title
             if row["workspace_label"]:
@@ -754,8 +763,9 @@ class MacSource:
                 session["remoteSessionID"] = row["remote_session_id"]
             sessions.append(session)
         state = next((candidate for candidate in ("needs_input", "failed", "working", "finished")
-                      if any(session["state"] == candidate for session in sessions)), "idle")
-        activity_key = json.dumps([(row["id"], row["turn"], session["state"])
+                      if any(session["state"] == candidate and not session.get('attentionUncertain')
+                             for session in sessions)), "idle")
+        activity_key = json.dumps([(row["id"], row["turn"], session["state"], bool(session.get('attentionUncertain')))
                                    for row, session in zip(records, sessions)])
         old_key = db.execute("SELECT value FROM metadata WHERE key='activity_key'").fetchone()
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()

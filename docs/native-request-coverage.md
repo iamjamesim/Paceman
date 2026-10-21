@@ -41,12 +41,18 @@ does not truncate or narrow the native choice set. Explicit Claude
 turn outcome and submitted mobile-card lifetime. Disconnect is unknown, not empty.
 Claude checkpoints enumerate permission/dialog requests, omit elicitation and
 may omit inherited prompts; omission resolves only a known same-worker request
-in an enumerated domain. Exact native results or unambiguous elicitation hooks
+in an enumerated domain. After a stream gap, an omitted request is last-known
+attention, not confirmed Needs input. The phone and Apple Watch show Status
+unverified under Last known, with native-app continuation on the phone. Exact
+native results or unambiguous elicitation hooks
 can resolve requests without clearing siblings.
 
 Linux restores bounded attention only for the same verified live process.
 Restored Claude aggregate uncertainty has no saved request IDs and remains until
-the owner/session ends; a partial empty checkpoint cannot clear it. Mac starts
+the owner/session ends; a partial empty checkpoint cannot clear it or make it
+current. Unverified rows are excluded from current aggregates, alerts, Live
+Activities and accessory session packets. This presentation requires the updated
+phone build; older clients do not understand the optional uncertainty marker. Mac starts
 clean across source restart because hooks cannot verify process ownership.
 
 Versioned source inventories live in the [Codex desktop](../tests/fixtures/codex-desktop-inventory.json),

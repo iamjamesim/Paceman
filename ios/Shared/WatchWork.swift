@@ -165,11 +165,13 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
     // This is the computer snapshot observation, not the task's last action.
     var observedAt: Double? = nil
     var presentationSymbol: String? = nil
+    var attentionUncertain: Bool? = nil
     var id: String { "\(sourceID)/\(provider)/\(sessionID)" }
     var providerName: String {
         switch provider { case "claude": return "Claude Code"; case "codex": return "Codex"; default: return provider.capitalized }
     }
     func symbol(at date: Date) -> String {
+        if attentionUncertain == true { return "questionmark.circle" }
         if !historical(at: date) {
             if let presentationSymbol { return presentationSymbol }
             if presentationGroup == "Working" { return "circle.dotted" }
@@ -182,9 +184,10 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
         default: return "ellipsis.circle"
         }
     }
-    func historical(at date: Date) -> Bool { date.timeIntervalSince1970 >= freshUntil }
+    func historical(at date: Date) -> Bool { attentionUncertain == true || date.timeIntervalSince1970 >= freshUntil }
     var status: String { status(at: Date()) }
     func status(at date: Date) -> String {
+        if attentionUncertain == true { return "Status unverified" }
         if !historical(at: date), let presentationStatus { return presentationStatus }
         switch state {
         case "needs_input": return historical(at: date) ? "Needs attention" : "Needs you"

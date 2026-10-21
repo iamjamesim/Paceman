@@ -27,7 +27,8 @@ class DesktopStatus:
         if not force and time.monotonic() < self.next_write:
             return
         snapshot = self.store.snapshot()
-        session_counts = {state: sum(session["state"] == state for session in snapshot["sessions"])
+        current_sessions = [s for s in snapshot['sessions'] if not s.get('attentionUncertain')]
+        session_counts = {state: sum(session["state"] == state for session in current_sessions)
                           for state in ("needs_input", "failed", "working", "finished", "idle")}
         clients = self.store.clients()
         with self.store.connect() as db:
@@ -42,8 +43,11 @@ class DesktopStatus:
             "computerName": socket.gethostname(),
             "activity": snapshot["state"], "sessions": len(snapshot["sessions"]),
             "sessionCounts": session_counts,
+            "unverifiedSessions": len(snapshot['sessions']) - len(current_sessions),
+            "unverifiedByProvider": {p: sum(s['provider'] == p and bool(s.get('attentionUncertain'))
+                for s in snapshot['sessions']) for p in {s['provider'] for s in snapshot['sessions']}},
             "providerCounts": {p: {state: sum(s["provider"] == p and s["state"] == state
-                for s in snapshot["sessions"]) for state in session_counts}
+                for s in current_sessions) for state in session_counts}
                 for p in sorted({s["provider"] for s in snapshot["sessions"]})},
             **({"configuredProviders": list(adapter.providers)} if local_mode == "omarchy" and adapter is not None else {}),
             "providers": sorted({s["provider"] for s in snapshot["sessions"]}),

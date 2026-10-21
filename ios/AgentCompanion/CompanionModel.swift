@@ -852,10 +852,11 @@ extension CompanionModel {
                 watchRejected.remove(id)
                 continue
             }
-            let state = snapshot.sessions?.first {
+            let session = snapshot.sessions?.first {
                 $0.id == item.request.sessionID && $0.provider == item.request.provider
-            }?.state
-            if state == nil || (state != observation.state && state != .needsInput) {
+            }
+            let state = session?.state
+            if state == nil || session?.attentionUncertain == true || (state != observation.state && state != .needsInput) {
                 watchTracking[id] = (observation.generation, state, false)
             } else { watchTracking[id] = (observation.generation, state, observation.active) }
         }
@@ -934,10 +935,11 @@ extension CompanionModel {
                 return WatchWorkTask(sourceID: source.sourceID, sessionID: session.id, provider: session.provider,
                     title: session.title ?? session.displayName,
                     computer: name, state: session.state.rawValue, freshUntil: snapshot.activityFreshUntil,
-                    presentationStatus: item.historical ? session.state.title : item.status,
+                    presentationStatus: session.attentionUncertain == true ? item.status : item.historical ? session.state.title : item.status,
                     presentationGroup: item.phase.group.rawValue,
                     project: session.detail.isEmpty ? nil : session.detail, observedAt: snapshot.observedAt,
-                    presentationSymbol: item.statusToken.symbol ?? "circle.dotted")
+                    presentationSymbol: item.statusToken.symbol ?? "circle.dotted",
+                    attentionUncertain: session.attentionUncertain)
             }
         }
         var result = WatchWorkSnapshot(tasks: Array(values.prefix(128)), computers: sources.count,
@@ -949,7 +951,7 @@ extension CompanionModel {
                         sourceName: snapshot?.sourceName, host: source.endpoint.host),
                     generation: snapshot?.generation, revision: snapshot?.revision,
                     stateCounts: snapshot?.sessions.map { sessions in
-                        Dictionary(grouping: sessions, by: { $0.state.rawValue }).mapValues(\.count)
+                        Dictionary(grouping: sessions.filter { $0.attentionUncertain != true }, by: { $0.state.rawValue }).mapValues(\.count)
                     })
             })
         if previousWorkProjection != result {
@@ -1175,6 +1177,9 @@ extension CompanionModel {
                 guard let snapshot = snapshots[sourceID], errors[sourceID] == nil,
                       snapshotIsFresh(sourceID) else { return ["error": "Couldn’t refresh this chat. Check Paceman on iPhone."] }
                 let destination = ResponseGuidance.destination(for: provider)
+                if snapshot.sessions?.first(where: { $0.id == sessionID && $0.provider == provider })?.attentionUncertain == true {
+                    return ["nativeOnly": true]
+                }
                 guard snapshot.interactionsEnabled == true else { return ["nativeOnly": true] }
                 let identity = WorkIdentity(sourceID: sourceID, sessionID: sessionID, provider: provider)
                 let known = interactions.pendingRequests(for: identity).first

@@ -18,6 +18,19 @@ function present(counts, overrides = {}) {
   }, now);
 }
 
+test('unverified decisions do not advertise current input or no active work', () => {
+  const value = present({ needs_input: 0, working: 0, finished: 0, idle: 0 }, {
+    sessions: 1, activity: 'idle', unverifiedSessions: 1, configuredProviders: ['claude'],
+    unverifiedByProvider: {claude: 1}, sessionLiveness: 'process'
+  });
+  assert.equal(value.activity, 'Status unverified');
+  assert.equal(value.agents.find(agent => agent.id === 'claude').label, 'Status unverified');
+  const working = present({ needs_input: 0, working: 1, finished: 0 }, {
+    sessions: 2, unverifiedSessions: 1
+  });
+  assert.equal(working.activity, 'Working');
+});
+
 test('one session keeps the simple row', () => {
   const value = present({ needs_input: 0, working: 1, finished: 0 });
   assert.equal(value.activityTitle, 'Codex');

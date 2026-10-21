@@ -24,7 +24,7 @@ from service.allowance import allowance_snapshots
 from service.codex_turns import read_codex_turn_metadata
 from service.usage import readings, selected_reading
 from service.claude import ClaudeSession
-from service.native_attention import PendingDecisions, native_waiting, native_empty
+from service.native_attention import PendingDecisions, native_waiting, native_empty, native_unverified
 from service.claude_hooks import validate_message
 from service.session_titles import SessionTitles, read_session_titles
 from service.processes import AgentProcesses, ProcessIdentity
@@ -139,6 +139,9 @@ class OmarchySource:
                         self.pending_questions[key] = row["question_turn"], row["question_due"]
                     if row["waiting"] is not None:
                         self.native_attention[key] = row["attention_turn"], bool(row["waiting"])
+                        if row['waiting']:
+                            self.native_attention[key] = PendingDecisions('restored', frozenset(), uncertain=True,
+                                uncertain_turn=row['attention_turn'])
                 for row in db.execute("SELECT key,value FROM metadata WHERE key LIKE 'omarchy_last_event_%'"):
                     self.last_event_by_provider[row["key"].removeprefix("omarchy_last_event_")] = float(row["value"])
                 for row in db.execute('SELECT id,lifecycle FROM omarchy_claude'):
@@ -443,6 +446,10 @@ class OmarchySource:
             if turn is None:
                 return
             if by_turn is None:
+                previous = self.native_attention.get(key)
+                if isinstance(previous, PendingDecisions):
+                    self.native_attention[key] = previous.disconnected()
+                    self.publish(db)
                 return
             previous = native_waiting(self.native_attention.get(key), turn)
             if isinstance(by_turn, PendingDecisions):
@@ -673,6 +680,7 @@ class OmarchySource:
                     if current.remote_session_id:
                         session["remoteSessionID"] = current.remote_session_id
             native = self.native_attention.get(row["id"])
+            hook_waiting = session['state'] == 'needs_input'
             if native_waiting(native, row['turn']):
                 session['state'] = 'needs_input'
             elif native_empty(native, row['turn']) and row['state'] not in ('finished', 'failed', 'idle'):
@@ -680,11 +688,14 @@ class OmarchySource:
             elif (native and not isinstance(native, PendingDecisions) and native[0] == row["turn"]
                   and row["state"] not in ("finished", "failed", "idle")):
                 session["state"] = "needs_input" if native[1] else "working"
+            if native_unverified(native, row['turn']) and not hook_waiting:
+                session['attentionUncertain'] = True
             sessions.append(session)
         # Needs-input takes precedence; active work wins over old completions.
         state = next((candidate for candidate in ("needs_input", "failed", "working", "finished")
-                      if any(session["state"] == candidate for session in sessions)), "idle")
-        activity_key = json.dumps([(row["id"], row["turn"], session["state"])
+                      if any(session["state"] == candidate and not session.get('attentionUncertain')
+                             for session in sessions)), "idle")
+        activity_key = json.dumps([(row["id"], row["turn"], session["state"], bool(session.get('attentionUncertain')))
                                    for row, session in zip(records, sessions)])
         previous_key = db.execute("SELECT value FROM metadata WHERE key='activity_key'").fetchone()
         sessions_changed = previous_key is None or previous_key[0] != activity_key
