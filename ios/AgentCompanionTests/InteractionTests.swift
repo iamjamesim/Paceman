@@ -1813,6 +1813,7 @@ final class SidebarGestureTests: XCTestCase {
 private final class InteractionURLProtocol: URLProtocol {
     static var start: ((InteractionURLProtocol) -> Void)?
     static var stop: ((InteractionURLProtocol) -> Void)?
+    private var stopHandler: ((InteractionURLProtocol) -> Void)?
     func finish(_ data: Data, status: Int = 200) {
         client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: status,
             httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
@@ -1821,11 +1822,44 @@ private final class InteractionURLProtocol: URLProtocol {
     }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() { Self.start?(self) }
-    override func stopLoading() { Self.stop?(self) }
+    override func startLoading() {
+        // A late cancellation belongs to the fixture that started this request,
+        // even after another test installs new shared handlers.
+        stopHandler = Self.stop
+        Self.start?(self)
+    }
+    override func stopLoading() {
+        let handler = stopHandler
+        stopHandler = nil
+        handler?(self)
+    }
 }
 
 extension InteractionTests {
+    func testURLProtocolCancellationKeepsItsOriginalRequestHandler() {
+        var stopped: [String] = []
+        InteractionURLProtocol.start = { _ in }
+        defer {
+            InteractionURLProtocol.start = nil
+            InteractionURLProtocol.stop = nil
+        }
+        let request = URLRequest(url: URL(string: "https://cancellation.example.test")!)
+        InteractionURLProtocol.stop = { _ in stopped.append("first") }
+        let first = InteractionURLProtocol(request: request, cachedResponse: nil, client: nil)
+        first.startLoading()
+        InteractionURLProtocol.stop = nil
+        let withoutHandler = InteractionURLProtocol(request: request, cachedResponse: nil, client: nil)
+        withoutHandler.startLoading()
+        InteractionURLProtocol.stop = { _ in stopped.append("next") }
+        let next = InteractionURLProtocol(request: request, cachedResponse: nil, client: nil)
+        next.startLoading()
+        // The previous test's delayed cancellation must not reach the next test.
+        first.stopLoading()
+        withoutHandler.stopLoading()
+        next.stopLoading()
+        XCTAssertEqual(stopped, ["first", "next"])
+    }
+
     @MainActor func testWatchForegroundReadsUsePhoneCacheAndDoNotRetainItsPoll() async throws {
         let source = refreshSource("watch-foreground-owner")
         let config = URLSessionConfiguration.ephemeral
