@@ -167,13 +167,32 @@ class MonitoringTests(unittest.TestCase):
         snapshot['sessions'].append(dict(state='working'))
         self.assertFalse(should_end_live_activity(snapshot, 100000))
 
+    def test_terminal_observation_uses_existing_live_activity_timestamp_field(self):
+        snapshot = dict(schema=1, generation='fixture', revision=1, observedAt=200,
+                        state='finished', changedAt=190, sessions=[
+                            dict(state='finished', resultObservedAt=100)])
+        content = live_notification(snapshot, 200)[0]['aps']['content-state']
+        self.assertEqual(content['changedAt'], 100)
+        self.assertNotIn('resultObservedAt', content)
+        snapshot['sessions'].append(dict(state='working'))
+        content = live_notification(snapshot, 200)[0]['aps']['content-state']
+        self.assertEqual(content['changedAt'], 190)
+
     def test_shared_phone_watch_temporal_fixtures_match_direct_apns(self):
+        from service.relay import valid_payload
         path = Path(__file__).parent / 'fixtures/session-temporal.json'
         for fixture in json.loads(path.read_text()):
             with self.subTest(name=fixture['name']):
-                snapshot = dict(fixture, schema=1, generation='fixture', revision=1, observedAt=fixture['now'])
+                snapshot = dict(fixture, schema=1, sourceID=self.client['sourceID'],
+                                generation='fixture', revision=1, observedAt=fixture['now'])
                 self.assertEqual(should_end_live_activity(snapshot, fixture['now']), fixture['expectedEnd'])
-                content = live_notification(snapshot, fixture['now'])[0]['aps']['content-state']
+                payload = live_notification(snapshot, fixture['now'])[0]
+                self.assertTrue(valid_payload('liveactivity', snapshot['sourceID'], payload))
+                self.assertTrue(valid_payload('liveactivity', snapshot['sourceID'],
+                    live_notification(snapshot, fixture['now'], ending=True)[0]))
+                self.assertTrue(valid_payload('liveactivity', snapshot['sourceID'],
+                    live_start_notification(snapshot, fixture['now'])[0]))
+                content = payload['aps']['content-state']
                 for state, field in [('working', 'working'), ('needs_input', 'needsInput'),
                                      ('finished', 'finished'), ('failed', 'failed')]:
                     self.assertEqual(content[field], fixture['expectedGlance'].get(state, 0))

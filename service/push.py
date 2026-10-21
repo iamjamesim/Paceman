@@ -324,8 +324,10 @@ def live_notification(snapshot: dict, now: float, ending=False,
                "changedAt": snapshot["changedAt"]}
     terminal_times = [session["resultObservedAt"] for session in observed_sessions
                       if session.get("state") in ("finished", "failed") and "resultObservedAt" in session]
-    if terminal_times:
-        content["resultObservedAt"] = max(terminal_times)
+    if terminal_times and not any(s.get('state') in ('working', 'needs_input') for s in observed_sessions):
+        # Keep the deployed relay contract. ActivityKit clients already use
+        # changedAt as the fallback result time; metadata must not renew it.
+        content["changedAt"] = max(terminal_times)
     active_sessions = [s for s in sessions if s.get("state") in ("working", "needs_input", "finished", "failed")]
     if active_sessions:
         aliases = {"codex": "codex", "claude": "claude", "claude-code": "claude"}
