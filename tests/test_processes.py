@@ -11,9 +11,10 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from service.hub import Store
-from service.omarchy import OmarchySource
+from service.omarchy import FINISHED_RETENTION, OmarchySource
 from service.processes import AgentProcesses, ProcessIdentity
 from service.status import DesktopStatus
 
@@ -91,6 +92,16 @@ class ProcessTrackingTests(unittest.TestCase):
         self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root / 'theme', providers=("codex", "claude"))
         self.source.__enter__()
 
+    def assert_retained_result_without_owner(self, before):
+        after = self.store.snapshot()
+        self.assertEqual(after['sessions'], before['sessions'])
+        self.assertEqual(after['state'], 'finished')
+        self.assertEqual(after['eventID'], before['eventID'])
+        self.assertEqual(self.source.native_response_sessions(), {})
+        with self.store.connect() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM omarchy_processes').fetchone()[0], 0)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM omarchy_claude').fetchone()[0], 0)
+
     def test_installed_claude_hook_runs_under_isolated_python_and_tracks_native_version_owner(self):
         versions = self.root / "home/.local/share/claude/versions"
         versions.mkdir(parents=True)
@@ -148,10 +159,11 @@ for line in sys.stdin:
         self.assertEqual(self.store.snapshot()["sessions"][0]["provider"], "claude")
         with self.store.connect() as db:
             self.assertEqual(db.execute("SELECT pid FROM omarchy_processes").fetchone()[0], owner.pid)
+        before = self.store.snapshot()
         owner.kill()
         owner.wait(timeout=3)
         self.source.tick(force=True)
-        self.assertEqual(self.store.snapshot()["sessions"], [])
+        self.assert_retained_result_without_owner(before)
 
     def test_short_lived_hook_does_not_close_its_owner_and_finished_stays_visible(self):
         owner = self.spawn()
@@ -169,7 +181,7 @@ for line in sys.stdin:
         self.assertNotIn('boot_id', public)
         self.assertNotIn('"pid"', (self.root / 'status.json').read_text())
 
-    def test_killed_owner_disappears_and_aggregate_change_gets_a_new_identity(self):
+    def test_killed_owner_clears_working_but_retains_result_without_new_alert(self):
         first, second = self.spawn(), self.spawn()
         self.event(first, 'completed', session='one')
         before = self.event(second, 'working', session='two')
@@ -184,7 +196,7 @@ for line in sys.stdin:
         first.kill()
         first.wait(timeout=3)
         self.source.tick(force=True)
-        self.assertEqual(self.store.snapshot()['sessions'], [])
+        self.assert_retained_result_without_owner(after)
 
     def test_membership_only_cleanup_does_not_realert_an_unchanged_state(self):
         first, second = self.spawn(), self.spawn()
@@ -220,23 +232,29 @@ for line in sys.stdin:
         owner = self.spawn()
         before = self.event(owner, 'completed')
         self.assertEqual(os.getsid(owner.pid), owner.pid)
-        with self.store.connect() as db:
-            db.execute('UPDATE omarchy_sessions SET updated=0')
-        self.source.tick(force=True)
-        expired = self.store.snapshot()
-        self.assertEqual(expired['state'], 'idle')
-        self.assertEqual(expired['sessions'], [])
-        self.assertNotEqual(expired['eventID'], before['eventID'])
-        self.restart()
-        after = self.store.snapshot()
-        self.assertEqual(after['state'], 'idle')
-        self.assertEqual(after['sessions'], [])
-        self.assertEqual(after['eventID'], expired['eventID'])
+        completed_at = before['sessions'][0]['resultObservedAt']
+        with patch('service.omarchy.time.time', return_value=completed_at + FINISHED_RETENTION - 1):
+            self.source.tick(force=True)
+            self.assertEqual(self.store.snapshot()['sessions'], before['sessions'])
+        with patch('service.omarchy.time.time', return_value=completed_at + FINISHED_RETENTION):
+            self.source.tick(force=True)
+            expired = self.store.snapshot()
+            self.assertEqual(expired['state'], 'idle')
+            self.assertEqual(expired['sessions'], [])
+            self.assertEqual(expired['completedSessions'], before['sessions'])
+            self.assertNotEqual(expired['eventID'], before['eventID'])
+            self.restart()
+            after = self.store.snapshot()
+            self.assertEqual(after['state'], 'idle')
+            self.assertEqual(after['sessions'], [])
+            self.assertEqual(after['completedSessions'], before['sessions'])
+            self.assertEqual(after['eventID'], expired['eventID'])
         with self.store.connect() as db:
             self.assertEqual(db.execute('SELECT pid FROM omarchy_processes').fetchone()[0], owner.pid)
         resumed = self.event(owner, 'working', turn='turn-2')
         self.assertEqual(resumed['state'], 'working')
         self.assertEqual(resumed['sessions'][0]['id'], before['sessions'][0]['id'])
+        self.assertEqual(resumed['completedSessions'], [])
 
     def test_restart_reconciles_process_that_exited_while_source_was_down(self):
         owner = self.spawn()
@@ -324,7 +342,7 @@ for line in sys.stdin:
         self.assertEqual(self.store.snapshot()['sessions'], [])
 
     @unittest.skipUnless(shutil.which('tmux'), 'tmux is needed for detached-terminal coverage')
-    def test_detached_tmux_keeps_session_until_its_process_exits(self):
+    def test_detached_tmux_retains_result_after_its_process_exits(self):
         address = self.root / 'tmux.sock'
         prefix = ['tmux', '-S', str(address), '-f', '/dev/null']
         self.addCleanup(lambda: subprocess.run(prefix + ['kill-server'], capture_output=True, timeout=3))
@@ -346,12 +364,14 @@ for line in sys.stdin:
         self.assertEqual(attached.stdout.strip(), '0')
         self.restart()
         self.assertEqual(len(self.store.snapshot()['sessions']), 1)
+        before = self.store.snapshot()
         subprocess.run(prefix + ['kill-session', '-t', 'paceman-test'], capture_output=True, check=True, timeout=3)
         deadline = time.monotonic() + 3
-        while self.store.snapshot()['sessions'] and time.monotonic() < deadline:
+        while self.source.native_response_sessions() and time.monotonic() < deadline:
             self.source.tick(force=True)
             time.sleep(.02)
-        self.assertEqual(self.store.snapshot()['sessions'], [])
+        self.source.tick(force=True)
+        self.assert_retained_result_without_owner(before)
 
 
 class ProcessMetadataTests(unittest.TestCase):
