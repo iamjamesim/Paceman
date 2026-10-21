@@ -69,6 +69,30 @@ class DaemonTests(unittest.TestCase):
         self.adapter.receive(other)
         self.assertEqual(self.broker.pending()['requests'], [])
 
+    def test_new_turn_request_before_subscription_poll_updates_scope_without_losing_request(self):
+        self.adapter.receive(request(1))
+        session_request = dict(id=3, method='mcpServer/elicitation/request', params=dict(
+            threadId='session', serverName='forms', mode='form', message='Choose',
+            requestedSchema={'type': 'object', 'properties': {}}))
+        self.adapter.receive(session_request)
+        self.sessions['session'] = 'next'
+        self.adapter.receive(request(2, turn='next'))
+        self.assertEqual(self.adapter.joined['session'], 'next')
+        self.assertEqual({key[2] for key in self.adapter.requests}, {'2', '3'})
+        self.assertEqual(len(self.broker.pending()['requests']), 1, 'The MCP form is native-only')
+        self.assertTrue(self.attention[-1][1].for_turn('next'))
+        self.adapter.receive(request(4, turn='turn'))
+        self.assertEqual({key[2] for key in self.adapter.requests}, {'2', '3'},
+                         'A late old-turn request must not reverse the rollover')
+
+    def test_removed_session_request_before_subscription_poll_withdraws_stale_cards(self):
+        self.adapter.receive(request(1))
+        self.sessions.clear()
+        self.adapter.receive(request(2))
+        self.assertEqual(self.broker.pending()['requests'], [])
+        self.assertNotIn('session', self.adapter.joined)
+        self.connection.send.assert_not_called()
+
     def test_native_review_mutation_invalidates_previous_remote_card(self):
         self.adapter.receive(request())
         self.adapter.receive(request(command='a different command'))
