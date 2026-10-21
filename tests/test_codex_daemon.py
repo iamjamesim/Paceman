@@ -1,8 +1,10 @@
 import time
+import threading
 import unittest
 from unittest.mock import Mock
 
 from service.codex_daemon import DaemonRequests
+from service.codex_desktop import DesktopRequests
 from service.interactions import InteractionBroker, BrokerError
 
 
@@ -18,6 +20,72 @@ def wait_for(predicate):
         if time.monotonic() > deadline:
             raise AssertionError('condition did not complete')
         time.sleep(.005)
+
+
+class MixedAdapterLockTests(unittest.TestCase):
+    def test_daemon_delivery_and_other_session_desktop_discovery_do_not_invert_locks(self):
+        broker = InteractionBroker()
+        self.addCleanup(broker.close)
+        current = {'session': 'turn', 'desktop-session': 'desktop-turn'}
+        daemon = DaemonRequests(broker, lambda: {})
+        desktop = DesktopRequests(broker, lambda: [])
+        daemon.connection, desktop.connection = Mock(), Mock()
+        daemon.joined['session'] = 'turn'
+        daemon.ready.add('session')
+        daemon.items['session'] = {}
+        desktop.retry_at['desktop-session'] = 0
+        desktop._request = Mock(return_value={'handledByClientId': 'desktop-owner'})
+        desktop._follow = Mock()
+        discovery_check, daemon_check = threading.Event(), threading.Event()
+        delivery_done, discovery_done = threading.Event(), threading.Event()
+        errors = []
+
+        def desktop_sessions():
+            discovery_check.set()
+            if not daemon_check.wait(2):
+                raise AssertionError('Daemon never reached its session callback')
+            return [s for s in current if not daemon.owns(s)]
+
+        def daemon_sessions():
+            daemon_check.set()
+            if not discovery_check.wait(2):
+                raise AssertionError('Desktop never reached its session callback')
+            return {s: turn for s, turn in current.items() if daemon.owns(s) or desktop.unavailable(s)}
+
+        desktop.sessions, daemon.sessions = desktop_sessions, daemon_sessions
+
+        def discover():
+            try:
+                desktop._discover('desktop-session', desktop.connection)
+            except Exception as error:
+                errors.append(error)
+            finally:
+                discovery_done.set()
+
+        def deliver():
+            try:
+                with daemon.lock:  # The production reader holds this lock.
+                    daemon.receive(request())
+            except Exception as error:
+                errors.append(error)
+            finally:
+                delivery_done.set()
+
+        discovery = threading.Thread(target=discover, daemon=True)
+        delivery = threading.Thread(target=deliver, daemon=True)
+        discovery.start()
+        self.assertTrue(discovery_check.wait(2))
+        delivery.start()
+        self.assertTrue(delivery_done.wait(2), 'Daemon waits on desktop while discovery waits on daemon')
+        self.assertTrue(discovery_done.wait(2), 'Desktop discovery did not finish')
+        delivery.join(timeout=1)
+        discovery.join(timeout=1)
+        self.assertEqual(errors, [])
+        self.assertEqual(desktop.owners, {'desktop-session': 'desktop-owner'})
+        self.assertEqual(len(broker.pending()['requests']), 1)
+        desktop._follow.assert_called_once_with('desktop-session', 'desktop-owner', True, desktop.connection)
+        daemon._reset()
+        desktop._reset()
 
 
 class DaemonTests(unittest.TestCase):

@@ -273,9 +273,13 @@ class DesktopRequests:
         try:
             reply = self._request("thread-owner-discovery", dict(hostId="local", conversationId=session), connection=connection)
             owner = reply.get("handledByClientId")
+            # The session callback checks daemon ownership. Call it before
+            # taking our lock: daemon delivery can hold its own lock while
+            # asking unavailable(), so the reverse order would deadlock.
+            if not isinstance(owner, str) or session not in self.sessions():
+                return
             with self.lock:
-                if (self.connection is not connection or self.stop.is_set() or not isinstance(owner, str)
-                        or session not in self.sessions()):
+                if self.connection is not connection or self.stop.is_set():
                     return
                 self.owners[session] = owner
                 self._follow(session, owner, True, connection)

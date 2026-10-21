@@ -68,6 +68,24 @@ class DesktopRequestTests(unittest.TestCase):
             self.broker.submit(submission(self.broker, first, action="choose", optionID="decision-0"))
         self.assertEqual(error.exception.code, "stale_request")
 
+    def test_discovery_rechecks_connection_and_shutdown_after_session_callback(self):
+        for change in ('connection', 'shutdown'):
+            with self.subTest(change=change):
+                self.adapter.stop.clear()
+                connection = self.adapter.connection = Mock()
+                self.adapter._request = Mock(return_value={'handledByClientId': 'late-owner'})
+                self.adapter._follow = Mock()
+                def sessions():
+                    if change == 'connection':
+                        self.adapter.connection = Mock()
+                    else:
+                        self.adapter.stop.set()
+                    return [SESSION]
+                self.adapter.sessions = sessions
+                self.adapter._discover(SESSION, connection)
+                self.assertEqual(self.adapter.owners[SESSION], 'native-owner')
+                self.adapter._follow.assert_not_called()
+
     def test_remote_decision_preserves_id_type_owner_and_exact_decision(self):
         sent = []
         self.adapter._request = lambda method, params, **kw: sent.append((method, params, kw))
