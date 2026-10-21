@@ -209,7 +209,8 @@ class LinuxSourceParityTests(unittest.TestCase):
         self.assertEqual(self.source.native_response_sessions(), {'session': 'failed-turn'})
         self.assertEqual(self.codex('needs-input', turn='failed-turn')['state'], 'failed')
         self.assertEqual(self.codex('completed', turn='failed-turn')['state'], 'failed')
-        self.assertEqual(self.codex('ended', turn='failed-turn')['state'], 'idle')
+        self.assertEqual(self.codex('ended', turn='failed-turn')['state'], 'failed')
+        self.assertEqual(self.source.native_response_sessions(), {}, 'A retained result has no live response binding')
 
     def test_missing_prompt_recovery_uses_latest_saved_turn_and_replays_only_matching_hooks(self):
         self.codex(hook='UserPromptSubmit')

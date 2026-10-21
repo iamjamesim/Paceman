@@ -59,8 +59,22 @@ final class PresentationModel: ObservableObject {
         default: return .idle
         }
     }
-    var previewOffline: Bool { ["offline", "computer-offline", "computer-usage-stale", "single-offline", "offline-empty", "claude-offline"].contains(previewScreen) }
+    var previewOffline: Bool { ["offline", "computer-offline", "computer-usage-stale", "single-offline", "offline-empty", "claude-offline", "history-offline"].contains(previewScreen) }
     var previewSessions: [AgentSession] {
+        if previewScreen.hasPrefix("history") {
+            let now = Date().timeIntervalSince1970
+            var rows = [AgentSession(id: "morning", provider: "codex", state: .finished,
+                name: previewScreen == "history-long" ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : "Check notification delivery",
+                workspaceLabel: "paceman", resultObservedAt: now - 3600),
+                AgentSession(id: "last-night", provider: "claude", state: .finished,
+                    name: "Improve onboarding", workspaceLabel: "paceman", resultObservedAt: now - 14 * 3600),
+                AgentSession(id: "failed", provider: "codex", state: .failed,
+                    name: "Run integration tests", resultObservedAt: now - 3 * 86400)]
+            if previewScreen == "history-mixed" {
+                rows.insert(AgentSession(id: "current", provider: "claude", state: .working, name: "Build Mac client"), at: 0)
+            }
+            return rows
+        }
         if previewScreen == "work-review" {
             return [AgentSession(id: "review-approval", provider: "codex", state: .needsInput, name: "Fix checkout redirect", project: "storefront"),
                     AgentSession(id: "review-question", provider: "claude", state: .needsInput, name: "Improve onboarding", project: "paceman"),
@@ -131,6 +145,14 @@ struct AgentSession: Codable, Identifiable, Equatable {
     var project: String?
     var workspaceLabel: String?
     var remoteSessionID: String?
+    var resultObservedAt: Double? = nil
+    var hasResult: Bool { state == .finished || state == .failed }
+    func timeFacts(freshUntil: Double = .infinity) -> SessionTimePolicy.Facts {
+        .init(state: state.rawValue, resultObservedAt: resultObservedAt, freshUntil: freshUntil)
+    }
+    func resultIsVisible(at now: Date) -> Bool {
+        SessionTimePolicy.present(timeFacts(), at: now).visible
+    }
     var appURL: URL? {
         switch provider {
         case "codex": return URL(string: "chatgpt://codex")
@@ -164,14 +186,20 @@ struct AgentSession: Codable, Identifiable, Equatable {
 /// A missing session list cannot be interpreted as zero activity in older sources.
 enum AgentFeedContent: Equatable {
     case waiting, empty, summary(ActivityState), sessions([AgentSession])
-    static func resolve(_ snapshot: Snapshot?) -> Self {
+    static func resolve(_ snapshot: Snapshot?, at now: Date = Date()) -> Self {
         guard let snapshot else { return .waiting }
-        if let sessions = snapshot.sessions, !sessions.isEmpty {
+        let sessions = (snapshot.sessions ?? []).filter { $0.resultIsVisible(at: now) } + snapshot.retainedSessions(at: now)
+        if !sessions.isEmpty {
             return .sessions(sessions.sorted {
+                let l = SessionTimePolicy.present($0.timeFacts(), at: now).glanceEligible
+                let r = SessionTimePolicy.present($1.timeFacts(), at: now).glanceEligible
+                if l != r { return l }
+                if !l, let l = $0.resultObservedAt, let r = $1.resultObservedAt, l != r { return l > r }
                 let left = priority($0.state), right = priority($1.state)
                 return left == right ? $0.id < $1.id : left < right
             })
         }
+        if snapshot.sessions?.contains(where: { $0.hasResult && $0.resultObservedAt != nil }) == true { return .empty }
         return snapshot.state == .idle ? .empty : .summary(snapshot.state)
     }
     fileprivate static func priority(_ state: ActivityState) -> Int {

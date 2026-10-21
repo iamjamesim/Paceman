@@ -4,8 +4,8 @@ import Foundation
 import UIKit
 
 extension MonitoringActivity.ContentState {
-    init(snapshot: Snapshot) {
-        let sessions = snapshot.sessions ?? []
+    init(snapshot: Snapshot, at now: Date = Date()) {
+        let sessions = snapshot.glanceSessions(at: now)
         generation = snapshot.generation
         revision = snapshot.revision
         state = snapshot.state.rawValue
@@ -13,7 +13,7 @@ extension MonitoringActivity.ContentState {
         needsInput = sessions.filter { $0.state == .needsInput }.count
         finished = sessions.filter { $0.state == .finished }.count
         failed = sessions.filter { $0.state == .failed }.count
-        if sessions.isEmpty {
+        if (snapshot.sessions ?? []).isEmpty {
             working = snapshot.state == .working ? 1 : 0
             needsInput = snapshot.state == .needsInput ? 1 : 0
             finished = snapshot.state == .finished ? 1 : 0
@@ -23,8 +23,9 @@ extension MonitoringActivity.ContentState {
         // Fresh source observations renew this bounded display lease.
         freshUntil = snapshot.activityFreshUntil
         changedAt = snapshot.changedAt
+        resultObservedAt = (snapshot.sessions ?? []).filter(\.hasResult).compactMap(\.resultObservedAt).max()
         themeID = ThemePreference.current.rawValue
-        providers = Self.providerCodes((snapshot.sessions ?? [])
+        providers = Self.providerCodes(sessions
             .filter { $0.state != .idle }.map(\.provider))
         providerStates = Dictionary(grouping: sessions.filter { $0.state != .idle }, by: {
             Self.providerCodes([$0.provider]).first ?? "other"
@@ -100,8 +101,11 @@ final class MonitoringCoordinator: ObservableObject {
                 && candidate.observedAt >= current.freshUntil - MonitoringActivity.displayLeaseDuration / 2)
     }
 
-    static func shouldRetireStaleActivity(isStale: Bool, staleDate: Date, now: Date) -> Bool {
-        isStale && now.timeIntervalSince(staleDate) >= staleRetirementGrace
+    static func shouldRetireStaleActivity(isStale: Bool, staleDate: Date, now: Date, resultObservedAt: Date? = nil) -> Bool {
+        guard isStale, now.timeIntervalSince(staleDate) >= staleRetirementGrace else { return false }
+        return resultObservedAt.map {
+            !SessionTimePolicy.present(.init(state: "finished", resultObservedAt: $0.timeIntervalSince1970), at: now).glanceEligible
+        } ?? true
     }
 
     /// The system can mark content stale while the phone is suspended, but
@@ -111,8 +115,12 @@ final class MonitoringCoordinator: ObservableObject {
         for (sourceID, activity) in Array(activities) {
             let staleDate = activity.content.staleDate
                 ?? Date(timeIntervalSince1970: activity.content.state.freshUntil)
+            let state = activity.content.state
+            let terminal = state.working == 0 && state.needsInput == 0 && state.finished + state.failedCount > 0
+            let resultObservedAt = terminal
+                ? Date(timeIntervalSince1970: state.resultObservedAt ?? state.changedAt ?? state.observedAt) : nil
             guard Self.shouldRetireStaleActivity(isStale: activity.activityState == .stale,
-                                                 staleDate: staleDate, now: now) else { continue }
+                                                 staleDate: staleDate, now: now, resultObservedAt: resultObservedAt) else { continue }
             await end(activity, sourceID: sourceID)
         }
     }

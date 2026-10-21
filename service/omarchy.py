@@ -25,12 +25,13 @@ from service.codex_turns import read_codex_turn_metadata
 from service.usage import readings, selected_reading
 from service.claude import ClaudeSession
 from service.native_attention import PendingDecisions, native_waiting, native_empty
+from service.session_history import completed_sessions, display_sessions, retained_completions, FINISHED_DISPLAY_DURATION
 from service.claude_hooks import validate_message
 from service.session_titles import SessionTitles, read_session_titles
 from service.processes import AgentProcesses, ProcessIdentity
 
 MAX_AGE = 24 * 60 * 60
-FINISHED_RETENTION = 10 * 60
+FINISHED_RETENTION = FINISHED_DISPLAY_DURATION
 ATTENTION_DELAY = 5.0
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
 EVENTS = {"working": "working", "needs-input": "needs_input", "completed": "finished",
@@ -678,11 +679,17 @@ class OmarchySource:
                   and row["state"] not in ("finished", "failed", "idle")):
                 session["state"] = "needs_input" if native[1] else "working"
             sessions.append(session)
+            if session["state"] in ("finished", "failed"):
+                session["resultObservedAt"] = row["updated"]
+        now = time.time()
+        completed = completed_sessions(db, sessions, now, self.providers)
+        sessions = display_sessions(sessions, completed, now)
+        turns = {row["id"]: row["turn"] for row in records}
         # Needs-input takes precedence; active work wins over old completions.
         state = next((candidate for candidate in ("needs_input", "failed", "working", "finished")
                       if any(session["state"] == candidate for session in sessions)), "idle")
-        activity_key = json.dumps([(row["id"], row["turn"], session["state"])
-                                   for row, session in zip(records, sessions)])
+        activity_key = json.dumps([(session["id"], session.get("resultObservedAt", turns.get(session["id"], "")), session["state"])
+                                   for session in sessions])
         previous_key = db.execute("SELECT value FROM metadata WHERE key='activity_key'").fetchone()
         sessions_changed = previous_key is None or previous_key[0] != activity_key
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
@@ -694,17 +701,20 @@ class OmarchySource:
         payload = {"sourceName": self.computer_name, "state": state, "sessions": sessions,
                    "configuredProviders": list(self.providers),
                    "allowance": selected_reading(allowances), "allowances": allowances}
+        payload["completedSessions"] = retained_completions(sessions, completed)
         # Membership-only cleanup isn't a new alert. An aggregate state change
         # still needs a new event identity so an acknowledged watch state clears.
         activity_changed = sessions_changed and (not lifecycle_only or old.get("state") != state)
+        if sessions and not records:
+            activity_changed = False
         if not sessions_changed and all(old.get(key) == value for key, value in payload.items()):
             return False
         now = time.time()
         kind = "activity" if activity_changed else "presentation"
         seq = db.execute("INSERT INTO events(at,state,label,kind) VALUES (?,?,?,?)",
                          (now, state, "Omarchy " + kind, kind)).lastrowid
-        payload["eventID"] = str(seq) if activity_changed else old["eventID"]
-        payload["changedAt"] = now if activity_changed else old["changedAt"]
+        payload["eventID"] = str(seq) if activity_changed else old.get("eventID", str(last["seq"]))
+        payload["changedAt"] = now if activity_changed else old.get("changedAt", last["at"])
         db.execute("UPDATE events SET payload=? WHERE seq=?", (json.dumps(payload, separators=(",", ":")), seq))
         db.execute("INSERT OR REPLACE INTO metadata VALUES ('activity_key',?)", (activity_key,))
         return True

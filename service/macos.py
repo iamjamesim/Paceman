@@ -21,6 +21,7 @@ import time
 import unicodedata
 
 from service.claude import ClaudeSession
+from service.session_history import completed_sessions, display_sessions, retained_completions, FINISHED_DISPLAY_DURATION
 from service.claude_hooks import EVENTS as CLAUDE_EVENTS, validate_message
 from service.codex_limits import read_codex_allowances
 from service.usage import selected_reading, valid_reading
@@ -35,7 +36,7 @@ EVENT_STATES = {
     "completed": "finished", "interrupted": "idle", "ended": "idle",
 }
 ATTENTION_DELAY = 5.0
-FINISHED_RETENTION = 10 * 60
+FINISHED_RETENTION = FINISHED_DISPLAY_DURATION
 TURN_STATUS_INTERVAL = 15.0
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
 
@@ -722,6 +723,7 @@ class MacSource:
         records = [{**dict(row), "provider": "codex"} for row in
                    db.execute("SELECT * FROM mac_sessions ORDER BY id")]
         records.extend({"id": key, "turn": item.turn, "state": item.state(now_monotonic),
+                        "updated": item.updated,
                         "workspace_label": item.workspace_label, "remote_session_id": item.remote_session_id, "provider": "claude"}
                        for key, item in self.claude_sessions.items())
         records.sort(key=lambda row: row["id"])
@@ -746,6 +748,9 @@ class MacSource:
                 state = ("needs_input" if native[1] else
                          "working" if state == "needs_input" else state)
             session = {"id": row["id"], "provider": row["provider"], "state": state}
+            if state in ("finished", "failed"):
+                # This is the received lifecycle observation, not provider wall time.
+                session["resultObservedAt"] = row["updated"]
             if title := self.titles.name(row["id"]):
                 session["name"] = title
             if row["workspace_label"]:
@@ -753,25 +758,33 @@ class MacSource:
             if row.get("remote_session_id"):
                 session["remoteSessionID"] = row["remote_session_id"]
             sessions.append(session)
+        now = time.time()
+        completed = completed_sessions(db, sessions, now, self.providers)
+        sessions = display_sessions(sessions, completed, now)
+        turns = {row["id"]: row["turn"] for row in records}
         state = next((candidate for candidate in ("needs_input", "failed", "working", "finished")
                       if any(session["state"] == candidate for session in sessions)), "idle")
-        activity_key = json.dumps([(row["id"], row["turn"], session["state"])
-                                   for row, session in zip(records, sessions)])
+        activity_key = json.dumps([(session["id"], session.get("resultObservedAt", turns.get(session["id"], "")), session["state"])
+                                   for session in sessions])
         old_key = db.execute("SELECT value FROM metadata WHERE key='activity_key'").fetchone()
         last = db.execute("SELECT * FROM events ORDER BY seq DESC LIMIT 1").fetchone()
         old = json.loads(last["payload"]) if last["payload"] else {}
         payload = {"sourceName": self.computer_name, "state": state,
                    "sessions": sessions, "allowance": self.allowance,
                    "allowances": self.allowances, "configuredProviders": list(self.providers)}
+        payload["completedSessions"] = retained_completions(sessions, completed)
         if old_key and old_key[0] == activity_key and all(old.get(k) == v for k, v in payload.items()):
             return False
         changed = not old_key or old_key[0] != activity_key
         activity_changed = changed and (not lifecycle_only or old.get("state") != state)
+        # Restoring an observed result is display recovery, not a new completion.
+        if sessions and not records:
+            activity_changed = False
         now = time.time()
         seq = db.execute("INSERT INTO events(at,state,label,kind) VALUES (?,?,?,?)",
                          (now, state, "Mac activity", "activity" if activity_changed else "presentation")).lastrowid
-        payload["eventID"] = str(seq) if activity_changed else old["eventID"]
-        payload["changedAt"] = now if activity_changed else old["changedAt"]
+        payload["eventID"] = str(seq) if activity_changed else old.get("eventID", str(last["seq"]))
+        payload["changedAt"] = now if activity_changed else old.get("changedAt", last["at"])
         db.execute("UPDATE events SET payload=? WHERE seq=?", (json.dumps(payload, separators=(",", ":")), seq))
         db.execute("INSERT OR REPLACE INTO metadata VALUES ('activity_key',?)", (activity_key,))
         return True

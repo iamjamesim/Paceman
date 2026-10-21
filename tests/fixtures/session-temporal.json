@@ -1,0 +1,310 @@
+[
+  {
+    "name": "A finishes 10:00; B closes without completion 10:20; cached at 10:31",
+    "now": 37860,
+    "state": "finished",
+    "changedAt": 37200,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "finished",
+        "freshUntil": 37500,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {
+      "A": "Recent"
+    },
+    "expectedGlance": {},
+    "expectedEnd": true
+  },
+  {
+    "name": "working beats an expired result and old completion",
+    "now": 727200,
+    "state": "working",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "finished",
+        "freshUntil": 10000000000,
+        "resultObservedAt": 36000
+      },
+      {
+        "id": "B",
+        "provider": "codex",
+        "state": "working",
+        "freshUntil": 10000000000,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {
+      "B": "Working"
+    },
+    "expectedGlance": {
+      "working": 1
+    },
+    "expectedEnd": false
+  },
+  {
+    "name": "stale needs-input never becomes expired completion",
+    "now": 727200,
+    "state": "needs_input",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "B",
+        "provider": "codex",
+        "state": "needs_input",
+        "freshUntil": 36300,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {
+      "B": "Last known"
+    },
+    "expectedGlance": {
+      "needs_input": 1
+    },
+    "expectedEnd": false
+  },
+  {
+    "name": "finished before thirty minutes",
+    "now": 37799,
+    "state": "finished",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "finished",
+        "freshUntil": 10000000000,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {
+      "A": "Recent"
+    },
+    "expectedGlance": {
+      "finished": 1
+    },
+    "expectedEnd": false
+  },
+  {
+    "name": "finished at thirty minutes",
+    "now": 37800,
+    "state": "finished",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "finished",
+        "freshUntil": 10000000000,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {
+      "A": "Recent"
+    },
+    "expectedGlance": {},
+    "expectedEnd": true
+  },
+  {
+    "name": "failed before thirty minutes",
+    "now": 37799,
+    "state": "failed",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "failed",
+        "freshUntil": 10000000000,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {
+      "A": "Needs you"
+    },
+    "expectedGlance": {
+      "failed": 1
+    },
+    "expectedEnd": false
+  },
+  {
+    "name": "failed at thirty minutes with stale fresh lease",
+    "now": 37800,
+    "state": "failed",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "failed",
+        "freshUntil": 36300,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {
+      "A": "Recent"
+    },
+    "expectedGlance": {},
+    "expectedEnd": true
+  },
+  {
+    "name": "finished stale before thirty minutes",
+    "now": 36900,
+    "state": "finished",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "finished",
+        "freshUntil": 36300,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {
+      "A": "Last known"
+    },
+    "expectedGlance": {
+      "finished": 1
+    },
+    "expectedEnd": false
+  },
+  {
+    "name": "result one second before seven days",
+    "now": 640799,
+    "state": "finished",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "finished",
+        "freshUntil": 36300,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {
+      "A": "Recent"
+    },
+    "expectedGlance": {},
+    "expectedEnd": true
+  },
+  {
+    "name": "result at seven days",
+    "now": 640800,
+    "state": "finished",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "finished",
+        "freshUntil": 36300,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {},
+    "expectedGlance": {},
+    "expectedEnd": true
+  },
+  {
+    "name": "missing result timestamp keeps legacy stale row",
+    "now": 37800,
+    "state": "finished",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "finished",
+        "freshUntil": 36300
+      }
+    ],
+    "expectedGroups": {
+      "A": "Last known"
+    },
+    "expectedGlance": {
+      "finished": 1
+    },
+    "expectedEnd": true
+  },
+  {
+    "name": "missing result timestamp uses aggregate grace only",
+    "now": 37799,
+    "state": "failed",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "failed",
+        "freshUntil": 10000000000
+      }
+    ],
+    "expectedGroups": {
+      "A": "Needs you"
+    },
+    "expectedGlance": {
+      "failed": 1
+    },
+    "expectedEnd": false
+  },
+  {
+    "name": "resumed work ignores older result timestamp",
+    "now": 640800,
+    "state": "working",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "working",
+        "freshUntil": 10000000000,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {
+      "A": "Working"
+    },
+    "expectedGlance": {
+      "working": 1
+    },
+    "expectedEnd": false
+  },
+  {
+    "name": "attention remains current beside expired failures",
+    "now": 640800,
+    "state": "failed",
+    "changedAt": 36000,
+    "sessions": [
+      {
+        "id": "A",
+        "provider": "codex",
+        "state": "failed",
+        "freshUntil": 10000000000,
+        "resultObservedAt": 36000
+      },
+      {
+        "id": "B",
+        "provider": "codex",
+        "state": "needs_input",
+        "freshUntil": 10000000000,
+        "resultObservedAt": 36000
+      }
+    ],
+    "expectedGroups": {
+      "B": "Needs you"
+    },
+    "expectedGlance": {
+      "needs_input": 1
+    },
+    "expectedEnd": false
+  }
+]

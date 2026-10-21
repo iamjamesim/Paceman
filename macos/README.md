@@ -216,8 +216,8 @@ Use the Python 3.11+ interpreter printed by the source installer if needed. If r
 
 Mac hooks cannot verify process ownership. Codex async-question attention can clear
 on an unrelated user message. Completed turns clear main-turn hook-only
-attention; owner-confirmed pending decisions remain visible. Finished and failed
-rows retire after ten minutes once pending decisions resolve.
+attention; owner-confirmed pending decisions remain visible. Result display and
+Recent follow the [retention rules](../docs/data-lifecycle.md#freshness-and-recovery).
 
 Claude tracks the local main turn and scoped human requests from its children,
 not separate background-task progress or remote/cloud sessions. Questions and approvals appear after five seconds; an

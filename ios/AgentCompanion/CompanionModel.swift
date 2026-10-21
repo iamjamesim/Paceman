@@ -914,7 +914,7 @@ extension CompanionModel {
         }
     }
 
-    private func watchWorkSnapshot() -> WatchWorkSnapshot {
+    func watchWorkSnapshot(at now: Date = Date()) -> WatchWorkSnapshot {
         preserveWatchResponses()
         let sources = pairedSources.filter { !isRevoked($0.sourceID) }
         let values = sources.flatMap { source -> [WatchWorkTask] in
@@ -922,7 +922,7 @@ extension CompanionModel {
             let name = ComputerPreferences.displayName(for: source.sourceID,
                 sourceName: snapshot.sourceName, host: source.endpoint.host)
             let sessions: [AgentSession]
-            switch AgentFeedContent.resolve(snapshot) {
+            switch AgentFeedContent.resolve(snapshot, at: now) {
             case .sessions(let values): sessions = values
             case .summary(let state): sessions = [AgentSession(id: "aggregate", provider: "aggregate", state: state, name: "Agent activity")]
             case .empty, .waiting: sessions = []
@@ -930,17 +930,20 @@ extension CompanionModel {
             return sessions.prefix(32).map { session in
                 let item = WorkCatalog.item(session: session, source: source, model: self, inbox: interactions,
                     computer: name, connected: connectionState(source.sourceID) == .current,
-                    current: isActivityCurrent(source.sourceID))
+                    current: isActivityCurrent(source.sourceID, now: now), at: now)
                 return WatchWorkTask(sourceID: source.sourceID, sessionID: session.id, provider: session.provider,
                     title: session.title ?? session.displayName,
                     computer: name, state: session.state.rawValue, freshUntil: snapshot.activityFreshUntil,
                     presentationStatus: item.historical ? session.state.title : item.status,
-                    presentationGroup: item.phase.group.rawValue,
+                    presentationGroup: item.group.rawValue,
                     project: session.detail.isEmpty ? nil : session.detail, observedAt: snapshot.observedAt,
-                    presentationSymbol: item.statusToken.symbol ?? "circle.dotted")
+                    presentationSymbol: item.statusToken.symbol ?? "circle.dotted",
+                    resultObservedAt: session.resultObservedAt, retainedCompletion: item.retainedCompletion)
             }
         }
-        var result = WatchWorkSnapshot(tasks: Array(values.prefix(128)), computers: sources.count,
+        let current = values.filter { $0.temporalPresentation(at: now).glanceEligible }
+        let recent = values.filter { !$0.temporalPresentation(at: now).glanceEligible }
+        var result = WatchWorkSnapshot(tasks: Array((current + recent).prefix(128)), computers: sources.count,
             unavailable: sources.filter { !snapshotIsFresh($0.sourceID) || errors[$0.sourceID] != nil }.count,
             sources: sources.map { source in
                 let snapshot = snapshots[source.sourceID]

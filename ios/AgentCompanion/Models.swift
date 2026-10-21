@@ -34,6 +34,7 @@ struct Snapshot: Codable {
     var configuredProviders: [String]? = nil
     var interactionsEnabled: Bool? = nil
     var interactionContentVersion: Int? = nil
+    var completedSessions: [AgentSession]? = nil
     var usageReadings: [CodexAllowance] {
         var values: [CodexAllowance] = []
         for value in (allowances ?? allowance.map { [$0] } ?? []).filter({ $0.valid }) {
@@ -43,17 +44,27 @@ struct Snapshot: Codable {
         }
         return values
     }
-    enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, observedAt, changedAt, freshFor, state, eventID, sessions, allowance, allowances, configuredProviders, interactionsEnabled, interactionContentVersion }
+    enum CodingKeys: String, CodingKey { case schema, sourceID, generation, revision, sourceName, observedAt, changedAt, freshFor, state, eventID, sessions, allowance, allowances, configuredProviders, interactionsEnabled, interactionContentVersion, completedSessions }
     var identity: String { "\(sourceID)/\(generation)/\(eventID)" }
     var activityFreshUntil: Double { observedAt + MonitoringActivity.displayLeaseDuration }
 
-    func shouldEndLiveActivity(at now: Date) -> Bool {
-        // A failed turn does not make the whole computer's activity terminal.
-        guard !(sessions ?? []).contains(where: { $0.state == .working || $0.state == .needsInput }) else {
-            return false
+    func retainedSessions(at now: Date = Date()) -> [AgentSession] {
+        let live = Set((sessions ?? []).map { "\($0.provider)/\($0.id)" })
+        return (completedSessions ?? []).filter {
+            guard $0.hasResult, $0.resultObservedAt != nil,
+                  SessionTimePolicy.present($0.timeFacts(), at: now).visible else { return false }
+            return !live.contains("\($0.provider)/\($0.id)")
+                && (configuredProviders == nil || configuredProviders!.contains($0.provider))
         }
-        return state == .idle || ((state == .finished || state == .failed)
-            && now.timeIntervalSince1970 - changedAt >= MonitoringActivity.terminalGraceDuration)
+    }
+
+    func glanceSessions(at now: Date = Date()) -> [AgentSession] {
+        (sessions ?? []).filter { SessionTimePolicy.present($0.timeFacts(), at: now).glanceEligible }
+    }
+
+    func shouldEndLiveActivity(at now: Date) -> Bool {
+        SessionTimePolicy.shouldEndLiveActivity(state: state.rawValue,
+            sessions: (sessions ?? []).map { $0.timeFacts() }, legacyChangedAt: changedAt, at: now)
     }
 }
 
@@ -488,6 +499,9 @@ extension Snapshot {
         eventID = try c.decode(String.self, forKey: .eventID)
         // A richer session list cannot invalidate core activity.
         sessions = try? c.decode([AgentSession].self, forKey: .sessions)
+        if let values = try? c.decode([AgentSession].self, forKey: .completedSessions), values.count <= 128 {
+            completedSessions = values
+        }
         let limits = try? c.decode(CodexAllowance.self, forKey: .allowance)
         allowance = limits?.valid == true ? limits : nil
         if let values = try? c.decode([CodexAllowance].self, forKey: .allowances), values.count <= 2 {

@@ -83,6 +83,9 @@ struct WorkItem: Identifiable {
     var returnedToComputer: Bool { delivery == .released }
     var response: String? { delivery?.message(provider: session.provider) }
     var request: PendingInput? = nil
+    var retainedCompletion = false
+    var timePresentation: SessionTimePolicy.Presentation? = nil
+    var visible: Bool { timePresentation?.visible ?? true }
     // Lazy sections retain moved rows by ID. A phase transition replaces the
     // rendered row (including its animation), while task selection stays stable.
     var rowIdentity: WorkRowIdentity { .init(task: id, phase: phase, historical: historical) }
@@ -106,7 +109,7 @@ struct WorkItem: Identifiable {
         }
     }
     var state: ActivityState { phase.activity }
-    var group: WorkGroup { historical ? .lastKnown : phase.group }
+    var group: WorkGroup { timePresentation?.group ?? (historical ? .lastKnown : phase.group) }
     var status: String {
         let title = phase == .continued ? ResponseGuidance.continuation(for: session.provider) : phase.title
         return historical ? "Last known: \(title)" : title
@@ -117,6 +120,11 @@ struct WorkItem: Identifiable {
     var statusToken: WorkStatusToken { phase.token }
     var opensActivityCard: Bool { !aggregate }
     var statusDetail: String? {
+        if let resultObservedAt = session.resultObservedAt {
+            let date = Date(timeIntervalSince1970: resultObservedAt)
+            let time = date.formatted(date: Calendar.current.isDateInToday(date) ? .omitted : .abbreviated, time: .shortened)
+            return "\(session.state.title) · seen \(time)"
+        }
         // The section establishes that these are historical observations; the
         // row still needs to say what was observed, without relying on a glyph.
         if historical { return session.state == .needsInput ? "Needs attention" : session.state.title }
@@ -192,15 +200,8 @@ enum WorkStatusToken: Hashable {
     }
 }
 
-enum WorkGroup: String, CaseIterable {
-    case attention = "Needs you", working = "Working", recent = "Recent", lastKnown = "Last known"
-}
-
-struct WorkSectionData: Identifiable {
-    let group: WorkGroup
-    let rows: [WorkItem]
-    var id: WorkGroup { group }
-}
+typealias WorkGroup = SessionTimePolicy.Group
+typealias WorkSectionData = SessionTimePolicy.Section<WorkItem>
 
 @MainActor enum WorkCatalog {
     static func sorted(_ items: [WorkItem]) -> [WorkItem] {
@@ -209,6 +210,9 @@ struct WorkSectionData: Identifiable {
             if a != b { return a < b }
             if left.group == .attention, (left.request != nil) != (right.request != nil) {
                 return left.request != nil
+            }
+            if left.group == .recent, let l = left.session.resultObservedAt, let r = right.session.resultObservedAt, l != r {
+                return l > r
             }
             let l = left.group == .attention ? (left.requestOrder ?? left.activityOrder) : left.activityOrder
             let r = right.group == .attention ? (right.requestOrder ?? right.activityOrder) : right.activityOrder
@@ -221,24 +225,20 @@ struct WorkSectionData: Identifiable {
         }
     }
     static func sections(_ items: [WorkItem]) -> [WorkSectionData] {
-        let grouped = Dictionary(grouping: items, by: \.group)
-        return WorkGroup.allCases.compactMap { group in
-            guard let rows = grouped[group], !rows.isEmpty else { return nil }
-            return WorkSectionData(group: group, rows: rows)
-        }
+        SessionTimePolicy.sections(items) { $0.visible ? $0.group : nil }
     }
-    static func live(model: CompanionModel, presentation: PresentationModel, inbox: InteractionInbox) -> [WorkItem] {
+    static func live(model: CompanionModel, presentation: PresentationModel, inbox: InteractionInbox, at now: Date = Date()) -> [WorkItem] {
         model.pairedSources.flatMap { source -> [WorkItem] in
             let snapshot = model.snapshots[source.sourceID]
             let content: AgentFeedContent = presentation.preview && !presentation.previewScreen.hasPrefix("handoff")
                 && source.sourceID == model.pairedSources.first?.sourceID
-                ? .sessions(presentation.previewSessions) : AgentFeedContent.resolve(snapshot)
+                ? .sessions(presentation.previewSessions) : AgentFeedContent.resolve(snapshot, at: now)
             switch content {
             case .sessions(let sessions):
-                return sessions.map { item(session: $0, source: source, model: model, presentation: presentation, inbox: inbox) }
+                return sessions.map { item(session: $0, source: source, model: model, presentation: presentation, inbox: inbox, at: now) }.filter(\.visible)
             case .summary(let state):
                 var summary = item(session: AgentSession(id: "aggregate", provider: "aggregate", state: state,
-                    name: "Agent activity"), source: source, model: model, presentation: presentation, inbox: inbox)
+                    name: "Agent activity"), source: source, model: model, presentation: presentation, inbox: inbox, at: now)
                 summary.aggregate = true
                 return [summary]
             case .waiting, .empty: return []
@@ -247,27 +247,31 @@ struct WorkSectionData: Identifiable {
     }
 
     static func item(session: AgentSession, source: PairedSource, model: CompanionModel,
-                     presentation: PresentationModel, inbox: InteractionInbox) -> WorkItem {
+                     presentation: PresentationModel, inbox: InteractionInbox, at now: Date = Date()) -> WorkItem {
         let connected = presentation.computerState(model: model, sourceID: source.sourceID) == .current
         let current = presentation.preview && !presentation.previewScreen.hasPrefix("handoff")
-            ? connected : model.isActivityCurrent(source.sourceID)
+            ? connected : model.isActivityCurrent(source.sourceID, now: now)
         return item(session: session, source: source, model: model, inbox: inbox,
             computer: presentation.displayName(source: source, snapshot: model.snapshots[source.sourceID]),
-            connected: connected, current: current)
+            connected: connected, current: current, at: now)
     }
 
     /// The phone Activity and Watch export use the same derived presentation.
     static func item(session: AgentSession, source: PairedSource, model: CompanionModel,
-                     inbox: InteractionInbox, computer: String, connected: Bool, current: Bool) -> WorkItem {
+                     inbox: InteractionInbox, computer: String, connected: Bool, current: Bool, at now: Date = Date()) -> WorkItem {
         let id = WorkIdentity(sourceID: source.sourceID, sessionID: session.id, provider: session.provider)
+        let facts = session.timeFacts(freshUntil: current ? .infinity : 0)
+        let temporal = SessionTimePolicy.present(facts, at: now)
         let pending = connected ? inbox.pendingRequests(for: id).first
             ?? model.watchPending(for: id) : nil
-        return WorkItem(id: id, session: session,
-            computer: computer, historical: !current,
+        var item = WorkItem(id: id, session: session,
+            computer: computer, historical: temporal.historical,
             activityOrder: inbox.ordering.activityOrder(id), requestOrder: inbox.ordering.requestOrder(pending),
             delivery: current && session.state == .needsInput ? inbox.receipt(for: id) ?? model.watchDelivery(for: id) : nil,
             inputAvailability: inbox.availability[source.sourceID],
-            request: pending)
+            request: temporal.retainedCompletion ? nil : pending, retainedCompletion: temporal.retainedCompletion)
+        item.timePresentation = SessionTimePolicy.present(facts, at: now, overlayGroup: item.phase.group)
+        return item
     }
 }
 
@@ -284,12 +288,11 @@ struct CompanionWork: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
     var items: [WorkItem] {
-        let result = WorkCatalog.live(model: model, presentation: presentation, inbox: inbox)
-        return WorkCatalog.sorted(result)
+        items(at: Date())
     }
-
-    private var visible: [WorkItem] {
-        items.filter { filter == nil || $0.id.sourceID == filter }
+    private func items(at now: Date) -> [WorkItem] {
+        let result = WorkCatalog.live(model: model, presentation: presentation, inbox: inbox, at: now)
+        return WorkCatalog.sorted(result)
     }
     private var hasComputerFilters: Bool {
         return !model.pairedSources.isEmpty
@@ -302,10 +305,10 @@ struct CompanionWork: View {
         }
     }
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 5)) { _ in
+        TimelineView(.periodic(from: .now, by: 5)) { context in
             VStack(spacing: 0) {
                 if hasComputerFilters && !typeSize.isAccessibilitySize { computerFilters }
-                taskList
+                taskList(at: context.date)
             }
         }
         .background(CompanionCanvas(theme: theme))
@@ -316,8 +319,8 @@ struct CompanionWork: View {
         }
     }
 
-    private var taskList: some View {
-        let currentRows = visible
+    private func taskList(at now: Date) -> some View {
+        let currentRows = items(at: now).filter { filter == nil || $0.id.sourceID == filter }
         return ScrollView {
             LazyVStack(spacing: 0, pinnedViews: typeSize.isAccessibilitySize ? [] : [.sectionHeaders]) {
                 if hasComputerFilters && typeSize.isAccessibilitySize { computerFilters }
@@ -375,7 +378,7 @@ struct CompanionWork: View {
             WorkSectionSurface(theme: theme) {
                 if group == .recent {
                     Button { recentExpanded.toggle() } label: {
-                        groupHeading(group, count: rows.contains { $0.aggregate } ? nil : rows.count)
+                        groupHeading(group, count: rows.contains { $0.aggregate } ? nil : section.count)
                     }.buttonStyle(.plain)
                         .accessibilityValue(recentExpanded ? "Expanded" : "Collapsed")
                         .accessibilityHint("Show or hide recent sessions")
@@ -384,7 +387,7 @@ struct CompanionWork: View {
                         ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
                         : AnyLayout(HStackLayout(spacing: 12))
                     layout {
-                        groupHeading(group, count: rows.contains { $0.aggregate } ? nil : rows.count)
+                        groupHeading(group, count: rows.contains { $0.aggregate } ? nil : section.count)
                         if group == .attention, rows.contains(where: { $0.opensActivityCard }) {
                             Button { reviewTasks(rows.filter(\.opensActivityCard).map(\.id)) } label: {
                                 Text("Review").font(CompanionTextRole.label.font).fixedSize(horizontal: true, vertical: false)

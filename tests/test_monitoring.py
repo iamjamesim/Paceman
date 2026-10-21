@@ -123,7 +123,7 @@ class MonitoringTests(unittest.TestCase):
         self.store.emit('finished')
         self.worker.step(now + 16)
         self.assertEqual(self.sender.calls[-1][1]['aps']['event'], 'update')
-        self.worker.step(now + 92)
+        self.worker.step(now + 1802)
         self.assertEqual(self.sender.calls[-1][1]['aps']['event'], 'end')
         with self.store.connect() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM live_activities').fetchone()[0], 0)
@@ -132,10 +132,10 @@ class MonitoringTests(unittest.TestCase):
         for state in ('finished', 'failed'):
             for sessions in (None, [], [{'state': state}]):
                 with self.subTest(state=state, sessions=sessions):
-                    snapshot = dict(state=state, changedAt=100, observedAt=189, sessions=sessions)
-                    self.assertFalse(should_end_live_activity(snapshot, 189))
-                    snapshot['observedAt'] = 190  # Fresh contact does not restart the grace.
-                    self.assertTrue(should_end_live_activity(snapshot, 190))
+                    snapshot = dict(state=state, changedAt=100, observedAt=1899, sessions=sessions)
+                    self.assertFalse(should_end_live_activity(snapshot, 1899))
+                    snapshot['observedAt'] = 1900  # Fresh contact does not restart the grace.
+                    self.assertTrue(should_end_live_activity(snapshot, 1900))
         self.assertTrue(should_end_live_activity(dict(state='idle', sessions=[], changedAt=190), 190))
 
     def test_mixed_failure_keeps_activity_and_allows_remote_start(self):
@@ -159,6 +159,44 @@ class MonitoringTests(unittest.TestCase):
         snapshot['sessions'][-1]['state'] = 'needs_input'
         self.assertFalse(should_end_live_activity(snapshot, now + 600))
 
+    def test_result_observation_controls_terminal_grace_without_restarting_on_metadata(self):
+        snapshot = dict(state='finished', changedAt=2000, sessions=[
+            dict(state='finished', resultObservedAt=100)])
+        self.assertFalse(should_end_live_activity(snapshot, 1899))
+        self.assertTrue(should_end_live_activity(snapshot, 1900))
+        snapshot['sessions'].append(dict(state='working'))
+        self.assertFalse(should_end_live_activity(snapshot, 100000))
+
+    def test_terminal_observation_uses_existing_live_activity_timestamp_field(self):
+        snapshot = dict(schema=1, generation='fixture', revision=1, observedAt=200,
+                        state='finished', changedAt=190, sessions=[
+                            dict(state='finished', resultObservedAt=100)])
+        content = live_notification(snapshot, 200)[0]['aps']['content-state']
+        self.assertEqual(content['changedAt'], 100)
+        self.assertNotIn('resultObservedAt', content)
+        snapshot['sessions'].append(dict(state='working'))
+        content = live_notification(snapshot, 200)[0]['aps']['content-state']
+        self.assertEqual(content['changedAt'], 190)
+
+    def test_shared_phone_watch_temporal_fixtures_match_direct_apns(self):
+        from service.relay import valid_payload
+        path = Path(__file__).parent / 'fixtures/session-temporal.json'
+        for fixture in json.loads(path.read_text()):
+            with self.subTest(name=fixture['name']):
+                snapshot = dict(fixture, schema=1, sourceID=self.client['sourceID'],
+                                generation='fixture', revision=1, observedAt=fixture['now'])
+                self.assertEqual(should_end_live_activity(snapshot, fixture['now']), fixture['expectedEnd'])
+                payload = live_notification(snapshot, fixture['now'])[0]
+                self.assertTrue(valid_payload('liveactivity', snapshot['sourceID'], payload))
+                self.assertTrue(valid_payload('liveactivity', snapshot['sourceID'],
+                    live_notification(snapshot, fixture['now'], ending=True)[0]))
+                self.assertTrue(valid_payload('liveactivity', snapshot['sourceID'],
+                    live_start_notification(snapshot, fixture['now'])[0]))
+                content = payload['aps']['content-state']
+                for state, field in [('working', 'working'), ('needs_input', 'needsInput'),
+                                     ('finished', 'finished'), ('failed', 'failed')]:
+                    self.assertEqual(content[field], fixture['expectedGlance'].get(state, 0))
+
     def test_failed_activity_ends_without_restarting_until_new_work(self):
         now = time.time()
         self.store.emit('failed')
@@ -167,16 +205,16 @@ class MonitoringTests(unittest.TestCase):
             'action': 'register-start', 'deviceToken': 'cd' * 32, 'environment': 'development'})
         self.register()
         self.worker.step_live_activities(now, snapshot)
-        self.worker.step_live_activities(now + 89, snapshot)
+        self.worker.step_live_activities(now + 1799, snapshot)
         self.assertEqual(self.sender.calls[-1][1]['aps']['event'], 'update')
-        self.worker.step_live_activities(now + 90, snapshot)
+        self.worker.step_live_activities(now + 1814, snapshot)
         self.assertEqual(self.sender.calls[-1][1]['aps']['event'], 'end')
         sent = len(self.sender.calls)
-        self.worker.step_live_activities(now + 91, snapshot)
+        self.worker.step_live_activities(now + 1815, snapshot)
         self.assertEqual(len(self.sender.calls), sent)
         self.store.emit('working')
-        snapshot = {**self.store.snapshot(), 'observedAt': now + 92, 'changedAt': now + 92}
-        self.worker.step_live_activities(now + 92, snapshot)
+        snapshot = {**self.store.snapshot(), 'observedAt': now + 1816, 'changedAt': now + 1816}
+        self.worker.step_live_activities(now + 1816, snapshot)
         self.assertEqual(self.sender.calls[-1][1]['aps']['event'], 'start')
         self.assertEqual(self.sender.calls[-1][1]['aps']['content-state']['working'], 1)
 

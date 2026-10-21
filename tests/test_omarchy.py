@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from tests.identity import device
 from service.hub import Server, Store
@@ -108,12 +108,12 @@ class OmarchyTests(unittest.TestCase):
 
     def test_socket_routes_all_states_and_does_not_leak_hook_content(self):
         for event, state in [('working', 'working'), ('needs-input', 'needs_input'),
-                             ('working', 'working'), ('completed', 'finished'), ('ended', 'idle')]:
+                             ('working', 'working'), ('completed', 'finished'), ('ended', 'finished')]:
             value = self.event(event, prompt='PRIVATE PROMPT', arguments='PRIVATE ARGS')
             self.assertEqual(value['state'], state)
             self.assertNotIn('mode', value)
             self.assertNotIn('PRIVATE', json.dumps(value))
-        self.assertEqual(value['sessions'], [])
+        self.assertEqual(len(value['sessions']), 1)
         self.assertEqual(self.source.socket_path.stat().st_mode & 0o777, 0o600)
 
     def test_multiple_sessions_and_delayed_cleanup(self):
@@ -154,18 +154,18 @@ class OmarchyTests(unittest.TestCase):
         self.assertEqual(value['activity'], 'working')
         self.assertEqual(value['sessionCounts'], {'needs_input': 0, 'failed': 0, 'working': 1, 'finished': 1, 'idle': 0})
         self.event('ended', session='two')
-        self.assertEqual(published()['sessions'], 1)
+        self.assertEqual(published()['sessions'], 2)
         self.event('ended')
         value = published()
-        self.assertEqual(value['sessions'], 0)
-        self.assertEqual(sum(value['sessionCounts'].values()), 0)
+        self.assertEqual(value['sessions'], 1)
+        self.assertEqual(value['sessionCounts']['finished'], 1)
 
     def test_closed_turn_cannot_be_resurrected_and_session_end_can_omit_turn(self):
         self.event('completed')
         self.assertEqual(self.event('working')['state'], 'finished')
         self.assertEqual(self.event('needs-input')['state'], 'finished')
-        self.assertEqual(self.event('ended', turn='')['state'], 'idle')
-        self.assertEqual(self.event('needs-input')['state'], 'idle')
+        self.assertEqual(self.event('ended', turn='')['state'], 'finished')
+        self.assertEqual(self.event('needs-input')['state'], 'finished')
         self.assertEqual(self.event('working', turn='turn-2')['state'], 'working')
 
     def test_async_question_waits_five_seconds_and_ends_with_turn(self):
@@ -202,21 +202,23 @@ class OmarchyTests(unittest.TestCase):
         self.assertEqual(self.event('working', turn='turn-2', hook='UserPromptSubmit')['state'], 'working')
 
     def test_finished_turn_disappears_without_losing_live_process_binding(self):
-        self.event('working', session='active')
-        self.event('completed', session='old')
-        before = self.store.snapshot()
-        with self.store.connect() as db:
-            db.execute("UPDATE omarchy_sessions SET updated=? WHERE state='finished'",
-                       (time.time() - FINISHED_RETENTION - 1,))
-        self.source.tick(force=True)
-        current = self.store.snapshot()
-        self.assertEqual(current['state'], 'working')
-        self.assertEqual(len(current['sessions']), 1)
-        self.assertEqual(current['eventID'], before['eventID'])
-        with self.store.connect() as db:
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM omarchy_processes WHERE closed=0").fetchone()[0], 2)
-        resumed = self.event('working', session='old', turn='turn-2')
-        self.assertEqual(len(resumed['sessions']), 2)
+        clock = [time.time()]
+        with patch('service.omarchy.time.time', side_effect=lambda: clock[0]):
+            self.event('working', session='active')
+            self.event('completed', session='old')
+            before = self.store.snapshot()
+            clock[0] += FINISHED_RETENTION + 1
+            self.source.tick(force=True)
+            current = self.store.snapshot()
+            self.assertEqual(current['state'], 'working')
+            self.assertEqual(len(current['sessions']), 1)
+            self.assertEqual(len(current['completedSessions']), 1)
+            self.assertEqual(current['eventID'], before['eventID'])
+            with self.store.connect() as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM omarchy_processes WHERE closed=0").fetchone()[0], 2)
+            resumed = self.event('working', session='old', turn='turn-2')
+            self.assertEqual(len(resumed['sessions']), 2)
+            self.assertEqual(resumed['completedSessions'], [])
 
     def test_allowance_update_does_not_repeat_pending_push(self):
         import datetime as dt
@@ -252,6 +254,20 @@ class OmarchyTests(unittest.TestCase):
             self.assertEqual(len(value['sessions']), 2)
             self.assertEqual(value['sourceID'], pair['sourceID'])
             self.assertTrue(self.store.authorized(pair['credential']))
+
+    def test_observed_result_survives_closed_process_and_service_restart(self):
+        now = time.time()
+        self.event('completed')
+        self.event('ended')
+        self.source.__exit__(None, None, None)
+        self.source.thread = None
+        with patch('service.omarchy.time.time', return_value=now + 3600):
+            with OmarchySource(Store(self.store.path), socket_path=self.root / 'other.sock',
+                               state_dir=self.root / 'omarchy', processes=self.processes):
+                snapshot = self.store.snapshot()
+                self.assertEqual(snapshot['state'], 'idle')
+                self.assertEqual(snapshot['sessions'], [])
+                self.assertEqual(len(snapshot['completedSessions']), 1)
 
     def test_synthetic_controls_are_disabled_and_age_does_not_expire_live_sessions(self):
         with self.assertRaises(ValueError):
@@ -331,7 +347,7 @@ class OmarchyTests(unittest.TestCase):
         sequence = [('UserPromptSubmit', {}, 'working'),
                     ('PreToolUse', {'tool_name': 'request_user_input', 'tool_use_id': 'call-1'}, 'needs_input'),
                     ('PostToolUse', {'tool_name': 'request_user_input', 'tool_use_id': 'call-1'}, 'working'),
-                    ('Stop', {}, 'finished'), ('SessionEnd', {}, 'idle')]
+                    ('Stop', {}, 'finished'), ('SessionEnd', {}, 'finished')]
         for name, extra, state in sequence:
             self.assertEqual(send(name, extra), state)
         clock = [100.0]

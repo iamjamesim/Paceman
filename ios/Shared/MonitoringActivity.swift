@@ -4,7 +4,6 @@ import Foundation
 /// Minimal APNs display contract. Unix timestamps avoid platform-specific Date encoding.
 struct MonitoringActivity: ActivityAttributes {
     static let displayLeaseDuration: TimeInterval = 5 * 60
-    static let terminalGraceDuration: TimeInterval = 90
 
     struct ContentState: Codable, Hashable {
         var schema = 1
@@ -20,6 +19,7 @@ struct MonitoringActivity: ActivityAttributes {
         var freshUntil: Double
         // Optional so an activity created by an earlier build still decodes.
         var changedAt: Double? = nil
+        var resultObservedAt: Double? = nil
         // A local palette change refreshes the visible view without changing
         // the computer-owned activity state. Remote updates may omit this.
         var themeID: String? = nil

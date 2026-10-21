@@ -1,5 +1,74 @@
 import Foundation
 
+/// Time changes presentation, never the provider-owned state. All clocks are
+/// supplied by the caller so cached phone and Watch rows age identically.
+enum SessionTimePolicy {
+    static let finishedDuration: TimeInterval = 30 * 60
+    static let historyDuration: TimeInterval = 7 * 24 * 60 * 60
+    enum Group: String, CaseIterable {
+        case attention = "Needs you", working = "Working", recent = "Recent", lastKnown = "Last known"
+    }
+    struct Facts {
+        let state: String
+        var resultObservedAt: Double? = nil
+        var freshUntil: Double = .infinity
+    }
+    struct Presentation {
+        let visible: Bool
+        let historical: Bool
+        let retainedCompletion: Bool
+        let glanceEligible: Bool
+        let group: Group
+    }
+    struct Section<Row>: Identifiable {
+        let group: Group
+        let rows: [Row]
+        var id: Group { group }
+        var count: Int { rows.count }
+    }
+
+    static func present(_ facts: Facts, at now: Date, overlayGroup: Group? = nil,
+                        legacyRetained: Bool = false) -> Presentation {
+        let time = now.timeIntervalSince1970
+        let terminal = facts.state == "finished" || facts.state == "failed"
+        var visible = true
+        var retained = terminal && legacyRetained
+        var glance = facts.state == "working" || facts.state == "needs_input" || terminal && !retained
+        if terminal, let observed = facts.resultObservedAt {
+            let age = time - observed
+            visible = observed.isFinite && age >= 0 && age < historyDuration
+            retained = visible && age >= finishedDuration
+            glance = visible && age < finishedDuration
+        }
+        let historical = time >= facts.freshUntil && !retained
+        let group: Group = retained ? .recent : historical ? .lastKnown : overlayGroup ?? {
+            switch facts.state {
+            case "working": return .working
+            case "needs_input", "failed": return .attention
+            default: return .recent
+            }
+        }()
+        return Presentation(visible: visible, historical: historical, retainedCompletion: retained,
+                            glanceEligible: glance, group: group)
+    }
+
+    static func sections<Row>(_ rows: [Row], group: (Row) -> Group?) -> [Section<Row>] {
+        var grouped: [Group: [Row]] = [:]
+        for row in rows { if let key = group(row) { grouped[key, default: []].append(row) } }
+        return Group.allCases.compactMap { key in grouped[key].map { Section(group: key, rows: $0) } }
+    }
+
+    static func shouldEndLiveActivity(state: String, sessions: [Facts], legacyChangedAt: Double, at now: Date) -> Bool {
+        if sessions.contains(where: { $0.state == "working" || $0.state == "needs_input" }) { return false }
+        if state == "idle" { return true }
+        guard state == "finished" || state == "failed" else { return false }
+        // changedAt is only the old aggregate contract, never a per-row time.
+        let observed = sessions.filter { $0.state == "finished" || $0.state == "failed" }
+            .compactMap(\.resultObservedAt).max() ?? legacyChangedAt
+        return now.timeIntervalSince1970 - observed >= finishedDuration
+    }
+}
+
 enum ResponseGuidance {
     static func continuation(for provider: String) -> String {
         switch provider {
@@ -165,6 +234,8 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
     // This is the computer snapshot observation, not the task's last action.
     var observedAt: Double? = nil
     var presentationSymbol: String? = nil
+    var resultObservedAt: Double? = nil
+    var retainedCompletion: Bool? = nil
     var id: String { "\(sourceID)/\(provider)/\(sessionID)" }
     var providerName: String {
         switch provider { case "claude": return "Claude Code"; case "codex": return "Codex"; default: return provider.capitalized }
@@ -182,7 +253,20 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
         default: return "ellipsis.circle"
         }
     }
-    func historical(at date: Date) -> Bool { date.timeIntervalSince1970 >= freshUntil }
+    func historical(at date: Date) -> Bool {
+        temporalPresentation(at: date).historical
+    }
+    func isRetainedCompletion(at date: Date) -> Bool {
+        temporalPresentation(at: date).retainedCompletion
+    }
+    func visible(at date: Date) -> Bool {
+        temporalPresentation(at: date).visible
+    }
+    func temporalPresentation(at date: Date) -> SessionTimePolicy.Presentation {
+        SessionTimePolicy.present(.init(state: state, resultObservedAt: resultObservedAt, freshUntil: freshUntil),
+            at: date, overlayGroup: presentationGroup.flatMap(SessionTimePolicy.Group.init(rawValue:)),
+            legacyRetained: retainedCompletion == true)
+    }
     var status: String { status(at: Date()) }
     func status(at date: Date) -> String {
         if !historical(at: date), let presentationStatus { return presentationStatus }
@@ -195,13 +279,7 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
         }
     }
     func group(at date: Date) -> String {
-        if historical(at: date) { return "Last known" }
-        if let presentationGroup { return presentationGroup }
-        switch state {
-        case "needs_input", "failed": return "Needs you"
-        case "working": return "Working"
-        default: return "Recent"
-        }
+        temporalPresentation(at: date).group.rawValue
     }
 }
 
@@ -294,6 +372,7 @@ extension LiveActivityRoute {
               source.stateCounts?[state] == 1 else { return nil }
         let matches = snapshot.tasks.filter {
             $0.sourceID == sourceID && $0.state == state && !$0.historical(at: date)
+                && $0.temporalPresentation(at: date).glanceEligible
                 && $0.sessionID != "aggregate"
         }
         return matches.count == 1 ? matches.first : nil

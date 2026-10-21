@@ -50,7 +50,9 @@ class ClaudeTests(unittest.TestCase):
         self.assertEqual(states, {'codex': 'working', 'claude': 'finished'})
         self.assertEqual(len(self.source.turn_ids), 1)  # Claude never enters Codex's status reader.
         self.hook('SessionEnd')
-        self.assertEqual([s['provider'] for s in self.store.snapshot()['sessions']], ['codex'])
+        self.assertEqual({s['provider']: s['state'] for s in self.store.snapshot()['sessions']},
+                         {'codex': 'working', 'claude': 'finished'})
+        self.assertFalse(self.source.claude_sessions)
 
     def test_prompt_attention_resume_finish_and_new_prompt(self):
         self.hook('SessionStart', turn='')

@@ -1929,17 +1929,69 @@ final class ProtocolTests: XCTestCase {
     func testLiveActivityTerminalGraceDoesNotResetOnFreshObservation() throws {
         for state in ["finished", "failed"] {
             for sessions in [nil, [], [["id": "turn", "provider": "codex", "state": state]]] as [[[String: String]]?] {
-                var fixture: [String: Any] = ["state": state, "changedAt": 100, "observedAt": 189]
+                var fixture: [String: Any] = ["state": state, "changedAt": 100, "observedAt": 1899]
                 if let sessions { fixture["sessions"] = sessions }
                 let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(fixture))
-                XCTAssertFalse(snapshot.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 189)))
-                fixture["observedAt"] = 190
+                XCTAssertFalse(snapshot.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 1899)))
+                fixture["observedAt"] = 1900
                 let renewed = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(fixture))
-                XCTAssertTrue(renewed.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 190)))
+                XCTAssertTrue(renewed.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 1900)))
             }
         }
         let idle = try JSONDecoder().decode(Snapshot.self, from: sourceFixture(["state": "idle", "changedAt": 190]))
         XCTAssertTrue(idle.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 190)))
+    }
+
+    func testCompletionHistorySurvivesCacheWithoutExtendingLiveActivity() throws {
+        let now = Date().timeIntervalSince1970
+        func result(_ id: String, state: String = "finished", age: Double) -> [String: Any] {
+            ["id": id, "provider": "codex", "state": state, "resultObservedAt": now - age]
+        }
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture([
+            "state": "idle", "sessions": [], "completedSessions": [
+                result("morning", age: 3600), result("last-night", state: "failed", age: 86400),
+                result("expired", age: 7 * 86400), result("future", age: -10), result("invalid", state: "working", age: 100)
+            ]]))
+        let restored = try JSONDecoder().decode(Snapshot.self, from: JSONEncoder().encode(snapshot))
+        XCTAssertEqual(restored.retainedSessions().map(\.id), ["morning", "last-night"])
+        XCTAssertTrue(restored.shouldEndLiveActivity(at: Date()))
+        XCTAssertEqual(MonitoringActivity.ContentState(snapshot: restored).sessionCount, 0)
+        guard case .sessions(let rows) = AgentFeedContent.resolve(restored) else { return XCTFail("Missing Recent") }
+        XCTAssertEqual(rows.map(\.id), ["morning", "last-night"])
+        var resumed = restored
+        resumed.sessions = [AgentSession(id: "morning", provider: "codex", state: .working)]
+        XCTAssertEqual(resumed.retainedSessions().map(\.id), ["last-night"])
+    }
+
+    func testCachedCompletedRowsAndWatchExpireAfterSevenDays() throws {
+        let now = Date().timeIntervalSince1970
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture([
+            "state": "finished", "sessions": [["id": "old", "provider": "codex", "state": "finished",
+                "resultObservedAt": now - 7 * 86400]]]))
+        XCTAssertEqual(AgentFeedContent.resolve(snapshot), .empty)
+        var watch = WatchWorkTask(sourceID: "mac", sessionID: "done", provider: "codex", title: "Result",
+            computer: "Mac", state: "failed", freshUntil: now - 1,
+            resultObservedAt: now - 3600, retainedCompletion: false)
+        XCTAssertFalse(watch.historical(at: Date()))
+        XCTAssertEqual(watch.group(at: Date()), "Recent")
+        XCTAssertTrue(watch.visible(at: Date()))
+        watch.resultObservedAt = now - 7 * 86400
+        XCTAssertFalse(watch.visible(at: Date()))
+    }
+
+    @MainActor func testTerminalResultRetentionIsIndependentOfStaleCleanupAndMetadata() throws {
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: sourceFixture([
+            "state": "finished", "changedAt": 2000,
+            "sessions": [["id": "done", "provider": "codex", "state": "finished", "resultObservedAt": 100]]]))
+        XCTAssertFalse(snapshot.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 1899)))
+        XCTAssertTrue(snapshot.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 1900)))
+        XCTAssertEqual(MonitoringActivity.ContentState(snapshot: snapshot).resultObservedAt, 100)
+        XCTAssertFalse(MonitoringCoordinator.shouldRetireStaleActivity(isStale: true,
+            staleDate: Date(timeIntervalSince1970: 400), now: Date(timeIntervalSince1970: 1000),
+            resultObservedAt: Date(timeIntervalSince1970: 100)))
+        XCTAssertTrue(MonitoringCoordinator.shouldRetireStaleActivity(isStale: true,
+            staleDate: Date(timeIntervalSince1970: 400), now: Date(timeIntervalSince1970: 1900),
+            resultObservedAt: Date(timeIntervalSince1970: 100)))
     }
 
     func testLiveActivityFailurePreservesOtherWorkingOrWaitingSessions() throws {

@@ -286,8 +286,12 @@ private struct WatchActivityView: View {
     private var source: WatchWorkSource? {
         snapshot?.sources?.first { $0.sourceID == route?.sourceID }
     }
-    private var sessions: [WatchWorkTask] {
-        (snapshot?.tasks ?? []).filter { route == nil || $0.sourceID == route?.sourceID }
+    private func sections(at date: Date) -> [SessionTimePolicy.Section<WatchWorkTask>] {
+        let tasks = (snapshot?.tasks ?? []).filter { route == nil || $0.sourceID == route?.sourceID }
+        return SessionTimePolicy.sections(tasks) {
+            let temporal = $0.temporalPresentation(at: date)
+            return temporal.visible ? temporal.group : nil
+        }
     }
     private var receivedActivity: Bool {
         if route != nil { return source?.generation != nil }
@@ -297,22 +301,20 @@ private struct WatchActivityView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
+            let sections = sections(at: context.date)
             Group {
-                if sessions.isEmpty {
+                if sections.isEmpty {
                     activityState
                 } else {
                     List {
-                        ForEach(["Needs you", "Working", "Recent", "Last known"], id: \.self) { section in
-                            let tasks = sessions.filter { group($0, at: context.date) == section }
-                            if !tasks.isEmpty {
-                                Section(section) {
-                                    ForEach(tasks) { task in
+                        ForEach(sections) { section in
+                                Section(section.group.rawValue) {
+                                    ForEach(section.rows) { task in
                                         NavigationLink(value: WatchDestination.session(task)) {
                                             WatchActivityRow(task: task, showComputer: route == nil, date: context.date)
                                         }
                                     }
                                 }
-                            }
                         }
                     }
                 }
@@ -356,10 +358,6 @@ private struct WatchActivityView: View {
             cacheReadID = UUID()
             loading = false
         }
-    }
-
-    private func group(_ task: WatchWorkTask, at date: Date) -> String {
-        task.group(at: date)
     }
 
     private var activityState: some View {
@@ -448,7 +446,13 @@ private struct WatchActivityRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if ["Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed"
                         || task.status(at: date) == "Response sent" {
-                        Text(task.status(at: date)).font(.caption)
+                        if let resultObservedAt = task.resultObservedAt {
+                            let completed = Date(timeIntervalSince1970: resultObservedAt)
+                            Text("\(task.status(at: date)) · seen \(completed.formatted(date: Calendar.current.isDateInToday(completed) ? .omitted : .abbreviated, time: .shortened))")
+                                .font(.caption).fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            Text(task.status(at: date)).font(.caption)
+                        }
                     }
                 }
             }
@@ -528,7 +532,11 @@ private struct WatchTaskView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Label(currentTask.historical(at: Date()) ? "Last known: \(currentTask.status)" : currentTask.status,
                                     systemImage: currentTask.symbol(at: Date()))
-                                if let observedAt = currentTask.observedAt, observedAt > 0 {
+                                if let resultObservedAt = currentTask.resultObservedAt {
+                                    let completed = Date(timeIntervalSince1970: resultObservedAt)
+                                    Text("Result received at \(completed.formatted(date: Calendar.current.isDateInToday(completed) ? .omitted : .abbreviated, time: .shortened))")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                } else if let observedAt = currentTask.observedAt, observedAt > 0 {
                                     let observed = Date(timeIntervalSince1970: observedAt)
                                     let time = observed.formatted(date: Calendar.current.isDateInToday(observed) ? .omitted : .abbreviated, time: .shortened)
                                     Text("Last updated at \(time)").font(.caption).foregroundStyle(.secondary)

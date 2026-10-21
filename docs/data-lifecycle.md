@@ -20,7 +20,7 @@ See the [source protocol](protocol.md) for freshness fields.
 
 | Owner | Stored state | Clear boundary |
 | --- | --- | --- |
-| Desktop source | Source ID, hashed client credentials, paired-client metadata, push destinations/cursors and current event in owner-only SQLite | Explicit client removal, source uninstall or source-data reset |
+| Desktop source | Source ID, hashed client credentials, paired-client metadata, push destinations/cursors, current activity and bounded result history in owner-only SQLite | Explicit client removal, source uninstall or source-data reset |
 | Source push config | Source-specific relay credential in plaintext JSON at `~/Library/Application Support/Paceman/private/apns.json` on Mac or `~/.local/state/paceman/private/apns.json` on Omarchy (`0700` directories, `0600` file; not Keychain). Advanced direct APNs setups instead store a private signing key. | Source uninstall or credential rotation |
 | APNs relay | APNs key in host-managed secret files; hashed source and client credentials, hashed token bindings, App Attest public keys and counters, pairing approvals, and revocation tombstones in managed PostgreSQL | Phone/source revocation, token replacement, or key rotation; attested keys remain available for later approvals |
 | iPhone Keychain | Source endpoints and credentials, installation ID, accessory owner identity; device-only, available after first unlock | Explicit removal or confirmed revocation |
@@ -30,13 +30,13 @@ See the [source protocol](protocol.md) for freshness fields.
 | ESP32 watch NVS | Owner bond, stable device ID, saved profile and wearer acknowledgement | Deliberate factory reset or owner transfer |
 | Pebble settings/PFS | Owner bond, stable device ID and saved profile | Confirmed watch-side Reset Paceman pairing clears ownership/profile and the owner bond, keeping the ID; factory reset clears all |
 | Apple Watch shared preferences | Per-computer Codex usage caches, observation times, phone revision and allowed source IDs | Phone removal of a source or newer accepted data from that source; expired readings remain unavailable |
-| Live Activity | Expiring ActivityKit display copy | New event, stale date or lifecycle end |
+| Live Activity | Expiring ActivityKit display copy | Terminal grace, explicit removal or lifecycle end; stale content is marked Last known |
 
 Session titles are bounded to 80 characters. The source reads new session titles off the hook path and rechecks tracked title metadata every 30 seconds, to pick up generated titles and renames without blocking activity delivery. Title changes are presentation revisions, not new activity or alerts. Raw lookup IDs and title caches are held in source memory; titles also appear in stored event snapshots and the phone’s last-known snapshot. Missing metadata keeps the last successfully read title; an explicitly cleared title restores the provider fallback.
 
 The watch keeps activity, including titles, in RAM, so reboot clears old alerts. The phone keeps
-no durable queue of BLE writes. Omarchy verifies living agent owners after a
-source restart; Mac clears hook-only sessions until another hook arrives.
+no durable queue of BLE writes. Source restart behavior follows the
+[session liveness rules](architecture.md#from-agents-to-the-phone).
 When a Codex task resumes, Paceman checks Codex's saved history to confirm which
 turn is latest before using its activity events. If the check is unavailable,
 Paceman waits and retries.
@@ -72,9 +72,16 @@ replies cannot undo a newer submission.
 - The phone and ESP32 watch may be reachable while a computer is not, or vice
   versa. Each surface reports its own link without inferring the other.
 
-Working does not time out; finished and failed rows retire after ten
-minutes. Live Activities end when idle, or after a 90-second terminal grace when
-no session is working or needs input. New observations do not restart that grace.
+Working and Needs input do not time out. Finished and failed results remain in
+the live display for 30 minutes, including after the agent closes. Live Activities
+end when idle, or after that terminal grace when no session is working or needs
+input. Fresh observations do not restart the grace.
+The source retains the latest observed result per session for seven days across
+restarts, bounded to 128 sessions and a 24 KiB history payload. The phone caches
+that metadata for Recent and shares it with Apple Watch; history does not extend
+live freshness or trigger activity alerts. A new turn supersedes its older result.
+Result times identify when Paceman observed completion, not an exact provider
+transition time.
 Disabling an agent clears its sessions; disabling Codex also clears usage.
 Other agents continue without restarting the source.
 
