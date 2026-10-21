@@ -3,9 +3,6 @@
 This is bounded to the inspected stream-v11 producer. Unknown tool execution
 is not a human prompt. Request identities stay in RAM beside their native owner.
 """
-from service.native_attention import PendingDecisions
-
-
 # Producer inventory: Codex 26.1013.40934 (20770), desktop stream 11.
 # The transport dispatcher handles INTERNAL_METHODS before pending-array insertion.
 HUMAN_METHODS = frozenset({'item/commandExecution/requestApproval', 'item/fileChange/requestApproval',
@@ -82,7 +79,3 @@ def classify_request(session, request):
         # The desktop explicitly renders session-level MCP forms/URL requests.
         return 'human' if turn or method == 'mcpServer/elicitation/request' else 'invalid'
     return 'unknown'
-
-
-def human_request(session, request):
-    return classify_request(session, request) == 'human'

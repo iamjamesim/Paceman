@@ -11,7 +11,8 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from service.codex_attention import PendingDecisions, human_request, HUMAN_METHODS, INTERNAL_METHODS, HUMAN_DYNAMIC_TOOLS
+from service.codex_attention import classify_request, HUMAN_METHODS, INTERNAL_METHODS, HUMAN_DYNAMIC_TOOLS
+from service.native_attention import PendingDecisions
 from service.codex_desktop import DesktopRequests
 from service.diagnostics import DeliveryDiagnostics
 from service.hub import Store
@@ -51,7 +52,7 @@ class HumanRequestTests(unittest.TestCase):
                             raw['params'].pop('namespace', None)
                         else:
                             raw['params']['namespace'] = namespace
-                        self.assertTrue(human_request(SESSION, raw))
+                        self.assertEqual(classify_request(SESSION, raw), 'human')
                         adapter._receive(snapshot([raw]))
                         self.assertEqual(len(attention[-1].for_turn('turn')), 1)
                         self.assertEqual(broker.pending()['requests'], [])
@@ -82,7 +83,7 @@ class HumanRequestTests(unittest.TestCase):
             self.addCleanup(adapter._reset)
             for raw in invalid:
                 with self.subTest(raw=raw):
-                    self.assertFalse(human_request(SESSION, raw))
+                    self.assertNotEqual(classify_request(SESSION, raw), 'human')
                     adapter._receive(snapshot([raw]))
                     self.assertEqual(attention[-1].requests, frozenset())
                     self.assertEqual(broker.pending()['requests'], [])
@@ -169,10 +170,10 @@ class HumanRequestTests(unittest.TestCase):
         for method in methods:
             raw = dict(id=1, method=method, params=dict(threadId=SESSION, turnId='turn'))
             with self.subTest(method=method):
-                self.assertTrue(human_request(SESSION, raw))
-                self.assertFalse(human_request('another-thread', raw))
+                self.assertEqual(classify_request(SESSION, raw), 'human')
+                self.assertNotEqual(classify_request('another-thread', raw), 'human')
                 raw['completed'] = True
-                self.assertFalse(human_request(SESSION, raw))
+                self.assertNotEqual(classify_request(SESSION, raw), 'human')
 
 
 class NativeDecisionLifetimeTests(unittest.TestCase):
@@ -226,7 +227,7 @@ class NativeDecisionLifetimeTests(unittest.TestCase):
                     if not before:
                         self.event('completed', 'Stop')
                     self.assertEqual(self.state(), 'needs_input')
-                    self.assertEqual(self.source.native_active_sessions(), {}, 'Attention must not resume the finished turn')
+                    self.assertEqual(self.source.native_response_sessions(), {SESSION: 'turn'}, 'Finished turns retain their response binding')
                     self.assertEqual(self.broker.pending()['requests'], [], 'Use existing native continuation')
                     self.receive([question])
                     self.assertEqual(self.state(), 'needs_input', 'Resolving one sibling is insufficient')

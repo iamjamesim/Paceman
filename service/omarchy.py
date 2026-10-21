@@ -436,16 +436,6 @@ class OmarchySource:
             db.execute("INSERT OR REPLACE INTO omarchy_tracking VALUES (?,?,?,?,?,?,?)",
                        (key, session, self.native_turns.get(key), *question, *attention))
 
-    def native_active_sessions(self):
-        with self.lock, self.store.connect() as db:
-            if self.closed or "codex" not in self.providers:
-                return {}
-            return {self.session_refs[row['id']]: row['turn'] for row in db.execute(
-                "SELECT s.*,p.pid,p.start_ticks,p.boot_id FROM omarchy_sessions s "
-                "JOIN omarchy_processes p ON p.session_id=s.id WHERE p.closed=0 "
-                "AND s.provider='codex' AND s.state IN ('working','needs_input')")
-                if row['id'] in self.session_refs and self.processes.is_alive(self.identity(row))}
-
     def native_requests_changed(self, session, by_turn):
         key = hashlib.sha256(("codex:" + session).encode()).hexdigest()
         with self.lock, self.store.connect() as db:

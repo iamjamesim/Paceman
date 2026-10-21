@@ -88,7 +88,7 @@ class MacSourceTests(unittest.TestCase):
                 self.assertEqual(store.snapshot()['state'], 'needs_input')
                 source.native_requests_changed('one', {'1': 'planImplementation'})
                 self.assertEqual(store.snapshot()['state'], 'needs_input')
-                self.assertNotIn('one', source.native_active_sessions(), 'A plan decision must not resume a CLI turn')
+                self.assertEqual(source.native_response_sessions(), {'one': '1'}, 'Finished turns retain their response binding')
                 with store.connect() as db:
                     db.execute('UPDATE mac_sessions SET updated=?', (time.time() - 601,))
                 source.tick()

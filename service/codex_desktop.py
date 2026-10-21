@@ -16,7 +16,8 @@ import time
 import uuid
 
 from service.codex_requests import decode_request, decode_async_question, is_browser_approval, session_key
-from service.codex_attention import PendingDecisions, classify_request
+from service.codex_attention import classify_request
+from service.native_attention import PendingDecisions
 from service.diagnostics import fingerprint
 from service.codex_policy import read_browser_policy
 from service.interactions import BrokerError

@@ -70,7 +70,7 @@ class LinuxSourceParityTests(unittest.TestCase):
         return self.store.snapshot()
 
     def daemon(self):
-        adapter = DaemonRequests(self.broker, self.source.native_active_sessions,
+        adapter = DaemonRequests(self.broker, self.source.native_response_sessions,
             attention=self.source.native_requests_changed)
         adapter.connection = Mock()
         adapter.joined['session'] = 'turn'
@@ -91,7 +91,7 @@ class LinuxSourceParityTests(unittest.TestCase):
         self.clock += 3
         self.restart()
         self.assertEqual(self.store.snapshot()['state'], 'working')
-        self.assertEqual(self.source.native_active_sessions(), {'session': 'turn'})
+        self.assertEqual(self.source.native_response_sessions(), {'session': 'turn'})
         self.clock += 3
         self.source.tick(force=True)
         self.assertEqual(self.store.snapshot()['state'], 'needs_input')
@@ -99,7 +99,7 @@ class LinuxSourceParityTests(unittest.TestCase):
             event='working', hook='UserPromptSubmit'), peer_pid=100)
         self.assertEqual(self.store.snapshot()['state'], 'needs_input')
         self.assertEqual(self.codex('completed')['state'], 'finished')
-        self.assertEqual(self.source.native_active_sessions(), {})
+        self.assertEqual(self.source.native_response_sessions(), {'session': 'turn'})
 
     def test_restart_and_pid_reuse_cannot_restore_old_question_or_response_binding(self):
         self.codex(hook='UserPromptSubmit')
@@ -107,7 +107,7 @@ class LinuxSourceParityTests(unittest.TestCase):
         self.owner = ProcessIdentity(100, '2', 'new-boot')
         self.restart()
         self.assertEqual(self.store.snapshot()['sessions'], [])
-        self.assertEqual(self.source.native_active_sessions(), {})
+        self.assertEqual(self.source.native_response_sessions(), {})
         self.assertFalse(self.source.pending_questions)
         with self.store.connect() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM omarchy_tracking').fetchone()[0], 0)
@@ -206,7 +206,7 @@ class LinuxSourceParityTests(unittest.TestCase):
         self.assertEqual(self.recover({'session': [{'id': 'turn', 'status': 'completed'}]})['state'], 'finished')
         self.codex(turn='failed-turn', hook='UserPromptSubmit')
         self.assertEqual(self.recover({'session': [{'id': 'failed-turn', 'status': 'failed'}]})['state'], 'failed')
-        self.assertEqual(self.source.native_active_sessions(), {})
+        self.assertEqual(self.source.native_response_sessions(), {'session': 'failed-turn'})
         self.assertEqual(self.codex('needs-input', turn='failed-turn')['state'], 'failed')
         self.assertEqual(self.codex('completed', turn='failed-turn')['state'], 'failed')
         self.assertEqual(self.codex('ended', turn='failed-turn')['state'], 'idle')
@@ -219,7 +219,7 @@ class LinuxSourceParityTests(unittest.TestCase):
         self.assertEqual(self.recover({'session': [{'id': 'turn', 'status': 'completed'}]})['state'], 'finished')
         self.assertEqual(self.recover({'session': [{'id': 'new', 'status': 'inProgress'},
             {'id': 'turn', 'status': 'completed'}]})['state'], 'needs_input')
-        self.assertEqual(self.source.native_active_sessions(), {'session': 'new'})
+        self.assertEqual(self.source.native_response_sessions(), {'session': 'new'})
 
     def test_saved_failure_corrects_stop_and_known_historical_hooks_are_retired(self):
         self.codex(hook='UserPromptSubmit')
@@ -245,7 +245,7 @@ class LinuxSourceParityTests(unittest.TestCase):
         done.set()
         self.source.recovery_thread.join(2)
         self.assertEqual(self.store.snapshot()['state'], 'working')
-        self.assertEqual(self.source.native_active_sessions(), {'session': 'next'})
+        self.assertEqual(self.source.native_response_sessions(), {'session': 'next'})
 
     def test_recovery_preserves_newer_turn_hook_received_during_metadata_read(self):
         self.codex(hook='UserPromptSubmit')
@@ -275,7 +275,7 @@ class LinuxSourceParityTests(unittest.TestCase):
         current = self.recover({'session': [{'id': 'newest', 'status': 'inProgress'},
             {'id': 'resumed', 'status': 'completed'}, {'id': 'turn', 'status': 'completed'}]})
         self.assertEqual(current['state'], 'needs_input')
-        self.assertEqual(self.source.native_active_sessions(), {'session': 'newest'})
+        self.assertEqual(self.source.native_response_sessions(), {'session': 'newest'})
         self.assertFalse(self.source.pending_turn_events)
 
     def test_replacement_codex_owner_cannot_inherit_attention_or_pending_recovery(self):
