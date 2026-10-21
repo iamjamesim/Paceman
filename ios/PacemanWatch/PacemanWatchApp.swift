@@ -568,9 +568,6 @@ private struct WatchTaskView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10).padding(.bottom, 8)
             }
-            #if DEBUG
-            .defaultScrollAnchor(ProcessInfo.processInfo.arguments.contains("--approval-actions-preview") ? UnitPoint(x: 0.5, y: 0.8) : .top)
-            #endif
 
         }
         .navigationTitle(prompt?.request.kind == "question" ? "Question" : prompt?.request.kind == "approval" ? "Approval" : "Session")
@@ -586,7 +583,7 @@ private struct WatchTaskView: View {
                 Button("Confirm") {
                     confirming = nil
                     respond("choose", optionID: option.id)
-                }.buttonStyle(WatchResponseButtonStyle(primary: true))
+                }.buttonStyle(.borderedProminent).foregroundStyle(.black)
             }.padding(.horizontal, 10)
         }
         .task { await load() }
@@ -652,7 +649,7 @@ private struct WatchTaskView: View {
                         respond(request.usesApprovalChoices ? "choose" : option.id,
                             optionID: request.usesApprovalChoices ? option.id : nil)
                     }
-                }.buttonStyle(WatchResponseButtonStyle())
+                }.buttonStyle(.bordered)
             }
             if request.approvalChoices.isEmpty { Text(ResponseGuidance.continuation(for: request.provider) + ".") }
         } else if !prompt.supportsWatchAnswer {
@@ -854,27 +851,6 @@ private struct WatchTaskView: View {
         if operation.finish(token), scenePhase == .active, !submitted {
             Task { await load() }
         }
-    }
-}
-
-/// Keep wrapped decision labels inside the button at every readable text size.
-private struct WatchResponseButtonStyle: ButtonStyle {
-    var primary = false
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 16)
-        configuration.label
-            .font(.body)
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .frame(minHeight: 44)
-            .foregroundStyle(primary ? Color.black : Color.primary)
-            .background(primary ? WatchPalette.tint : Color.primary.opacity(0.14), in: shape)
-            .contentShape(shape)
-            .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.45)
     }
 }
 

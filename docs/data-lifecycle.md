@@ -20,7 +20,7 @@ See the [source protocol](protocol.md) for freshness fields.
 
 | Owner | Stored state | Clear boundary |
 | --- | --- | --- |
-| Desktop source | Source ID, hashed client credentials, paired-client metadata, push destinations/cursors and current event in owner-only SQLite | Explicit client removal, source uninstall or source-data reset |
+| Desktop source | Source ID, hashed client credentials, paired-client metadata, push destinations/cursors, current activity and bounded result history in owner-only SQLite | Explicit client removal, source uninstall or source-data reset |
 | Source push config | Source-specific relay credential in plaintext JSON at `~/Library/Application Support/Paceman/private/apns.json` on Mac or `~/.local/state/paceman/private/apns.json` on Omarchy (`0700` directories, `0600` file; not Keychain). Advanced direct APNs setups instead store a private signing key. | Source uninstall or credential rotation |
 | APNs relay | APNs key in host-managed secret files; hashed source and client credentials, hashed token bindings, App Attest public keys and counters, pairing approvals, and revocation tombstones in managed PostgreSQL | Phone/source revocation, token replacement, or key rotation; attested keys remain available for later approvals |
 | iPhone Keychain | Source endpoints and credentials, installation ID, accessory owner identity; device-only, available after first unlock | Explicit removal or confirmed revocation |
@@ -81,7 +81,7 @@ restarts, bounded to 128 sessions and a 24 KiB history payload. The phone caches
 that metadata for Recent and shares it with Apple Watch; history does not extend
 live freshness or trigger activity alerts. A new turn supersedes its older result.
 Result times identify when Paceman observed completion, not an exact provider
-transition time. Already stored event snapshots can recover recent results on upgrade.
+transition time.
 Disabling an agent clears its sessions; disabling Codex also clears usage.
 Other agents continue without restarting the source.
 
