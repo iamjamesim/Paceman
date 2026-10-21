@@ -93,8 +93,13 @@ statuses and hook lifecycle reasons; the phone records matching IDs and request 
 
 Native approval attention is independent of mobile request lifetime. Unrelated
 same-turn activity cannot clear it. A matching completion resolves one approval;
-new turns or confirmed terminal outcomes clear the old turn's attention. Hooks
-do not expose every native approval decision.
+new turns or confirmed terminal outcomes clear main-turn hook-only attention. Hooks do
+not expose every native approval decision. Owner-confirmed decisions are
+tracked separately from the saved turn outcome: Stop can finish a turn while
+Needs input remains. Owner-confirmed removal of the last matching decision
+restores that outcome and starts its normal display retention. Turn-scoped
+decisions cannot affect a newer turn; session-scoped elicitation remains
+session-scoped. Disconnect or a stream gap means unknown, not confirmed empty.
 
 Omarchy persists local session references and attention metadata, without request
 content, for restart recovery. Restoring them requires the same live process,
@@ -104,14 +109,15 @@ finish live work.
 
 Requests and answers are RAM-only and excluded from snapshots, SQLite, APNs,
 accessory BLE and diagnostics. Codex desktop requests use private versioned IPC
-and belong to the existing native owner until resolution or disconnect. CLI
+and belong to the existing native owner. Disconnect withdraws remote cards
+without declaring the native decisions resolved. CLI
 requests rejoin active, already-loaded threads on the native app-server daemon
 without changing their settings. Paceman never starts the daemon or a turn.
 Async question replies use native steering and exact question IDs.
 Claude uses an already-enabled native Remote Control connection and the native
 login's session scope. Only control events are requested; native request IDs and
-pending-request checkpoints govern lifetime. Local answers clear immediately;
-remote submissions are confirmed against the owner's pending set. Hooks only
+pending-request checkpoints govern lifetime. Owner resolution clears matching
+cards; submitted responses require native confirmation. Hooks only
 observe activity. Native login refresh and permission-mode changes stay in Claude.
 On Linux, the existing scoped login is read from Claude's private
 `$CLAUDE_CONFIG_DIR/.credentials.json` (default `~/.claude/.credentials.json`);
@@ -128,3 +134,16 @@ request in the same generation.
 Pending sibling requests take precedence over a submission receipt.
 Visible Watch reviews advance within the selected session; uncertain submissions
 remain available for explicit retry.
+
+### Coverage boundaries
+
+See [native request coverage](native-request-coverage.md) for the provider/platform
+matrix, finite producer inventories, response exclusions and release checks.
+Claude Remote Control identities are session/owner scoped, independent of the
+hook prompt journal. Child hook waits are scoped by actor and survive parent
+turn completion; child callbacks cannot finish the parent. Exact elicitation
+hook results suppress stale reappearance; ambiguous server-only matches do not
+clear siblings. Checkpoint omission only resolves a known same-worker request
+in an enumerated domain; elicitation and inherited-worker uncertainty stay
+native until a verified result. Unknown methods produce count-only diagnostics,
+never inferred user attention or response buttons.
