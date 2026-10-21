@@ -308,13 +308,11 @@ class NativeDecisionLifetimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.adapter._receive(gap)
         self.adapter._reset()
-        self.assertEqual(self.state(), 'idle')
-        self.assertTrue(self.store.snapshot()['sessions'][0]['attentionUncertain'])
+        self.assertEqual(self.state(), 'needs_input')
         self.assertEqual(self.broker.pending()['requests'], [])
         self.adapter.owners[SESSION] = 'replacement-owner'
         self.receive([])
-        self.assertEqual(self.state(), 'idle', 'Old owner cannot clear or reconfirm last-known attention')
-        self.assertTrue(self.store.snapshot()['sessions'][0]['attentionUncertain'])
+        self.assertEqual(self.state(), 'needs_input', 'Old owner cannot clear pending state')
         message = snapshot([])
         message['sourceClientId'] = 'replacement-owner'
         self.adapter._receive(message)
@@ -374,8 +372,7 @@ class NativeDecisionLifetimeTests(unittest.TestCase):
         with self.store.connect() as db:
             db.execute('UPDATE mac_sessions SET updated=?', (time.time() - FINISHED_RETENTION - 5,))
         self.source.tick()
-        self.assertEqual(self.state(), 'idle', 'Unknown attention is retained as history, not confirmed input')
-        self.assertTrue(self.store.snapshot()['sessions'][0]['attentionUncertain'])
+        self.assertEqual(self.state(), 'needs_input', 'Unknown is not confirmed empty')
         self.adapter.owners[SESSION] = 'native-owner'
         self.receive([])
         self.source.tick()

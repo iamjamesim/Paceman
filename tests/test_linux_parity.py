@@ -19,7 +19,6 @@ from service.hub import Store
 from service import hub
 from service.interactions import InteractionBroker
 from service.linux_native import claude_token
-from service.native_attention import native_unverified
 from service.omarchy import OmarchySource
 from service.processes import AgentProcesses, ProcessIdentity
 from service.push import Result, Worker
@@ -119,10 +118,7 @@ class LinuxSourceParityTests(unittest.TestCase):
         self.codex(hook='UserPromptSubmit')
         self.source.native_requests_changed('session', None)
         self.restart()
-        self.assertEqual(self.store.snapshot()['state'], 'working')
-        self.assertNotIn('attentionUncertain', self.store.snapshot()['sessions'][0])
-        self.assertTrue(native_unverified(
-            self.source.native_attention[hashlib.sha256(b'codex:session').hexdigest()], 'turn'))
+        self.assertEqual(self.store.snapshot()['state'], 'needs_input')
         self.codex(turn='next', hook='UserPromptSubmit')
         self.source.native_requests_changed('session', {'turn': True})
         self.assertEqual(self.store.snapshot()['state'], 'working')

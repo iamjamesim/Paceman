@@ -217,7 +217,7 @@ def notification_copy(event: dict, phone_name: str | None = None) -> dict:
     raw = event.get("payload")
     value = json.loads(raw) if raw else {}
     source = source_display_name(value.get("sourceName"), phone_name)
-    sessions = [s for s in value.get("sessions", []) if not s.get('attentionUncertain')]
+    sessions = value.get("sessions", [])
     matching = [s for s in sessions if s.get("state") == event["state"]]
     providers = {"codex": "Codex", "claude": "Claude", "claude-code": "Claude"}
     subject = providers.get(matching[0].get("provider"), "Agent") if len(matching) == 1 else "Agent"
@@ -291,7 +291,7 @@ def live_alert(event: dict, phone_name: str | None = None) -> dict:
 def should_end_live_activity(snapshot: dict, now: float) -> bool:
     # An aggregate failure can coexist with work in another session.
     if any(session.get("state") in ("working", "needs_input")
-           for session in snapshot.get("sessions") or [] if not session.get('attentionUncertain')):
+           for session in snapshot.get("sessions") or []):
         return False
     return (snapshot["state"] == "idle"
             or (snapshot["state"] in ("finished", "failed")
@@ -301,7 +301,7 @@ def should_end_live_activity(snapshot: dict, now: float) -> bool:
 def live_notification(snapshot: dict, now: float, ending=False,
                       alert: dict | None = None) -> tuple[dict, dict]:
     """Display-only envelope shared with MonitoringActivity.ContentState."""
-    sessions = [s for s in snapshot.get("sessions") or [] if not s.get('attentionUncertain')]
+    sessions = snapshot.get("sessions") or []
     counts = {state: sum(s.get("state") == state for s in sessions) for state in ("working", "needs_input", "finished", "failed")}
     if not sessions and snapshot["state"] in counts:
         counts[snapshot["state"]] = 1

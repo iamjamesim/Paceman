@@ -9,39 +9,6 @@ import DeviceCheck
 @testable import AgentCompanion
 
 final class ProtocolTests: XCTestCase {
-    @MainActor func testUnverifiedAttentionIsHistoryAndExcludedFromCurrentLiveActivityAndBLE() throws {
-        let now = Date()
-        let unverified = try JSONDecoder().decode(AgentSession.self, from: Data(
-            #"{"id":"old-form","provider":"claude","state":"needs_input","attentionUncertain":true}"#.utf8))
-        let working = AgentSession(id: "current", provider: "codex", state: .working)
-        let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: "test", clientID: "client", credential: "test")
-        let model = CompanionModel(preview: true)
-        let item = WorkCatalog.item(session: unverified, source: source, model: model, inbox: model.interactions,
-            computer: "Test", connected: true, current: true)
-        XCTAssertTrue(item.historical, "A fresh computer connection cannot reconfirm an omitted native decision")
-        XCTAssertEqual(item.group, .lastKnown)
-        XCTAssertEqual(item.status, "Status unverified")
-        XCTAssertEqual(item.statusDetail, "Check Claude")
-        XCTAssertNil(item.request)
-        let snapshot = Snapshot(schema: 1, sourceID: "test", generation: "generation", revision: 1, sourceName: "Test",
-            observedAt: now.timeIntervalSince1970, changedAt: now.timeIntervalSince1970, freshFor: 30,
-            state: .working, eventID: "1", sessions: [unverified, working])
-        let activity = MonitoringActivity.ContentState(snapshot: snapshot)
-        XCTAssertEqual(activity.needsInput, 0)
-        XCTAssertEqual(activity.working, 1)
-        XCTAssertEqual(activity.providers, ["codex"])
-        let card = WatchSourceCard(sourceID: "test", name: "Test", state: .working,
-            availability: 1, expiresAt: now.timeIntervalSince1970 + 300, sessions: [unverified, working])
-        let packet = try XCTUnwrap(WatchWire.sourcePackets([card], capabilities: 1 << 14, now: now).first)
-        XCTAssertEqual(packet[21], 1, "The accessory receives only the verified current session")
-        let watch = WatchWorkTask(sourceID: "test", sessionID: unverified.id, provider: "claude", title: "Form", computer: "Test",
-            state: "needs_input", freshUntil: now.timeIntervalSince1970 + 300, attentionUncertain: true)
-        let decoded = try JSONDecoder().decode(WatchWorkTask.self, from: JSONEncoder().encode(watch))
-        XCTAssertTrue(decoded.historical(at: now))
-        XCTAssertEqual(decoded.group(at: now), "Last known")
-        XCTAssertEqual(decoded.status(at: now), "Status unverified")
-    }
-
     func testTitledSessionPacketsAreBoundedAtomicAndCapabilityGated() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let sessions = (0..<8).map { AgentSession(id: "session-\($0)", provider: "codex", state: .working,

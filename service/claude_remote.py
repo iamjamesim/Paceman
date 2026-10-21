@@ -148,8 +148,6 @@ class NativeRequests:
         self.request_owners = {}
         self.observed_counts = None
         self.session_waiting = False
-        self.unverified = set()
-        self.session_uncertain = False
 
     def initialize(self):
         with self.lock:
@@ -201,17 +199,13 @@ class NativeRequests:
             self.pending.clear()
             # Keep known identities in RAM across a gap. The checkpoint has
             # no elicitation list and cannot declare those decisions empty.
-            self.unverified.update(self.native)
-            self.session_uncertain |= self.session_waiting
-            self.session_waiting = False
-            self._attention()  # Losing the channel never resolves the agent.
+            self.attention(None)  # Losing the channel never resolves the agent.
 
     def _resolve(self, rid):
         self.resolved[rid] = True
         while len(self.resolved) > 1024:
             self.resolved.popitem(last=False)
         self.native.pop(rid, None)
-        self.unverified.discard(rid)
         self.confirmed.discard(rid)
         self.request_owners.pop(rid, None)
         self.confirming.discard(rid)
@@ -297,7 +291,6 @@ class NativeRequests:
                     complete = continuous and state.get('session_state') != 'requires_action'
                     if state.get('session_state') in ('idle', 'running', 'requires_action'):
                         self.session_waiting = state['session_state'] == 'requires_action'
-                        self.session_uncertain = False
                     # Historical replay is replaced by the first checkpoint.
                     # Previously confirmed, omitted requests remain uncertain
                     # across a worker change. Elicitation is never enumerated.
@@ -317,8 +310,6 @@ class NativeRequests:
                         self._resolve(missing)
                     self.native = {**preserve, **{self._request(f): deepcopy(f) for f in pending
                                    if f.get('request_id') not in self.resolved}}
-                    inherited = {rid for rid in preserve if self.request_owners.get(rid) != pid}
-                    self.unverified = ((self.unverified | inherited) & self.native.keys()) - current_ids
                     self.retired.update(preserve.keys() - current_ids)
                     for uncertain in preserve.keys() - current_ids:
                         entry = self.pending.pop(uncertain, None)
@@ -353,7 +344,6 @@ class NativeRequests:
                     self.native[rid] = deepcopy(frame)
                     if self.connected:
                         self.request_owners[rid] = self.owner_pid
-                        self.unverified.discard(rid)
             if self.connected:
                 self._sync()
 
@@ -389,17 +379,12 @@ class NativeRequests:
             self.pending[rid] = (handle, deepcopy(frame), deepcopy(public))
             threading.Thread(target=self._answer, args=(rid, handle, encode), daemon=True).start()
         self.confirmed.update(self.native)
-        self._attention()
-
-    def _attention(self):
         requests = frozenset((None, 'str', rid) for rid in self.native)
         inputs = frozenset(((None, 'str', rid), hashlib.sha256(
             (f['request'].get('elicitation_id') or f['request']['mcp_server_name']).encode()).hexdigest())
             for rid, f in self.native.items() if f['request'].get('subtype') == 'elicitation'
             and isinstance(f['request'].get('elicitation_id') or f['request'].get('mcp_server_name'), str))
-        self.attention(PendingDecisions(self.remote, requests, inputs, unverified_waiting=self.session_uncertain,
-            waiting_on_human=self.session_waiting,
-            unverified=frozenset((None, 'str', rid) for rid in self.unverified)))
+        self.attention(PendingDecisions(self.remote, requests, inputs, waiting_on_human=self.session_waiting))
 
     def _diagnose(self, frames):
         counts = dict(human=0, internal=0, unknown=0, invalid=0)

@@ -9,7 +9,6 @@ from unittest.mock import Mock
 from service.claude_remote import NativeRequests, NativeHTTP, events
 from service.claude_requests import decode_request
 from service.interactions import BrokerError, InteractionBroker
-from service.native_attention import native_unverified
 
 
 REMOTE = 'session_native_proof'
@@ -156,7 +155,7 @@ class NativeClaudeTests(unittest.TestCase):
         self.assertEqual(self.broker.pending()['requests'][0]['requestID'], first['requestID'])
         self.adapter.disconnect()
         self.assertEqual(self.broker.pending()['requests'], [])
-        self.assertTrue(native_unverified(self.attention[-1], None))
+        self.assertIsNone(self.attention[-1])
         with self.assertRaises(BrokerError):
             self.submit(first)
 

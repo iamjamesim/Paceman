@@ -2,23 +2,6 @@ import XCTest
 @testable import AgentCompanion
 
 final class InteractionTests: XCTestCase {
-    @MainActor func testUnverifiedSnapshotWithdrawsPreviouslyDisplayedFormWithoutPretendingItWasAnswered() throws {
-        let source = PairedSource(endpoint: URL(string: "https://test.example")!, sourceID: sourceID,
-            clientID: "client", credential: "test")
-        let inbox = InteractionInbox()
-        inbox.preview(source)
-        let pending = try XCTUnwrap(inbox.items.first)
-        let session = AgentSession(id: pending.request.sessionID, provider: pending.request.provider,
-            state: .needsInput, attentionUncertain: true)
-        let snapshot = Snapshot(schema: 1, sourceID: sourceID, generation: "source", revision: 1, sourceName: "Test",
-            observedAt: Date().timeIntervalSince1970, changedAt: Date().timeIntervalSince1970,
-            freshFor: 30, state: .idle, eventID: "unverified", sessions: [session], interactionsEnabled: true)
-        inbox.reconcile(snapshot)
-        XCTAssertFalse(inbox.isCurrent(pending))
-        XCTAssertTrue(inbox.items.isEmpty)
-        XCTAssertNil(inbox.response(for: pending), "Losing confirmation is not an answer receipt")
-    }
-
     func testReviewLeaseRenewalCannotReuseDraftForChangedContent() throws {
         let original = InputRequest(requestID: "request", version: 1, provider: "codex", sessionID: "session",
             kind: "question", title: "Choose", detail: "", questions: [.init(id: "q", prompt: "Which?",

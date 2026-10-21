@@ -108,7 +108,6 @@ struct WorkItem: Identifiable {
     var state: ActivityState { phase.activity }
     var group: WorkGroup { historical ? .lastKnown : phase.group }
     var status: String {
-        if session.attentionUncertain == true { return "Status unverified" }
         let title = phase == .continued ? ResponseGuidance.continuation(for: session.provider) : phase.title
         return historical ? "Last known: \(title)" : title
     }
@@ -118,7 +117,6 @@ struct WorkItem: Identifiable {
     var statusToken: WorkStatusToken { phase.token }
     var opensActivityCard: Bool { !aggregate }
     var statusDetail: String? {
-        if session.attentionUncertain == true { return "Check \(session.provider.capitalized)" }
         // The section establishes that these are historical observations; the
         // row still needs to say what was observed, without relying on a glyph.
         if historical { return session.state == .needsInput ? "Needs attention" : session.state.title }
@@ -262,13 +260,12 @@ struct WorkSectionData: Identifiable {
     static func item(session: AgentSession, source: PairedSource, model: CompanionModel,
                      inbox: InteractionInbox, computer: String, connected: Bool, current: Bool) -> WorkItem {
         let id = WorkIdentity(sourceID: source.sourceID, sessionID: session.id, provider: session.provider)
-        let verified = session.attentionUncertain != true
-        let pending = connected && verified ? inbox.pendingRequests(for: id).first
+        let pending = connected ? inbox.pendingRequests(for: id).first
             ?? model.watchPending(for: id) : nil
         return WorkItem(id: id, session: session,
-            computer: computer, historical: !current || !verified,
+            computer: computer, historical: !current,
             activityOrder: inbox.ordering.activityOrder(id), requestOrder: inbox.ordering.requestOrder(pending),
-            delivery: current && verified && session.state == .needsInput ? inbox.receipt(for: id) ?? model.watchDelivery(for: id) : nil,
+            delivery: current && session.state == .needsInput ? inbox.receipt(for: id) ?? model.watchDelivery(for: id) : nil,
             inputAvailability: inbox.availability[source.sourceID],
             request: pending)
     }

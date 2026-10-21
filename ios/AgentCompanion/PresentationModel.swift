@@ -61,15 +61,6 @@ final class PresentationModel: ObservableObject {
     }
     var previewOffline: Bool { ["offline", "computer-offline", "computer-usage-stale", "single-offline", "offline-empty", "claude-offline"].contains(previewScreen) }
     var previewSessions: [AgentSession] {
-        if previewScreen == "work-unverified" || previewScreen == "work-unverified-only" {
-            let lastKnown = AgentSession(id: "old-form", provider: "claude", state: .needsInput,
-                name: "Review onboarding", project: "paceman", remoteSessionID: "session_previewClaude", attentionUncertain: true)
-            return previewScreen == "work-unverified-only" ? [lastKnown] : [
-                AgentSession(id: "current-approval", provider: "codex", state: .needsInput,
-                    name: "Review checkout changes", project: "storefront"),
-                AgentSession(id: "current-work", provider: "claude", state: .working,
-                    name: "Improve search", project: "paceman"), lastKnown]
-        }
         if previewScreen == "work-review" {
             return [AgentSession(id: "review-approval", provider: "codex", state: .needsInput, name: "Fix checkout redirect", project: "storefront"),
                     AgentSession(id: "review-question", provider: "claude", state: .needsInput, name: "Improve onboarding", project: "paceman"),
@@ -140,7 +131,6 @@ struct AgentSession: Codable, Identifiable, Equatable {
     var project: String?
     var workspaceLabel: String?
     var remoteSessionID: String?
-    var attentionUncertain: Bool? = nil
     var appURL: URL? {
         switch provider {
         case "codex": return URL(string: "chatgpt://codex")

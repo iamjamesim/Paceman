@@ -5,7 +5,7 @@ import UIKit
 
 extension MonitoringActivity.ContentState {
     init(snapshot: Snapshot) {
-        let sessions = (snapshot.sessions ?? []).filter { $0.attentionUncertain != true }
+        let sessions = snapshot.sessions ?? []
         generation = snapshot.generation
         revision = snapshot.revision
         state = snapshot.state.rawValue
@@ -24,7 +24,7 @@ extension MonitoringActivity.ContentState {
         freshUntil = snapshot.activityFreshUntil
         changedAt = snapshot.changedAt
         themeID = ThemePreference.current.rawValue
-        providers = Self.providerCodes(sessions
+        providers = Self.providerCodes((snapshot.sessions ?? [])
             .filter { $0.state != .idle }.map(\.provider))
         providerStates = Dictionary(grouping: sessions.filter { $0.state != .idle }, by: {
             Self.providerCodes([$0.provider]).first ?? "other"

@@ -49,7 +49,7 @@ struct Snapshot: Codable {
 
     func shouldEndLiveActivity(at now: Date) -> Bool {
         // A failed turn does not make the whole computer's activity terminal.
-        guard !(sessions ?? []).contains(where: { $0.attentionUncertain != true && ($0.state == .working || $0.state == .needsInput) }) else {
+        guard !(sessions ?? []).contains(where: { $0.state == .working || $0.state == .needsInput }) else {
             return false
         }
         return state == .idle || ((state == .finished || state == .failed)
@@ -311,9 +311,9 @@ enum WatchWire {
             data.append(Data(repeating: 0, count: 26 - name.count))
             if rich {
                 for state in [ActivityState.working, .needsInput, .finished, .failed] {
-                    data.appendLE(UInt16(clamping: card.sessions.filter { $0.attentionUncertain != true && $0.state == state }.count))
+                    data.appendLE(UInt16(clamping: card.sessions.filter { $0.state == state }.count))
                 }
-                let providers = card.sessions.filter { $0.attentionUncertain != true }.reduce(UInt8(0)) { mask, session in
+                let providers = card.sessions.reduce(UInt8(0)) { mask, session in
                     mask | (session.provider == "codex" ? 1 : session.provider == "claude" ? 2 : 4)
                 }
                 data.append(providers)
@@ -335,7 +335,7 @@ enum WatchWire {
         var pages: [(index: UInt8, count: UInt8, known: UInt8, chunk: UInt8, body: Data)] = []
         for (index, card) in cards.enumerated() {
             let source = Data(sources([card], now: now, rich: true).dropFirst(4))
-            let sessions = card.sessionsKnown ? card.sessions.filter { $0.state != .idle && $0.attentionUncertain != true }.sorted {
+            let sessions = card.sessionsKnown ? card.sessions.filter { $0.state != .idle }.sorted {
                 let a = priority[$0.state] ?? 4, b = priority[$1.state] ?? 4
                 if a != b { return a < b }
                 return $0.id < $1.id

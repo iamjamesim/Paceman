@@ -184,7 +184,6 @@ struct InputResponseState {
             guard let current = sessions.first(where: {
                 $0.id == item.request.sessionID && $0.provider == item.request.provider
             }) else { return true }
-            if current.attentionUncertain == true { return true }
             let old = previous?.first {
                 $0.id == item.request.sessionID && $0.provider == item.request.provider
             }

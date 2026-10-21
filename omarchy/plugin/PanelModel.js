@@ -14,7 +14,6 @@ function activitySummary(state, available) {
   var title = providers.length === 1 ? (providers[0] === "claude" ? "Claude Code" : "Codex") : "Agents"
   var result = {title: title, label: labels[state.activity] || "Waiting for activity", breakdown: ""}
   if (!available) return result
-  if (state.activity === "idle" && Number(state.unverifiedSessions || 0) > 0) result.label = "Status unverified"
   var counts = state.sessionCounts || {}
   var verified = state.sessionLiveness === "process"
   var order = verified ? ["needs_input", "failed", "working", "finished", "idle"] : ["needs_input", "failed", "working", "finished"]
@@ -23,7 +22,7 @@ function activitySummary(state, available) {
   })
   var total = order.reduce(function(sum, key) { return sum + (counts[key] || 0) }, 0)
   // Older status files contain only an aggregate; never guess the breakdown.
-  if (!valid || total + Number(state.unverifiedSessions || 0) !== state.sessions) return result
+  if (!valid || total !== state.sessions) return result
   // New sources verify every session's process, including quiet/finished ones.
   // Older sources retained completions without proving they were still open.
   var visibleCount = verified ? total : counts.needs_input + counts.working
@@ -51,12 +50,10 @@ function agentRows(state, running, sharing) {
     var activity = ["needs_input", "failed", "working", "finished"].filter(function(key) { return counts[key] > 0 })[0] || "idle"
     var seen = Number((state.lastAgentEventByProvider || {})[provider] || 0) > 0
     var total = Object.keys(labels).reduce(function(sum, key) { return sum + (counts[key] || 0) }, 0)
-    var unverified = Number((state.unverifiedByProvider || {})[provider] || 0)
-    seen = seen || total > 0 || unverified > 0
+    seen = seen || total > 0
     var available = enabled && running && sharing
     var summary = activitySummary({configuredProviders: [provider], activity: activity,
-      sessions: total + unverified, unverifiedSessions: unverified,
-      sessionCounts: Object.assign({needs_input: 0, failed: 0, working: 0, finished: 0, idle: 0}, counts),
+      sessions: total, sessionCounts: Object.assign({needs_input: 0, failed: 0, working: 0, finished: 0, idle: 0}, counts),
       sessionLiveness: state.sessionLiveness}, available)
     var detected = (state.detectedProviders || []).indexOf(provider) >= 0
     var hooks = (state.hookStatusByProvider || {})[provider]

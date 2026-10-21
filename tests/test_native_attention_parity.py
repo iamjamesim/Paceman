@@ -127,11 +127,9 @@ class PlatformDecisionParityTests(unittest.TestCase):
                 state_dir=previous.state_dir, processes=previous.processes, providers=f.enabled,
                 settings_reader=lambda: f.enabled, monotonic=lambda: f.clock, title_reader=lambda _: {},
                 turn_metadata_reader=lambda _: {}))
-            self.assertEqual(f.state(), 'idle')
-            self.assertTrue(f.store.snapshot()['sessions'][0]['attentionUncertain'])
+            self.assertEqual(f.state(), 'needs_input')
             f.source.native_claude_requests_changed(f.key, f.turn, PendingDecisions(REMOTE, frozenset()))
-            self.assertEqual(f.state(), 'idle', 'A partial checkpoint cannot establish current attention from restored uncertainty')
-            self.assertTrue(f.store.snapshot()['sessions'][0]['attentionUncertain'])
+            self.assertEqual(f.state(), 'needs_input', 'A partial checkpoint cannot resolve restored identities that were intentionally not persisted')
             f.event('SessionEnd')
             self.assertEqual(f.store.snapshot()['sessions'], [])
 
