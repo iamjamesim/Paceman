@@ -10,16 +10,25 @@ EVENTS = {
     "PostToolBatch": "batch-ended", "Elicitation": "needs-input",
     "ElicitationResult": "input-resolved", "Stop": "completed",
     "StopFailure": "failed", "SessionEnd": "ended",
+    "SubagentStop": "child-ended",
 }
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
 REMOTE_IDENTIFIER = re.compile(r"session_[A-Za-z0-9_-]{1,152}\Z")
 QUESTIONS = {"AskUserQuestion", "ExitPlanMode"}
+CHILD_HOOKS = {'PreToolUse', 'PermissionRequest', 'PostToolUse', 'PostToolUseFailure', 'SubagentStop'}
 
 
 def message_for(data, workspace_label=None):
-    if not isinstance(data, dict) or data.get("agent_id"):
-        return None  # Subagent completion must never finish its parent session.
+    if not isinstance(data, dict):
+        return None
     hook = data.get("hook_event_name")
+    actor = data.get('agent_id')
+    if actor:
+        if (not isinstance(actor, str) or not IDENTIFIER.fullmatch(actor)
+                or hook not in CHILD_HOOKS):
+            return None  # A child cannot finish or restart its parent turn.
+    elif hook == 'SubagentStop':
+        return None
     event = EVENTS.get(hook) if isinstance(hook, str) else None
     session, turn = data.get("session_id"), data.get("prompt_id", "")
     if (not event or not isinstance(session, str) or not IDENTIFIER.fullmatch(session)
@@ -27,10 +36,12 @@ def message_for(data, workspace_label=None):
         return None
     # prompt_id is documented from Claude Code 2.1.196. Without it, a delayed
     # callback could finish a newer prompt. Do not guess at turn boundaries.
-    if not turn and hook not in ("SessionStart", "SessionEnd"):
+    if not turn and hook not in ("SessionStart", "SessionEnd") and not actor:
         return None
     message = {"command": "agent-event", "provider": "claude", "session": session,
                "turn": turn, "hook": hook, "event": event}
+    if actor:
+        message['actor'] = hashlib.sha256(actor.encode()).hexdigest()
     if hook in ("PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure"):
         tool = data.get("tool_name")
         if not isinstance(tool, str) or not 1 <= len(tool) <= 256:
@@ -41,7 +52,7 @@ def message_for(data, workspace_label=None):
             message["toolUse"] = tool_id
         if hook == "PreToolUse" and tool in QUESTIONS:
             message["event"] = "question-opened"
-        if hook == "PostToolUseFailure" and data.get("is_interrupt") is True:
+        if hook == "PostToolUseFailure" and data.get("is_interrupt") is True and not actor:
             message["event"] = "interrupted"
     if hook in ("Elicitation", "ElicitationResult"):
         # A hash scopes concurrent MCP forms without exporting server names/URLs.
@@ -60,14 +71,15 @@ def message_for(data, workspace_label=None):
 def validate_message(command):
     hook, event, turn = (command.get(k) for k in ("hook", "event", "turn"))
     if (not isinstance(hook, str) or hook not in EVENTS
-            or (not turn and hook not in ("SessionStart", "SessionEnd"))
+            or (not turn and hook not in ("SessionStart", "SessionEnd") and not command.get('actor'))
+            or command.get('actor') and hook not in CHILD_HOOKS
             or (event != EVENTS[hook] and (hook, event) not in
                 (("PreToolUse", "question-opened"), ("PostToolUseFailure", "interrupted")))):
         raise ValueError("Invalid Claude lifecycle")
     remote_id = command.get("remoteSessionID")
     if remote_id is not None and (not isinstance(remote_id, str) or not REMOTE_IDENTIFIER.fullmatch(remote_id)):
         raise ValueError("Invalid Claude remote session ID")
-    for field in ("tool", "toolUse", "inputID"):
+    for field in ("tool", "toolUse", "inputID", "actor"):
         value = command.get(field)
         if value is not None and (not isinstance(value, str) or not IDENTIFIER.fullmatch(value)):
             raise ValueError("Invalid Claude scope")
@@ -75,6 +87,8 @@ def validate_message(command):
         raise ValueError("Missing tool scope")
     if hook in ("Elicitation", "ElicitationResult") and not command.get("inputID"):
         raise ValueError("Missing input scope")
+    if hook == 'SubagentStop' and not command.get('actor'):
+        raise ValueError('Missing child scope')
 
 
 CLAUDE_PURPOSES = (
@@ -90,4 +104,5 @@ CLAUDE_PURPOSES = (
     ('Stop', 'show a finished main turn'),
     ('StopFailure', 'show a failed main turn'),
     ('SessionEnd', 'remove a closed session'),
+    ('SubagentStop', 'clear only that child’s hook-observed questions and permissions'),
 )

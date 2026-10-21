@@ -64,9 +64,9 @@ After enabling Claude, inspect the loaded hooks with `/hooks` in the CLI, or **/
 /usr/bin/python3 -I /home/YOU/.local/lib/paceman/omarchy/claude_hook.py
 ```
 
-Paceman observes session start/end, new prompts, tool start/results, permission requests, MCP input requests/results, and turn completion/failure. It sends only opaque session/prompt/call IDs, lifecycle states, and hashed tool/input scopes. With Remote Control active on Claude Code 2.1.199+, it also sends the remote session ID so the iPhone can open that specific chat; otherwise the button opens the Claude Code session list. It sends no prompts, replies, tool arguments, or credentials, and never changes approval decisions. If hooks are disabled by your Claude settings or organization, enable them there first.
+Paceman observes session start/end, new prompts, tool start/results, permission requests, MCP input requests/results, scoped child completion, and turn completion/failure. It sends only opaque session/prompt/call IDs, lifecycle states, and hashed tool/input/actor scopes. With Remote Control active on Claude Code 2.1.199+, it also sends the remote session ID so the iPhone can open that specific chat; otherwise the button opens the Claude Code session list. It sends no prompts, replies, tool arguments, or credentials, and never changes approval decisions. If hooks are disabled by your Claude settings or organization, enable them there first.
 
-Submit a fresh local prompt in CLI or VS Code and check that `lastAgentEventByProvider.claude` advances in `pacemanctl status`. The panel distinguishes an enabled agent awaiting its first event from one with no active work. Process identity verifies ownership and clears exited sessions; source restart preserves live sessions and pending attention. Questions and approvals appear after five seconds and clear on the corresponding result or turn end.
+Submit a fresh local prompt in CLI or VS Code and check that `lastAgentEventByProvider.claude` advances in `pacemanctl status`. The panel distinguishes an enabled agent awaiting its first event from one with no active work. Process identity verifies ownership and clears exited sessions; source restart preserves live sessions and pending attention. Hook-observed questions and approvals appear after five seconds. Matching results clear them; parent turn end clears only main-turn hook waits.
 
 ## Private phone connection
 
@@ -84,7 +84,8 @@ app-server daemon and a hook-observed active thread already loaded there. Claude
 requires Remote Control to be enabled and its existing Linux login to include
 the session scope. Paceman starts neither the Codex daemon nor a Claude Remote
 Control session. Hooks return immediately without taking over native prompts.
-Unsupported requests remain in the agent. Restart restores attention only for
+Known native-only requests remain visible with continuation in the agent. Pending
+decisions can outlive a completed turn. See [verified coverage and limits](../docs/native-request-coverage.md). Restart restores attention only for
 the same verified live process; saved Codex outcomes recover missed completion
 hooks. Codex quota snapshots retain both short and weekly windows, including
 their durations, for phone and direct Apple Watch delivery.

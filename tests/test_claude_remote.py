@@ -193,7 +193,7 @@ class NativeClaudeTests(unittest.TestCase):
         wait_for(lambda: len(self.sent) == 3)
         rid = self.sent[-1]['request_id']
         self.receive(dict(type='control_response', session_id=REMOTE, response=dict(subtype='success',
-            request_id=rid, response={}, pending_permission_requests=[], pending_user_dialog_requests=[])))
+            request_id=rid, response={'pid': 42, 'session_state': 'running'}, pending_permission_requests=[], pending_user_dialog_requests=[])))
         self.assertFalse(self.attention[-1])
         self.assertFalse(self.adapter.confirming)
         self.assertEqual(sum(f['type'] == 'control_response' for f in self.sent), 1)
@@ -238,7 +238,7 @@ class NativeClaudeTests(unittest.TestCase):
         with self.assertRaises(OSError):
             self.adapter.initialize()
 
-    def test_reconnect_checkpoint_clears_only_requests_the_owner_resolved(self):
+    def test_reconnect_checkpoint_replaces_previous_observations(self):
         resolved = []
         self.adapter.resolution = lambda tools, pending: resolved.append((tools, pending))
         self.checkpoint([approval('first'), approval('sibling')])
@@ -361,3 +361,171 @@ class NativeClaudeTests(unittest.TestCase):
         self.assertEqual(next(events(io.BytesIO(value))), ('client_event', dict(source='worker', sequence_num=1)))
         with self.assertRaises(ValueError):
             next(events(io.BytesIO(b'data: []\n\n')))
+
+    def test_installed_control_inventory_has_no_unclassified_known_subtypes(self):
+        from pathlib import Path
+        from service.claude_attention import classify_request, HUMAN_SUBTYPES
+        inventory = json.loads((Path(__file__).parent / 'fixtures/claude-control-inventory.json').read_text())
+        self.assertEqual(set(inventory['human_subtypes']), HUMAN_SUBTYPES)
+        self.assertEqual(len(inventory['control_subtypes']), 92)
+        self.checkpoint([])
+        for subtype in inventory['control_subtypes']:
+            if subtype in HUMAN_SUBTYPES:
+                continue
+            raw = dict(type='control_request', session_id=REMOTE, request_id=subtype, request=dict(subtype=subtype))
+            self.assertEqual(classify_request(raw), 'internal', subtype)
+            self.receive(raw)
+        self.assertFalse(self.attention[-1])
+        self.assertEqual(self.adapter.native, {})
+        self.assertEqual(self.broker.pending()['requests'], [])
+
+    def test_checkpoint_filters_internal_unknown_and_malformed_entries(self):
+        raw = lambda rid, request: dict(type='control_request', session_id=REMOTE, request_id=rid, request=request)
+        self.checkpoint([raw('internal', dict(subtype='hook_callback')), raw('unknown', dict(subtype='future_dialog')),
+                         raw('invalid', dict(subtype='can_use_tool')), raw('misfiled', dict(
+                             subtype='elicitation', mcp_server_name='server', message='Form'))])
+        self.assertFalse(self.attention[-1])
+        self.assertEqual(self.adapter.native, {})
+        self.assertEqual(self.broker.pending()['requests'], [])
+        self.broker.diagnostics = Mock()
+        self.receive(raw('future', dict(subtype='future_dialog', prompt='private text')))
+        fields = self.broker.diagnostics.record.call_args.kwargs
+        self.assertEqual(fields['unknownCount'], 1)
+        self.assertNotIn('private text', repr(fields))
+        self.assertFalse(self.attention[-1])
+
+    def test_elicitation_and_open_dialog_kinds_are_native_only_human_requests(self):
+        self.checkpoint([])
+        for subtype, fields in [('elicitation', dict(mode='form', mcp_server_name='server', message='Choose')),
+                                ('elicitation', dict(mode='url', mcp_server_name='server', message='Sign in', url='https://example.test')),
+                                ('request_user_dialog', dict(dialog_kind='future_native_flow'))]:
+            rid = subtype + str(self.sequence)
+            self.receive(dict(type='control_request', session_id=REMOTE, request_id=rid,
+                              request=dict(subtype=subtype, **fields)))
+            self.assertTrue(self.attention[-1])
+            self.assertEqual(self.broker.pending()['requests'], [])
+            self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [])
+            self.receive(dict(type='control_cancel_request', session_id=REMOTE, request_id=rid))
+            self.assertFalse(self.attention[-1])
+        self.assertEqual(len(self.sent), 1, 'Only the read-only checkpoint was sent')
+
+    def test_checkpoint_does_not_retain_omitted_requests_across_worker_changes(self):
+        for reconnect, pid in ((False, 42), (False, 43), (True, 42), (True, 43)):
+            with self.subTest(reconnect=reconnect, pid=pid):
+                first, form, current = (f'{name}-{reconnect}-{pid}' for name in ('first', 'form', 'current'))
+                self.checkpoint([approval(first)])
+                self.receive(dict(type='control_request', session_id=REMOTE, request_id=form,
+                                  request=dict(subtype='elicitation', mcp_server_name='server', message='Choose')))
+                self.assertEqual(set(self.adapter.native), {first, form})
+                self.assertTrue(self.attention[-1])
+                if reconnect:
+                    self.adapter.disconnect()
+                    self.assertEqual(self.adapter.native, {})
+                    self.assertIsNone(self.attention[-1], 'Disconnect itself does not settle source attention')
+                self.adapter.initialize()
+                self.receive(dict(type='control_response', session_id=REMOTE, response=dict(subtype='success',
+                    request_id=self.sent[-1]['request_id'], response=dict(pid=pid),
+                    pending_permission_requests=[approval(current, requires_user_interaction=True)],
+                    pending_user_dialog_requests=[])))
+                self.assertEqual(set(self.adapter.native), {current})
+                self.assertTrue(self.attention[-1], 'Directly observed native-only requests still need attention')
+                self.assertEqual(self.broker.pending()['requests'], [])
+                self.checkpoint([])
+                self.assertFalse(self.attention[-1])
+
+    def test_remote_subscription_survives_hook_turn_change_and_rejects_old_process_callbacks(self):
+        from service.claude_remote import RemoteRequests
+        from service.native_attention import PendingDecisions
+        current = [(SESSION, REMOTE, 'one')]
+        token = ['owner-one']
+        reducers, observed = [], []
+        remote = RemoteRequests(self.broker, lambda: current, attention=lambda *value: observed.append(value),
+            http_factory=lambda _: Mock(), owner_token=lambda *_: token[0])
+        remote._follow = lambda _http, reducer, _stop: reducers.append(reducer)
+        with remote:
+            wait_for(lambda: len(reducers) == 1)
+            first = reducers[0]
+            current[:] = [(SESSION, REMOTE, 'two')]
+            first.attention(PendingDecisions(REMOTE, frozenset({(None, 'str', 'ask')})))
+            self.assertEqual(observed[-1][1], 'two')
+            self.assertEqual(len(reducers), 1, 'A local hook turn is not a native session owner change')
+            token[0] = 'owner-two'
+            wait_for(lambda: len(reducers) == 2)
+            count = len(observed)
+            first.attention(PendingDecisions(REMOTE, frozenset({(None, 'str', 'stale')})))
+            self.assertEqual(len(observed), count, 'Old process callbacks cannot attach to its replacement')
+
+    def test_remote_answer_revalidates_owner_and_membership_before_subscription_poll(self):
+        from service.claude_remote import RemoteRequests
+        for change in ('owner', 'removed', 'remote', 'turn'):
+            with self.subTest(change=change):
+                current, token, reducers = [(SESSION, REMOTE, 'one')], ['owner-one'], []
+                http, stopped, polling = Mock(), threading.Event(), threading.Event()
+                remote = RemoteRequests(self.broker, lambda: current, http_factory=lambda _: http,
+                    owner_token=lambda *_: token[0])
+                # Hold the subscription loop at its first poll boundary so it
+                # cannot retire the old worker before the answer is dispatched.
+                remote.stop = Mock(is_set=stopped.is_set, set=stopped.set)
+                remote.stop.wait.side_effect = lambda _timeout: (polling.set(), stopped.wait())[1]
+                remote._follow = lambda _http, reducer, _stop: reducers.append(reducer)
+                with remote:
+                    self.assertTrue(polling.wait(1))
+                    first = reducers[0]
+                    first.initialize()
+                    rid = http.send.call_args.args[0]['request_id']
+                    first.receive('client_event', envelope(dict(type='control_response', session_id=REMOTE,
+                        response=dict(subtype='success', request_id=rid, response={'pid': 42},
+                            pending_permission_requests=[approval('stale-' + change)],
+                            pending_user_dialog_requests=[])), 1))
+                    card = self.broker.pending()['requests'][0]
+                    http.reset_mock()
+                    if change == 'owner':
+                        token[0] = 'owner-two'
+                    elif change == 'removed':
+                        current.clear()
+                    elif change == 'remote':
+                        current[:] = [(SESSION, 'session_replacement', 'one')]
+                    else:
+                        current[:] = [(SESSION, REMOTE, 'two')]
+                    dispatched, send = threading.Event(), first.send
+                    def dispatch(frame):
+                        try:
+                            return send(frame)
+                        finally:
+                            dispatched.set()
+                    first.send = dispatch
+                    self.submit(card)
+                    self.assertTrue(dispatched.wait(1))
+                    if change == 'turn':
+                        self.assertEqual(http.send.call_count, 1, 'Session-scoped decisions survive a hook turn change')
+                        self.assertEqual(http.send.call_args.args[0]['response']['request_id'], 'stale-turn')
+                    else:
+                        http.send.assert_not_called()
+
+    def test_checkpoint_dialog_omission_tombstones_late_history(self):
+        self.checkpoint([])
+        dialog = dict(type='control_request', session_id=REMOTE, request_id='dialog',
+                      request=dict(subtype='request_user_dialog', dialog_kind='refusal_fallback_prompt'))
+        self.receive(dialog)
+        self.assertTrue(self.attention[-1])
+        self.checkpoint([])
+        self.assertFalse(self.attention[-1])
+        self.receive(dialog)
+        self.assertFalse(self.attention[-1], 'A checkpoint-omitted dialog cannot reopen from stale history')
+
+    def test_native_requires_action_surfaces_observed_owner_state_without_inventing_request_id(self):
+        self.adapter.initialize()
+        self.receive(dict(type='control_response', session_id=REMOTE, response=dict(subtype='success',
+            request_id=self.sent[-1]['request_id'], response=dict(pid=42, session_state='requires_action'),
+            pending_permission_requests=[], pending_user_dialog_requests=[])))
+        self.assertTrue(self.attention[-1])
+        self.assertEqual(self.attention[-1].requests, frozenset())
+        self.assertEqual(self.broker.pending()['requests'], [])
+        self.assertEqual(self.broker.pending()['awaitingRequestIDs'], [])
+        self.adapter.next_checkpoint = 0
+        self.adapter.refresh()
+        wait_for(lambda: len(self.sent) == 2)
+        self.receive(dict(type='control_response', session_id=REMOTE, response=dict(subtype='success',
+            request_id=self.sent[-1]['request_id'], response=dict(pid=42, session_state='running'),
+            pending_permission_requests=[], pending_user_dialog_requests=[])))
+        self.assertFalse(self.attention[-1], 'Explicit owner state settles the state-only signal')

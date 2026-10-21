@@ -28,7 +28,7 @@ class ClaudeInstallTests(unittest.TestCase):
         original={"permissions":{"allow":["Read"]},"statusLine":{"type":"command","command":"my-status"},
                   "hooks":{"Stop":[{"hooks":[{"type":"command","command":"other-hook"}]}]}}
         path.write_text(json.dumps(original))
-        self.assertEqual(len(install.install_hooks(path,provider="claude")),12)
+        self.assertEqual(len(install.install_hooks(path,provider="claude")),13)
         saved=json.loads(path.read_text())
         self.assertEqual(install.install_hooks(path,provider="claude"),[])
         self.assertEqual(control.missing_hooks(provider="claude"),[])
@@ -52,7 +52,7 @@ class ClaudeInstallTests(unittest.TestCase):
         path.write_text('{"disableAllHooks":true}')
         install.install_hooks(path,provider="claude")
         self.assertTrue(json.loads(path.read_text())["disableAllHooks"])
-        self.assertEqual(len(control.missing_hooks(provider="claude")),12)
+        self.assertEqual(len(control.missing_hooks(provider="claude")),13)
     def test_configure_and_deselect_roll_back_on_write_failure(self):
         codex=agents.hook_path("codex");codex.parent.mkdir(parents=True)
         codex.write_text('{"keep":true,"hooks":{}}')

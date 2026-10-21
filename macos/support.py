@@ -11,6 +11,7 @@ import plistlib
 import re
 import sqlite3
 import time
+from service.compatibility import report as compatibility_report
 
 
 def report(root: Path, status: dict, app: Path, *, now: float | None = None) -> dict:
@@ -81,6 +82,7 @@ def report(root: Path, status: dict, app: Path, *, now: float | None = None) -> 
         "macOSVersion": platform.mac_ver()[0],
         "appVersion": version,
         "build": build,
+        "compatibility": compatibility_report(root / 'lib', status),
         "sourceSupportID": hashlib.sha256(source_id.encode()).hexdigest()[:12] if source_id else None,
         "source": {
             "databaseReadable": database_readable,

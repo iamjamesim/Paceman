@@ -59,7 +59,7 @@ Project labels may appear on your iPhone Lock Screen. Session titles come from p
 
 ### Claude Code
 
-Use Claude Code **2.1.196 or later**. Paceman adds twelve observer commands to
+Use Claude Code **2.1.196 or later**. Paceman adds thirteen observer commands to
 `~/.claude/settings.json` (or the saved `CLAUDE_CONFIG_DIR`), preserving unrelated
 hooks and settings.
 In the CLI, `/hooks` is a read-only list of loaded hooks. In
@@ -88,6 +88,7 @@ shown by your installation:
 | `PostToolBatch` | Clear attention when the tool batch returns. |
 | `Elicitation` | Show an MCP input request after five seconds. |
 | `ElicitationResult` | Clear the corresponding MCP request. |
+| `SubagentStop` | Clear only that child's hook-observed questions and permissions. |
 | `Stop` | Show a finished main turn. |
 | `StopFailure` | Show a failed main turn. |
 | `SessionEnd` | Remove a closed session. |
@@ -131,7 +132,8 @@ For Claude Remote Control sessions, Paceman reads Claude's sign-in token from
 the **Claude Code-credentials** Keychain item and uses it to read pending requests
 and send your answers to **api.anthropic.com**. The first run may show a macOS
 Keychain permission prompt. Answering Claude questions from your phone requires
-Remote Control to be on and only works during an active turn.
+Remote Control to be on and the native session to remain available. Pending
+decisions can outlive a completed turn. See [verified coverage and limits](../docs/native-request-coverage.md).
 
 <details>
 <summary>Private Tailscale connection</summary>
@@ -213,11 +215,12 @@ Use the Python 3.11+ interpreter printed by the source installer if needed. If r
 <summary>Coverage limits</summary>
 
 Mac hooks cannot verify process ownership. Codex async-question attention can clear
-on an unrelated user message. Completed turns clear attention; finished and failed
-rows retire after ten minutes.
+on an unrelated user message. Completed turns clear main-turn hook-only
+attention; owner-confirmed pending decisions remain visible. Finished and failed
+rows retire after ten minutes once pending decisions resolve.
 
-Claude tracks the local main turn, not independent subagents, background tasks or
-remote/cloud sessions. Questions and approvals appear after five seconds; an
+Claude tracks the local main turn and scoped human requests from its children,
+not separate background-task progress or remote/cloud sessions. Questions and approvals appear after five seconds; an
 approved tool can retain attention until its observed calls return. An interrupt
 without another hook can retain the old state until a new prompt or `SessionEnd`.
 Another Stop hook can briefly show Finished before a tool resumes the same turn.

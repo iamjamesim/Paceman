@@ -326,6 +326,9 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
     for folder in ("service", "macos"):
         shutil.copytree(REPO / folder, staged_lib / folder,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    from service.compatibility import install_build
+    staged_build = staging / 'build-info.json'
+    staged_build.write_text(json.dumps(install_build(REPO)) + '\n')
     staged_wrapper = staging / "pacemanctl"
     staged_wrapper.write_text((REPO / "macos/launch_control.py").read_text().replace(
         "#!/usr/bin/python3 -I", f"#!{PYTHON} -IB", 1))
@@ -415,6 +418,7 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for folder in ("service", "macos"):
             replace(staged_lib / folder, lib / folder, folder)
+        replace(staged_build, lib / 'build-info.json', 'build-info.json')
         if (lib / "desktop").exists() or (lib / "desktop").is_symlink():
             replace(None, lib / "desktop", "desktop")
         replace(staged_wrapper, wrapper, "pacemanctl")

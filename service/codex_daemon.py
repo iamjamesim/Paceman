@@ -11,7 +11,10 @@ import time
 import uuid
 
 from service.codex_desktop import owned_socket
-from service.codex_requests import decode_request
+from service.codex_requests import decode_request, session_key
+from service.codex_attention import classify_request
+from service.native_attention import PendingDecisions
+from service.diagnostics import fingerprint
 from service.interactions import BrokerError
 from service.native_websocket import UnixWebSocket
 
@@ -84,6 +87,17 @@ class DaemonRequests:
         self.native_waiting.pop(session, None)
         self.attention(session, None)
 
+    def _set_turn(self, session, turn):
+        if self.joined[session] == turn:
+            return False
+        self.joined[session] = turn
+        self.items[session] = {}
+        self.native_waiting.pop(session, None)
+        for key, raw in list(self.requests.items()):
+            if key[0] == session and raw['params'].get('turnId') not in (None, '', turn):
+                self._resolve(key)
+        return True
+
     def _reset(self):
         with self.lock:
             for session in list(self.joined):
@@ -111,11 +125,14 @@ class DaemonRequests:
                     capabilities=dict(experimentalApi=True)), connection)
                 connection.send(dict(method='initialized'))
                 while not self.stop.is_set() and reader.is_alive():
-                    current = self.sessions()
-                    if not current:
-                        break
                     with self.lock:
-                        leaving = [s for s, turn in self.joined.items() if current.get(s) != turn]
+                        current = dict(self.sessions())
+                        if not current:
+                            break
+                        leaving = [s for s in self.joined if s not in current]
+                        for session in self.joined.keys() & current.keys():
+                            if self._set_turn(session, current[session]):
+                                self._sync(session)
                     for session in leaving:
                         with self.lock:
                             self._forget(session)
@@ -208,9 +225,23 @@ class DaemonRequests:
         session = params.get('threadId')
         if session not in self.joined:
             return
-        turn = self.joined[session]
+        current = self.sessions()
+        if session not in current:
+            self._forget(session)
+            return
+        turn = current[session]
+        # The native stream can deliver the next turn's first request before
+        # the subscription poll sees its hook. Reconcile before filtering it.
+        changed = self._set_turn(session, turn)
         if 'id' in message:
-            if type(rid) not in (str, int) or params.get('turnId') != turn:
+            if (type(rid) not in (str, int) or params.get('turnId') not in (None, '', turn)
+                    or classify_request(session, message) != 'human'):
+                if self.broker.diagnostics is not None:
+                    self.broker.diagnostics.record('native_requests_observed', provider='codex',
+                        sessionFingerprint=fingerprint(session_key(session)),
+                        **{classify_request(session, message) + 'Count': 1})
+                if changed:
+                    self._sync(session)
                 return
             if len(self.requests) >= 64:
                 raise ValueError('too many native requests')
@@ -223,9 +254,7 @@ class DaemonRequests:
             self._forget(session)
             return
         elif method == 'turn/completed' and params.get('turn', {}).get('id') == turn:
-            for key in [k for k in self.requests if k[0] == session]:
-                self._resolve(key)
-            self.native_waiting[session] = False
+            pass  # Outcome does not resolve pending native decisions.
         elif method == 'thread/status/changed':
             status = params.get('status', {})
             self.native_waiting[session] = bool(set(status.get('activeFlags', [])) & {'waitingOnApproval', 'waitingOnUserInput'})
@@ -255,8 +284,12 @@ class DaemonRequests:
                 continue
             self.pending[key] = handle, deepcopy(raw), deepcopy(public)
             threading.Thread(target=self._answer, args=(key, handle, encode, self.connection), daemon=True).start()
-        self.attention(session, {self.joined[session]: self.native_waiting.get(session, False)
-                                or any(key[0] == session for key in self.requests)})
+        pending = {(raw['params'].get('turnId') or None, key[1], key[2])
+                   for key, raw in self.requests.items() if key[0] == session}
+        if self.native_waiting.get(session, False):
+            pending.add((self.joined[session], 'status', 'waitingOnHuman'))
+        self.attention(session, PendingDecisions('daemon-' + str(id(self.connection)), frozenset(pending),
+            known_turns=frozenset({self.joined[session]})))
 
     def _answer(self, key, handle, encode, connection):
         handle.ready.wait()

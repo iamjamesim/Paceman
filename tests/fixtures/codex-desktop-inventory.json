@@ -1,0 +1,57 @@
+{
+  "desktop_version": "26.1013.40934",
+  "desktop_build": "20770",
+  "stream_version": 11,
+  "source_path": ".vite/build/src-DsLVGakC.js",
+  "source_sha256": "28a0918f01c50b0eb17676e894998ad7182f119d978adf0467ccaac3583f259c",
+  "evidence": "Installed producer zS/BS/Mv/Lp, native UI Pv/Lv/Sv/Iv/Gv/Jv/$v; synthetic plan producer xS. Public App Server schemas do not define this private stream.",
+  "producer_methods": [
+    "account/chatgptAuthTokens/refresh",
+    "applyPatchApproval",
+    "attestation/generate",
+    "currentTime/read",
+    "execCommandApproval",
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/permissions/requestApproval",
+    "item/tool/call",
+    "item/tool/requestOptionPicker",
+    "item/tool/requestSetupCodexContextPicker",
+    "item/tool/requestUserInput",
+    "mcpServer/elicitation/request"
+  ],
+  "ui_methods": [
+    "account/chatgptAuthTokens/refresh",
+    "applyPatchApproval",
+    "attestation/generate",
+    "currentTime/read",
+    "execCommandApproval",
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/permissions/requestApproval",
+    "item/plan/requestImplementation",
+    "item/tool/call",
+    "item/tool/requestOptionPicker",
+    "item/tool/requestUserInput",
+    "mcpServer/elicitation/request"
+  ],
+  "dynamic_tools": [
+    "request_environment_input",
+    "request_onboarding_input",
+    "request_option_picker",
+    "setup_codex_step"
+  ],
+  "mcp_modes": [
+    "form",
+    "openai/form",
+    "openai/userVerification",
+    "openaiForm",
+    "url"
+  ],
+  "ui_item_types": [
+    "agentMessage",
+    "fileChange",
+    "planImplementation",
+    "userInputResponse"
+  ]
+}

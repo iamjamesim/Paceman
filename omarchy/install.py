@@ -132,6 +132,8 @@ def main():
             for source in (ROOT / package).glob("*.py"):
                 if source.name != "install.py":
                     write(app / package / source.name, source.read_bytes())
+        from service.compatibility import install_build
+        write(app / 'build-info.json', (json.dumps(install_build(ROOT)) + '\n').encode())
         for name in ("CODEX_HOOK_UPSTREAM.md", "OMARCHY_WATCH_CODEX_LICENSE"):
             write(app / "omarchy" / name, (ROOT / "omarchy" / name).read_bytes())
         write(ctl, (ROOT / "omarchy/pacemanctl").read_bytes(), 0o755)

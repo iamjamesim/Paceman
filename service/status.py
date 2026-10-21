@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import threading
 import time
+from service.compatibility import AUDITED, adapter_snapshot, service_build
 
 
 class DesktopStatus:
@@ -15,6 +16,8 @@ class DesktopStatus:
         self.phone_seen = 0
         self.next_write = 0
         self.lock = threading.Lock()
+        self.service_build = service_build(Path(__file__).resolve().parents[1])
+        self.native_responders = {}
 
     def phone_fetched(self):
         with self.lock:
@@ -49,6 +52,9 @@ class DesktopStatus:
             "lastAgentEventAt": getattr(adapter, "last_event_at", 0),
             "clients": clients,
             "pairedPhones": len(clients), "lastPhoneFetchAt": phone_seen,
+            "serviceBuild": self.service_build,
+            "auditedBaseline": AUDITED,
+            "nativeAdapters": adapter_snapshot(self.native_responders),
         }
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         descriptor, temporary = tempfile.mkstemp(dir=self.path.parent, prefix=".status-")

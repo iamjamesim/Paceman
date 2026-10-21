@@ -204,8 +204,13 @@ def _mcp_approval(base, params, *, browser_global_allowed=None):
         return None
     tool, original = meta["tool_name"], meta["tool_params"]
     browser = tool == 'access_browser_origin' and meta.get('connector_id') == 'browser-use'
+    # The desktop disables approval for these execution-bound database tools
+    # even if the required bound summary/token is absent or malformed.
+    bound_database = (meta.get('connector_id') == 'connector_20205bf7d4e99a89d7154bb849718324'
+        and tool.strip() in ('sites.execute_database_delete', 'sites.execute_database_insert',
+                             'sites.execute_database_update'))
     if ((tool in ('access_browser_origin', 'access_browser_origin_with_raw_cdp') and not browser)
-            or 'plan_token' in original or 'confirmation_summary' in original):
+            or bound_database or 'plan_token' in original or 'confirmation_summary' in original):
         return None
     persist = meta.get("persist", [])
     persist = [persist] if isinstance(persist, str) else persist
