@@ -24,6 +24,7 @@ from service.allowance import allowance_snapshots
 from service.codex_turns import read_codex_turn_metadata
 from service.usage import readings, selected_reading
 from service.claude import ClaudeSession
+from service.native_attention import PendingDecisions, native_waiting, native_empty
 from service.claude_hooks import validate_message
 from service.session_titles import SessionTitles, read_session_titles
 from service.processes import AgentProcesses, ProcessIdentity
@@ -136,10 +137,17 @@ class OmarchySource:
                         self.native_turns[key] = row["native_turn"]
                     if row["question_turn"]:
                         self.pending_questions[key] = row["question_turn"], row["question_due"]
-                    if row["attention_turn"]:
+                    if row["waiting"] is not None:
                         self.native_attention[key] = row["attention_turn"], bool(row["waiting"])
                 for row in db.execute("SELECT key,value FROM metadata WHERE key LIKE 'omarchy_last_event_%'"):
                     self.last_event_by_provider[row["key"].removeprefix("omarchy_last_event_")] = float(row["value"])
+                for row in db.execute('SELECT id,lifecycle FROM omarchy_claude'):
+                    current = ClaudeSession(**json.loads(row['lifecycle']))
+                    if current.remote_session_id and native_waiting(self.native_attention.get(row['id']), current.turn):
+                        # Only an aggregate survived restart, not request IDs or
+                        # worker identity. Partial checkpoints cannot resolve it.
+                        self.native_attention[row['id']] = PendingDecisions(current.remote_session_id,
+                            frozenset(), uncertain=True)
                 self.last_event_at = max(self.last_event_by_provider.values(), default=0)
                 db.execute("INSERT OR REPLACE INTO metadata VALUES ('mode','omarchy')")
                 db.execute("DELETE FROM schedule WHERE fired=0")
@@ -244,7 +252,6 @@ class OmarchySource:
                     return self.publish(db, lifecycle_only=True)
                 if previous["turn"] != turn:
                     self.pending_questions.pop(key, None)
-                    self.native_attention.pop(key, None)
                     self.pending_turn_events.pop(key, None)
                     self.confirmed_turns.pop(key, None)
                 if previous["turn"] == turn:
@@ -280,7 +287,8 @@ class OmarchySource:
             elif event in ("completed", "interrupted", "ended") or command.get("hook") == "UserPromptSubmit":
                 self.pending_questions.pop(key, None)
             if event in ("completed", "interrupted", "ended"):
-                self.native_attention.pop(key, None)
+                if event == 'ended':
+                    self.native_attention.pop(key, None)
                 self.pending_turn_events.pop(key, None)
             state = (previous["state"] if async_question and previous and previous["turn"] == turn
                      else "working" if async_question else EVENTS[event])
@@ -351,6 +359,16 @@ class OmarchySource:
             else:
                 saved = db.execute("SELECT lifecycle FROM omarchy_claude WHERE id=?", (key,)).fetchone()
                 current = ClaudeSession(**json.loads(saved[0])) if saved else ClaudeSession()
+            previous_remote = current.remote_session_id
+            native = self.native_attention.get(key)
+            input_resolved = False
+            if (command.get('hook') == 'ElicitationResult' and isinstance(native, PendingDecisions)
+                    and native.owner == current.remote_session_id):
+                updated = native.resolve_input(command['inputID'])
+                input_resolved = updated != native
+                self.native_attention[key] = updated
+                if input_resolved and not updated and current.base_state in ('finished', 'failed'):
+                    current.updated = time.time()
             if event == "started":
                 if "remoteSessionID" in command:
                     current.remote_session_id = command["remoteSessionID"]
@@ -363,11 +381,13 @@ class OmarchySource:
                 current.remote_session_id = None
                 current.waits.clear()
                 current.tools.clear()
-            elif not current.receive({**command, "workspaceLabel": None}, self.monotonic(), ATTENTION_DELAY):
+            elif not current.receive({**command, "workspaceLabel": None}, self.monotonic(), ATTENTION_DELAY) and not input_resolved:
                 return self.publish(db, lifecycle_only=True)
+            if previous_remote and current.remote_session_id != previous_remote:
+                self.native_attention.pop(key, None)
             # Linux monotonic time is shared across processes within a boot.
             # Ownership reconciliation rejects records from earlier boots.
-            if len(current.waits) > 128 or len(current.tools) > 128:
+            if any(len(values) > 128 for values in (current.waits, current.tools, current.child_waits, current.child_tools)):
                 raise ValueError("Too many pending Claude tools")
             for row in db.execute("SELECT session_id FROM omarchy_processes WHERE pid=? AND "
                                   "start_ticks=? AND boot_id=? AND session_id!=?",
@@ -406,6 +426,13 @@ class OmarchySource:
         for key, session in self.session_refs.items():
             question = self.pending_questions.get(key, (None, None))
             attention = self.native_attention.get(key, (None, None))
+            if isinstance(attention, PendingDecisions):
+                current = db.execute('SELECT turn,provider FROM omarchy_sessions WHERE id=?', (key,)).fetchone()
+                turn = current['turn'] if current else ''
+                scope = None if any(identity[0] is None for identity in attention.requests) else turn
+                waiting = native_waiting(attention, turn)
+                attention = ((None, None) if current and current['provider'] == 'claude' and not waiting
+                             else (scope, waiting))
             db.execute("INSERT OR REPLACE INTO omarchy_tracking VALUES (?,?,?,?,?,?,?)",
                        (key, session, self.native_turns.get(key), *question, *attention))
 
@@ -422,16 +449,29 @@ class OmarchySource:
     def native_requests_changed(self, session, by_turn):
         key = hashlib.sha256(("codex:" + session).encode()).hexdigest()
         with self.lock, self.store.connect() as db:
-            turn = self.native_active_sessions().get(session)
+            turn = self.native_response_sessions().get(session)
             if turn is None:
                 return
             if by_turn is None:
-                # A disconnected response channel cannot resolve attention.
-                if not self.native_attention.get(key, (None, False))[1]:
-                    self.native_attention.pop(key, None)
+                return
+            previous = native_waiting(self.native_attention.get(key), turn)
+            if isinstance(by_turn, PendingDecisions):
+                self.native_attention[key] = by_turn
             elif turn in by_turn:
                 self.native_attention[key] = turn, bool(by_turn[turn])
+            if previous and not native_waiting(self.native_attention.get(key), turn):
+                db.execute("UPDATE omarchy_sessions SET updated=? WHERE id=? AND state IN ('finished','failed')",
+                           (time.time(), key))
             self.publish(db)
+
+    def native_response_sessions(self):
+        with self.lock, self.store.connect() as db:
+            if self.closed or 'codex' not in self.providers:
+                return {}
+            return {self.session_refs[row['id']]: row['turn'] for row in db.execute(
+                "SELECT s.*,p.pid,p.start_ticks,p.boot_id FROM omarchy_sessions s "
+                "JOIN omarchy_processes p ON p.session_id=s.id WHERE p.closed=0 AND s.provider='codex'")
+                if row['id'] in self.session_refs and self.processes.is_alive(self.identity(row))}
 
     def native_claude_sessions(self):
         with self.lock, self.store.connect() as db:
@@ -441,7 +481,9 @@ class OmarchySource:
             for row in db.execute("SELECT c.*,p.pid,p.start_ticks,p.boot_id FROM omarchy_claude c "
                                   "JOIN omarchy_processes p ON p.session_id=c.id WHERE p.closed=0"):
                 current = ClaudeSession(**json.loads(row['lifecycle']))
-                if (current.remote_session_id and current.turn and current.base_state == 'working'
+                if (current.remote_session_id and current.turn
+                        and (current.base_state not in ('finished', 'failed') or current.updated > time.time() - FINISHED_RETENTION
+                             or current.child_waits or native_waiting(self.native_attention.get(row['id']), current.turn))
                         and self.processes.is_alive(self.identity(row))):
                     result.append((row['id'], current.remote_session_id, current.turn))
             return result
@@ -451,13 +493,32 @@ class OmarchySource:
             if not any(key == session and active == turn for key, _, active in self.native_claude_sessions()):
                 return
             if waiting is None:
-                if not self.native_attention.get(session, (None, False))[1]:
-                    self.native_attention.pop(session, None)
+                return
+            row = db.execute('SELECT lifecycle FROM omarchy_claude WHERE id=?', (session,)).fetchone()
+            current = ClaudeSession(**json.loads(row[0]))
+            if isinstance(waiting, PendingDecisions) and waiting.owner != current.remote_session_id:
+                return
+            previous = native_waiting(self.native_attention.get(session), turn)
+            if isinstance(waiting, PendingDecisions):
+                self.native_attention[session] = waiting.merge(self.native_attention.get(session))
             elif waiting:
                 self.native_attention[session] = turn, True
             else:
                 self.native_attention.pop(session, None)
+            if previous and not native_waiting(self.native_attention.get(session), turn) and current.base_state in ('finished', 'failed'):
+                current.updated = time.time()
+                db.execute('UPDATE omarchy_sessions SET updated=? WHERE id=?', (current.updated, session))
+                db.execute('UPDATE omarchy_claude SET lifecycle=? WHERE id=?',
+                    (json.dumps(asdict(current), separators=(',', ':')), session))
             self.publish(db)
+
+    def native_claude_owner(self, session, remote):
+        with self.lock, self.store.connect() as db:
+            row = db.execute('SELECT p.*,c.lifecycle FROM omarchy_processes p JOIN omarchy_claude c '
+                             'ON c.id=p.session_id WHERE p.session_id=? AND p.closed=0', (session,)).fetchone()
+            if row and json.loads(row['lifecycle']).get('remote_session_id') == remote:
+                owner = self.identity(row)
+                return owner if self.processes.is_alive(owner) else None
 
     def native_claude_requests_resolved(self, session, turn, tools, pending_tools):
         with self.lock, self.store.connect() as db:
@@ -465,15 +526,7 @@ class OmarchySource:
                 return
             row = db.execute("SELECT lifecycle FROM omarchy_claude WHERE id=?", (session,)).fetchone()
             current = ClaudeSession(**json.loads(row[0]))
-            pending_hashes = {hashlib.sha256(tool.encode()).hexdigest() for tool in pending_tools
-                              if isinstance(tool, str)}
-            for tool_id, tool in tools:
-                tool_hash = hashlib.sha256(tool.encode()).hexdigest()
-                if current.tools.get(tool_id) != tool_hash:
-                    continue
-                current.waits.pop('question:' + tool_id, None)
-                if tool_hash not in pending_hashes:
-                    current.waits.pop('permission:' + tool_hash, None)
+            current.resolve_tools(tools, pending_tools)
             db.execute("UPDATE omarchy_claude SET lifecycle=? WHERE id=?",
                        (json.dumps(asdict(current), separators=(",", ":")), session))
             self.publish(db)
@@ -515,7 +568,6 @@ class OmarchySource:
                                (latest, time.time(), key))
                 self.pending_turn_events.pop(key, None)
                 self.pending_questions.pop(key, None)
-                self.native_attention.pop(key, None)
                 self.confirmed_turns.pop(key, None)
                 known = {row['id'] for row in rows}
                 remaining = [event for event in batch['events'] if event['turn'] not in known]
@@ -548,7 +600,6 @@ class OmarchySource:
                                 'failed' if status == 'failed' else 'finished'))
                     self.confirmed_turns[row['id']] = row['turn']
                     self.pending_questions.pop(row['id'], None)
-                    self.native_attention.pop(row['id'], None)
                 self.publish(db, lifecycle_only=True)
 
     def prune_processes(self, db):
@@ -609,7 +660,10 @@ class OmarchySource:
         records = db.execute("SELECT s.* FROM omarchy_sessions s JOIN omarchy_processes p "
                              "ON p.session_id=s.id WHERE p.closed=0 ORDER BY s.id").fetchall()
         cutoff = time.time() - FINISHED_RETENTION
-        records = [row for row in records if row["state"] not in ("finished", "failed") or row["updated"] > cutoff]
+        child_pending = {row['id'] for row in db.execute('SELECT id,lifecycle FROM omarchy_claude')
+                         if json.loads(row['lifecycle']).get('child_waits')}
+        records = [row for row in records if row["state"] not in ("finished", "failed") or row["updated"] > cutoff
+                   or row['id'] in child_pending or native_waiting(self.native_attention.get(row['id']), row['turn'])]
         now_monotonic = self.monotonic()
         self.titles.retain(row["id"] for row in records)
         sessions = []
@@ -629,7 +683,12 @@ class OmarchySource:
                     if current.remote_session_id:
                         session["remoteSessionID"] = current.remote_session_id
             native = self.native_attention.get(row["id"])
-            if native and native[0] == row["turn"] and row["state"] not in ("finished", "failed", "idle"):
+            if native_waiting(native, row['turn']):
+                session['state'] = 'needs_input'
+            elif native_empty(native, row['turn']) and row['state'] not in ('finished', 'failed', 'idle'):
+                session['state'] = 'working'
+            elif (native and not isinstance(native, PendingDecisions) and native[0] == row["turn"]
+                  and row["state"] not in ("finished", "failed", "idle")):
                 session["state"] = "needs_input" if native[1] else "working"
             sessions.append(session)
         # Needs-input takes precedence; active work wins over old completions.

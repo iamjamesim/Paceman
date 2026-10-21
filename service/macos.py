@@ -26,6 +26,7 @@ from service.codex_limits import read_codex_allowances
 from service.usage import selected_reading, valid_reading
 from service.session_titles import SessionTitles, read_session_titles
 from service.codex_turns import read_codex_turn_metadata, read_codex_turn_statuses
+from service.native_attention import PendingDecisions, native_waiting, native_empty
 
 
 EVENT_STATES = {
@@ -116,43 +117,56 @@ class MacSource:
                 "SELECT id FROM mac_sessions WHERE state IN ('working','needs_input')")}
             return {session: turn for key, (session, turn) in self.turn_ids.items() if key in active}
 
+    def native_response_sessions(self):
+        with self.lock:
+            return {session: turn for session, turn in self.turn_ids.values()} if not self.closed and 'codex' in self.providers else {}
+
+    def _native_codex_waiting(self, key, turn):
+        return native_waiting(self.native_attention.get(key), turn)
+
     def native_requests_changed(self, session, by_turn):
         key = hashlib.sha256(("codex:" + session).encode()).hexdigest()
         with self.lock:
-            if self.closed:
+            if self.closed or 'codex' not in self.providers:
                 return
             tracked = self.turn_ids.get(key)
-            if by_turn is None:
-                # Losing the response channel does not resolve native attention.
-                if not self.native_attention.get(key, (None, False))[1]:
-                    self.native_attention.pop(key, None)
-            elif tracked and tracked[1] in by_turn:
-                previous = self.native_attention.get(key)
+            if tracked is None or by_turn is None:
+                # A missing owner/channel is unknown, not confirmed empty.
+                return
+            previous = self._native_codex_waiting(key, tracked[1])
+            if isinstance(by_turn, PendingDecisions):
+                self.native_attention[key] = by_turn
+            elif tracked[1] in by_turn:
+                # CLI daemon observations retain their own turn-scoped contract.
                 self.native_attention[key] = (tracked[1], by_turn[tracked[1]])
-                if previous == (tracked[1], 'planImplementation') and not by_turn[tracked[1]]:
-                    with self.store.connect() as db:
-                        db.execute("UPDATE mac_sessions SET updated=? WHERE id=? AND turn=? AND state='finished'",
-                                   (time.time(), key, tracked[1]))
+            if previous and not self._native_codex_waiting(key, tracked[1]):
+                with self.store.connect() as db:
+                    db.execute("UPDATE mac_sessions SET updated=? WHERE id=? AND turn=? AND state IN ('finished','failed')",
+                               (time.time(), key, tracked[1]))
             self.publish_current()
 
     def native_claude_sessions(self):
         with self.lock:
             return [(key, item.remote_session_id, item.turn) for key, item in self.claude_sessions.items()
-                    if 'claude' in self.providers and item.remote_session_id and item.turn
-                    and item.base_state == 'working']
+                    if not self.closed and 'claude' in self.providers and item.remote_session_id and item.turn]
 
     def native_claude_requests_changed(self, session, turn, waiting):
         with self.lock:
             current = self.claude_sessions.get(session)
-            if self.closed or current is None or current.turn != turn:
+            if (self.closed or 'claude' not in self.providers or current is None or current.turn != turn
+                    or isinstance(waiting, PendingDecisions) and waiting.owner != current.remote_session_id):
                 return
             if waiting is None:
-                if not self.native_attention.get(session, (None, False))[1]:
-                    self.native_attention.pop(session, None)
+                return
+            previous = native_waiting(self.native_attention.get(session), turn)
+            if isinstance(waiting, PendingDecisions):
+                self.native_attention[session] = waiting.merge(self.native_attention.get(session))
             elif not waiting:
                 self.native_attention.pop(session, None)
             else:
                 self.native_attention[session] = turn, waiting
+            if previous and not native_waiting(self.native_attention.get(session), turn) and current.base_state in ('finished', 'failed'):
+                current.updated = time.time()
             self.publish_current()
 
     def native_claude_requests_resolved(self, session, turn, tools, pending_tools):
@@ -160,15 +174,7 @@ class MacSource:
             current = self.claude_sessions.get(session)
             if self.closed or current is None or current.turn != turn:
                 return
-            pending_hashes = {hashlib.sha256(tool.encode()).hexdigest() for tool in pending_tools
-                              if isinstance(tool, str)}
-            for tool_id, tool in tools:
-                tool_hash = hashlib.sha256(tool.encode()).hexdigest()
-                if current.tools.get(tool_id) != tool_hash:
-                    continue  # Historical replay cannot clear a newer turn's wait.
-                current.waits.pop('question:' + tool_id, None)
-                if tool_hash not in pending_hashes:
-                    current.waits.pop('permission:' + tool_hash, None)
+            current.resolve_tools(tools, pending_tools)
             self.publish_current()
 
     def __enter__(self):
@@ -422,9 +428,7 @@ class MacSource:
                 if command.get("hook") == "PostToolUse":
                     approval_cleared = self._resolve_approval(key, command.get("attentionKey"), tool_id)
                 if event in ("completed", "interrupted"):
-                    native = self.native_attention.get(key)
-                    if event != 'completed' or native != (turn, 'planImplementation'):
-                        self.native_attention.pop(key, None)
+                    # Turn outcome and owner-confirmed decisions are independent.
                     self._clear_approvals(key)
                     self.resolved_approval_tools.pop(key, None)
                 question_cleared = False
@@ -453,12 +457,24 @@ class MacSource:
         remote_id = command.get("remoteSessionID")
         key = hashlib.sha256(("claude:" + command["session"]).encode()).hexdigest()
         with self.lock, self.store.connect() as db:
-            if "claude" not in self.providers:
+            if self.closed or "claude" not in self.providers:
                 return False
             db.execute("BEGIN IMMEDIATE")
             if event != "ended":
                 self.titles.track(key, "claude", command["session"])
             previous = self.claude_sessions.get(key)
+            if previous is None and command.get('actor') and command['hook'] in ('PostToolUse', 'PostToolUseFailure', 'SubagentStop'):
+                return False  # A late child result cannot recreate a removed session.
+            previous_remote = previous.remote_session_id if previous else None
+            native = self.native_attention.get(key)
+            input_resolved = False
+            if (previous and command.get('hook') == 'ElicitationResult' and isinstance(native, PendingDecisions)
+                    and native.owner == previous.remote_session_id):
+                updated = native.resolve_input(command['inputID'])
+                input_resolved = updated != native
+                self.native_attention[key] = updated
+                if input_resolved and not updated and previous.base_state in ('finished', 'failed'):
+                    previous.updated = time.time()
             if event == "ended":
                 self.claude_sessions.pop(key, None)
                 self.native_attention.pop(key, None)
@@ -470,10 +486,14 @@ class MacSource:
             else:
                 current = previous or ClaudeSession()
                 if not current.receive(command, self.monotonic(), ATTENTION_DELAY):
+                    if input_resolved:
+                        self._record_event(db, 'claude')
+                        return self._publish(db)
                     return False
                 self.claude_sessions[key] = current
-                if event in ('completed', 'failed', 'interrupted'):
-                    self.native_attention.pop(key, None)
+            current = self.claude_sessions.get(key)
+            if previous_remote and current and current.remote_session_id != previous_remote:
+                self.native_attention.pop(key, None)
             self._record_event(db, "claude")
             return self._publish(db)
 
@@ -525,7 +545,9 @@ class MacSource:
             if self.claude_sessions:
                 retired_claude = [key for key, session in self.claude_sessions.items()
                                   if session.base_state in ("finished", "failed")
-                                  and session.updated <= time.time() - FINISHED_RETENTION]
+                                  and session.updated <= time.time() - FINISHED_RETENTION
+                                  and not native_waiting(self.native_attention.get(key), session.turn)
+                                  and not session.child_waits]
                 for key in retired_claude:
                     del self.claude_sessions[key]
                     self.native_attention.pop(key, None)
@@ -569,7 +591,7 @@ class MacSource:
                 retired = 0
                 for row in db.execute("SELECT id,turn FROM mac_sessions WHERE state IN ('finished','failed') AND updated<=?",
                                       (time.time() - FINISHED_RETENTION,)):
-                    if self.native_attention.get(row['id']) == (row['turn'], 'planImplementation'):
+                    if self._native_codex_waiting(row['id'], row['turn']):
                         continue
                     retired += db.execute("DELETE FROM mac_sessions WHERE id=?", (row["id"],)).rowcount
                     self.native_attention.pop(row["id"], None)
@@ -723,12 +745,12 @@ class MacSource:
             state = ("needs_input" if row["state"] not in ("finished", "failed")
                      and waiting else row["state"])
             native = self.native_attention.get(row["id"])
-            if (native and native[0] == row["turn"] and native[1] == 'planImplementation'
-                    and row["state"] == 'finished'):
-                # Implement this plan is a desktop-owned decision after the
-                # planning turn completes, not a delayed tool approval.
+            if native_waiting(native, row['turn']):
                 state = 'needs_input'
-            elif native and native[0] == row["turn"] and row["state"] not in ("finished", "failed", "idle"):
+            elif native_empty(native, row['turn']) and row['state'] not in ('finished', 'failed', 'idle'):
+                state = 'working'
+            elif (native and not isinstance(native, PendingDecisions) and native[0] == row["turn"]
+                  and row["state"] not in ("finished", "failed", "idle")):
                 state = ("needs_input" if native[1] else
                          "working" if state == "needs_input" else state)
             session = {"id": row["id"], "provider": row["provider"], "state": state}

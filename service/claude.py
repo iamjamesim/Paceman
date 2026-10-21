@@ -1,5 +1,6 @@
 """Hook-observed Claude main-session state; no transcript reads or idle watchdog."""
 from dataclasses import dataclass, field
+import hashlib
 import time
 
 
@@ -13,14 +14,44 @@ class ClaudeSession:
     # Pending attention survives unrelated parallel tool completions.
     waits: dict[str, float] = field(default_factory=dict)
     tools: dict[str, str] = field(default_factory=dict)
+    child_waits: dict[str, float] = field(default_factory=dict)
+    child_tools: dict[str, str] = field(default_factory=dict)
 
     def state(self, now):
+        if any(due <= now for due in self.child_waits.values()):
+            return 'needs_input'
         if self.base_state in ("finished", "failed", "idle"):
             return self.base_state
         return "needs_input" if any(due <= now for due in self.waits.values()) else "working"
 
     def receive(self, command, now, delay):
         event, hook, turn = (command.get(k) for k in ("event", "hook", "turn"))
+        actor = command.get('actor')
+        if actor:
+            # Child hooks carry the host journal's current prompt ID, not a
+            # stable child turn. Their human waits belong to this session/actor.
+            self.turn = self.turn or turn
+            prefix = actor + ':'
+            tool, tool_id = command.get('tool'), command.get('toolUse')
+            if hook == 'SubagentStop':
+                self.child_waits = {k: v for k, v in self.child_waits.items() if not k.startswith(prefix)}
+                self.child_tools = {k: v for k, v in self.child_tools.items() if not k.startswith(prefix)}
+            else:
+                if 'remoteSessionID' in command:
+                    self.remote_session_id = command['remoteSessionID']
+                if hook == 'PreToolUse' and tool_id:
+                    self.child_tools[prefix + tool_id] = tool
+                if event == 'question-opened':
+                    self.child_waits.setdefault(prefix + 'question:' + (tool_id or tool), now + delay)
+                elif event == 'needs-input':
+                    self.child_waits.setdefault(prefix + 'permission:' + tool, now + delay)
+                elif event == 'tool-ended':
+                    self.child_tools.pop(prefix + (tool_id or ''), None)
+                    self.child_waits.pop(prefix + 'question:' + (tool_id or tool), None)
+                    if not any(k.startswith(prefix) and value == tool for k, value in self.child_tools.items()):
+                        self.child_waits.pop(prefix + 'permission:' + tool, None)
+            self.updated = time.time()
+            return True
         if self.turn and turn != self.turn and hook != "UserPromptSubmit":
             return False
         if hook == "SessionStart":
@@ -70,3 +101,24 @@ class ClaudeSession:
             self.waits.clear()
             self.tools.clear()
         return True
+
+    def resolve_tools(self, tools, pending_tools):
+        had_child_waits = bool(self.child_waits)
+        pending = set()
+        for value in pending_tools:
+            actor, tool = value if isinstance(value, tuple) else (None, value)
+            if isinstance(tool, str):
+                pending.add((actor, hashlib.sha256(tool.encode()).hexdigest()))
+        for entry in tools:
+            tool_id, tool, *actors = entry
+            actor = actors[0] if actors else None
+            tool_hash = hashlib.sha256(tool.encode()).hexdigest()
+            calls, waits = (self.child_tools, self.child_waits) if actor else (self.tools, self.waits)
+            prefix = actor + ':' if actor else ''
+            if calls.get(prefix + tool_id) != tool_hash:
+                continue
+            waits.pop(prefix + 'question:' + tool_id, None)
+            if (actor, tool_hash) not in pending:
+                waits.pop(prefix + 'permission:' + tool_hash, None)
+        if had_child_waits and self.base_state in ('finished', 'failed') and not self.child_waits:
+            self.updated = time.time()

@@ -17,6 +17,9 @@ import uuid
 
 from service.claude_hooks import REMOTE_IDENTIFIER
 from service.claude_requests import decode_request
+from service.claude_attention import classify_request
+from service.native_attention import PendingDecisions
+from service.diagnostics import fingerprint
 from service.interactions import BrokerError
 
 MAX_FRAME = 16 * 1024 * 1024
@@ -140,6 +143,11 @@ class NativeRequests:
         self.checkpoint_started = 0
         self.next_checkpoint = 0
         self.checkpoint_failed = False
+        self.owner_pid = None
+        self.confirmed = set()
+        self.request_owners = {}
+        self.observed_counts = None
+        self.session_waiting = False
 
     def initialize(self):
         with self.lock:
@@ -164,7 +172,7 @@ class NativeRequests:
     def refresh(self):
         """Confirm consumption; remote response echoes alone are not decisions."""
         with self.lock:
-            if (self.closed or not self.connected or self.initializing or not self.confirming
+            if (self.closed or not self.connected or self.initializing or not (self.confirming or self.session_waiting)
                     or time.monotonic() < self.next_checkpoint):
                 return
             self.next_checkpoint = time.monotonic() + 2
@@ -189,7 +197,8 @@ class NativeRequests:
             for handle, _, _ in self.pending.values():
                 self.broker.withdraw(handle)
             self.pending.clear()
-            self.native.clear()
+            # Keep known identities in RAM across a gap. The checkpoint has
+            # no elicitation list and cannot declare those decisions empty.
             self.attention(None)  # Losing the channel never resolves the agent.
 
     def _resolve(self, rid):
@@ -197,6 +206,8 @@ class NativeRequests:
         while len(self.resolved) > 1024:
             self.resolved.popitem(last=False)
         self.native.pop(rid, None)
+        self.confirmed.discard(rid)
+        self.request_owners.pop(rid, None)
         self.confirming.discard(rid)
         self.retired.discard(rid)
         if rid in self.observed:
@@ -264,9 +275,28 @@ class NativeRequests:
                     pending = permissions + dialogs
                     if len(pending) > MAX_PENDING:
                         raise ValueError('too many native requests')
-                    current_ids = {self._request(f) for f in pending}
-                    if len(current_ids) != len(pending):
+                    all_ids = {self._request(f) for f in pending}
+                    if len(all_ids) != len(pending):
                         raise ValueError('duplicate native request')
+                    self._diagnose(pending)
+                    pending = [f for values, subtype in ((permissions, 'can_use_tool'), (dialogs, 'request_user_dialog'))
+                               for f in values if f['request'].get('subtype') == subtype
+                               and classify_request(f) == 'human']
+                    current_ids = {self._request(f) for f in pending}
+                    state = reply.get('response') or {}
+                    if not isinstance(state, dict):
+                        raise ValueError('invalid native session state')
+                    pid = state.get('pid')
+                    continuous = type(pid) is int and pid == self.owner_pid
+                    complete = continuous and state.get('session_state') != 'requires_action'
+                    if state.get('session_state') in ('idle', 'running', 'requires_action'):
+                        self.session_waiting = state['session_state'] == 'requires_action'
+                    # Historical replay is replaced by the first checkpoint.
+                    # Previously confirmed, omitted requests remain uncertain
+                    # across a worker change. Elicitation is never enumerated.
+                    preserve = {rid: f for rid, f in self.native.items() if rid in self.confirmed
+                                and (f['request'].get('subtype') == 'elicitation' or not complete
+                                     or self.request_owners.get(rid) != pid)}
                     # The owner still awaits these decisions. Re-present them
                     # for explicit review; never resend the previous answer.
                     for unanswered in self.checkpoint_confirming & self.confirming & current_ids:
@@ -275,11 +305,19 @@ class NativeRequests:
                             self.broker.withdraw(self.pending.pop(unanswered)[0])
                             self.retired.discard(unanswered)
                     self.confirming.difference_update(self.checkpoint_confirming)
-                    self.retired.intersection_update(current_ids)
-                    for missing in self.observed.keys() - current_ids:
+                    self.retired.intersection_update(current_ids | preserve.keys())
+                    for missing in self.native.keys() - current_ids - preserve.keys():
                         self._resolve(missing)
-                    self.native = {self._request(f): deepcopy(f) for f in pending
-                                   if f.get('request_id') not in self.resolved}
+                    self.native = {**preserve, **{self._request(f): deepcopy(f) for f in pending
+                                   if f.get('request_id') not in self.resolved}}
+                    self.retired.update(preserve.keys() - current_ids)
+                    for uncertain in preserve.keys() - current_ids:
+                        entry = self.pending.pop(uncertain, None)
+                        if entry:
+                            self.broker.withdraw(entry[0])
+                    self.owner_pid = pid if type(pid) is int else None
+                    self.request_owners = {rid: self.owner_pid if rid in current_ids else self.request_owners.get(rid)
+                                           for rid in self.native}
                     self.initializing = None
                     self.connected = True
                 elif isinstance(rid, str) and source == 'worker':
@@ -297,12 +335,15 @@ class NativeRequests:
                 self._resolve(rid)
             elif kind == 'control_request' and source == 'worker':
                 rid = self._request(frame)
-                if frame['request'].get('subtype') not in ('can_use_tool', 'request_user_dialog'):
+                self._diagnose([frame])
+                if classify_request(frame) != 'human':
                     return
                 if rid not in self.resolved:
                     if len(self.native) >= MAX_PENDING and rid not in self.native:
                         raise ValueError('too many native requests')
                     self.native[rid] = deepcopy(frame)
+                    if self.connected:
+                        self.request_owners[rid] = self.owner_pid
             if self.connected:
                 self._sync()
 
@@ -310,9 +351,12 @@ class NativeRequests:
         for rid, frame in self.native.items():
             request = frame['request']
             if isinstance(request.get('tool_use_id'), str) and isinstance(request.get('tool_name'), str):
-                self.observed[rid] = request['tool_use_id'], request['tool_name']
+                actor = request.get('agent_id')
+                scope = (hashlib.sha256(actor.encode()).hexdigest(),) if isinstance(actor, str) and actor else ()
+                self.observed[rid] = request['tool_use_id'], request['tool_name'], *scope
         if self.completed:
-            pending_tools = {f['request'].get('tool_name') for f in self.native.values()}
+            pending_tools = {(hashlib.sha256(f['request']['agent_id'].encode()).hexdigest(), f['request'].get('tool_name'))
+                             if f['request'].get('agent_id') else f['request'].get('tool_name') for f in self.native.values()}
             self.resolution(list(self.completed.values()), pending_tools)
             self.completed.clear()
         for rid, (handle, _, _) in list(self.pending.items()):
@@ -334,7 +378,24 @@ class NativeRequests:
                 continue
             self.pending[rid] = (handle, deepcopy(frame), deepcopy(public))
             threading.Thread(target=self._answer, args=(rid, handle, encode), daemon=True).start()
-        self.attention(bool(self.native))
+        self.confirmed.update(self.native)
+        requests = frozenset((None, 'str', rid) for rid in self.native)
+        inputs = frozenset(((None, 'str', rid), hashlib.sha256(
+            (f['request'].get('elicitation_id') or f['request']['mcp_server_name']).encode()).hexdigest())
+            for rid, f in self.native.items() if f['request'].get('subtype') == 'elicitation'
+            and isinstance(f['request'].get('elicitation_id') or f['request'].get('mcp_server_name'), str))
+        self.attention(PendingDecisions(self.remote, requests, inputs, waiting_on_human=self.session_waiting))
+
+    def _diagnose(self, frames):
+        counts = dict(human=0, internal=0, unknown=0, invalid=0)
+        for frame in frames:
+            counts[classify_request(frame)] += 1
+        if counts != self.observed_counts:
+            self.observed_counts = counts
+            if self.broker.diagnostics is not None:
+                self.broker.diagnostics.record('native_requests_observed', provider='claude',
+                    sessionFingerprint=fingerprint(self.session),
+                    **{kind + 'Count': count for kind, count in counts.items()})
 
     def _answer(self, rid, handle, encode):
         handle.ready.wait()
@@ -362,10 +423,11 @@ class NativeRequests:
 class RemoteRequests:
     """One controls-only native subscription per active, already-shared session."""
     def __init__(self, broker, sessions, *, attention=lambda *_args: None,
-                 resolved=lambda *_args: None, http_factory=NativeHTTP):
+                 resolved=lambda *_args: None, http_factory=NativeHTTP, owner_token=lambda *_: None):
         self.broker, self.sessions, self.attention = broker, sessions, attention
         self.resolution = resolved
         self.http_factory = http_factory
+        self.owner_token = owner_token
         self.stop = threading.Event()
         self.workers = {}
 
@@ -383,7 +445,7 @@ class RemoteRequests:
 
     def _run(self):
         while not self.stop.is_set():
-            current = self.sessions()
+            current = {(session, remote, self.owner_token(session, remote)): turn for session, remote, turn in self.sessions()}
             for identity in list(self.workers):
                 if identity not in current:
                     stop, reducer, _ = self.workers.pop(identity)
@@ -392,16 +454,22 @@ class RemoteRequests:
             for identity in current:
                 if identity in self.workers:
                     continue
-                session, remote, turn = identity
+                session, remote, token = identity
                 stop = threading.Event()
                 http = self.http_factory(remote)
                 def send(frame, *, http=http, stop=stop):
                     if self.stop.is_set() or stop.is_set():
                         raise OSError('native session released')
                     http.send(frame)
+                def callback(function, *args, session=session, remote=remote, token=token):
+                    # Hook turns may advance while session-owned decisions stay
+                    # pending. Recheck the owner at callback delivery time.
+                    turn = next((turn for key, owner, turn in self.sessions() if (key, owner) == (session, remote)), None)
+                    if turn is not None and self.owner_token(session, remote) == token:
+                        function(session, turn, *args)
                 reducer = NativeRequests(self.broker, session, remote, send,
-                    attention=lambda value, session=session, turn=turn: self.attention(session, turn, value),
-                    resolved=lambda tools, pending, session=session, turn=turn: self.resolution(session, turn, tools, pending))
+                    attention=lambda value, callback=callback: callback(self.attention, value),
+                    resolved=lambda tools, pending, callback=callback: callback(self.resolution, tools, pending))
                 worker = threading.Thread(target=self._follow, args=(http, reducer, stop), daemon=True)
                 self.workers[identity] = stop, reducer, worker
                 worker.start()

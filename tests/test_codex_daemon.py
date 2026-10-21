@@ -47,9 +47,9 @@ class DaemonTests(unittest.TestCase):
         self.submit('decision-1')
         wait_for(lambda: self.connection.send.called)
         self.connection.send.assert_called_once_with(dict(id=0, result=dict(decision='acceptForSession')))
-        self.assertTrue(self.attention[-1][1]['turn'], 'Submission is not native consumption')
+        self.assertTrue(self.attention[-1][1].for_turn('turn'), 'Submission is not native consumption')
         self.adapter.receive(dict(method='serverRequest/resolved', params=dict(threadId='session', requestId=0)))
-        self.assertFalse(self.attention[-1][1]['turn'])
+        self.assertFalse(self.attention[-1][1].for_turn('turn'))
 
     def test_local_answer_withdraws_only_exact_native_request_immediately(self):
         self.adapter.receive(request(1))
@@ -57,7 +57,7 @@ class DaemonTests(unittest.TestCase):
         self.adapter.receive(request(2))
         self.adapter.receive(dict(method='serverRequest/resolved', params=dict(threadId='session', requestId=1)))
         self.assertEqual(len(self.broker.pending()['requests']), 1)
-        self.assertTrue(self.attention[-1][1]['turn'])
+        self.assertTrue(self.attention[-1][1].for_turn('turn'))
         with self.assertRaises(BrokerError):
             self.broker.submit(dict(generation=self.broker.generation, requestID=first['requestID'],
                 version=1, idempotencyKey='late', action='choose', optionID='decision-0'))
@@ -115,8 +115,8 @@ class DaemonTests(unittest.TestCase):
         self.assertEqual(self.connection.send.call_count, 1)
         self.connection.close.assert_called_once()
 
-    def test_unknown_live_requests_preserve_native_attention(self):
+    def test_known_permissions_without_response_codec_preserve_native_attention(self):
         raw = request(); raw['method'] = 'item/permissions/requestApproval'
         self.adapter.receive(raw)
         self.assertEqual(self.broker.pending()['requests'], [])
-        self.assertTrue(self.attention[-1][1]['turn'])
+        self.assertTrue(self.attention[-1][1].for_turn('turn'))

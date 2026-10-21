@@ -23,7 +23,7 @@ class DeliveryDiagnostics:
             "stage": {"http_received", "http_replied", "http_disconnected",
                       "hook_received", "hook_unsupported", "hook_failed", "hook_returned",
                       "request_published", "request_released", "request_rejected",
-                      "response_submitted", "response_replayed"},
+                      "response_submitted", "response_replayed", "native_requests_observed"},
             "operation": {"snapshot", "requests", "submit"},
             "provider": {"codex", "claude"}, "kind": {"approval", "question"},
             "reason": {"deadline", "provider_disabled", "hook_disconnected", "access_changed", "shutdown",
@@ -40,7 +40,8 @@ class DeliveryDiagnostics:
                 entry[key] = value
             elif key == "traceID" and isinstance(value, str) and re.fullmatch(r"[0-9a-fA-F-]{36}", value):
                 entry[key] = value
-            elif key in {"durationMs", "httpStatus", "pendingCount", "errorNumber"} and type(value) is int and 0 <= value < 2**32:
+            elif key in {"durationMs", "httpStatus", "pendingCount", "errorNumber", "humanCount",
+                         "internalCount", "unknownCount", "invalidCount"} and type(value) is int and 0 <= value < 2**32:
                 entry[key] = value
         # Hooks and the source can write concurrently. Diagnostics never wait
         # on another writer and never change a request's outcome on failure.

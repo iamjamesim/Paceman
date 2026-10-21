@@ -15,7 +15,9 @@ import threading
 import time
 import uuid
 
-from service.codex_requests import decode_request, decode_async_question, is_browser_approval
+from service.codex_requests import decode_request, decode_async_question, is_browser_approval, session_key
+from service.codex_attention import PendingDecisions, classify_request
+from service.diagnostics import fingerprint
 from service.codex_policy import read_browser_policy
 from service.interactions import BrokerError
 
@@ -28,6 +30,7 @@ def _item(value):
     fields = {"fileChange": ("id", "type", "changes"),
               "commandExecution": ("id", "type", "command", "processId"),
               "agentMessage": ("id", "type", "questions"),
+              "planImplementation": ("id", "type", "turnId", "isCompleted"),
               "userInputResponse": ("id", "type", "completed", "requestId"),
               "userMessage": ("type", "content"),
               "steeringUserMessage": ("type", "input", "status")}.get(value.get("type"), ())
@@ -74,13 +77,24 @@ def _turns(state):
     return [*(state.get("turns") or []), *((state.get("turnHistory") or {}).get("history", {}).get("entitiesByKey", {}).values())]
 
 
-def _async_waiting(turn):
-    if turn.get("status") != "inProgress":
-        return False
+def _item_pending(turn):
+    scope = turn.get('turnId') or None
+    pending = set()
+    # The native UI checks these item-owned decisions independently of outcome.
+    plan = next((item for item in reversed(turn['items'])
+                 if item.get('type') == 'planImplementation' and 'isCompleted' in item), None)
+    if plan is not None and plan['isCompleted'] is False:
+        pending.add((plan.get('turnId') or scope, 'plan', str(plan['id'])))
+    for item in turn['items']:
+        rid = item.get('requestId')
+        if (item.get('type') == 'userInputResponse' and item.get('completed') is False
+                and isinstance(scope, str) and type(rid) in (str, int)):
+            pending.add((scope, 'response-' + type(rid).__name__, str(rid)))
+    # Async question messages have a separate, active-turn-only native UI path.
+    if turn.get('status') != 'inProgress' or not isinstance(scope, str):
+        return pending
     questions, answered = set(), set()
     for item in turn["items"]:
-        if item.get("type") == "userInputResponse" and item.get("completed") is False:
-            return True
         if item.get("type") == "agentMessage":
             questions.update(json.dumps(["request_user_input_async", item["id"], index], separators=(",", ":"), ensure_ascii=False)
                              for index, _ in enumerate(item.get("questions") or []))
@@ -88,7 +102,7 @@ def _async_waiting(turn):
             answered.update(_answered(item.get("content")))
         if item.get("type") == "steeringUserMessage" and item.get("status") == "accepted":
             answered.update(_answered(item.get("input")))
-    return bool(questions - answered)
+    return pending | {(scope, 'async', key) for key in questions - answered}
 
 
 def read_frame(connection):
@@ -139,6 +153,7 @@ class DesktopRequests:
         self.policy_loaded = False
         self.policy_loading = False
         self.policy_epoch = object()
+        self.observed_counts = {}
 
     def __enter__(self):
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -204,6 +219,7 @@ class DesktopRequests:
             self.owners.clear()
             self.states.clear()
             self.retired.clear()
+            self.observed_counts.clear()
             self.retry_at.clear()
             self.client = None
             self.policy_epoch = object()
@@ -258,7 +274,8 @@ class DesktopRequests:
             reply = self._request("thread-owner-discovery", dict(hostId="local", conversationId=session), connection=connection)
             owner = reply.get("handledByClientId")
             with self.lock:
-                if self.connection is not connection or self.stop.is_set() or not isinstance(owner, str):
+                if (self.connection is not connection or self.stop.is_set() or not isinstance(owner, str)
+                        or session not in self.sessions()):
                     return
                 self.owners[session] = owner
                 self._follow(session, owner, True, connection)
@@ -279,21 +296,30 @@ class DesktopRequests:
             self.states.pop(session, None)
             self.owners.pop(session, None)
             self.retired = {k for k in self.retired if k[0] != session}
+            self.observed_counts.pop(session, None)
             self.attention(session, None)
 
     def _read(self, connection):
         try:
             while not self.stop.is_set():
-                self._receive(read_frame(connection))
+                self._receive(read_frame(connection), connection=connection)
         except (OSError, EOFError, ValueError, KeyError, TypeError, IndexError, AttributeError, RecursionError):
             # A malformed/private-protocol update cannot leave actionable cards.
             try:
                 connection.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
-            self._reset()
+            with self.lock:
+                if self.connection is connection:
+                    self._reset()
 
-    def _receive(self, message):
+    def _receive(self, message, *, connection=None):
+        with self.lock:
+            if self.stop.is_set() or connection is not None and self.connection is not connection:
+                return
+            self._receive_current(message)
+
+    def _receive_current(self, message):
         if message.get("targetClientIds") is not None and self.client not in message["targetClientIds"]:
             return
         if message.get("type") == "response":
@@ -383,7 +409,7 @@ class DesktopRequests:
                     transform = lambda v: [_item(i) for i in v]
                 elif len(rest) == 2:
                     transform = _item
-                elif rest[2] not in ("id", "type", "changes", "questions", "completed", "requestId", "content", "input", "status", "command", "processId"):
+                elif rest[2] not in ("id", "type", "changes", "questions", "completed", "requestId", "content", "input", "status", "command", "processId", "turnId", "isCompleted"):
                     return
         parent = state
         for key in path[:-1]:
@@ -461,17 +487,26 @@ class DesktopRequests:
                 continue
             self.pending[key] = (handle, deepcopy(request), deepcopy(public))
             threading.Thread(target=self._answer, args=(key, handle, encode), daemon=True).start()
-        human = {"item/commandExecution/requestApproval", "item/fileChange/requestApproval",
-                 "item/permissions/requestApproval", "item/tool/requestUserInput",
-                 "item/tool/requestOptionPicker", "mcpServer/elicitation/request"}
-        by_turn = {t["turnId"]: _async_waiting(t) for t in turns if isinstance(t.get("turnId"), str)}
+        decisions = {key for turn in turns for key in _item_pending(turn)}
+        counts = dict(human=0, internal=0, unknown=0, invalid=0)
         for request in native.values():
-            turn = request.get("params", {}).get("turnId")
-            if request.get("method") in human and isinstance(turn, str):
-                by_turn[turn] = True
-            elif request.get("method") == "item/plan/requestImplementation" and isinstance(turn, str):
-                by_turn[turn] = "planImplementation"
-        self.attention(session, by_turn)
+            if request.get('method') is None:
+                continue  # Async questions above are item-owned, not protocol requests.
+            category = classify_request(session, request)
+            counts[category] += 1
+            if category == 'human':
+                turn = request['params'].get('turnId') or None
+                decisions.add((turn, type(request['id']).__name__, str(request['id'])))
+        # This is the owner's complete pending set, including native-only
+        # decisions. Empty is confirmed resolution; disconnect publishes None.
+        self.attention(session, PendingDecisions(self.owners[session], frozenset(decisions),
+            known_turns=frozenset(t['turnId'] for t in turns if isinstance(t.get('turnId'), str))))
+        if counts != self.observed_counts.get(session):
+            self.observed_counts[session] = counts
+            if self.broker.diagnostics is not None:
+                self.broker.diagnostics.record('native_requests_observed', provider='codex',
+                    sessionFingerprint=fingerprint(session_key(session)),
+                    **{kind + 'Count': count for kind, count in counts.items()})
 
     def _load_browser_policy(self, epoch):
         try:

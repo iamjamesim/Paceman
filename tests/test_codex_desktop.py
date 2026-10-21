@@ -319,15 +319,15 @@ class DesktopRequestTests(unittest.TestCase):
         message['params']['change']['conversationState']['turns'] = [
             dict(turnId='turn', status='completed', items=[])]
         self.adapter._receive(message)
-        self.assertEqual(attention[-1], {'turn': 'planImplementation'})
+        self.assertEqual(attention[-1].for_turn('turn'), frozenset({('turn', 'str', 'implement-plan:turn')}))
         self.assertEqual(self.broker.pending()['requests'], [], 'Do not fake a user-input response to a synthetic plan')
         message['params']['change']['conversationState']['requests'] = []
         self.adapter._receive(message)
-        self.assertEqual(attention[-1], {'turn': False})
+        self.assertEqual(attention[-1].requests, frozenset())
 
     def test_canonical_history_tracks_async_attention_without_retaining_conversation_text(self):
         attention = []
-        self.adapter.attention = lambda _, turns: attention.append(turns.get('t') if turns else None)
+        self.adapter.attention = lambda _, turns: attention.append(turns.for_turn('t') if turns is not None else None)
         message = snapshot([])
         state = message['params']['change']['conversationState']
         state['turnHistory'] = dict(kind='canonical', history=dict(entitiesByKey={'turn:t': dict(
@@ -391,7 +391,7 @@ class DesktopRequestTests(unittest.TestCase):
         # and only then sends turn/steer. Exercise the framed IPC, not a mocked
         # _request that accepts a payload the native owner cannot consume.
         attention = []
-        self.adapter.attention = lambda _, turns: attention.append(turns.get('t') if turns else None)
+        self.adapter.attention = lambda _, turns: attention.append(turns.for_turn('t') if turns is not None else None)
         client, owner = socket.socketpair()
         with client, owner:
             owner.settimeout(3)
