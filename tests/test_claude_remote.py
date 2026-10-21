@@ -452,6 +452,53 @@ class NativeClaudeTests(unittest.TestCase):
             first.attention(PendingDecisions(REMOTE, frozenset({(None, 'str', 'stale')})))
             self.assertEqual(len(observed), count, 'Old process callbacks cannot attach to its replacement')
 
+    def test_remote_answer_revalidates_owner_and_membership_before_subscription_poll(self):
+        from service.claude_remote import RemoteRequests
+        for change in ('owner', 'removed', 'remote', 'turn'):
+            with self.subTest(change=change):
+                current, token, reducers = [(SESSION, REMOTE, 'one')], ['owner-one'], []
+                http, stopped, polling = Mock(), threading.Event(), threading.Event()
+                remote = RemoteRequests(self.broker, lambda: current, http_factory=lambda _: http,
+                    owner_token=lambda *_: token[0])
+                # Hold the subscription loop at its first poll boundary so it
+                # cannot retire the old worker before the answer is dispatched.
+                remote.stop = Mock(is_set=stopped.is_set, set=stopped.set)
+                remote.stop.wait.side_effect = lambda _timeout: (polling.set(), stopped.wait())[1]
+                remote._follow = lambda _http, reducer, _stop: reducers.append(reducer)
+                with remote:
+                    self.assertTrue(polling.wait(1))
+                    first = reducers[0]
+                    first.initialize()
+                    rid = http.send.call_args.args[0]['request_id']
+                    first.receive('client_event', envelope(dict(type='control_response', session_id=REMOTE,
+                        response=dict(subtype='success', request_id=rid, response={'pid': 42},
+                            pending_permission_requests=[approval('stale-' + change)],
+                            pending_user_dialog_requests=[])), 1))
+                    card = self.broker.pending()['requests'][0]
+                    http.reset_mock()
+                    if change == 'owner':
+                        token[0] = 'owner-two'
+                    elif change == 'removed':
+                        current.clear()
+                    elif change == 'remote':
+                        current[:] = [(SESSION, 'session_replacement', 'one')]
+                    else:
+                        current[:] = [(SESSION, REMOTE, 'two')]
+                    dispatched, send = threading.Event(), first.send
+                    def dispatch(frame):
+                        try:
+                            return send(frame)
+                        finally:
+                            dispatched.set()
+                    first.send = dispatch
+                    self.submit(card)
+                    self.assertTrue(dispatched.wait(1))
+                    if change == 'turn':
+                        self.assertEqual(http.send.call_count, 1, 'Session-scoped decisions survive a hook turn change')
+                        self.assertEqual(http.send.call_args.args[0]['response']['request_id'], 'stale-turn')
+                    else:
+                        http.send.assert_not_called()
+
     def test_confirmed_dialog_omission_tombstones_late_history(self):
         self.checkpoint([])
         dialog = dict(type='control_request', session_id=REMOTE, request_id='dialog',

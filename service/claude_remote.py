@@ -457,8 +457,12 @@ class RemoteRequests:
                 session, remote, token = identity
                 stop = threading.Event()
                 http = self.http_factory(remote)
-                def send(frame, *, http=http, stop=stop):
-                    if self.stop.is_set() or stop.is_set():
+                def send(frame, *, http=http, stop=stop, session=session, remote=remote, token=token):
+                    # A card may be submitted before the subscription poll
+                    # retires its worker. Check the current binding at dispatch.
+                    if (self.stop.is_set() or stop.is_set()
+                            or not any((key, owner) == (session, remote) for key, owner, _turn in self.sessions())
+                            or self.owner_token(session, remote) != token):
                         raise OSError('native session released')
                     http.send(frame)
                 def callback(function, *args, session=session, remote=remote, token=token):
