@@ -12,7 +12,7 @@ from service.status import DesktopStatus
 from service.omarchy import OmarchySource
 from service.processes import ProcessIdentity
 from tests.test_claude_remote import REMOTE, approval
-from tests.test_codex_desktop import command
+from tests.test_codex_desktop import browser, command
 from tests.test_native_attention_parity import SourceFixture
 
 
@@ -23,6 +23,75 @@ def form(rid='form'):
 
 
 class AttentionRecoveryTests(unittest.TestCase):
+    @staticmethod
+    def session_request(provider):
+        if provider == 'claude':
+            return form()
+        frame = browser()
+        frame['params'].pop('turnId')
+        frame['params']['_meta'] = {}
+        return frame
+
+    def test_fresh_work_in_same_session_survives_old_unverified_attention(self):
+        for platform in ('mac', 'linux'):
+            for provider in ('codex', 'claude'):
+                with self.subTest(platform=platform, provider=provider), ExitStack() as stack:
+                    f = SourceFixture(stack, platform, provider)
+                    f.receive(self.session_request(provider))
+                    f.event('Stop')
+                    if provider == 'claude':
+                        f.adapter.disconnect()
+                        f.checkpoint([])
+                    else:
+                        f.source.native_requests_changed(f.raw, None)
+                    previous = f.source.native_attention[f.key]
+                    self.assertTrue(native_unverified(previous, f.turn))
+                    f.event('UserPromptSubmit', turn='fresh-working-turn')
+                    # Repeated partial observations must not hide the newer
+                    # activity or manufacture resolution of the older request.
+                    if provider == 'claude':
+                        f.checkpoint([])
+                    else:
+                        f.source.native_requests_changed(f.raw, f.source.native_attention[f.key])
+                    value = f.store.snapshot()
+                    self.assertEqual(value['state'], 'working')
+                    self.assertEqual(value['sessions'][0]['state'], 'working')
+                    self.assertNotIn('attentionUncertain', value['sessions'][0])
+                    current = f.source.native_attention[f.key]
+                    self.assertTrue(native_unverified(current, f.turn))
+                    self.assertEqual(current.requests, previous.requests)
+                    content = live_notification(value, time.time())[0]['aps']['content-state']
+                    self.assertEqual((content['working'], content['needsInput']), (1, 0))
+                    self.assertFalse(should_end_live_activity(value, time.time()))
+                    with tempfile.TemporaryDirectory() as directory:
+                        path = Path(directory) / 'status.json'
+                        DesktopStatus(path, f.store).publish(f.source, force=True)
+                        counts = json.loads(path.read_text())['sessionCounts']
+                        self.assertEqual((counts['working'], counts['needs_input']), (1, 0))
+                    f.event('Stop')
+                    self.assertEqual(f.state(), 'idle')
+                    self.assertTrue(f.store.snapshot()['sessions'][0]['attentionUncertain'],
+                                    'Finishing fresh work must not silently resolve the old request')
+                    f.resolve('form' if provider == 'claude' else 8)
+                    self.assertEqual(f.state(), 'finished')
+                    self.assertNotIn('attentionUncertain', f.store.snapshot()['sessions'][0])
+
+    def test_confirmed_session_request_still_takes_precedence_over_fresh_work(self):
+        for platform in ('mac', 'linux'):
+            for provider in ('codex', 'claude'):
+                with self.subTest(platform=platform, provider=provider), ExitStack() as stack:
+                    f = SourceFixture(stack, platform, provider)
+                    f.receive(self.session_request(provider))
+                    f.event('Stop')
+                    f.event('UserPromptSubmit', turn='fresh-working-turn')
+                    value = f.store.snapshot()
+                    self.assertEqual(value['state'], 'needs_input')
+                    self.assertNotIn('attentionUncertain', value['sessions'][0])
+                    content = live_notification(value, time.time())[0]['aps']['content-state']
+                    self.assertEqual((content['working'], content['needsInput']), (0, 1))
+                    f.resolve('form' if provider == 'claude' else 8)
+                    self.assertEqual(f.state(), 'working')
+
     def test_linux_restored_codex_attention_requires_a_fresh_native_set(self):
         with ExitStack() as stack:
             f = SourceFixture(stack, 'linux', 'codex')

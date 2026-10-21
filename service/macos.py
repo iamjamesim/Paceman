@@ -744,7 +744,9 @@ class MacSource:
                      and waiting else row["state"])
             native = self.native_attention.get(row["id"])
             hook_waiting = state == 'needs_input'
-            if native_waiting(native, row['turn']):
+            unverified = native_unverified(native, row['turn'])
+            # Retain uncertain decisions without hiding observed ongoing work.
+            if native_waiting(native, row['turn']) and not (unverified and state == 'working'):
                 state = 'needs_input'
             elif native_empty(native, row['turn']) and row['state'] not in ('finished', 'failed', 'idle'):
                 state = 'working'
@@ -753,7 +755,7 @@ class MacSource:
                 state = ("needs_input" if native[1] else
                          "working" if state == "needs_input" else state)
             session = {"id": row["id"], "provider": row["provider"], "state": state}
-            if native_unverified(native, row['turn']) and not hook_waiting:
+            if unverified and state == 'needs_input' and not hook_waiting:
                 session['attentionUncertain'] = True
             if title := self.titles.name(row["id"]):
                 session["name"] = title

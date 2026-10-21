@@ -46,6 +46,8 @@ attention, not confirmed Needs input. The phone and Apple Watch show Status
 unverified under Last known, with native-app continuation on the phone. Exact
 native results or unambiguous elicitation hooks
 can resolve requests without clearing siblings.
+Known Working activity in the same session remains current. Unverified decisions
+remain tracked separately and return to last-known attention when that work ends.
 
 Linux restores bounded attention only for the same verified live process.
 Restored Claude aggregate uncertainty has no saved request IDs and remains until

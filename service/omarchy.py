@@ -681,14 +681,16 @@ class OmarchySource:
                         session["remoteSessionID"] = current.remote_session_id
             native = self.native_attention.get(row["id"])
             hook_waiting = session['state'] == 'needs_input'
-            if native_waiting(native, row['turn']):
+            unverified = native_unverified(native, row['turn'])
+            # Retain uncertain decisions without hiding observed ongoing work.
+            if native_waiting(native, row['turn']) and not (unverified and session['state'] == 'working'):
                 session['state'] = 'needs_input'
             elif native_empty(native, row['turn']) and row['state'] not in ('finished', 'failed', 'idle'):
                 session['state'] = 'working'
             elif (native and not isinstance(native, PendingDecisions) and native[0] == row["turn"]
                   and row["state"] not in ("finished", "failed", "idle")):
                 session["state"] = "needs_input" if native[1] else "working"
-            if native_unverified(native, row['turn']) and not hook_waiting:
+            if unverified and session['state'] == 'needs_input' and not hook_waiting:
                 session['attentionUncertain'] = True
             sessions.append(session)
         # Needs-input takes precedence; active work wins over old completions.
