@@ -1538,6 +1538,7 @@ final class ProtocolTests: XCTestCase {
             let client = stubClient { request in
                 XCTAssertEqual(request.httpMethod, "DELETE")
                 XCTAssertEqual(request.url?.path, "/v1/client")
+                XCTAssertEqual(request.timeoutInterval, 5)
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer secret")
                 XCTAssertNil(request.httpBody)
                 return (code, Data(#"{"revoked":true}"#.utf8))
@@ -1567,7 +1568,7 @@ final class ProtocolTests: XCTestCase {
     }
 
     @MainActor
-    func testRemovalWaitsForItsOwnPushCoordinator() async throws {
+    func testRemovalAndForgettingDoNotWaitForPushRegistration() async throws {
         let source = PairedSource(endpoint: URL(string: "https://computer.example")!,
             sourceID: UUID().uuidString, clientID: "client", credential: "secret")
         let push = PushCoordinator()
@@ -1581,19 +1582,58 @@ final class ProtocolTests: XCTestCase {
 
         push.busy = true
         let removedWhileBusy = await model.remove(source)
-        let forgottenWhileBusy = await model.forget(source)
-        XCTAssertFalse(removedWhileBusy)
-        XCTAssertFalse(forgottenWhileBusy)
-        XCTAssertEqual(requests, 0)
-        XCTAssertEqual(saves, 0)
-        XCTAssertEqual(model.pairedSources.first?.credential, source.credential)
-
-        push.busy = false
-        let removed = await model.remove(source)
-        XCTAssertTrue(removed)
+        XCTAssertTrue(removedWhileBusy)
         XCTAssertEqual(requests, 1)
         XCTAssertEqual(saves, 1)
         XCTAssertTrue(model.pairedSources.isEmpty)
+
+        model.pairedSources = [source]
+        let forgottenWhileBusy = await model.forget(source)
+        XCTAssertTrue(forgottenWhileBusy)
+        XCTAssertEqual(requests, 1)
+        XCTAssertEqual(saves, 2)
+        XCTAssertTrue(model.pairedSources.isEmpty)
+    }
+
+    @MainActor
+    func testPendingRemovalCanBeCancelledThenForgottenWhilePushIsBusy() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://offline.example")!,
+            sourceID: UUID().uuidString, clientID: "client", credential: "secret")
+        let other = PairedSource(endpoint: URL(string: "https://online.example")!,
+            sourceID: UUID().uuidString, clientID: "other", credential: "other-secret")
+        let started = expectation(description: "Removal waiting for offline computer")
+        let stopped = expectation(description: "Remote request cancelled")
+        PendingRemovalURLProtocol.started = { started.fulfill() }
+        PendingRemovalURLProtocol.stopped = { stopped.fulfill() }
+        defer {
+            PendingRemovalURLProtocol.started = nil
+            PendingRemovalURLProtocol.stopped = nil
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [PendingRemovalURLProtocol.self]
+        let push = PushCoordinator()
+        push.busy = true
+        var saved: [PairedSource] = []
+        let model = CompanionModel(preview: true, push: push, client: SourceClient(configuration: configuration),
+            savePairedSources: { saved = $0 })
+        model.pairedSources = [source, other]
+        let attempt = Task { await model.remove(source) }
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertTrue(model.busy)
+        attempt.cancel()
+        let removed = await attempt.value
+        XCTAssertFalse(removed)
+        await fulfillment(of: [stopped], timeout: 2)
+        XCTAssertFalse(model.busy)
+        XCTAssertFalse(model.canForgetAfterRemovalFailure)
+        XCTAssertEqual(model.pairedSources.count, 2)
+
+        let forgotten = await model.forget(source)
+        XCTAssertTrue(forgotten)
+        XCTAssertEqual(saved.map(\.sourceID), [other.sourceID])
+        XCTAssertEqual(model.pairedSources.map(\.sourceID), [other.sourceID])
+        XCTAssertEqual(model.status, "Computer removed.")
+        XCTAssertFalse(model.isRevoked(source.sourceID), "Local forgetting must not claim remote revocation")
     }
 
     @MainActor
@@ -2244,6 +2284,15 @@ final class ProtocolTests: XCTestCase {
         return try JSONSerialization.data(withJSONObject: value)
     }
 
+}
+
+private final class PendingRemovalURLProtocol: URLProtocol {
+    static var started: (() -> Void)?
+    static var stopped: (() -> Void)?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { Self.started?() }
+    override func stopLoading() { Self.stopped?() }
 }
 
 private final class ClientURLProtocol: URLProtocol {

@@ -3,7 +3,6 @@ import SwiftUI
 struct ComputerDetail: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
-    @ObservedObject private var push = PushCoordinator.shared
     let theme: CompanionTheme
     var sourceID: String? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -15,6 +14,8 @@ struct ComputerDetail: View {
     @State private var rename = false
     @State private var name = ""
     @State private var removing = false
+    @State private var removalTask: Task<Void, Never>?
+    @State private var confirmForget = false
 
     private var paired: PairedSource? {
         if let sourceID { return model.pairedSources.first { $0.sourceID == sourceID } }
@@ -64,6 +65,9 @@ struct ComputerDetail: View {
                 CompanionRule(theme: theme)
                 DeviceRemovalButton(title: removing ? "Removing…" : "Remove computer", theme: theme) { remove = true }
                     .disabled(removing || paired == nil).allowsHitTesting(!presentation.preview)
+                if removing {
+                    DeviceRemovalButton(title: "Forget on this iPhone", theme: theme) { confirmForget = true }
+                }
             }.padding(.horizontal, CompanionLayout.pageInset).padding(.bottom, 32)
         }.foregroundStyle(theme.ink).background(theme.canvas).tint(theme.tint)
             .navigationTitle("Computer").navigationBarTitleDisplayMode(.inline)
@@ -86,6 +90,12 @@ struct ComputerDetail: View {
                     removeComputer()
                 }
             } message: { Text("Remove this connection from your iPhone.") }
+            .alert("Forget computer?", isPresented: $confirmForget) {
+                Button("Forget", role: .destructive) { removeComputer(locally: true) }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Access on the computer may remain active.")
+            }
             .alert(offerForget ? "Couldn't remove computer" : "Couldn't finish removing computer", isPresented: $removalFailed) {
                 if offerForget {
                     Button("Forget", role: .destructive) { removeComputer(locally: true) }
@@ -103,6 +113,7 @@ struct ComputerDetail: View {
                     removalFailed = true
                 }
                 if presentation.preview && ProcessInfo.processInfo.arguments.contains("--remove-confirmation") { remove = true }
+                if presentation.preview && ProcessInfo.processInfo.arguments.contains("--removal-pending") { removing = true }
                 #endif
             }
     }
@@ -111,13 +122,22 @@ struct ComputerDetail: View {
         guard let paired else { return }
         removing = true
         retryLocally = locally
-        Task {
-            defer { removing = false }
-            // Let an in-flight fetch complete without flickering the row.
-            while model.busy || push.busy {
-                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+        let previous = removalTask
+        if locally { previous?.cancel() }
+        removalTask = Task {
+            // Cancel the remote attempt before committing an explicit local forget.
+            // Its late result must not present an error or reset the new operation.
+            if locally {
+                await previous?.value
+                if !model.pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) {
+                    removing = false
+                    dismiss()
+                    return
+                }
             }
+            defer { if !Task.isCancelled { removing = false } }
             let removed = locally ? await model.forget(paired) : await model.remove(paired)
+            guard !Task.isCancelled else { return }
             if removed { dismiss() }
             else {
                 offerForget = model.canForgetAfterRemovalFailure

@@ -9,9 +9,10 @@ color. A transient fetch failure does not flicker the connection indicator while
 that snapshot lease remains valid; response controls still clear immediately.
 Reconnection fetches the latest state rather than replaying missed events.
 Normal computer removal confirms computer-side revocation before
-clearing the saved connection. An unreachable computer offers **Forget** to clear
-the iPhone connection without claiming remote revocation. Relay cleanup is
-best-effort and does not block removal. Each failed step is retried once. A local
+clearing the saved connection. Pending or unreachable removal offers **Forget**
+to clear the iPhone connection without claiming remote revocation. Relay cleanup
+is best-effort; notification registration does not block removal. Each failed
+step is retried once. A local
 storage failure retains the saved connection; confirmed remote revocation still clears its activity.
 See the [source protocol](protocol.md) for freshness fields.
 

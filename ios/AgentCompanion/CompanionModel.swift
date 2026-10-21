@@ -423,7 +423,7 @@ final class CompanionModel: ObservableObject {
     @discardableResult
     func remove(_ paired: PairedSource) async -> Bool {
         canForgetAfterRemovalFailure = false
-        guard !busy, !push.busy,
+        guard !busy,
               pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) else { return false }
         busy = true
         defer { busy = false; schedulePendingWatchRefresh() }
@@ -457,7 +457,7 @@ final class CompanionModel: ObservableObject {
     @discardableResult
     func forget(_ paired: PairedSource) async -> Bool {
         canForgetAfterRemovalFailure = false
-        guard !busy, !push.busy,
+        guard !busy,
               pairedSources.contains(where: { $0.sourceID == paired.sourceID && $0.credential == paired.credential }) else { return false }
         busy = true
         defer { busy = false; schedulePendingWatchRefresh() }

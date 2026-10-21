@@ -162,6 +162,9 @@ final class SourceClient {
 
     func remove(_ source: PairedSource) async throws {
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/client"))
+        // A user-initiated removal should fail promptly even though status reads
+        // allow longer private-network recovery. Local forgetting stays explicit.
+        request.timeoutInterval = 5
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         do {

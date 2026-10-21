@@ -262,6 +262,11 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
                 Diagnostics.shared.recordError("push_registration_failed", error: error)
             }
         }
+        // Removal can finish while a registration request is in flight. Keep
+        // the cleared local state and reconcile against the remaining pairings.
+        guard sources.allSatisfy({ source in
+            model?.pairedSources.contains(where: { $0.sourceID == source.sourceID && $0.credential == source.credential }) == true
+        }) else { syncPending = true; return }
         registered = completed == sources.count
         awaitingToken = false
         status = registered ? "Registered on computers · \(environment)" : "Could not register on every computer. Check their connections."
