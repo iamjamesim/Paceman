@@ -597,7 +597,7 @@ class Handler(BaseHTTPRequestHandler):
             snapshot = self.server.store.snapshot()
             if self.server.interactions is not None:
                 snapshot["interactionsEnabled"] = True
-                snapshot["interactionContentVersion"] = 4
+                snapshot["interactionContentVersion"] = 5
             self.reply(200, snapshot)
             self.server.store.client_fetched(token)
             if self.server.desktop_status is not None:
@@ -610,7 +610,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.server.check_interaction_access()
                 self.reply(200, {"sourceID": self.server.store.metadata("source_id"),
                                  **self.server.interactions.pending(content_version=
-                                     {"2": 2, "3": 3, "4": 4}.get(self.headers.get("X-Paceman-Content-Version"), 1))})
+                                     {"2": 2, "3": 3, "4": 4, "5": 5}.get(self.headers.get("X-Paceman-Content-Version"), 1))})
             return
         if self.path == "/v1/push":
             value = self.server.store.push_device(token)

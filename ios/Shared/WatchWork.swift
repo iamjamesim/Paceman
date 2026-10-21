@@ -122,7 +122,7 @@ enum InteractionWire {
 /// A versioned wire envelope. `content` is the validated common representation;
 /// provider-native methods and correlation IDs belong to the desktop adapter.
 struct InputRequest: Codable, Identifiable, Equatable {
-    static let maximumContentVersion = 4
+    static let maximumContentVersion = 5
     enum Content {
         case legacyApproval(String)
         case approval(ApprovalPayload, choices: [ApprovalResponseOption])
@@ -151,12 +151,12 @@ struct InputRequest: Codable, Identifiable, Equatable {
     var approvalChoices: [ApprovalResponseOption] {
         switch content {
         case .approval(_, let choices): return choices
-        case .legacyApproval: return [.init(id: "allowOnce", label: "Allow once"), .init(id: "deny", label: "Decline")]
+        case .legacyApproval: return [.init(id: "allowOnce", label: "Approve"), .init(id: "deny", label: "Deny")]
         default: return []
         }
     }
     var validContent: Bool { content != nil }
-    var usesApprovalChoices: Bool { contentVersion == 2 || contentVersion == 4 }
+    var usesApprovalChoices: Bool { contentVersion == 2 || contentVersion == 4 || contentVersion == 5 }
     func hasSameReview(as other: InputRequest) -> Bool {
         requestID == other.requestID && version == other.version && provider == other.provider
             && sessionID == other.sessionID && kind == other.kind && title == other.title
@@ -186,7 +186,9 @@ struct InputRequest: Codable, Identifiable, Equatable {
               let options = responseOptions, options.count <= 16,
               Set(options.map(\.id)).count == options.count,
               options.allSatisfy({ InteractionWire.identifier($0.id) && InteractionWire.text($0.label, limit: 512)
-                  && ($0.confirmation == nil || contentVersion == 4 && InteractionWire.text($0.confirmation!, limit: 32768)) }) else { return nil }
+                  && ($0.confirmation == nil || [4, 5].contains(contentVersion ?? 0) && InteractionWire.text($0.confirmation!, limit: 32768))
+                  && ($0.commandPrefix == nil || contentVersion == 5 && approval.action.kind == "command"
+                      && $0.confirmation == nil && $0.validCommandPrefix) }) else { return nil }
         return .approval(approval, choices: options)
     }
 }

@@ -16,6 +16,32 @@ def request(tool='Bash', input=None, choices=None):
 
 
 class ApprovalContentTests(unittest.TestCase):
+    def test_typed_command_prefix_is_bounded_and_never_downgraded(self):
+        prefix = ['git', '', "a b", "quote'argument", '日本語']
+        raw = request(choices=[dict(id='prefix', label='Always approve', commandPrefix=prefix)])
+        raw['contentVersion'] = 5
+        broker = InteractionBroker()
+        self.addCleanup(broker.close)
+        handle = broker.publish_live(raw)
+        self.assertEqual(handle.public['responseOptions'][0]['commandPrefix'], prefix)
+        for version in range(1, 5):
+            self.assertEqual(broker.pending(content_version=version)['requests'], [])
+        self.assertEqual(len(broker.pending(content_version=5)['requests']), 1)
+        for invalid in ([], [''], ['  '], ['git', 3], ['git', 'bad\x00argument'], ['git'] * 257):
+            broken = dict(raw, responseOptions=[dict(id='prefix', label='Always approve', commandPrefix=invalid)])
+            with self.subTest(invalid=repr(invalid)[:80]), self.assertRaises(BrokerError):
+                broker.publish_live(broken)
+        for version in (1, 2, 3, 4):
+            with self.subTest(version=version), self.assertRaises(BrokerError):
+                broker.publish_live(dict(raw, contentVersion=version))
+        raw['responseOptions'][0]['confirmation'] = 'Another required scope'
+        with self.assertRaises(BrokerError):
+            broker.publish_live(raw)
+        del raw['responseOptions'][0]['confirmation']
+        raw['approval']['toolName'] = 'UnknownTool'
+        with self.assertRaises(BrokerError):
+            broker.publish_live(raw)
+
     def test_provider_preview_is_never_promoted_to_a_complete_command(self):
         result = normalize_approval('claude', dict(toolName='Bash', inputKind='providerPreview', input={'command': 'rm …'}))
         self.assertEqual(result['action'], {'kind': 'tool'})

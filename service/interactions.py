@@ -69,9 +69,9 @@ def _request(value):
               "kind": value["kind"], "title": _text(value["title"], 256),
               "detail": _text(value["detail"], 16384, empty=True), "questions": []}
     content_version = value.get("contentVersion", 1)
-    if type(content_version) is not int or content_version not in (1, 2, 3, 4):
+    if type(content_version) is not int or content_version not in (1, 2, 3, 4, 5):
         raise BrokerError("invalid_request")
-    if content_version in (2, 4):
+    if content_version in (2, 4, 5):
         if value["kind"] != "approval" or value["detail"]:
             raise BrokerError("invalid_request")
         try:
@@ -83,10 +83,19 @@ def _request(value):
             raise BrokerError("invalid_request")
         result.update(contentVersion=content_version, responseOptions=[])
         for option in options:
-            _keys(option, ("id", "label"), ("confirmation",) if content_version == 4 else ())
+            _keys(option, ("id", "label"), ("confirmation", "commandPrefix") if content_version == 5
+                  else ("confirmation",) if content_version == 4 else ())
             normalized = {"id": _identifier(option["id"]), "label": _text(option["label"], 512)}
             if "confirmation" in option:
                 normalized["confirmation"] = _text(option["confirmation"], 32768)
+            if "commandPrefix" in option:
+                prefix = option["commandPrefix"]
+                if (not isinstance(prefix, list) or not 1 <= len(prefix) <= 256
+                        or "confirmation" in option or result["approval"]["action"]["kind"] != "command"):
+                    raise BrokerError("invalid_request")
+                normalized["commandPrefix"] = [_text(argument, 32768, empty=True) for argument in prefix]
+                if not prefix[0].strip():
+                    raise BrokerError("invalid_request")
             result["responseOptions"].append(normalized)
         if len({o["id"] for o in options}) != len(options):
             raise BrokerError("invalid_request")
@@ -215,7 +224,7 @@ class InteractionBroker:
     def withdraw(self, pending):
         self._cancel(pending)
 
-    def pending(self, content_version=4):
+    def pending(self, content_version=5):
         with self._lock:
             self._prune()
             return {"generation": self.generation,
@@ -279,9 +288,9 @@ class InteractionBroker:
                 raise BrokerError("stale_request", 409)
             request = pending.public
             if action == "choose":
-                if request.get("contentVersion") not in (2, 4) or option_id not in {o["id"] for o in request["responseOptions"]}:
+                if request.get("contentVersion") not in (2, 4, 5) or option_id not in {o["id"] for o in request["responseOptions"]}:
                     raise BrokerError("invalid_response")
-            elif request.get("contentVersion") in (2, 4) and action != "release":
+            elif request.get("contentVersion") in (2, 4, 5) and action != "release":
                 raise BrokerError("invalid_response")
             if action == "answer":
                 if request["kind"] != "question" or set(answers) != {q["id"] for q in request["questions"]}:

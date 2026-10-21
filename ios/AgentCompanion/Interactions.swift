@@ -409,10 +409,10 @@ struct InputResponseState {
                 allowsText: selectionOnly ? false : nil)
             let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: approval ? "codex" : "claude",
                 sessionID: "review-" + kind, kind: approval && !selectionOnly ? "approval" : "question",
-                title: terminal ? "Allow write_stdin?" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? "Allow \(ApprovalPreviewFixtures.pageTool)?" : approval ? "Run the tests?" : "Question",
+                title: policy ? "Allow commandExecution?" : terminal ? "Allow write_stdin?" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? "Allow \(ApprovalPreviewFixtures.pageTool)?" : approval ? "Run the tests?" : "Question",
                 detail: terminal || selectionOnly || policy ? "" : approval && ProcessInfo.processInfo.arguments.contains("--approval-large-payload") ? ApprovalPreviewFixtures.largePageEdit : approval ? "Command: npm test -- checkout" : "",
                 questions: approval && !selectionOnly ? [] : [question], remainingSeconds: 120,
-                contentVersion: selectionOnly ? 3 : policy ? 4 : terminal ? 2 : nil,
+                contentVersion: selectionOnly ? 3 : policy ? 5 : terminal ? 2 : nil,
                 approval: policy ? ApprovalPreviewFixtures.policy : terminal ? ApprovalPreviewFixtures.terminal() : nil,
                 responseOptions: policy ? ApprovalPreviewFixtures.policyChoices
                     : terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : nil)

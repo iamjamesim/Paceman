@@ -111,7 +111,7 @@ class DaemonTests(unittest.TestCase):
     def test_replayed_live_request_keeps_all_native_choices_and_exact_response_id(self):
         self.adapter.receive(request(0))
         self.assertEqual([o['label'] for o in self.broker.pending()['requests'][0]['responseOptions']],
-                         ['Allow once', 'Allow for this session', 'Cancel this turn'])
+                         ['Approve', 'Approve for this session', 'Cancel this turn'])
         self.submit('decision-1')
         wait_for(lambda: self.connection.send.called)
         self.connection.send.assert_called_once_with(dict(id=0, result=dict(decision='acceptForSession')))
