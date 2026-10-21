@@ -135,15 +135,6 @@ Pending sibling requests take precedence over a submission receipt.
 Visible Watch reviews advance within the selected session; uncertain submissions
 remain available for explicit retry.
 
-### Coverage boundaries
-
-See [native request coverage](native-request-coverage.md) for the provider/platform
-matrix, finite producer inventories, response exclusions and release checks.
-Claude Remote Control identities are session/owner scoped, independent of the
-hook prompt journal. Child hook waits are scoped by actor and survive parent
-turn completion; child callbacks cannot finish the parent. Exact elicitation
-hook results suppress stale reappearance; ambiguous server-only matches do not
-clear siblings. Checkpoint omission only resolves a known same-worker request
-in an enumerated domain; elicitation and inherited-worker uncertainty stay
-native until a verified result. Unknown methods produce count-only diagnostics,
-never inferred user attention or response buttons.
+Claude child hook waits are scoped by actor and survive parent turn completion;
+child callbacks cannot finish the parent. See [native request coverage](native-request-coverage.md)
+for supported surfaces, response boundaries and restart limitations.
