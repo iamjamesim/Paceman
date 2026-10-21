@@ -35,8 +35,8 @@ See the [source protocol](protocol.md) for freshness fields.
 Session titles are bounded to 80 characters. The source reads new session titles off the hook path and rechecks tracked title metadata every 30 seconds, to pick up generated titles and renames without blocking activity delivery. Title changes are presentation revisions, not new activity or alerts. Raw lookup IDs and title caches are held in source memory; titles also appear in stored event snapshots and the phone’s last-known snapshot. Missing metadata keeps the last successfully read title; an explicitly cleared title restores the provider fallback.
 
 The watch keeps activity, including titles, in RAM, so reboot clears old alerts. The phone keeps
-no durable queue of BLE writes. Omarchy verifies living agent owners after a
-source restart; Mac clears active hook-only sessions until another hook arrives, preserving observed results.
+no durable queue of BLE writes. Source restart behavior follows the
+[session liveness rules](architecture.md#from-agents-to-the-phone).
 When a Codex task resumes, Paceman checks Codex's saved history to confirm which
 turn is latest before using its activity events. If the check is unavailable,
 Paceman waits and retries.
