@@ -1,0 +1,18 @@
+{
+  "cli_version": "0.163.0-alpha.10.2",
+  "evidence": "Installed bundled codex app-server generate-json-schema --experimental. These are public server RPCs; desktop plan/setup/picker extensions are separate.",
+  "server_request_sha256": "3d7bc481f84dc042984a74420e65c5a8d3c423f37a91b7d5df2365c903a12ac6",
+  "methods": [
+    "account/chatgptAuthTokens/refresh",
+    "applyPatchApproval",
+    "attestation/generate",
+    "currentTime/read",
+    "execCommandApproval",
+    "item/commandExecution/requestApproval",
+    "item/fileChange/requestApproval",
+    "item/permissions/requestApproval",
+    "item/tool/call",
+    "item/tool/requestUserInput",
+    "mcpServer/elicitation/request"
+  ]
+}
