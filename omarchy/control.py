@@ -124,7 +124,7 @@ def pair_phone(open_image=False, json_output=False):
 def main():
     os.umask(0o077)
     parser = argparse.ArgumentParser(description="Manage the Paceman desktop source")
-    parser.add_argument("command", choices=("status", "start", "restart", "stop", "logs", "pair", "share-on", "share-off", "remove-access", "agents"))
+    parser.add_argument("command", choices=("status", "support", "start", "restart", "stop", "logs", "pair", "share-on", "share-off", "remove-access", "agents"))
     parser.add_argument("--client-id", help="Connection to remove (from pacemanctl status)")
     parser.add_argument("--open", action="store_true", help="Open the phone-pairing QR")
     parser.add_argument("--json", action="store_true", help="Return pairing image metadata for the panel")
@@ -143,6 +143,10 @@ def main():
             print(json.dumps(read_status()))
         elif args.command == "status":
             print(json.dumps(read_status(), indent=2))
+        elif args.command == "support":
+            from service.compatibility import report
+            print(json.dumps({'schema': 1, 'platform': 'linux',
+                              'compatibility': report(Path(__file__).resolve().parents[1], read_status())}, indent=2))
         elif args.command == "remove-access":
             if not args.client_id:
                 raise ValueError("Specify --client-id from pacemanctl status.")

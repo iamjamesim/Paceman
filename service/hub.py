@@ -815,9 +815,13 @@ def main():
                     stack.enter_context(desktop)
                     stack.enter_context(daemon)
                     from service.claude_remote import RemoteRequests
-                    stack.enter_context(RemoteRequests(server.interactions, server.adapter.native_claude_sessions,
+                    remote = RemoteRequests(server.interactions, server.adapter.native_claude_sessions,
                         attention=server.adapter.native_claude_requests_changed,
-                        resolved=server.adapter.native_claude_requests_resolved))
+                        resolved=server.adapter.native_claude_requests_resolved)
+                    stack.enter_context(remote)
+                    if server.desktop_status is not None:
+                        server.desktop_status.native_responders = {'codexDesktop': desktop, 'codexDaemon': daemon,
+                                                                    'claudeRemote': remote}
                 elif args.source == "omarchy":
                     from service.codex_daemon import DaemonRequests
                     from service.claude_remote import NativeHTTP, RemoteRequests
@@ -825,11 +829,14 @@ def main():
                     daemon = DaemonRequests(server.interactions, server.adapter.native_response_sessions,
                         attention=server.adapter.native_requests_changed)
                     stack.enter_context(daemon)
-                    stack.enter_context(RemoteRequests(server.interactions, server.adapter.native_claude_sessions,
+                    remote = RemoteRequests(server.interactions, server.adapter.native_claude_sessions,
                         attention=server.adapter.native_claude_requests_changed,
                         resolved=server.adapter.native_claude_requests_resolved,
                         http_factory=lambda remote: NativeHTTP(remote, token_reader=claude_token),
-                        owner_token=server.adapter.native_claude_owner))
+                        owner_token=server.adapter.native_claude_owner)
+                    stack.enter_context(remote)
+                    if server.desktop_status is not None:
+                        server.desktop_status.native_responders = {'codexDaemon': daemon, 'claudeRemote': remote}
             print(f"{args.source.title()} source listening on 127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever(poll_interval=0.25)
