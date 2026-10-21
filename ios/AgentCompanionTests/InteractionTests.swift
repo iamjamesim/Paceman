@@ -2,6 +2,101 @@ import XCTest
 @testable import AgentCompanion
 
 final class InteractionTests: XCTestCase {
+    @MainActor func testSharedTemporalSectionsAndCountsAgeWithoutNetworkRefresh() throws {
+        let model = CompanionModel(preview: true)
+        let source = refreshSource("temporal")
+        model.pairedSources = [source]
+        // A finished at 10:00; B closed without completing at 10:20.
+        // B's aggregate change must not extend A's completion window.
+        let result = AgentSession(id: "A", provider: "codex", state: .finished, resultObservedAt: 36000)
+        var snapshot = Snapshot(schema: 1, sourceID: source.sourceID, generation: source.sourceID,
+            revision: 1, sourceName: "Mac", observedAt: 37200, changedAt: 37200, freshFor: 30,
+            state: .finished, eventID: "1", sessions: [result])
+        func check(_ now: Double, expectedCount: Int, expectedEnd: Bool) throws {
+            model.snapshots[source.sourceID] = snapshot
+            let date = Date(timeIntervalSince1970: now)
+            let sessions: [AgentSession]
+            if case .sessions(let values) = AgentFeedContent.resolve(snapshot, at: date) { sessions = values }
+            else { sessions = [] }
+            let phone = sessions.map { WorkCatalog.item(session: $0, source: source, model: model,
+                inbox: model.interactions, computer: "Mac", connected: false,
+                current: now < snapshot.activityFreshUntil, at: date) }
+            let phoneSections = WorkCatalog.sections(WorkCatalog.sorted(phone))
+            let watch = model.watchWorkSnapshot(at: date)
+            let watchSections = SessionTimePolicy.sections(watch.tasks) {
+                let value = $0.temporalPresentation(at: date)
+                return value.visible ? value.group : nil
+            }
+            XCTAssertEqual(phoneSections.map(\.group), watchSections.map(\.group))
+            XCTAssertEqual(phoneSections.map(\.count), watchSections.map(\.count))
+            XCTAssertEqual(phoneSections.reduce(0) { $0 + $1.count }, expectedCount)
+            XCTAssertEqual(snapshot.shouldEndLiveActivity(at: date), expectedEnd)
+            XCTAssertEqual(watch.sources?.first?.stateCounts?["finished"], 1, "Navigation keeps full observed counts")
+        }
+        try check(37799, expectedCount: 1, expectedEnd: false)
+        try check(37800, expectedCount: 1, expectedEnd: true)
+        try check(37860, expectedCount: 1, expectedEnd: true)
+        XCTAssertEqual(MonitoringActivity.ContentState(snapshot: snapshot, at: Date(timeIntervalSince1970: 37860)).finished, 0)
+        try check(36000 + 7 * 86400 - 1, expectedCount: 1, expectedEnd: true)
+        try check(36000 + 7 * 86400, expectedCount: 0, expectedEnd: true)
+        let cached = try JSONDecoder().decode(Snapshot.self, from: JSONEncoder().encode(snapshot))
+        snapshot = cached
+        try check(37860, expectedCount: 1, expectedEnd: true)
+        snapshot.sessions = [AgentSession(id: "A", provider: "codex", state: .working, resultObservedAt: 36000)]
+        snapshot.completedSessions = [result]
+        XCTAssertTrue(snapshot.retainedSessions(at: Date(timeIntervalSince1970: 37860)).isEmpty)
+        model.snapshots[source.sourceID] = snapshot
+        let resumed = model.watchWorkSnapshot(at: Date(timeIntervalSince1970: 37860))
+        XCTAssertEqual(resumed.tasks.count, 1)
+        XCTAssertEqual(resumed.tasks.first?.state, "working")
+        XCTAssertFalse(snapshot.shouldEndLiveActivity(at: Date(timeIntervalSince1970: 36000 + 8 * 86400)))
+    }
+
+    @MainActor func testWatchBoundsPrioritizeCurrentWorkAcrossComputersBeforeHistory() throws {
+        let model = CompanionModel(preview: true)
+        let now = Date()
+        let sources = (0..<5).map { refreshSource("temporal-\($0)") }
+        model.pairedSources = sources
+        for source in sources {
+            let history = (0..<64).map { AgentSession(id: "done-\($0)", provider: "codex", state: .failed,
+                resultObservedAt: now.timeIntervalSince1970 - 3600 - Double($0)) }
+            model.snapshots[source.sourceID] = Snapshot(schema: 1, sourceID: source.sourceID,
+                generation: source.sourceID, revision: 1, sourceName: "Mac", observedAt: now.timeIntervalSince1970,
+                changedAt: now.timeIntervalSince1970, freshFor: 30, state: .working, eventID: "1",
+                sessions: [AgentSession(id: "working", provider: "codex", state: .working),
+                           AgentSession(id: "attention", provider: "claude", state: .needsInput)],
+                completedSessions: history)
+        }
+        let exported = model.watchWorkSnapshot(at: now)
+        XCTAssertEqual(exported.tasks.count, 128)
+        XCTAssertTrue(Dictionary(grouping: exported.tasks, by: \.sourceID).values.allSatisfy { $0.count <= 32 })
+        for source in sources {
+            let tasks = exported.tasks.filter { $0.sourceID == source.sourceID }
+            XCTAssertTrue(tasks.contains { $0.state == "working" })
+            XCTAssertTrue(tasks.contains { $0.state == "needs_input" })
+        }
+        XCTAssertTrue(exported.tasks.prefix(10).allSatisfy { $0.state == "working" || $0.state == "needs_input" })
+    }
+
+    @MainActor func testRetainedCompletionsStayRecentWhenComputerIsOffline() throws {
+        let model = CompanionModel(preview: true)
+        model.showHandoffPreview("handoff-codex-working")
+        let source = try XCTUnwrap(model.pairedSources.first)
+        let now = Date().timeIntervalSince1970
+        let recent = AgentSession(id: "morning", provider: "codex", state: .finished,
+            name: "Morning work", resultObservedAt: now - 3600)
+        let older = AgentSession(id: "last-night", provider: "claude", state: .failed,
+            name: "Last night's work", resultObservedAt: now - 86400)
+        model.snapshots[source.sourceID]?.completedSessions = [older, recent]
+        let items = [older, recent].map {
+            WorkCatalog.item(session: $0, source: source, model: model, inbox: model.interactions,
+                computer: "Mac", connected: false, current: false)
+        }
+        XCTAssertTrue(items.allSatisfy { $0.group == .recent && !$0.historical && $0.request == nil })
+        XCTAssertEqual(WorkCatalog.sorted(items).map(\.session.id), ["morning", "last-night"])
+        XCTAssertEqual(items.first?.state, .failed)
+        XCTAssertTrue(items.allSatisfy { $0.statusDetail?.contains("seen") == true })
+    }
     func testReviewLeaseRenewalCannotReuseDraftForChangedContent() throws {
         let original = InputRequest(requestID: "request", version: 1, provider: "codex", sessionID: "session",
             kind: "question", title: "Choose", detail: "", questions: [.init(id: "q", prompt: "Which?",

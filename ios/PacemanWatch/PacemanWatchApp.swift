@@ -286,8 +286,12 @@ private struct WatchActivityView: View {
     private var source: WatchWorkSource? {
         snapshot?.sources?.first { $0.sourceID == route?.sourceID }
     }
-    private var sessions: [WatchWorkTask] {
-        (snapshot?.tasks ?? []).filter { route == nil || $0.sourceID == route?.sourceID }
+    private func sections(at date: Date) -> [SessionTimePolicy.Section<WatchWorkTask>] {
+        let tasks = (snapshot?.tasks ?? []).filter { route == nil || $0.sourceID == route?.sourceID }
+        return SessionTimePolicy.sections(tasks) {
+            let temporal = $0.temporalPresentation(at: date)
+            return temporal.visible ? temporal.group : nil
+        }
     }
     private var receivedActivity: Bool {
         if route != nil { return source?.generation != nil }
@@ -297,22 +301,20 @@ private struct WatchActivityView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
+            let sections = sections(at: context.date)
             Group {
-                if sessions.isEmpty {
+                if sections.isEmpty {
                     activityState
                 } else {
                     List {
-                        ForEach(["Needs you", "Working", "Recent", "Last known"], id: \.self) { section in
-                            let tasks = sessions.filter { group($0, at: context.date) == section }
-                            if !tasks.isEmpty {
-                                Section(section) {
-                                    ForEach(tasks) { task in
+                        ForEach(sections) { section in
+                                Section(section.group.rawValue) {
+                                    ForEach(section.rows) { task in
                                         NavigationLink(value: WatchDestination.session(task)) {
                                             WatchActivityRow(task: task, showComputer: route == nil, date: context.date)
                                         }
                                     }
                                 }
-                            }
                         }
                     }
                 }
@@ -356,10 +358,6 @@ private struct WatchActivityView: View {
             cacheReadID = UUID()
             loading = false
         }
-    }
-
-    private func group(_ task: WatchWorkTask, at date: Date) -> String {
-        task.group(at: date)
     }
 
     private var activityState: some View {
@@ -448,7 +446,13 @@ private struct WatchActivityRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if ["Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed"
                         || task.status(at: date) == "Response sent" {
-                        Text(task.status(at: date)).font(.caption)
+                        if let resultObservedAt = task.resultObservedAt {
+                            let completed = Date(timeIntervalSince1970: resultObservedAt)
+                            Text("\(task.status(at: date)) · seen \(completed.formatted(date: Calendar.current.isDateInToday(completed) ? .omitted : .abbreviated, time: .shortened))")
+                                .font(.caption).fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            Text(task.status(at: date)).font(.caption)
+                        }
                     }
                 }
             }
@@ -528,7 +532,11 @@ private struct WatchTaskView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Label(currentTask.historical(at: Date()) ? "Last known: \(currentTask.status)" : currentTask.status,
                                     systemImage: currentTask.symbol(at: Date()))
-                                if let observedAt = currentTask.observedAt, observedAt > 0 {
+                                if let resultObservedAt = currentTask.resultObservedAt {
+                                    let completed = Date(timeIntervalSince1970: resultObservedAt)
+                                    Text("Result received at \(completed.formatted(date: Calendar.current.isDateInToday(completed) ? .omitted : .abbreviated, time: .shortened))")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                } else if let observedAt = currentTask.observedAt, observedAt > 0 {
                                     let observed = Date(timeIntervalSince1970: observedAt)
                                     let time = observed.formatted(date: Calendar.current.isDateInToday(observed) ? .omitted : .abbreviated, time: .shortened)
                                     Text("Last updated at \(time)").font(.caption).foregroundStyle(.secondary)
@@ -560,6 +568,9 @@ private struct WatchTaskView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10).padding(.bottom, 8)
             }
+            #if DEBUG
+            .defaultScrollAnchor(ProcessInfo.processInfo.arguments.contains("--approval-actions-preview") ? UnitPoint(x: 0.5, y: 0.8) : .top)
+            #endif
 
         }
         .navigationTitle(prompt?.request.kind == "question" ? "Question" : prompt?.request.kind == "approval" ? "Approval" : "Session")
@@ -575,7 +586,7 @@ private struct WatchTaskView: View {
                 Button("Confirm") {
                     confirming = nil
                     respond("choose", optionID: option.id)
-                }.buttonStyle(.borderedProminent).foregroundStyle(.black)
+                }.buttonStyle(WatchResponseButtonStyle(primary: true))
             }.padding(.horizontal, 10)
         }
         .task { await load() }
@@ -641,7 +652,7 @@ private struct WatchTaskView: View {
                         respond(request.usesApprovalChoices ? "choose" : option.id,
                             optionID: request.usesApprovalChoices ? option.id : nil)
                     }
-                }.buttonStyle(.bordered)
+                }.buttonStyle(WatchResponseButtonStyle())
             }
             if request.approvalChoices.isEmpty { Text(ResponseGuidance.continuation(for: request.provider) + ".") }
         } else if !prompt.supportsWatchAnswer {
@@ -843,6 +854,27 @@ private struct WatchTaskView: View {
         if operation.finish(token), scenePhase == .active, !submitted {
             Task { await load() }
         }
+    }
+}
+
+/// Keep wrapped decision labels inside the button at every readable text size.
+private struct WatchResponseButtonStyle: ButtonStyle {
+    var primary = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16)
+        configuration.label
+            .font(.body)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .frame(minHeight: 44)
+            .foregroundStyle(primary ? Color.black : Color.primary)
+            .background(primary ? WatchPalette.tint : Color.primary.opacity(0.14), in: shape)
+            .contentShape(shape)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.45)
     }
 }
 

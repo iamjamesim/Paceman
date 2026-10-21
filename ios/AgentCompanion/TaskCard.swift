@@ -297,7 +297,12 @@ struct TaskCard: View {
                 }
                 // Snapshot observation is computer-scoped. It is never a task
                 // start time or last activity time; the protocol supplies neither.
-                if let snapshot = model.snapshots[item.id.sourceID], snapshot.observedAt > 0 {
+                if let resultObservedAt = item.session.resultObservedAt {
+                    let received = Date(timeIntervalSince1970: resultObservedAt)
+                    let time = received.formatted(date: Calendar.current.isDateInToday(received) ? .omitted : .abbreviated, time: .shortened)
+                    Text("Result received at \(time)").companionText(.supporting, theme: theme)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let snapshot = model.snapshots[item.id.sourceID], snapshot.observedAt > 0 {
                     let observed = Date(timeIntervalSince1970: snapshot.observedAt)
                     let time = observed.formatted(date: Calendar.current.isDateInToday(observed) ? .omitted : .abbreviated, time: .shortened)
                     Text("Last updated at \(time)").companionText(.supporting, theme: theme)

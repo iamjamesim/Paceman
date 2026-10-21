@@ -134,7 +134,8 @@ class PlatformDecisionParityTests(unittest.TestCase):
             f.source.native_claude_requests_changed(f.key, f.turn, PendingDecisions(REMOTE, frozenset()))
             self.assertEqual(f.state(), 'finished')
             f.event('SessionEnd')
-            self.assertEqual(f.store.snapshot()['sessions'], [])
+            self.assertEqual([row['state'] for row in f.store.snapshot()['sessions']], ['finished'])
+            self.assertFalse(f.source.native_claude_sessions(), 'Retaining the result must not restore the native owner')
 
     def test_confirmed_empty_codex_turn_clears_hook_attention_but_disconnect_does_not(self):
         for platform in ('mac', 'linux'):
@@ -266,8 +267,11 @@ class PlatformDecisionParityTests(unittest.TestCase):
                 f.event('SubagentStop', agent_id='child-b', turn='')
                 self.assertEqual(f.state(), 'finished')
                 f.event('SessionEnd')
+                retained = f.store.snapshot()['sessions']
+                self.assertEqual([row['state'] for row in retained], ['finished'])
                 f.event('SubagentStop', agent_id='child-b', turn='')
-                self.assertEqual(f.store.snapshot()['sessions'], [], 'A late child completion cannot recreate a closed session')
+                self.assertEqual(f.store.snapshot()['sessions'], retained, 'A late child completion cannot change the retained result')
+                self.assertFalse(f.source.native_claude_sessions(), 'A late child completion cannot recreate a closed session')
 
     def test_remote_child_resolution_clears_only_matching_hook_wait(self):
         for platform in ('mac', 'linux'):

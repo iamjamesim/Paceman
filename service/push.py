@@ -15,11 +15,12 @@ from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 from service.hub import Store
+from service.session_history import FINISHED_DISPLAY_DURATION
 from service.usage import readings, selected_reading
 
 DEFAULT_RELAY_URL = "https://relay.paceman.ai"
 LIVE_ACTIVITY_DISPLAY_LEASE = 5 * 60
-LIVE_ACTIVITY_TERMINAL_GRACE = 90
+LIVE_ACTIVITY_TERMINAL_GRACE = FINISHED_DISPLAY_DURATION
 LIVE_ACTIVITY_RENEWAL_INTERVAL = 4 * 60
 LIVE_ACTIVITY_UPDATE_INTERVAL = 15
 
@@ -293,17 +294,24 @@ def should_end_live_activity(snapshot: dict, now: float) -> bool:
     if any(session.get("state") in ("working", "needs_input")
            for session in snapshot.get("sessions") or []):
         return False
+    terminal_at = max((session["resultObservedAt"] for session in snapshot.get("sessions") or []
+                       if session.get("state") in ("finished", "failed") and "resultObservedAt" in session),
+                      default=snapshot["changedAt"])
     return (snapshot["state"] == "idle"
             or (snapshot["state"] in ("finished", "failed")
-                and now - snapshot["changedAt"] >= LIVE_ACTIVITY_TERMINAL_GRACE))
+                and now - terminal_at >= LIVE_ACTIVITY_TERMINAL_GRACE))
 
 
 def live_notification(snapshot: dict, now: float, ending=False,
                       alert: dict | None = None) -> tuple[dict, dict]:
     """Display-only envelope shared with MonitoringActivity.ContentState."""
-    sessions = snapshot.get("sessions") or []
+    observed_sessions = snapshot.get("sessions") or []
+    sessions = [session for session in observed_sessions
+                if session.get("state") not in ("finished", "failed")
+                or "resultObservedAt" not in session
+                or 0 <= now - session["resultObservedAt"] < LIVE_ACTIVITY_TERMINAL_GRACE]
     counts = {state: sum(s.get("state") == state for s in sessions) for state in ("working", "needs_input", "finished", "failed")}
-    if not sessions and snapshot["state"] in counts:
+    if not observed_sessions and snapshot["state"] in counts:
         counts[snapshot["state"]] = 1
     observed = min(now, snapshot["observedAt"])
     # A source-side renewal every four minutes keeps an unchanged active state
@@ -314,6 +322,10 @@ def live_notification(snapshot: dict, now: float, ending=False,
                "finished": counts["finished"], "failed": counts["failed"],
                "observedAt": observed, "freshUntil": fresh_until,
                "changedAt": snapshot["changedAt"]}
+    terminal_times = [session["resultObservedAt"] for session in observed_sessions
+                      if session.get("state") in ("finished", "failed") and "resultObservedAt" in session]
+    if terminal_times:
+        content["resultObservedAt"] = max(terminal_times)
     active_sessions = [s for s in sessions if s.get("state") in ("working", "needs_input", "finished", "failed")]
     if active_sessions:
         aliases = {"codex": "codex", "claude": "claude", "claude-code": "claude"}

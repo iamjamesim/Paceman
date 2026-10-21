@@ -90,7 +90,7 @@ class MacSourceTests(unittest.TestCase):
                 self.assertEqual(store.snapshot()['state'], 'needs_input')
                 self.assertEqual(source.native_response_sessions(), {'one': '1'}, 'Finished turns retain their response binding')
                 with store.connect() as db:
-                    db.execute('UPDATE mac_sessions SET updated=?', (time.time() - 601,))
+                    db.execute('UPDATE mac_sessions SET updated=?', (time.time() - FINISHED_RETENTION - 1,))
                 source.tick()
                 self.assertEqual(store.snapshot()['state'], 'needs_input', 'An unanswered plan does not retire as finished')
                 source.native_requests_changed('one', {'1': False})
@@ -467,8 +467,8 @@ class MacSourceTests(unittest.TestCase):
                 self.assertEqual(store.snapshot()["state"], "finished")
                 last_event = source.last_event_at
             with MacSource(store, socket_path=root / "hook.sock", computer_name="My Mac") as source:
-                self.assertEqual(store.snapshot()["state"], "idle")
-                self.assertEqual(store.snapshot()["sessions"], [])
+                self.assertEqual(store.snapshot()["state"], "finished")
+                self.assertEqual(len(store.snapshot()["sessions"]), 1)
                 self.assertEqual(source.last_event_at, last_event)
 
     def test_multiple_approvals_survive_unrelated_work_before_and_after_debounce(self):
@@ -722,11 +722,10 @@ class MacSourceTests(unittest.TestCase):
                 source.pending_questions[key] = ("1", clock[0] - 1, None)
                 source.publish_current()
                 self.assertEqual(store.snapshot()["state"], "finished")
-                with store.connect() as db:
-                    db.execute("UPDATE mac_sessions SET updated=?",
-                               (time.time() - FINISHED_RETENTION - 1,))
-                source.tick()
-                self.assertEqual(store.snapshot()["state"], "idle")
+                later = time.time() + FINISHED_RETENTION + 1
+                with patch('service.macos.time.time', return_value=later):
+                    source.tick()
+                    self.assertEqual(store.snapshot()["state"], "idle")
                 self.assertFalse(source.pending_questions)
                 hook("UserPromptSubmit", turn="2")
                 self.assertEqual(store.snapshot()["state"], "working")
@@ -752,37 +751,34 @@ class MacSourceTests(unittest.TestCase):
                 self.assertFalse(source.pending_questions)
 
     def test_finished_rows_retire_without_expiring_live_work(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        clock = [time.time()]
+        with tempfile.TemporaryDirectory() as temporary, patch('service.macos.time.time', side_effect=lambda: clock[0]):
             root = Path(temporary)
             root.chmod(0o700)
             store = Store(root / "hub.sqlite3")
-            with MacSource(store, socket_path=root / "hook.sock",
-                           allowance_reader=lambda: None) as source:
+            with MacSource(store, socket_path=root / "hook.sock", allowance_reader=lambda: None) as source:
                 source.next_allowance_at = float("inf")
                 source.receive(dict(command="agent-event", session="working", turn="1", event="working"))
                 source.receive(dict(command="agent-event", session="done", turn="1", event="completed"))
                 before = store.snapshot()
-                with store.connect() as db:
-                    db.execute("UPDATE mac_sessions SET updated=? WHERE state='finished'",
-                               (time.time() - FINISHED_RETENTION - 1,))
+                clock[0] += FINISHED_RETENTION + 1
                 source.tick()
                 current = store.snapshot()
                 self.assertEqual(current["state"], "working")
                 self.assertEqual(len(current["sessions"]), 1)
+                self.assertEqual(len(current["completedSessions"]), 1)
                 self.assertEqual(current["eventID"], before["eventID"])
                 with store.connect() as db:
-                    self.assertEqual(db.execute("SELECT kind FROM events ORDER BY seq DESC LIMIT 1").fetchone()[0],
-                                     "presentation")
+                    self.assertEqual(db.execute("SELECT kind FROM events ORDER BY seq DESC LIMIT 1").fetchone()[0], "presentation")
                 source.receive(dict(command="agent-event", session="working", turn="1", event="completed"))
-                with store.connect() as db:
-                    db.execute("UPDATE mac_sessions SET updated=? WHERE state='finished'",
-                               (time.time() - FINISHED_RETENTION - 1,))
+                clock[0] += FINISHED_RETENTION + 1
                 source.tick()
                 self.assertEqual(store.snapshot()["state"], "idle")
                 self.assertEqual(store.snapshot()["sessions"], [])
-                self.assertTrue(source.receive(dict(command="agent-event", session="done", turn="2",
-                                                    event="working", hook="UserPromptSubmit")))
+                self.assertEqual(len(store.snapshot()["completedSessions"]), 2)
+                source.receive(dict(command="agent-event", session="done", turn="2", event="working", hook="UserPromptSubmit"))
                 self.assertEqual(store.snapshot()["state"], "working")
+                self.assertEqual(len(store.snapshot()["completedSessions"]), 1)
 
     def test_terminal_hook_retries_during_source_restart(self):
         with tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:

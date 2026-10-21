@@ -111,12 +111,13 @@ example, an allowance change raised `revision` to 12 without changing activity
 | `state` | `idle`, `working`, `needs_input`, `finished`, or `failed`. |
 | `eventID` | Opaque activity identity, 1–128 UTF-8 bytes without control characters; stable across presentation-only revisions. |
 | `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded session `name` titles, workspace labels and Claude `remoteSessionID` (the Remote Control ID, distinct from the opaque row ID); no prompts or transcripts. |
+| `completedSessions` | Optional retained finished/failed rows outside the live display, bounded to 128 entries and 24 KiB. `resultObservedAt` on a terminal row is the Unix time Paceman first observed that result, not an exact provider completion time. See [retention](data-lifecycle.md#freshness-and-recovery). |
 | `allowance` | Optional selected Codex reading; may advance `revision` without a new activity event. |
 | `allowances` | Optional array of up to two Codex usage windows, each with its own observation and reset time. |
 | `configuredProviders` | Optional enabled activity providers (`codex`, `claude`), including providers without a received event. |
 
 Omarchy has its own `sourceID`, `generation`, and revisions, using this same
-schema. Mac uses hook-observed session liveness and clears sessions on restart;
+schema. Mac uses hook-observed session liveness and clears active sessions on restart, preserving observed results;
 Omarchy verifies owning processes locally. Neither sends process identity.
 Within a source, session identity is provider-scoped and both providers aggregate to
 one state/Live Activity. Usage does not filter activity.

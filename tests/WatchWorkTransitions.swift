@@ -1,7 +1,50 @@
 import Foundation
 
 @main struct WatchWorkTransitions {
+    struct TemporalFixture: Decodable {
+        struct Row: Decodable {
+            let id: String
+            let state: String
+            var resultObservedAt: Double?
+            let freshUntil: Double
+        }
+        let name: String
+        let now: Double
+        let state: String
+        let changedAt: Double
+        let sessions: [Row]
+        let expectedGroups: [String: String]
+        let expectedGlance: [String: Int]
+        let expectedEnd: Bool
+    }
+
     @MainActor static func main() async throws {
+        let fixtureURL = URL(fileURLWithPath: CommandLine.arguments[1])
+        let fixtures = try JSONDecoder().decode([TemporalFixture].self, from: Data(contentsOf: fixtureURL))
+        for fixture in fixtures {
+            let date = Date(timeIntervalSince1970: fixture.now)
+            let rows = fixture.sessions.map {
+                WatchWorkTask(sourceID: "mac", sessionID: $0.id, provider: "codex", title: $0.id,
+                    computer: "Mac", state: $0.state, freshUntil: $0.freshUntil, resultObservedAt: $0.resultObservedAt)
+            }
+            let facts = fixture.sessions.map {
+                SessionTimePolicy.Facts(state: $0.state, resultObservedAt: $0.resultObservedAt, freshUntil: $0.freshUntil)
+            }
+            let sections = SessionTimePolicy.sections(rows) {
+                let value = $0.temporalPresentation(at: date)
+                return value.visible ? value.group : nil
+            }
+            let groups = Dictionary(uniqueKeysWithValues: sections.flatMap { section in
+                section.rows.map { ($0.sessionID, section.group.rawValue) }
+            })
+            precondition(groups == fixture.expectedGroups, fixture.name)
+            precondition(sections.reduce(0) { $0 + $1.count } == fixture.expectedGroups.count, fixture.name)
+            let glance = Dictionary(grouping: facts.filter { SessionTimePolicy.present($0, at: date).glanceEligible },
+                                    by: \.state).mapValues(\.count)
+            precondition(glance == fixture.expectedGlance, fixture.name)
+            precondition(SessionTimePolicy.shouldEndLiveActivity(state: fixture.state, sessions: facts,
+                legacyChangedAt: fixture.changedAt, at: date) == fixture.expectedEnd, fixture.name)
+        }
         let activation = WatchWorkActivation()
         // Already activated reads need no subsequent delegate callback.
         try await activation.wait(activated: true, timeout: .zero)

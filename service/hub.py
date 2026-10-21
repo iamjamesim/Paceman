@@ -90,6 +90,9 @@ class Store:
                 CREATE TABLE IF NOT EXISTS events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
                     at REAL NOT NULL, state TEXT NOT NULL, label TEXT NOT NULL,
                     payload TEXT, kind TEXT NOT NULL DEFAULT 'activity');
+                CREATE TABLE IF NOT EXISTS completed_sessions(
+                    provider TEXT NOT NULL, id TEXT NOT NULL, completed_at REAL NOT NULL,
+                    payload TEXT NOT NULL, PRIMARY KEY(provider,id));
                 CREATE TRIGGER IF NOT EXISTS bound_events AFTER INSERT ON events BEGIN
                     DELETE FROM events WHERE seq <= NEW.seq - 1024
                         AND seq != (SELECT MAX(seq) FROM events WHERE kind='activity');
@@ -150,6 +153,8 @@ class Store:
             # Upgrade existing databases without resetting their monotonic revisions.
             db.execute("DELETE FROM events WHERE seq <= (SELECT MAX(seq) - 1024 FROM events) "
                        "AND seq != (SELECT MAX(seq) FROM events WHERE kind='activity')")
+            from service.session_history import recover_completed_sessions
+            recover_completed_sessions(db, time.time())
 
     @contextmanager
     def connect(self):

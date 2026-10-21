@@ -19,6 +19,7 @@ class WatchWorkTests(unittest.TestCase):
                 str(root / "tests/WatchWorkTransitions.swift"), "-o", str(binary),
             ], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+            result = subprocess.run([str(binary), str(root / 'tests/fixtures/session-temporal.json')],
+                                    capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("watch work transitions passed", result.stdout)
