@@ -141,13 +141,10 @@ class OmarchySource:
                         self.native_attention[key] = row["attention_turn"], bool(row["waiting"])
                 for row in db.execute("SELECT key,value FROM metadata WHERE key LIKE 'omarchy_last_event_%'"):
                     self.last_event_by_provider[row["key"].removeprefix("omarchy_last_event_")] = float(row["value"])
-                for row in db.execute('SELECT id,lifecycle FROM omarchy_claude'):
-                    current = ClaudeSession(**json.loads(row['lifecycle']))
-                    if current.remote_session_id and native_waiting(self.native_attention.get(row['id']), current.turn):
-                        # Only an aggregate survived restart, not request IDs or
-                        # worker identity. Partial checkpoints cannot resolve it.
-                        self.native_attention[row['id']] = PendingDecisions(current.remote_session_id,
-                            frozenset(), uncertain=True)
+                # Native Claude identities are RAM-only; do not restore an
+                # aggregate that checkpoints cannot reconcile exactly.
+                for row in db.execute('SELECT id FROM omarchy_claude'):
+                    self.native_attention.pop(row['id'], None)
                 self.last_event_at = max(self.last_event_by_provider.values(), default=0)
                 db.execute("INSERT OR REPLACE INTO metadata VALUES ('mode','omarchy')")
                 db.execute("DELETE FROM schedule WHERE fired=0")

@@ -39,15 +39,16 @@ does not truncate or narrow the native choice set. Explicit Claude
 
 [Decision lifetime](data-lifecycle.md#questions-and-approvals) is separate from
 turn outcome and submitted mobile-card lifetime. Disconnect is unknown, not empty.
-Claude checkpoints enumerate permission/dialog requests, omit elicitation and
-may omit inherited prompts; omission resolves only a known same-worker request
-in an enumerated domain. Exact native results or unambiguous elicitation hooks
-can resolve requests without clearing siblings.
+Claude checkpoints replace earlier native observations with the listed
+permission/dialog requests. They do not reconstruct every elicitation or inherited
+prompt, so reconnect and later checkpoints can lose attention for omitted requests.
+Paceman does not retain those omitted identities or claim exhaustive reconciliation.
+Directly observed current human requests, explicit `requires_action` state and
+matching hooks still supply attention; exact results resolve their matching scope.
 
-Linux restores bounded attention only for the same verified live process.
-Restored Claude aggregate uncertainty has no saved request IDs and remains until
-the owner/session ends; a partial empty checkpoint cannot clear it. Mac starts
-clean across source restart because hooks cannot verify process ownership.
+Linux restores bounded hook attention only for the same verified live process;
+Claude native request identities and aggregate uncertainty are not restored.
+Mac starts clean across source restart because hooks cannot verify process ownership.
 
 Versioned source inventories live in the [Codex desktop](../tests/fixtures/codex-desktop-inventory.json),
 [App Server](../tests/fixtures/codex-appserver-inventory.json) and

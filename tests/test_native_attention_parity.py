@@ -116,7 +116,7 @@ class PlatformDecisionParityTests(unittest.TestCase):
                 f.checkpoint([], session_state='running')
                 self.assertEqual(f.state(), 'finished')
 
-    def test_linux_restored_claude_aggregate_is_unknown_to_partial_checkpoints(self):
+    def test_linux_restart_does_not_restore_claude_native_aggregate(self):
         with ExitStack() as stack:
             f = SourceFixture(stack, 'linux', 'claude')
             f.receive(approval())
@@ -127,9 +127,12 @@ class PlatformDecisionParityTests(unittest.TestCase):
                 state_dir=previous.state_dir, processes=previous.processes, providers=f.enabled,
                 settings_reader=lambda: f.enabled, monotonic=lambda: f.clock, title_reader=lambda _: {},
                 turn_metadata_reader=lambda _: {}))
-            self.assertEqual(f.state(), 'needs_input')
+            self.assertEqual(f.state(), 'finished', 'Native identities and aggregate uncertainty are not restored')
+            current = PendingDecisions(REMOTE, frozenset({(None, 'str', 'current')}))
+            f.source.native_claude_requests_changed(f.key, f.turn, current)
+            self.assertEqual(f.state(), 'needs_input', 'A newly observed request still overrides the saved outcome')
             f.source.native_claude_requests_changed(f.key, f.turn, PendingDecisions(REMOTE, frozenset()))
-            self.assertEqual(f.state(), 'needs_input', 'A partial checkpoint cannot resolve restored identities that were intentionally not persisted')
+            self.assertEqual(f.state(), 'finished')
             f.event('SessionEnd')
             self.assertEqual(f.store.snapshot()['sessions'], [])
 
@@ -211,12 +214,21 @@ class PlatformDecisionParityTests(unittest.TestCase):
                 f.event('UserPromptSubmit', turn='next')
                 self.assertEqual(f.state(), 'needs_input', 'Remote IDs do not acquire an invented hook turn')
                 f.event('Stop')
-                f.checkpoint([])
-                self.assertEqual(f.state(), 'needs_input', 'Permission/dialog checkpoint cannot resolve elicitation')
                 f.event('ElicitationResult', elicitation_id='form-id', mcp_server_name='server')
                 self.assertEqual(f.state(), 'finished')
                 f.adapter._sync()
                 self.assertEqual(f.state(), 'finished', 'Stale reducer state cannot reopen the hook-resolved ID')
+
+    def test_claude_checkpoint_drops_omitted_elicitation_after_stop(self):
+        for platform in ('mac', 'linux'):
+            with self.subTest(platform=platform), ExitStack() as stack:
+                f = SourceFixture(stack, platform, 'claude')
+                f.receive(dict(type='control_request', session_id=REMOTE, request_id='form', request=dict(
+                    subtype='elicitation', mcp_server_name='server', message='Choose')))
+                f.event('Stop')
+                self.assertEqual(f.state(), 'needs_input')
+                f.checkpoint([])
+                self.assertEqual(f.state(), 'finished', 'Omitted history is not reconstructed from a partial checkpoint')
 
     def test_ambiguous_elicitation_server_fallback_does_not_clear_siblings(self):
         for platform in ('mac', 'linux'):

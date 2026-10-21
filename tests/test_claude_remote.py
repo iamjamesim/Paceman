@@ -238,7 +238,7 @@ class NativeClaudeTests(unittest.TestCase):
         with self.assertRaises(OSError):
             self.adapter.initialize()
 
-    def test_reconnect_checkpoint_clears_only_requests_the_owner_resolved(self):
+    def test_reconnect_checkpoint_replaces_previous_observations(self):
         resolved = []
         self.adapter.resolution = lambda tools, pending: resolved.append((tools, pending))
         self.checkpoint([approval('first'), approval('sibling')])
@@ -409,26 +409,29 @@ class NativeClaudeTests(unittest.TestCase):
             self.assertFalse(self.attention[-1])
         self.assertEqual(len(self.sent), 1, 'Only the read-only checkpoint was sent')
 
-    def test_checkpoint_cannot_clear_elicitation_or_inherited_owner_uncertainty(self):
-        self.checkpoint([approval()])
-        self.receive(dict(type='control_request', session_id=REMOTE, request_id='form',
-                          request=dict(subtype='elicitation', mcp_server_name='server', message='Choose')))
-        self.adapter.disconnect()
-        self.adapter.initialize()
-        self.receive(dict(type='control_response', session_id=REMOTE, response=dict(subtype='success',
-            request_id=self.sent[-1]['request_id'], response=dict(pid=43),
-            pending_permission_requests=[], pending_user_dialog_requests=[])))
-        self.assertEqual(set(self.adapter.native), {'first', 'form'})
-        self.adapter.initialize()
-        self.receive(dict(type='control_response', session_id=REMOTE, response=dict(subtype='success',
-            request_id=self.sent[-1]['request_id'], response=dict(pid=43),
-            pending_permission_requests=[], pending_user_dialog_requests=[])))
-        self.assertEqual(set(self.adapter.native), {'first', 'form'}, 'Inherited IDs do not become same-owner merely after another checkpoint')
-        self.assertTrue(self.attention[-1])
-        self.assertEqual(self.broker.pending()['requests'], [], 'Uncertain inherited prompts remain native-only')
-        self.receive(dict(type='control_cancel_request', session_id=REMOTE, request_id='first'))
-        self.receive(dict(type='control_cancel_request', session_id=REMOTE, request_id='form'))
-        self.assertFalse(self.attention[-1])
+    def test_checkpoint_does_not_retain_omitted_requests_across_worker_changes(self):
+        for reconnect, pid in ((False, 42), (False, 43), (True, 42), (True, 43)):
+            with self.subTest(reconnect=reconnect, pid=pid):
+                first, form, current = (f'{name}-{reconnect}-{pid}' for name in ('first', 'form', 'current'))
+                self.checkpoint([approval(first)])
+                self.receive(dict(type='control_request', session_id=REMOTE, request_id=form,
+                                  request=dict(subtype='elicitation', mcp_server_name='server', message='Choose')))
+                self.assertEqual(set(self.adapter.native), {first, form})
+                self.assertTrue(self.attention[-1])
+                if reconnect:
+                    self.adapter.disconnect()
+                    self.assertEqual(self.adapter.native, {})
+                    self.assertIsNone(self.attention[-1], 'Disconnect itself does not settle source attention')
+                self.adapter.initialize()
+                self.receive(dict(type='control_response', session_id=REMOTE, response=dict(subtype='success',
+                    request_id=self.sent[-1]['request_id'], response=dict(pid=pid),
+                    pending_permission_requests=[approval(current, requires_user_interaction=True)],
+                    pending_user_dialog_requests=[])))
+                self.assertEqual(set(self.adapter.native), {current})
+                self.assertTrue(self.attention[-1], 'Directly observed native-only requests still need attention')
+                self.assertEqual(self.broker.pending()['requests'], [])
+                self.checkpoint([])
+                self.assertFalse(self.attention[-1])
 
     def test_remote_subscription_survives_hook_turn_change_and_rejects_old_process_callbacks(self):
         from service.claude_remote import RemoteRequests
@@ -499,7 +502,7 @@ class NativeClaudeTests(unittest.TestCase):
                     else:
                         http.send.assert_not_called()
 
-    def test_confirmed_dialog_omission_tombstones_late_history(self):
+    def test_checkpoint_dialog_omission_tombstones_late_history(self):
         self.checkpoint([])
         dialog = dict(type='control_request', session_id=REMOTE, request_id='dialog',
                       request=dict(subtype='request_user_dialog', dialog_kind='refusal_fallback_prompt'))
@@ -508,9 +511,9 @@ class NativeClaudeTests(unittest.TestCase):
         self.checkpoint([])
         self.assertFalse(self.attention[-1])
         self.receive(dialog)
-        self.assertFalse(self.attention[-1], 'A confirmed removed dialog cannot reopen from stale history')
+        self.assertFalse(self.attention[-1], 'A checkpoint-omitted dialog cannot reopen from stale history')
 
-    def test_native_requires_action_surfaces_inherited_prompt_without_inventing_request_id(self):
+    def test_native_requires_action_surfaces_observed_owner_state_without_inventing_request_id(self):
         self.adapter.initialize()
         self.receive(dict(type='control_response', session_id=REMOTE, response=dict(subtype='success',
             request_id=self.sent[-1]['request_id'], response=dict(pid=42, session_state='requires_action'),

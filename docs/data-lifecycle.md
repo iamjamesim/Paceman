@@ -116,8 +116,9 @@ without changing their settings. Paceman never starts the daemon or a turn.
 Async question replies use native steering and exact question IDs.
 Claude uses an already-enabled native Remote Control connection and the native
 login's session scope. Only control events are requested; native request IDs and
-pending-request checkpoints govern lifetime. Owner resolution clears matching
-cards; submitted responses require native confirmation. Hooks only
+pending-request checkpoints replace earlier native observations (see
+[recovery limits](native-request-coverage.md#compatibility-and-recovery-limits)).
+Owner resolution clears matching cards; submitted responses require native confirmation. Hooks only
 observe activity. Native login refresh and permission-mode changes stay in Claude.
 On Linux, the existing scoped login is read from Claude's private
 `$CLAUDE_CONFIG_DIR/.credentials.json` (default `~/.claude/.credentials.json`);

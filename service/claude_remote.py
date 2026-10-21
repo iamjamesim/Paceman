@@ -123,7 +123,7 @@ def events(stream, check=lambda: None):
 
 
 class NativeRequests:
-    """Exact per-request lifetime, independent of network and tool completion."""
+    """Observed native requests; checkpoints replace the current request set."""
     def __init__(self, broker, session, remote, send, attention=lambda _value: None,
                  resolved=lambda _tools, _pending: None):
         self.broker, self.session, self.remote = broker, session, remote
@@ -143,9 +143,6 @@ class NativeRequests:
         self.checkpoint_started = 0
         self.next_checkpoint = 0
         self.checkpoint_failed = False
-        self.owner_pid = None
-        self.confirmed = set()
-        self.request_owners = {}
         self.observed_counts = None
         self.session_waiting = False
 
@@ -197,8 +194,7 @@ class NativeRequests:
             for handle, _, _ in self.pending.values():
                 self.broker.withdraw(handle)
             self.pending.clear()
-            # Keep known identities in RAM across a gap. The checkpoint has
-            # no elicitation list and cannot declare those decisions empty.
+            self.native.clear()
             self.attention(None)  # Losing the channel never resolves the agent.
 
     def _resolve(self, rid):
@@ -206,8 +202,6 @@ class NativeRequests:
         while len(self.resolved) > 1024:
             self.resolved.popitem(last=False)
         self.native.pop(rid, None)
-        self.confirmed.discard(rid)
-        self.request_owners.pop(rid, None)
         self.confirming.discard(rid)
         self.retired.discard(rid)
         if rid in self.observed:
@@ -286,17 +280,10 @@ class NativeRequests:
                     state = reply.get('response') or {}
                     if not isinstance(state, dict):
                         raise ValueError('invalid native session state')
-                    pid = state.get('pid')
-                    continuous = type(pid) is int and pid == self.owner_pid
-                    complete = continuous and state.get('session_state') != 'requires_action'
                     if state.get('session_state') in ('idle', 'running', 'requires_action'):
                         self.session_waiting = state['session_state'] == 'requires_action'
-                    # Historical replay is replaced by the first checkpoint.
-                    # Previously confirmed, omitted requests remain uncertain
-                    # across a worker change. Elicitation is never enumerated.
-                    preserve = {rid: f for rid, f in self.native.items() if rid in self.confirmed
-                                and (f['request'].get('subtype') == 'elicitation' or not complete
-                                     or self.request_owners.get(rid) != pid)}
+                    # Replace replay and earlier observations with this checkpoint.
+                    # It cannot reconstruct omitted elicitation/inherited prompts.
                     # The owner still awaits these decisions. Re-present them
                     # for explicit review; never resend the previous answer.
                     for unanswered in self.checkpoint_confirming & self.confirming & current_ids:
@@ -305,19 +292,11 @@ class NativeRequests:
                             self.broker.withdraw(self.pending.pop(unanswered)[0])
                             self.retired.discard(unanswered)
                     self.confirming.difference_update(self.checkpoint_confirming)
-                    self.retired.intersection_update(current_ids | preserve.keys())
-                    for missing in self.native.keys() - current_ids - preserve.keys():
+                    self.retired.intersection_update(current_ids)
+                    for missing in (self.native.keys() | self.observed.keys()) - current_ids:
                         self._resolve(missing)
-                    self.native = {**preserve, **{self._request(f): deepcopy(f) for f in pending
-                                   if f.get('request_id') not in self.resolved}}
-                    self.retired.update(preserve.keys() - current_ids)
-                    for uncertain in preserve.keys() - current_ids:
-                        entry = self.pending.pop(uncertain, None)
-                        if entry:
-                            self.broker.withdraw(entry[0])
-                    self.owner_pid = pid if type(pid) is int else None
-                    self.request_owners = {rid: self.owner_pid if rid in current_ids else self.request_owners.get(rid)
-                                           for rid in self.native}
+                    self.native = {self._request(f): deepcopy(f) for f in pending
+                                   if f.get('request_id') not in self.resolved}
                     self.initializing = None
                     self.connected = True
                 elif isinstance(rid, str) and source == 'worker':
@@ -342,8 +321,6 @@ class NativeRequests:
                     if len(self.native) >= MAX_PENDING and rid not in self.native:
                         raise ValueError('too many native requests')
                     self.native[rid] = deepcopy(frame)
-                    if self.connected:
-                        self.request_owners[rid] = self.owner_pid
             if self.connected:
                 self._sync()
 
@@ -378,7 +355,6 @@ class NativeRequests:
                 continue
             self.pending[rid] = (handle, deepcopy(frame), deepcopy(public))
             threading.Thread(target=self._answer, args=(rid, handle, encode), daemon=True).start()
-        self.confirmed.update(self.native)
         requests = frozenset((None, 'str', rid) for rid in self.native)
         inputs = frozenset(((None, 'str', rid), hashlib.sha256(
             (f['request'].get('elicitation_id') or f['request']['mcp_server_name']).encode()).hexdigest())
