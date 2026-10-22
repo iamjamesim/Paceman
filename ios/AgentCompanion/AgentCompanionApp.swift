@@ -79,7 +79,8 @@ struct CompanionRoot: View {
         }) { selection in
             TaskCard(selection: selection, model: model, presentation: presentation,
                      inbox: model.interactions, theme: theme,
-                     onOfferRequests: { offeredRequestIDs.formUnion($0.map(\.id)) }).id(selection.id)
+                     onOfferRequests: { offeredRequestIDs.formUnion($0.map(\.id)) },
+                     onFinishReview: { offeredRequestIDs = $0 }).id(selection.id)
         }
         .tint(theme.tint)
         .preferredColorScheme(.dark)
@@ -146,7 +147,7 @@ struct CompanionRoot: View {
             if value == nil {
                 dismissingTaskCard = true
                 if phase == .active {
-                    reviewPresentation.deferRequestIDs(offeredRequestIDs)
+                    reviewPresentation.deferOfferedRequests(offeredRequestIDs, pending: reviewRequests)
                 }
                 offeredRequestIDs = []
                 selectedTask = nil; reviewQueue = nil
@@ -184,9 +185,8 @@ struct CompanionRoot: View {
         let tasks = TaskReviewQueue.identities(for: requests, startingAt: startingAt)
         guard !tasks.isEmpty else { return }
         sidebarPresented = false
-        var queue = TaskReviewQueue(tasks: tasks,
+        let queue = TaskReviewQueue(tasks: tasks,
             excludedRequestIDs: includeDeferred ? [] : reviewPresentation.deferredRequestIDs)
-        queue.capture(requests, items: WorkCatalog.live(model: model, presentation: presentation, inbox: model.interactions), snapshots: model.snapshots)
         offeredRequestIDs = Set(requests.map(\.id))
         reviewQueue = queue
     }

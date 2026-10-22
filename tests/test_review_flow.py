@@ -25,7 +25,7 @@ class ReviewFlowTests(unittest.TestCase):
             section((phone / "PresentationModel.swift").read_text(), "struct AgentSession:", "/// A missing session list"),
             section(interactions, "struct PendingInput:", "/// Request content lives"),
             section((phone / "CompanionHome.swift").read_text(), "struct WorkIdentity:", "extension LiveActivityRoute"),
-            section((phone / "TaskCard.swift").read_text(), "/// Keep the current decision", "/// One current-task card"),
+            section((phone / "TaskCard.swift").read_text(), "struct TaskReviewQueue:", "/// One current-task card"),
         ])
         guard = section(interactions, "    func isCurrent(_ item:", "    @discardableResult func refresh(")
         harness = (root / "tests/ReviewFlowTransitions.swift").read_text().replace("// CURRENT_REQUEST_GUARD", guard)

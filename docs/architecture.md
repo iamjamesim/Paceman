@@ -76,11 +76,12 @@ and responses; Devices owns connections, accessories, and Live Activities.
 Ordering is stable and phone-observed, not durable task chronology: answerable
 requests lead Needs you, Working follows state-entry order, and Recent is newest
 first. Answerable requests open Review across computers on arrival and as new
-requests appear. Review retains each decision’s context, appends new arrivals,
-advances after confirmed responses and closes after the last decision. Dismissal
-sets aside only requests already offered. New arrivals never replace a draft or
-uncertain response. Missing requests remain unavailable unless current metadata
-confirms the session moved on; upcoming confirmed resolutions are skipped.
+requests appear. Review keeps unchanged questions stable and appends new arrivals.
+Answered, canceled, replaced or unavailable questions leave automatically, advancing
+to the next current question or closing when none remain. Activity owns connection
+status; an unavailable question can return after reconnection. Dismissal sets aside
+only offered questions that are still pending. In-flight and uncertain submissions
+remain owned by the inbox, preserving their exact response for confirmation or retry.
 Submission receipts show Response sent in Activity until native activity advances.
 
 Live Activity taps open current Review, or source-filtered Activity when nothing

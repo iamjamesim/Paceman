@@ -1545,7 +1545,7 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(queue.current, second)
     }
 
-    @MainActor func testReviewAppendsArrivalsWithoutReplacingCurrentAndSkipsResolvedSessions() {
+    @MainActor func testReviewAppendsArrivalsWithoutReplacingCurrentAndRemovesUnavailableSessions() {
         func identity(_ session: String) -> WorkIdentity {
             WorkIdentity(sourceID: sourceID, sessionID: session, provider: "codex")
         }
@@ -1556,7 +1556,7 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(queue.id, originalID)
         XCTAssertEqual(queue.current, first, "Arrival cannot replace a decision or draft")
         XCTAssertEqual(queue.tasks, [first, resolved, arriving])
-        XCTAssertTrue(queue.advance(pending: [arriving], resolved: [resolved]))
+        XCTAssertTrue(queue.advance(pending: [arriving]))
         XCTAssertEqual(queue.current, arriving, "A future session resolved elsewhere is skipped")
         queue.include([first, arriving])
         XCTAssertTrue(queue.advance(pending: [first]))
@@ -1654,7 +1654,16 @@ final class InteractionTests: XCTestCase {
             idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
         model.interactions.observeWatchSubmission(second, submission: answer, phase: .unconfirmed)
         try await Task.sleep(for: .milliseconds(200))
-        XCTAssertNotNil(host.presentedViewController, "An uncertain response must remain available for recovery")
+        XCTAssertNotNil(host.presentedViewController, "A current uncertain response remains available for explicit retry")
+        model.interactions.sourceUnavailable(source.sourceID)
+        try await settle(false)
+        XCTAssertEqual(model.interactions.response(for: second)?.submission, answer,
+                       "Closing an unavailable review preserves its exact response envelope")
+        model.interactions.observeWatchRequest(second)
+        try await settle(true)
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(model.interactions.response(for: second)?.phase, .unconfirmed,
+                       "Reconnection must not offer a fresh submission or retry automatically")
         model.interactions.didSubmit(second, submission: answer)
         try await settle(false)
         model.interactions.preview(source)
@@ -1778,67 +1787,51 @@ final class InteractionTests: XCTestCase {
         }
     }
 
-    @MainActor func testSessionFlowProtectsDraftThenAdvancesOnlyOnExactAcknowledgement() throws {
-        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
-                                  clientID: "client", credential: "fixture")
+    @MainActor func testLiveReviewPreservesDraftUntilQuestionWithdrawnOrReplaced() throws {
+        let source = refreshSource("live-review")
         let inbox = InteractionInbox()
         inbox.preview(source, kind: "question")
         let first = try XCTUnwrap(inbox.items.first)
-        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: first.request.provider,
-            sessionID: first.request.sessionID, kind: "question", title: "Follow-up", detail: "", questions: [], remainingSeconds: 60)
-        let next = PendingInput(source: source, generation: first.generation, request: request, expiresAtUptime: first.expiresAtUptime)
+        let next = PendingInput(source: source, generation: first.generation,
+            request: InputRequest(requestID: UUID().uuidString, version: 1, provider: first.request.provider,
+                sessionID: first.request.sessionID, kind: "question", title: "Follow-up", detail: "",
+                questions: [], remainingSeconds: 60), expiresAtUptime: first.expiresAtUptime)
         var lock = TaskCardRequestLock()
-        lock.capture(first)
-        lock.capture(next)
+        XCTAssertTrue(lock.reconcile(pending: [first]))
+        let originalVisit = lock.visitID
+        XCTAssertFalse(lock.reconcile(pending: [next, first]))
         XCTAssertEqual(lock.request?.id, first.id)
-        for phase in [InputResponsePhase.sending, .unconfirmed, .rejected] {
-            let result = InputResponseState(item: first, submission: submission(first), startedAt: 1, phase: phase)
-            XCTAssertFalse(lock.advance(after: result, to: next))
-            XCTAssertEqual(lock.request?.id, first.id)
-        }
-        let wrong = InputResponseState(item: next, submission: submission(next), startedAt: 1, phase: .submitted)
-        XCTAssertFalse(lock.advance(after: wrong, to: next))
-        let confirmed = InputResponseState(item: first, submission: submission(first), startedAt: 1, phase: .submitted)
-        XCTAssertFalse(lock.advance(after: confirmed, to: first), "A stale listing cannot repeat the answered form")
-        XCTAssertTrue(lock.advance(after: confirmed, to: next))
+        XCTAssertEqual(lock.visitID, originalVisit, "A new arrival preserves the current draft")
+        XCTAssertTrue(lock.reconcile(pending: [next]), "Withdrawal advances without an extra tap")
         XCTAssertEqual(lock.request?.id, next.id)
-        XCTAssertFalse(lock.advance(after: confirmed, to: nil), "A delayed duplicate acknowledgement cannot advance another form")
-        let last = InputResponseState(item: next, submission: submission(next), startedAt: 1, phase: .submitted)
-        XCTAssertTrue(lock.advance(after: last, to: nil))
-        XCTAssertNil(lock.request)
-        let laterRequest = InputRequest(requestID: UUID().uuidString, version: 1, provider: first.request.provider,
-            sessionID: first.request.sessionID, kind: "question", title: "Later follow-up", detail: "", questions: [], remainingSeconds: 60)
-        let later = PendingInput(source: source, generation: first.generation, request: laterRequest, expiresAtUptime: first.expiresAtUptime)
-        lock.capture(later)
-        XCTAssertEqual(lock.request?.id, later.id, "An empty flow can display the next available request")
+        XCTAssertNotEqual(lock.visitID, originalVisit)
+        XCTAssertTrue(lock.reconcile(pending: []))
+        XCTAssertNil(lock.request, "An unavailable form leaves Review")
+        XCTAssertTrue(lock.reconcile(pending: [first]), "The same question can return after reconnection")
+        let reconnectVisit = lock.visitID
+        let replacement = PendingInput(source: source, generation: first.generation,
+            request: InputRequest(requestID: first.request.id, version: 1, provider: first.request.provider,
+                sessionID: first.request.sessionID, kind: "question", title: "Different question", detail: "",
+                questions: [], remainingSeconds: 60), expiresAtUptime: first.expiresAtUptime)
+        XCTAssertTrue(lock.reconcile(pending: [replacement]))
+        XCTAssertNotEqual(lock.visitID, reconnectVisit, "Replacement content receives a fresh form")
     }
 
-    @MainActor func testConfirmedSessionFlowCannotSwitchComputerSessionProviderOrBroker() throws {
-        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
-                                  clientID: "client", credential: "fixture")
-        let inbox = InteractionInbox()
-        inbox.preview(source, kind: "question")
-        let first = try XCTUnwrap(inbox.items.first)
-        let confirmed = InputResponseState(item: first, submission: submission(first), startedAt: 1, phase: .submitted)
-        for difference in ["computer", "session", "provider", "generation"] {
-            let otherSource = PairedSource(endpoint: source.endpoint, sourceID: UUID().uuidString,
-                                          clientID: "client", credential: "fixture")
-            let request = InputRequest(requestID: UUID().uuidString, version: 1,
-                provider: difference == "provider" ? "codex" : first.request.provider,
-                sessionID: difference == "session" ? "other-session" : first.request.sessionID,
-                kind: "question", title: "Other", detail: "", questions: [], remainingSeconds: 60)
-            let other = PendingInput(source: difference == "computer" ? otherSource : source,
-                generation: difference == "generation" ? UUID().uuidString : first.generation,
-                request: request, expiresAtUptime: first.expiresAtUptime)
-            var lock = TaskCardRequestLock()
-            lock.capture(first)
-            XCTAssertFalse(lock.advance(after: confirmed, to: other), difference)
-            XCTAssertEqual(lock.request?.id, first.id)
-        }
-        var lock = TaskCardRequestLock()
-        lock.capture(first)
-        let released = InputResponseState(item: first, submission: submission(first, action: "release"), startedAt: 1, phase: .submitted)
-        XCTAssertFalse(lock.advance(after: released, to: nil), "Opening the agent is not a decision to follow more phone forms")
+    @MainActor func testReviewWithdrawsCurrentAndUpcomingQuestionsWithoutAStopPage() {
+        let first = WorkIdentity(sourceID: "one", sessionID: "first", provider: "codex")
+        let upcoming = WorkIdentity(sourceID: "one", sessionID: "upcoming", provider: "codex")
+        let remote = WorkIdentity(sourceID: "two", sessionID: "remote", provider: "claude")
+        var queue = TaskReviewQueue(tasks: [first, upcoming, remote])
+        XCTAssertTrue(queue.reconcile(pending: [first, remote]))
+        XCTAssertEqual(queue.tasks, [first, remote])
+        XCTAssertEqual(queue.progress, "1 of 2")
+        XCTAssertTrue(queue.reconcile(pending: [remote]), "Losing one computer continues on another")
+        XCTAssertEqual(queue.current, remote)
+        XCTAssertTrue(queue.reconcile(pending: [remote, first]))
+        XCTAssertEqual(queue.current, remote, "Reconnect never steals the current question")
+        XCTAssertEqual(queue.tasks, [remote, first])
+        XCTAssertFalse(queue.reconcile(pending: []), "Nothing answerable ends Review")
+        XCTAssertNil(queue.current)
     }
 
     @MainActor func testTaskStatusAndSectionsStayConsistentAcrossLiveTransitions() throws {

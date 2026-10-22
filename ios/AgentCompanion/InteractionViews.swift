@@ -10,7 +10,6 @@ struct InteractionDetail: View {
     var context: String? = nil
     var contentTopInset: CGFloat = 16
     var openSession: SessionOpenButton? = nil
-    var nextRequest: (() -> Void)? = nil
     @Environment(\.scenePhase) private var phase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var answers: [String: InputAnswer] = [:]
@@ -49,7 +48,7 @@ struct InteractionDetail: View {
     }
     private var inlineActions: Bool { approvalAction?.kind == .command || typeSize.isAccessibilitySize }
     private var hasDecisionControls: Bool {
-        message != nil || (!sent && (sending || retryable || editable)) || openSession != nil || nextRequest != nil
+        message != nil || (!sent && (sending || retryable || editable)) || openSession != nil
     }
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
@@ -179,9 +178,6 @@ struct InteractionDetail: View {
                     Text(message).companionText(.body, theme: theme).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !sent && (sending || retryable || editable) { responseActions }
-                if !sending && !retryable, let nextRequest {
-                    InputActionButton(title: "Next request", theme: theme, action: nextRequest)
-                }
                 if let openSession { openSession }
             }
         }
