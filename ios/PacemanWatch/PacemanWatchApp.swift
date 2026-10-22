@@ -552,7 +552,7 @@ private struct WatchTaskView: View {
                     }
                     if let error { Text(error).font(.body) }
                     if nativeOnly, currentTask.state == "needs_input", !currentTask.historical(at: Date()) {
-                        Text("Review the full request and all response options in \(responseDestination).")
+                        Text("An answerable request isn’t available on Apple Watch.")
                             .font(.body).fixedSize(horizontal: false, vertical: true)
                     }
                     if prompt == nil, error != nil, !submitted, !rejected,
