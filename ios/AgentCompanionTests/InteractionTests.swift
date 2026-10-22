@@ -13,12 +13,8 @@ final class InteractionTests: XCTestCase {
                 resultObservedAt: result, activityObservedAt: activity, at: now, calendar: calendar)
         }
         let minuteAgo = now.timeIntervalSince1970 - 60
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        formatter.dateTimeStyle = .named
-        let relative = formatter.localizedString(for: Date(timeIntervalSince1970: minuteAgo), relativeTo: now)
-        XCTAssertEqual(detail("finished", "Finished", group: .finished, result: now.timeIntervalSince1970),
-            formatter.localizedString(for: now, relativeTo: now))
+        let relative = "1m ago"
+        XCTAssertEqual(detail("finished", "Finished", group: .finished, result: now.timeIntervalSince1970), "Just now")
         XCTAssertEqual(detail("finished", "Finished", group: .finished, result: minuteAgo), relative)
         XCTAssertEqual(detail("finished", "Finished", result: minuteAgo), relative)
         XCTAssertEqual(detail("idle", "Idle", activity: minuteAgo), "Idle · " + relative)
@@ -41,6 +37,73 @@ final class InteractionTests: XCTestCase {
         for invalid in [nil, .nan, .infinity, 0, now.timeIntervalSince1970 + 60] as [Double?] {
             XCTAssertEqual(detail("finished", "Finished", result: invalid), "Finished")
         }
+    }
+
+    @MainActor func testUnchangedPhoneAndWatchObservationsAgeWithSuppliedTimelineDates() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let received = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 22, hour: 10)))
+        let session = AgentSession(id: "same-result", provider: "codex", state: .finished,
+            resultObservedAt: received.timeIntervalSince1970)
+        let phone = WorkItem(id: .init(sourceID: "Mac", sessionID: session.id, provider: session.provider),
+            session: session, computer: "Mac", historical: false)
+        let watch = WatchWorkTask(sourceID: "Mac", sessionID: session.id, provider: session.provider,
+            title: "Same result", computer: "Mac", state: "finished", freshUntil: .infinity,
+            resultObservedAt: session.resultObservedAt)
+        let boundaries: [(TimeInterval, String, String)] = [
+            (0, "Just now", "Just now"), (59.999, "Just now", "Just now"),
+            (60, "1m ago", "1 minute ago"), (119.999, "1m ago", "1 minute ago"),
+            (120, "2m ago", "2 minutes ago"), (3599.999, "59m ago", "59 minutes ago"),
+            (3600, "1h ago", "1 hour ago"), (7199, "1h ago", "1 hour ago"),
+            (7200, "2h ago", "2 hours ago")]
+        // No source snapshot, task mutation, reopen, or refresh between these dates.
+        for (seconds, visible, spoken) in boundaries {
+            let date = received.addingTimeInterval(seconds)
+            XCTAssertEqual(phone.statusDetail(at: date), visible)
+            XCTAssertEqual(phone.statusDetail(at: date, accessibility: true), spoken)
+            let temporal = watch.temporalPresentation(at: date)
+            XCTAssertEqual(SessionRowMetadata.detail(state: watch.state, status: watch.status(at: date),
+                historical: temporal.historical, group: temporal.group, resultObservedAt: watch.resultObservedAt,
+                activityObservedAt: watch.activityObservedAt, at: date, calendar: calendar), visible)
+            XCTAssertEqual(SessionRowMetadata.detail(state: watch.state, status: watch.status(at: date),
+                historical: temporal.historical, group: temporal.group, resultObservedAt: watch.resultObservedAt,
+                activityObservedAt: watch.activityObservedAt, at: date, calendar: calendar, accessibility: true), spoken)
+        }
+        // Retained results lose row ages at local midnight; fresh Finished retains its relative age.
+        let midnight = calendar.startOfDay(for: received.addingTimeInterval(86400))
+        let lastMinute = midnight.addingTimeInterval(-60).timeIntervalSince1970
+        XCTAssertEqual(SessionRowMetadata.detail(state: "finished", status: "Finished", historical: false,
+            group: .finished, resultObservedAt: lastMinute, activityObservedAt: nil,
+            at: midnight, calendar: calendar), "1m ago")
+        XCTAssertNil(SessionRowMetadata.detail(state: "finished", status: "Finished", historical: false,
+            group: .recent, resultObservedAt: lastMinute, activityObservedAt: nil,
+            at: midnight, calendar: calendar))
+        let nextDay = midnight.addingTimeInterval(1)
+        XCTAssertNil(phone.statusDetail(at: nextDay))
+        for state in [ActivityState.working, .needsInput] {
+            let active = WorkItem(id: phone.id,
+                session: AgentSession(id: session.id, provider: "codex", state: state,
+                    resultObservedAt: session.resultObservedAt, activityObservedAt: session.resultObservedAt),
+                computer: "Mac", historical: false)
+            XCTAssertNil(active.statusDetail(at: received.addingTimeInterval(3600)))
+        }
+    }
+
+    func testProviderTextIsOmittedOnlyWhenAProviderControlSuppliesIdentity() {
+        let row = WorkItem(id: .init(sourceID: "Mac", sessionID: "task", provider: "claude"),
+            session: AgentSession(id: "task", provider: "claude", state: .finished, project: "paceman"),
+            computer: "Development Mac", historical: false)
+        XCTAssertNotNil(row.session.appURL)
+        XCTAssertEqual(row.rowContext(showComputer: true, hasProviderControl: true), "paceman · Development Mac")
+        XCTAssertEqual(row.rowContext(showComputer: false, hasProviderControl: true), "paceman")
+        XCTAssertEqual(row.rowContext(showComputer: true, hasProviderControl: false), "paceman · Claude Code · Development Mac")
+        let unknown = WorkItem(id: row.id,
+            session: AgentSession(id: "unknown", provider: "other", state: .idle), computer: "Mac", historical: false)
+        XCTAssertNil(unknown.session.appURL)
+        XCTAssertEqual(unknown.rowContext(showComputer: false, hasProviderControl: unknown.session.appURL != nil), "Other")
+        let noContext = WorkItem(id: row.id,
+            session: AgentSession(id: "working", provider: "claude", state: .working), computer: "Mac", historical: false)
+        XCTAssertEqual(noContext.rowContext(showComputer: false, hasProviderControl: true), "")
     }
 
     @MainActor func testRecentDaysUseLocalCalendarAndKeepUnknownDatesUndated() throws {

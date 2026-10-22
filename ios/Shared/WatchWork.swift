@@ -138,7 +138,8 @@ enum SessionTimePolicy {
 enum SessionRowMetadata {
     static func detail(state: String, status: String, historical: Bool,
                        group: SessionTimePolicy.Group, resultObservedAt: Double?,
-                       activityObservedAt: Double?, at now: Date, calendar: Calendar = .current) -> String? {
+                       activityObservedAt: Double?, at now: Date, calendar: Calendar = .current,
+                       accessibility: Bool = false) -> String? {
         let observed = (state == "finished" || state == "failed") ? resultObservedAt
             : state == "idle" ? activityObservedAt : nil
         guard let observed, observed.isFinite, observed > 0, observed <= now.timeIntervalSince1970 else {
@@ -148,10 +149,21 @@ enum SessionRowMetadata {
         let redundantFinished = state == "finished" && !historical && (group == .finished || group == .recent)
         var parts = redundantFinished ? [] : [status]
         if group == .finished || (group == .recent && calendar.isDate(date, inSameDayAs: now)) {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .full
-            formatter.dateTimeStyle = .named
-            parts.append(formatter.localizedString(for: date, relativeTo: now))
+            let age = now.timeIntervalSince1970 - observed
+            if age < 60 {
+                parts.append("Just now")
+            } else {
+                let hours = Int(age / 3600)
+                let minutes = Int(age / 60)
+                if accessibility {
+                    let formatter = RelativeDateTimeFormatter()
+                    formatter.unitsStyle = .full
+                    parts.append(formatter.localizedString(from: hours > 0
+                        ? DateComponents(hour: -hours) : DateComponents(minute: -minutes)))
+                } else {
+                    parts.append(hours > 0 ? "\(hours)h ago" : "\(minutes)m ago")
+                }
+            }
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

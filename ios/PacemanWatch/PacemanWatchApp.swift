@@ -499,6 +499,10 @@ private struct WatchActivityRow: View {
                             historical: task.historical(at: date), group: task.temporalPresentation(at: date).group,
                             resultObservedAt: task.resultObservedAt, activityObservedAt: task.activityObservedAt, at: date) {
                             Text(detail).font(.caption).fixedSize(horizontal: false, vertical: true)
+                                .accessibilityLabel(SessionRowMetadata.detail(state: task.state, status: task.status(at: date),
+                                    historical: task.historical(at: date), group: task.temporalPresentation(at: date).group,
+                                    resultObservedAt: task.resultObservedAt, activityObservedAt: task.activityObservedAt,
+                                    at: date, accessibility: true) ?? detail)
                         }
                     }
                 }
@@ -1212,6 +1216,7 @@ private struct WatchPhoneContinuation: View {
 
 #if DEBUG
 private enum WatchWorkPreview {
+    static let observationDate = Date()
     struct ScrollPosition: ViewModifier {
         let target: String?
         func body(content: Content) -> some View {
@@ -1269,7 +1274,7 @@ private enum WatchWorkPreview {
         }
         if let operation = payload["operation"] as? String,
            ["tasks", "cachedTasks", "refreshTasks"].contains(operation) {
-            let now = Date().timeIntervalSince1970
+            let now = observationDate.timeIntervalSince1970
             let tasks = [task] + ["working", "finished", "failed"].enumerated().map { index, state in
                 WatchWorkTask(sourceID: index == 0 ? "other" : "preview", sessionID: "task-\(index)", provider: index == 0 ? "claude" : "codex",
                     title: scenario == "long" ? "Review accessibility and notifications throughout the entire onboarding experience" : ["Update the Watch app", "Run regression tests", "Build the release"][index],
@@ -1278,9 +1283,9 @@ private enum WatchWorkPreview {
             }
             var values = scenario == "stale" ? tasks.dropFirst().map { $0 } : tasks
             if scenario.hasPrefix("history") {
-                let today = Calendar.current.startOfDay(for: Date())
+                let today = Calendar.current.startOfDay(for: observationDate)
                 let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today)!
-                let dates = [now - min(3600, Date().timeIntervalSince(today) / 2), yesterday.addingTimeInterval(12 * 3600).timeIntervalSince1970, now - 3 * 86400]
+                let dates = [now - min(3600, observationDate.timeIntervalSince(today) / 2), yesterday.addingTimeInterval(12 * 3600).timeIntervalSince1970, now - 3 * 86400]
                 let titles = ["Check notification delivery", "Improve onboarding", "Run integration tests"]
                 let history = dates.enumerated().map { index, date in
                     WatchWorkTask(sourceID: "preview", sessionID: "history-\(index)", provider: "codex",
@@ -1296,7 +1301,7 @@ private enum WatchWorkPreview {
                         title: scenario.contains("long") ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : "Update the Watch app",
                         computer: "MacBook Pro", state: "finished", freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300),
                         project: scenario.contains("long") ? "launch-creative-direction-and-visual-assets" : "paceman",
-                        resultObservedAt: now - 60), at: 0)
+                        resultObservedAt: now - (scenario.contains("live") ? 30 : 60)), at: 0)
                     values.insert(WatchWorkTask(sourceID: "preview", sessionID: "working", provider: "claude",
                         title: "Build Mac client", computer: "MacBook Pro", state: "working",
                         freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300)), at: 0)
@@ -1305,7 +1310,7 @@ private enum WatchWorkPreview {
                     values.append(WatchWorkTask(sourceID: "preview", sessionID: "idle", provider: "codex",
                         title: "Investigate Pebble notification relay", computer: "MacBook Pro", state: "idle",
                         freshUntil: now + 300,
-                        activityObservedAt: now - min(900, Date().timeIntervalSince(today) / 2)))
+                        activityObservedAt: now - min(900, observationDate.timeIntervalSince(today) / 2)))
                 }
             }
             if responseSent || scenario == "response-sent", !values.isEmpty {

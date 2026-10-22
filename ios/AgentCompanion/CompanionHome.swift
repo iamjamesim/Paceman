@@ -120,14 +120,22 @@ struct WorkItem: Identifiable {
     var context: String {
         [session.provider.capitalized, session.detail, computer].filter { !$0.isEmpty }.joined(separator: " · ")
     }
+    var providerName: String { session.provider == "claude" ? "Claude Code" : session.provider.capitalized }
+    func rowContext(showComputer: Bool, hasProviderControl: Bool) -> String {
+        if aggregate { return computer }
+        return [session.detail, hasProviderControl ? nil : providerName,
+                request.map { $0.request.kind == "approval" ? "Approval" : "Question" },
+                showComputer ? computer : nil]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
     var statusToken: WorkStatusToken { phase.token }
     var opensActivityCard: Bool { !aggregate }
     var statusDetail: String? { statusDetail(at: Date()) }
-    func statusDetail(at now: Date) -> String? {
+    func statusDetail(at now: Date, accessibility: Bool = false) -> String? {
         if state == .finished || state == .failed || (state == .idle && session.activityObservedAt != nil) {
             return SessionRowMetadata.detail(state: session.state.rawValue, status: session.state.title,
                 historical: historical, group: group, resultObservedAt: session.resultObservedAt,
-                activityObservedAt: session.activityObservedAt, at: now)
+                activityObservedAt: session.activityObservedAt, at: now, accessibility: accessibility)
         }
         // The section establishes that these are historical observations; the
         // row still needs to say what was observed, without relying on a glyph.
@@ -359,7 +367,7 @@ struct CompanionWork: View {
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
                 }
                 ForEach(WorkCatalog.activitySections(currentRows, at: now)) { section in
-                    workSection(section)
+                    workSection(section, at: now)
                 }
                 if !model.pairedSources.isEmpty && currentRows.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
@@ -379,11 +387,11 @@ struct CompanionWork: View {
             .refreshable { if !presentation.preview { await model.refreshAll() } }
     }
 
-    private func workSection(_ section: SessionTimePolicy.ActivitySection<WorkItem>) -> some View {
+    private func workSection(_ section: SessionTimePolicy.ActivitySection<WorkItem>, at now: Date) -> some View {
         let rows = section.rows
         let expanded = !collapsedSections.contains(section.id)
         return Section {
-            if expanded { workRows(rows) }
+            if expanded { workRows(rows, at: now) }
         } header: {
             WorkSectionSurface(theme: theme) {
                 let layout = typeSize.isAccessibilitySize
@@ -412,9 +420,9 @@ struct CompanionWork: View {
         }
     }
 
-    private func workRows(_ rows: [WorkItem]) -> some View {
+    private func workRows(_ rows: [WorkItem], at now: Date) -> some View {
         ForEach(rows, id: \.rowIdentity) { item in
-            WorkTaskRow(item: item, theme: theme,
+            WorkTaskRow(item: item, theme: theme, date: now,
                 showComputer: filter == nil && Set(items.map { $0.id.sourceID }).count > 1,
                 inspect: { inspectTask(item.id) },
                 prepareToOpen: { inbox.releaseRequest(for: item.id) },
@@ -550,6 +558,7 @@ private struct WorkSectionSurface<Content: View>: View {
 private struct WorkTaskRow: View {
     let item: WorkItem
     let theme: CompanionTheme
+    let date: Date
     let showComputer: Bool
     let inspect: () -> Void
     let prepareToOpen: () -> Void
@@ -562,11 +571,13 @@ private struct WorkTaskRow: View {
             : AnyLayout(HStackLayout(spacing: 12))
         layout {
             if !item.opensActivityCard {
-                WorkRow(item: item, theme: theme, showComputer: showComputer)
+                WorkRow(item: item, theme: theme, date: date, showComputer: showComputer,
+                        hasProviderControl: item.session.appURL != nil)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Button(action: inspect) {
-                    WorkRow(item: item, theme: theme, showComputer: showComputer)
+                    WorkRow(item: item, theme: theme, date: date, showComputer: showComputer,
+                        hasProviderControl: item.session.appURL != nil)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain)
@@ -582,7 +593,9 @@ private struct WorkTaskRow: View {
 struct WorkRow: View {
     let item: WorkItem
     let theme: CompanionTheme
+    let date: Date
     var showComputer = true
+    var hasProviderControl = false
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .subheadline) private var tokenSize = 16.0
     @ScaledMetric(relativeTo: .callout) private var tokenBaselineOffset = 4.0
@@ -595,27 +608,26 @@ struct WorkRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.session.displayName).companionText(.body, theme: theme)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                context
-                    .companionText(.supporting, theme: theme)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !item.aggregate, let status = item.statusDetail {
+                if let context {
+                    context.companionText(.supporting, theme: theme)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if !item.aggregate, let status = item.statusDetail(at: date) {
                     Text(status).companionText(item.state == .needsInput && !item.historical && item.phase != .responded ? .body : .supporting, theme: theme)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(item.statusDetail(at: date, accessibility: true) ?? status)
                 }
             }
         }
             .accessibilityElement(children: .combine)
-            .accessibilityValue(item.status)
+            .accessibilityValue(hasProviderControl ? "\(item.providerName), \(item.status)" : item.status)
     }
 
-    private var context: Text {
-        guard !item.aggregate else { return Text(item.computer) }
-        let trailing = [item.session.provider.capitalized,
-                        item.request.map { $0.request.kind == "approval" ? "Approval" : "Question" },
-                        showComputer ? item.computer : nil]
-            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-        guard !item.session.detail.isEmpty else { return Text(trailing) }
-        return Text("\(Image(systemName: "folder")) \(item.session.detail) · \(trailing)")
+    private var context: Text? {
+        let text = item.rowContext(showComputer: showComputer, hasProviderControl: hasProviderControl)
+        guard !text.isEmpty else { return nil }
+        guard !item.aggregate, !item.session.detail.isEmpty else { return Text(text) }
+        return Text("\(Image(systemName: "folder")) \(text)")
     }
 }
 
