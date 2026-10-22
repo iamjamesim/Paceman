@@ -371,7 +371,7 @@ struct TaskCard: View {
         case .available:
             let missing = "Paceman doesn’t have an answerable request for this session."
             return item.session.provider == "codex"
-                ? missing + " If you’re using the Codex desktop app on a Mac, try opening this thread there, then check Paceman again."
+                ? missing + " If you’re using the Codex desktop app on a Mac, requests from sessions started remotely may not appear until you open the thread there. Try that, then check Paceman again."
                 : missing
         }
     }
