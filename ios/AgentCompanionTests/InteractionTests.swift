@@ -2140,31 +2140,50 @@ final class InteractionTests: XCTestCase {
 }
 
 final class SidebarGestureTests: XCTestCase {
-    func testClosedSidebarLeavesScrollingAndPushedBackNavigationAlone() {
-        let root = SidebarGesturePolicy(canReveal: true, isPresented: false, rightToLeft: false, screenWidth: 393)
-        XCTAssertTrue(root.canBegin(start: CGPoint(x: 12, y: 300), velocity: CGPoint(x: 200, y: 20)))
-        XCTAssertFalse(root.canBegin(start: CGPoint(x: 100, y: 300), velocity: CGPoint(x: 200, y: 20)), "Interior horizontal scrolling belongs to content")
-        XCTAssertFalse(root.canBegin(start: CGPoint(x: 12, y: 300), velocity: CGPoint(x: 20, y: 200)), "Vertical scrolling belongs to content")
-        XCTAssertFalse(root.canBegin(start: CGPoint(x: 12, y: 300), velocity: CGPoint(x: -200, y: 20)))
-        let pushed = SidebarGesturePolicy(canReveal: false, isPresented: false, rightToLeft: false, screenWidth: 393)
-        XCTAssertFalse(pushed.canBegin(start: CGPoint(x: 12, y: 300), velocity: CGPoint(x: 200, y: 20)), "Native back navigation owns pushed pages")
+    func testRootAcceptsDeliberateOpeningAndRejectsScrolling() {
+        let root = SidebarGesturePolicy(canReveal: true, isPresented: false, rightToLeft: false)
+        XCTAssertTrue(root.canBegin(translation: CGPoint(x: 18, y: 2), velocity: CGPoint(x: 200, y: 20)))
+        XCTAssertFalse(root.canBegin(translation: CGPoint(x: 2, y: 18), velocity: CGPoint(x: 20, y: 200)))
+        XCTAssertFalse(root.canBegin(translation: CGPoint(x: 18, y: 14), velocity: CGPoint(x: 200, y: 150)), "Diagonal scrolling belongs to content")
+        XCTAssertFalse(root.canBegin(translation: CGPoint(x: 18, y: 14), velocity: CGPoint(x: 200, y: 0)), "A late horizontal acceleration must not steal a diagonal scroll")
+        XCTAssertFalse(root.canBegin(translation: CGPoint(x: 18, y: 0), velocity: CGPoint(x: 200, y: 150)))
+        XCTAssertFalse(root.canBegin(translation: CGPoint(x: -18, y: 2), velocity: CGPoint(x: -200, y: 20)))
+        XCTAssertFalse(root.canBegin(translation: CGPoint(x: -18, y: 0), velocity: CGPoint(x: 200, y: 0)), "Opening needs travel in the opening direction")
+        XCTAssertFalse(root.canBegin(translation: .zero, velocity: .zero), "Taps do not open navigation")
     }
 
-    func testOpenSidebarAcceptsOnlyHorizontalClosingPans() {
-        let open = SidebarGesturePolicy(canReveal: true, isPresented: true, rightToLeft: false, screenWidth: 393)
-        XCTAssertTrue(open.canBegin(start: CGPoint(x: 350, y: 300), velocity: CGPoint(x: -200, y: 20)))
-        XCTAssertTrue(open.canBegin(start: CGPoint(x: 100, y: 300), velocity: CGPoint(x: -200, y: 20)))
-        XCTAssertFalse(open.canBegin(start: CGPoint(x: 100, y: 300), velocity: CGPoint(x: 20, y: 200)))
-        XCTAssertFalse(open.canBegin(start: CGPoint(x: 100, y: 300), velocity: CGPoint(x: 200, y: 20)))
+    func testPushedPagesLeaveNativeBackNavigationAlone() {
+        let pushed = SidebarGesturePolicy(canReveal: false, isPresented: false, rightToLeft: false)
+        XCTAssertFalse(pushed.canBegin(translation: CGPoint(x: 30, y: 0), velocity: CGPoint(x: 300, y: 0)))
+        XCTAssertFalse(pushed.isPresentedAfterPan(translation: 250, projected: 300, width: 320))
     }
 
-    func testRightToLeftSidebarUsesTheOppositeEdgeAndDirection() {
-        let root = SidebarGesturePolicy(canReveal: true, isPresented: false, rightToLeft: true, screenWidth: 393)
-        XCTAssertTrue(root.canBegin(start: CGPoint(x: 380, y: 300), velocity: CGPoint(x: -200, y: 20)))
-        XCTAssertFalse(root.canBegin(start: CGPoint(x: 12, y: 300), velocity: CGPoint(x: -200, y: 20)))
-        XCTAssertFalse(root.canBegin(start: CGPoint(x: 380, y: 300), velocity: CGPoint(x: 200, y: 20)))
-        let open = SidebarGesturePolicy(canReveal: true, isPresented: true, rightToLeft: true, screenWidth: 393)
-        XCTAssertTrue(open.canBegin(start: CGPoint(x: 100, y: 300), velocity: CGPoint(x: 200, y: 20)))
+    func testOpeningRequiresTravelEvenWithHighProjectedVelocity() {
+        let root = SidebarGesturePolicy(canReveal: true, isPresented: false, rightToLeft: false)
+        XCTAssertFalse(root.isPresentedAfterPan(translation: 20, projected: 400, width: 320), "A short flick must settle closed")
+        XCTAssertFalse(root.isPresentedAfterPan(translation: 70, projected: 90, width: 320), "An incomplete slow drag settles closed")
+        XCTAssertTrue(root.isPresentedAfterPan(translation: 70, projected: 220, width: 320), "An intentional flick can open")
+        XCTAssertTrue(root.isPresentedAfterPan(translation: 200, projected: 210, width: 320), "A slow drag past halfway can open")
+    }
+
+    func testOpenSidebarKeepsClosingAndSettlementBehavior() {
+        let open = SidebarGesturePolicy(canReveal: true, isPresented: true, rightToLeft: false)
+        XCTAssertTrue(open.canBegin(translation: CGPoint(x: -18, y: 2), velocity: CGPoint(x: -200, y: 20)))
+        XCTAssertFalse(open.canBegin(translation: CGPoint(x: 2, y: 18), velocity: CGPoint(x: 20, y: 200)))
+        XCTAssertFalse(open.canBegin(translation: CGPoint(x: 18, y: 2), velocity: CGPoint(x: 200, y: 20)))
+        XCTAssertFalse(open.isPresentedAfterPan(translation: -30, projected: -220, width: 320), "Existing closing flicks still close")
+        XCTAssertTrue(open.isPresentedAfterPan(translation: -30, projected: -50, width: 320), "An incomplete close settles open")
+    }
+
+    func testRightToLeftMirrorsOpeningAndClosing() {
+        let root = SidebarGesturePolicy(canReveal: true, isPresented: false, rightToLeft: true)
+        XCTAssertTrue(root.canBegin(translation: CGPoint(x: -18, y: 2), velocity: CGPoint(x: -200, y: 20)))
+        XCTAssertFalse(root.canBegin(translation: CGPoint(x: 18, y: 2), velocity: CGPoint(x: 200, y: 20)))
+        XCTAssertFalse(root.isPresentedAfterPan(translation: -20, projected: -400, width: 320))
+        XCTAssertTrue(root.isPresentedAfterPan(translation: -200, projected: -210, width: 320))
+        let open = SidebarGesturePolicy(canReveal: true, isPresented: true, rightToLeft: true)
+        XCTAssertTrue(open.canBegin(translation: CGPoint(x: 18, y: 2), velocity: CGPoint(x: 200, y: 20)))
+        XCTAssertFalse(open.isPresentedAfterPan(translation: 200, projected: 210, width: 320))
     }
 }
 

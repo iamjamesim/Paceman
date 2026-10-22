@@ -34,6 +34,8 @@ struct CompanionSidebar<Content: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let policy = SidebarGesturePolicy(canReveal: canReveal, isPresented: isPresented,
+                                              rightToLeft: direction == .rightToLeft)
             let width = min(320, max(0, geometry.size.width - 64))
             let offset = min(width, max(0, (isPresented ? width : 0) + translation))
             let progress = width > 0 ? offset / width : 0
@@ -67,20 +69,17 @@ struct CompanionSidebar<Content: View>: View {
             }
             .gesture(SidebarPanGesture(
                 enabled: phase == .active && (canReveal || isPresented),
-                shouldBegin: { start, velocity in
-                    SidebarGesturePolicy(canReveal: canReveal, isPresented: isPresented,
-                        rightToLeft: direction == .rightToLeft, screenWidth: geometry.size.width)
-                        .canBegin(start: start, velocity: velocity)
+                shouldBegin: { translation, velocity in
+                    policy.canBegin(translation: translation, velocity: velocity)
                 },
                 changed: { dx in
                     dragging = true
                     translation = sign * dx
                 },
-                ended: { projected in
+                ended: { dx, projected in
                     guard dragging else { return }
-                    let destination = (isPresented ? width : 0) + sign * projected
                     withAnimation(animation) {
-                        isPresented = destination > width / 2
+                        isPresented = policy.isPresentedAfterPan(translation: dx, projected: projected, width: width)
                         translation = 0
                         dragging = false
                     }
@@ -176,13 +175,25 @@ struct SidebarGesturePolicy {
     let canReveal: Bool
     let isPresented: Bool
     let rightToLeft: Bool
-    let screenWidth: CGFloat
 
-    func canBegin(start: CGPoint, velocity: CGPoint) -> Bool {
-        guard abs(velocity.x) > abs(velocity.y) * 1.2 else { return false }
-        let dx = rightToLeft ? -velocity.x : velocity.x
-        let leadingStart = rightToLeft ? screenWidth - start.x : start.x
-        return isPresented ? dx < 0 : canReveal && leadingStart >= 0 && leadingStart <= 24 && dx > 0
+    func canBegin(translation: CGPoint, velocity: CGPoint) -> Bool {
+        let sign: CGFloat = rightToLeft ? -1 : 1
+        let dx = sign * velocity.x
+        if isPresented {
+            return abs(velocity.x) > abs(velocity.y) * 1.2 && dx < 0
+        }
+        // Opening can start anywhere on a root page. Require a clear horizontal
+        // intent in both travel and velocity so diagonal scrolling stays with content.
+        return canReveal && dx > 0
+            && sign * translation.x > abs(translation.y) * 2
+            && abs(velocity.x) > abs(velocity.y) * 2
+    }
+
+    func isPresentedAfterPan(translation: CGFloat, projected: CGFloat, width: CGFloat) -> Bool {
+        let sign: CGFloat = rightToLeft ? -1 : 1
+        // Velocity alone must not turn a short incidental drag into an opening.
+        if !isPresented && (!canReveal || sign * translation < 44) { return false }
+        return (isPresented ? width : 0) + sign * projected > width / 2
     }
 }
 
@@ -192,7 +203,7 @@ private struct SidebarPanGesture: UIGestureRecognizerRepresentable {
     var enabled: Bool
     var shouldBegin: (CGPoint, CGPoint) -> Bool
     var changed: (CGFloat) -> Void
-    var ended: (CGFloat) -> Void
+    var ended: (CGFloat, CGFloat) -> Void
     var cancelled: () -> Void
 
     func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
@@ -217,7 +228,7 @@ private struct SidebarPanGesture: UIGestureRecognizerRepresentable {
         let dx = context.converter.localTranslation?.x ?? 0
         switch pan.state {
         case .began, .changed: changed(dx)
-        case .ended: ended(dx + (context.converter.localVelocity?.x ?? 0) * 0.2)
+        case .ended: ended(dx, dx + (context.converter.localVelocity?.x ?? 0) * 0.2)
         case .cancelled, .failed: cancelled()
         default: break
         }
@@ -231,10 +242,8 @@ private struct SidebarPanGesture: UIGestureRecognizerRepresentable {
             self.converter = converter
         }
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            let location = converter.localLocation
-            let translation = converter.localTranslation ?? .zero
-            let start = CGPoint(x: location.x - translation.x, y: location.y - translation.y)
-            return configuration.enabled && configuration.shouldBegin(start, converter.localVelocity ?? .zero)
+            configuration.enabled && configuration.shouldBegin(
+                converter.localTranslation ?? .zero, converter.localVelocity ?? .zero)
         }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
