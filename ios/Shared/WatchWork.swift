@@ -134,6 +134,29 @@ enum SessionTimePolicy {
     }
 }
 
+/// Compact row metadata uses observed task facts, never the snapshot fetch time.
+enum SessionRowMetadata {
+    static func detail(state: String, status: String, historical: Bool,
+                       group: SessionTimePolicy.Group, resultObservedAt: Double?,
+                       activityObservedAt: Double?, at now: Date, calendar: Calendar = .current) -> String? {
+        let observed = (state == "finished" || state == "failed") ? resultObservedAt
+            : state == "idle" ? activityObservedAt : nil
+        guard let observed, observed.isFinite, observed > 0, observed <= now.timeIntervalSince1970 else {
+            return status
+        }
+        let date = Date(timeIntervalSince1970: observed)
+        let redundantFinished = state == "finished" && !historical && (group == .finished || group == .recent)
+        var parts = redundantFinished ? [] : [status]
+        if group == .finished || (group == .recent && calendar.isDate(date, inSameDayAs: now)) {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            formatter.dateTimeStyle = .named
+            parts.append(formatter.localizedString(for: date, relativeTo: now))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
 enum WatchContinuationDestination: String, Codable {
     case paceman, agent
 

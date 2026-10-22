@@ -539,8 +539,14 @@ struct SessionOpenButton: View {
                 TaskCardActionLabel(title: session.provider == "claude" ? "Open Claude Code" : session.appLinkTitle,
                                     theme: theme, primary: false)
             } else {
-                Image(systemName: "arrow.up.forward")
-                    .font(CompanionTextRole.link.font).foregroundStyle(theme.ink)
+                Group {
+                    if session.provider == "claude" {
+                        Text("CC").font(.caption.weight(.semibold)).fixedSize()
+                    } else {
+                        Image("ProviderCodex").resizable().scaledToFit().frame(width: 18, height: 18)
+                    }
+                }
+                    .foregroundStyle(theme.ink).accessibilityHidden(true)
                     .padding(8).frame(minWidth: 32, minHeight: 32)
                     .background(theme.ink.opacity(0.07), in: Circle())
                     .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())

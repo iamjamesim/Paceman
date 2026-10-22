@@ -490,20 +490,15 @@ private struct WatchActivityRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(task.title).font(.body).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text([task.providerName, showComputer ? task.computer : ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                    context
                         .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if ["Finished", "Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed"
                         || task.status(at: date) == "Response sent" {
-                        if let resultObservedAt = task.resultObservedAt {
-                            let completed = Date(timeIntervalSince1970: resultObservedAt)
-                            let clockTime = completed.formatted(date: .omitted, time: .shortened)
-                            let time = completed.formatted(date: task.group(at: date) == "Recent" || Calendar.current.isDateInToday(completed) ? .omitted : .abbreviated, time: .shortened)
-                                .replacingOccurrences(of: clockTime, with: clockTime.replacingOccurrences(of: " ", with: "\u{00a0}"))
-                            Text("\(task.status(at: date)) · \(time)")
-                                .font(.caption).fixedSize(horizontal: false, vertical: true)
-                        } else {
-                            Text(task.status(at: date)).font(.caption)
+                        if let detail = SessionRowMetadata.detail(state: task.state, status: task.status(at: date),
+                            historical: task.historical(at: date), group: task.temporalPresentation(at: date).group,
+                            resultObservedAt: task.resultObservedAt, activityObservedAt: task.activityObservedAt, at: date) {
+                            Text(detail).font(.caption).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -511,6 +506,13 @@ private struct WatchActivityRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(task.status(at: date))
+    }
+
+    private var context: Text {
+        let trailing = [task.providerName, showComputer ? task.computer : ""]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+        guard let project = task.project, !project.isEmpty else { return Text(trailing) }
+        return Text("\(Image(systemName: "folder")) \(project) · \(trailing)")
     }
 }
 
@@ -1165,7 +1167,14 @@ private struct WatchPhoneContinuation: View {
             Task { await prepare(destination) }
         } label: {
             HStack(alignment: .center, spacing: 8) {
-                Image(systemName: "iphone").fixedSize().accessibilityHidden(true)
+                if destination == .agent, task?.provider == "claude" {
+                    Text("CC").font(.caption.weight(.semibold)).fixedSize().accessibilityHidden(true)
+                } else if destination == .agent, task?.provider == "codex" {
+                    Image("ProviderCodex").resizable().scaledToFit()
+                        .frame(width: 18, height: 18).accessibilityHidden(true)
+                } else {
+                    Image(systemName: "iphone").fixedSize().accessibilityHidden(true)
+                }
                 Text(destination == .agent ? "Open \(task?.providerName ?? "agent app")"
                     : "Open Paceman")
                     .multilineTextAlignment(.center)
@@ -1211,10 +1220,11 @@ private enum WatchWorkPreview {
             ScrollViewReader { proxy in
                 content.task(id: target) {
                     guard let target else { return }
-                    let result = scenario?.hasSuffix("-result") == true
-                    guard result || scenario?.hasSuffix("-bottom") == true else { return }
+                    let focus = [("-result", "just-finished"), ("-today", "history-0"), ("-yesterday", "history-1")]
+                        .first { scenario?.hasSuffix($0.0) == true }?.1
+                    guard focus != nil || scenario?.hasSuffix("-bottom") == true else { return }
                     await Task.yield()
-                    proxy.scrollTo(result ? "preview/codex/just-finished" : target, anchor: .bottom)
+                    proxy.scrollTo(focus.map { "preview/codex/" + $0 } ?? target, anchor: .bottom)
                 }
             }
         }
@@ -1279,13 +1289,15 @@ private enum WatchWorkPreview {
                         title: scenario.hasPrefix("history-long") && index == 0
                             ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : titles[index],
                         computer: "MacBook Pro", state: index == 2 ? "failed" : "finished",
-                        freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300), resultObservedAt: date)
+                        freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300),
+                        project: "paceman", resultObservedAt: date)
                 }
                 values = scenario.hasPrefix("history-mixed") ? Array(tasks.prefix(2)) + history : history
                 if scenario.hasPrefix("history-finished") {
                     values.insert(WatchWorkTask(sourceID: "preview", sessionID: "just-finished", provider: "codex",
                         title: scenario.contains("long") ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : "Update the Watch app",
                         computer: "MacBook Pro", state: "finished", freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300),
+                        project: scenario.contains("long") ? "launch-creative-direction-and-visual-assets" : "paceman",
                         resultObservedAt: now - 60), at: 0)
                     values.insert(WatchWorkTask(sourceID: "preview", sessionID: "working", provider: "claude",
                         title: "Build Mac client", computer: "MacBook Pro", state: "working",

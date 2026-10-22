@@ -75,7 +75,8 @@ final class PresentationModel: ObservableObject {
             if previewScreen.hasPrefix("history-finished") {
                 rows.insert(AgentSession(id: "just-finished", provider: "codex", state: .finished,
                     name: previewScreen.contains("long") ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : "Update the Watch app",
-                    workspaceLabel: "paceman", resultObservedAt: now - 60), at: 0)
+                    workspaceLabel: previewScreen.contains("long") ? "launch-creative-direction-and-visual-assets" : "paceman",
+                    resultObservedAt: now - 60), at: 0)
                 rows.insert(AgentSession(id: "current", provider: "claude", state: .working, name: "Build Mac client"), at: 0)
             }
             if previewScreen.hasPrefix("history-idle") {

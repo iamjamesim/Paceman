@@ -122,14 +122,12 @@ struct WorkItem: Identifiable {
     }
     var statusToken: WorkStatusToken { phase.token }
     var opensActivityCard: Bool { !aggregate }
-    var statusDetail: String? {
-        if let resultObservedAt = session.resultObservedAt {
-            let date = Date(timeIntervalSince1970: resultObservedAt)
-            let clockTime = date.formatted(date: .omitted, time: .shortened)
-            let time = date.formatted(date: group == .recent || Calendar.current.isDateInToday(date) ? .omitted : .abbreviated,
-                                      time: .shortened)
-                .replacingOccurrences(of: clockTime, with: clockTime.replacingOccurrences(of: " ", with: "\u{00a0}"))
-            return "\(session.state.title) · \(time)"
+    var statusDetail: String? { statusDetail(at: Date()) }
+    func statusDetail(at now: Date) -> String? {
+        if state == .finished || state == .failed || (state == .idle && session.activityObservedAt != nil) {
+            return SessionRowMetadata.detail(state: session.state.rawValue, status: session.state.title,
+                historical: historical, group: group, resultObservedAt: session.resultObservedAt,
+                activityObservedAt: session.activityObservedAt, at: now)
         }
         // The section establishes that these are historical observations; the
         // row still needs to say what was observed, without relying on a glyph.
@@ -597,10 +595,7 @@ struct WorkRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.session.displayName).companionText(.body, theme: theme)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                Text(item.aggregate ? item.computer : [item.request != nil ? (item.request?.request.kind == "approval" ? "Approval" : "Question") : nil,
-                      item.session.provider.capitalized, item.session.detail,
-                      showComputer ? item.computer : nil]
-                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
+                context
                     .companionText(.supporting, theme: theme)
                     .fixedSize(horizontal: false, vertical: true)
                 if !item.aggregate, let status = item.statusDetail {
@@ -611,6 +606,16 @@ struct WorkRow: View {
         }
             .accessibilityElement(children: .combine)
             .accessibilityValue(item.status)
+    }
+
+    private var context: Text {
+        guard !item.aggregate else { return Text(item.computer) }
+        let trailing = [item.session.provider.capitalized,
+                        item.request.map { $0.request.kind == "approval" ? "Approval" : "Question" },
+                        showComputer ? item.computer : nil]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        guard !item.session.detail.isEmpty else { return Text(trailing) }
+        return Text("\(Image(systemName: "folder")) \(item.session.detail) · \(trailing)")
     }
 }
 

@@ -3,6 +3,46 @@ import SwiftUI
 @testable import AgentCompanion
 
 final class InteractionTests: XCTestCase {
+    func testRowMetadataUsesTaskObservationsAndLocalDaysWithoutInventingActiveTimes() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 0, minute: 10)))
+        func detail(_ state: String, _ status: String, group: SessionTimePolicy.Group = .recent,
+                    result: Double? = nil, activity: Double? = nil, historical: Bool = false) -> String? {
+            SessionRowMetadata.detail(state: state, status: status, historical: historical, group: group,
+                resultObservedAt: result, activityObservedAt: activity, at: now, calendar: calendar)
+        }
+        let minuteAgo = now.timeIntervalSince1970 - 60
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        formatter.dateTimeStyle = .named
+        let relative = formatter.localizedString(for: Date(timeIntervalSince1970: minuteAgo), relativeTo: now)
+        XCTAssertEqual(detail("finished", "Finished", group: .finished, result: now.timeIntervalSince1970),
+            formatter.localizedString(for: now, relativeTo: now))
+        XCTAssertEqual(detail("finished", "Finished", group: .finished, result: minuteAgo), relative)
+        XCTAssertEqual(detail("finished", "Finished", result: minuteAgo), relative)
+        XCTAssertEqual(detail("idle", "Idle", activity: minuteAgo), "Idle · " + relative)
+        XCTAssertEqual(detail("failed", "Failed", result: minuteAgo), "Failed · " + relative)
+        XCTAssertEqual(detail("failed", "Failed", group: .attention, result: minuteAgo), "Failed")
+        XCTAssertEqual(detail("finished", "Finished", group: .lastKnown, result: minuteAgo, historical: true), "Finished")
+        for state in ["working", "needs_input"] {
+            XCTAssertEqual(detail(state, state, group: .working, result: minuteAgo, activity: minuteAgo), state)
+        }
+        // Across local midnight and the 25-hour DST day, headings supply the date.
+        let yesterday = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 23, minute: 59))).timeIntervalSince1970
+        let older = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 31, hour: 12))).timeIntervalSince1970
+        for observed in [yesterday, older] {
+            XCTAssertNil(detail("finished", "Finished", result: observed))
+            XCTAssertEqual(detail("failed", "Failed", result: observed), "Failed")
+            XCTAssertEqual(detail("finished", "Finished", group: .lastKnown, result: observed, historical: true), "Finished")
+        }
+        // A recent result crossing midnight still belongs to Finished and keeps relative time.
+        XCTAssertNotNil(detail("finished", "Finished", group: .finished, result: yesterday))
+        for invalid in [nil, .nan, .infinity, 0, now.timeIntervalSince1970 + 60] as [Double?] {
+            XCTAssertEqual(detail("finished", "Finished", result: invalid), "Finished")
+        }
+    }
+
     @MainActor func testRecentDaysUseLocalCalendarAndKeepUnknownDatesUndated() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
@@ -288,11 +328,9 @@ final class InteractionTests: XCTestCase {
         XCTAssertTrue(items.allSatisfy { $0.group == .recent && !$0.historical && $0.request == nil })
         XCTAssertEqual(WorkCatalog.sorted(items).map(\.session.id), ["morning", "last-night"])
         XCTAssertEqual(items.first?.state, .failed)
-        for item in items {
-            let detail = try XCTUnwrap(item.statusDetail)
-            XCTAssertTrue(detail.hasPrefix("\(item.state.title) · "))
-            XCTAssertFalse(detail.contains("seen"))
-        }
+        XCTAssertEqual(items.first?.statusDetail, "Failed")
+        XCTAssertFalse(items.last?.statusDetail?.contains("Finished") ?? false)
+        XCTAssertEqual(items.last?.status, "Finished") // State remains available to VoiceOver.
     }
     func testReviewLeaseRenewalCannotReuseDraftForChangedContent() throws {
         let original = InputRequest(requestID: "request", version: 1, provider: "codex", sessionID: "session",
@@ -2058,6 +2096,7 @@ final class InteractionTests: XCTestCase {
         let finished = item(.finished)
         XCTAssertEqual(finished.group, .recent)
         XCTAssertEqual(finished.statusToken, .finished)
+        XCTAssertEqual(finished.statusDetail, "Finished", "Undated results keep their observed state")
         let failed = item(.failed)
         XCTAssertEqual(failed.group, .attention)
         XCTAssertEqual(failed.statusToken, .failed)
