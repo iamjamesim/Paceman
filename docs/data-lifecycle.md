@@ -141,8 +141,10 @@ WatchConnectivity replies, never application context or queued transfers.
 An active Watch review renews its display lease; drafts survive only an identical
 request in the same generation.
 Pending sibling requests take precedence over a submission receipt.
-Visible Watch reviews advance within the selected session; uncertain submissions
-remain available for explicit retry.
+Visible Watch reviews advance through current pending questions across sessions
+and computers; their metadata and content fingerprints travel only in live replies.
+Uncertain submissions keep their exact envelope for explicit retry. Leaving Review
+or losing connectivity never confirms delivery or automatically resends a response.
 
 Claude child hook waits are scoped by actor and survive parent turn completion;
 child callbacks cannot finish the parent. See [native request coverage](native-request-coverage.md)

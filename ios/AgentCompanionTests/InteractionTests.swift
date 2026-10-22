@@ -2258,6 +2258,110 @@ extension InteractionTests {
         XCTAssertEqual(watch.status, try phone().phase.title)
     }
 
+    @MainActor func testWatchReviewProjectsExactPendingQuestionsAndPreservesUncertainResponses() async throws {
+        let firstSource = refreshSource("review-one"), secondSource = refreshSource("review-two")
+        var firstListing = fixture(), secondListing = fixture()
+        firstListing["sourceID"] = firstSource.sourceID
+        secondListing["sourceID"] = secondSource.sourceID
+        var firstRequests = try XCTUnwrap(firstListing["requests"] as? [[String: Any]])
+        var sibling = firstRequests[0]
+        sibling["requestID"] = UUID().uuidString
+        sibling["title"] = "Sibling question"
+        firstRequests.append(sibling)
+        firstListing["requests"] = firstRequests
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [firstSource, secondSource]
+        model.snapshots = [:]
+        var posts = 0
+        var secondUnavailable = false
+        var loseSubmissionReply = true
+        InteractionURLProtocol.start = { transport in
+            let first = transport.request.url?.host == firstSource.endpoint.host
+            let source = first ? firstSource : secondSource
+            if transport.request.httpMethod == "POST" {
+                posts += 1
+                if loseSubmissionReply {
+                    transport.client?.urlProtocol(transport, didFailWithError: URLError(.timedOut))
+                } else {
+                    let data = try! JSONSerialization.data(withJSONObject: ["status": "submitted",
+                        "generation": firstListing["generation"]!, "requestID": firstRequests[0]["requestID"]!, "version": 1])
+                    transport.finish(data)
+                }
+            } else if transport.request.url?.path == "/v1/snapshot" {
+                transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+            } else if !first && secondUnavailable {
+                transport.client?.urlProtocol(transport, didFailWithError: URLError(.notConnectedToInternet))
+            } else {
+                transport.finish(try! JSONSerialization.data(withJSONObject: first ? firstListing : secondListing))
+            }
+        }
+        defer {
+            InteractionURLProtocol.start = nil
+            for source in [firstSource, secondSource] {
+                SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+            }
+        }
+        func review() async throws -> WatchReviewSnapshot {
+            let reply = await model.handleWatchWork(["operation": "review"])
+            return try JSONDecoder().decode(WatchReviewSnapshot.self, from: XCTUnwrap(reply["data"] as? Data))
+        }
+        let initial = try await review()
+        XCTAssertEqual(initial.requests.count, 3, "Full native listings include siblings and other computers")
+        XCTAssertEqual(Set(initial.requests.map(\.taskID)).count, 2)
+        XCTAssertTrue(initial.continuationTaskIDs.isEmpty)
+        XCTAssertTrue(model.interactions.items.isEmpty, "Watch demand does not activate the foreground phone inbox")
+        let siblingID = sibling["requestID"] as! String
+        let selected = try XCTUnwrap(initial.requests.first { $0.id.hasSuffix("/" + siblingID) })
+        var message: [String: Any] = ["operation": "request", "sourceID": firstSource.sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude", "requestKey": selected.id,
+            "requestFingerprint": selected.fingerprint!]
+        let reply = await model.handleWatchWork(message)
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reply["data"] as? Data))
+        XCTAssertEqual(prompt.request.id, siblingID, "Exact selection must not return the first sibling instead")
+        message["requestFingerprint"] = "stale-content"
+        let stale = await model.handleWatchWork(message)
+        XCTAssertEqual(stale["reviewUnavailable"] as? Bool, true)
+        XCTAssertNil(stale["data"], "A stale form must not receive replacement content under the same request identity")
+        message["requestFingerprint"] = selected.fingerprint!
+        let response = InputSubmission(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        let payload: [String: Any] = ["operation": "submit", "sourceID": firstSource.sourceID,
+            "requestFingerprint": selected.fingerprint!, "submission": try JSONEncoder().encode(response)]
+        let uncertain = await model.handleWatchWork(payload)
+        XCTAssertEqual(uncertain["unconfirmed"] as? Bool, true)
+        let stillPending = try await review()
+        XCTAssertTrue(stillPending.requests.contains(selected), "A live uncertain question remains available for explicit retry")
+        let reopened = await model.handleWatchWork(message)
+        let retained = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reopened["data"] as? Data))
+        XCTAssertEqual(retained.submission, response, "Navigation retains the exact idempotent response")
+        XCTAssertEqual(posts, 1, "Reads and queue changes never retry a response")
+        firstListing["requests"] = [firstRequests[0]]
+        let removed = try await review()
+        XCTAssertFalse(removed.requests.contains(selected), "Canceled native questions leave Review even with a retained uncertain envelope")
+        secondUnavailable = true
+        let partial = try await review()
+        XCTAssertEqual(partial.requests.count, 1, "An unavailable computer does not block another computer's question")
+        XCTAssertTrue(partial.continuationTaskIDs.isEmpty, "Failed native reads must not invent an actionable continuation")
+        XCTAssertEqual(posts, 1)
+        let last = try XCTUnwrap(partial.requests.first)
+        let lastRead = await model.handleWatchWork(["operation": "request", "sourceID": firstSource.sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude", "requestKey": last.id,
+            "requestFingerprint": last.fingerprint!])
+        let lastPrompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(lastRead["data"] as? Data))
+        loseSubmissionReply = false
+        let lastResponse = InputSubmission(generation: lastPrompt.generation, requestID: lastPrompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        let sent = await model.handleWatchWork(["operation": "submit", "sourceID": firstSource.sourceID,
+            "requestFingerprint": last.fingerprint!, "submission": try JSONEncoder().encode(lastResponse)])
+        XCTAssertEqual(sent["submitted"] as? Bool, true)
+        let finished = try await review()
+        XCTAssertTrue(finished.requests.isEmpty, "A delayed native listing cannot revive a confirmed response")
+        XCTAssertTrue(finished.continuationTaskIDs.isEmpty, "A sent receipt is not a new continuation question")
+        XCTAssertEqual(posts, 2)
+    }
+
     @MainActor func testLateWatchReceiptDoesNotRestoreInboxContentAfterLifecycleChange() async throws {
         let source = PairedSource(endpoint: URL(string: "https://watch-lifecycle.example")!, sourceID: sourceID,
             clientID: "client", credential: "test")

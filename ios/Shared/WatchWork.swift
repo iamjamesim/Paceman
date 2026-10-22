@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Time changes presentation, never the provider-owned state. All clocks are
 /// supplied by the caller so cached phone and Watch rows age identically.
@@ -163,6 +164,16 @@ struct InputRequest: Codable, Identifiable, Equatable {
             && detail == other.detail && questions == other.questions && contentVersion == other.contentVersion
             && approval == other.approval && responseOptions == other.responseOptions
     }
+    /// Lease renewal is not a new decision; changed content is.
+    var reviewFingerprint: String {
+        let content = InputRequest(requestID: requestID, version: version, provider: provider,
+            sessionID: sessionID, kind: kind, title: title, detail: detail, questions: questions,
+            remainingSeconds: 0, contentVersion: contentVersion, approval: approval, responseOptions: responseOptions)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        guard let data = try? encoder.encode(content) else { return "" }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
     var content: Content? {
         if contentVersion == 3 {
             guard kind == "question", approval == nil, responseOptions == nil,
@@ -238,6 +249,7 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
     var presentationSymbol: String? = nil
     var resultObservedAt: Double? = nil
     var retainedCompletion: Bool? = nil
+    var reviewable: Bool? = nil
     var id: String { "\(sourceID)/\(provider)/\(sessionID)" }
     var providerName: String {
         switch provider { case "claude": return "Claude Code"; case "codex": return "Codex"; default: return provider.capitalized }
@@ -292,6 +304,55 @@ struct WatchWorkSnapshot: Codable, Equatable {
     var sources: [WatchWorkSource]? = nil
     var projectionGeneration: String? = nil
     var projectionRevision: UInt64? = nil
+}
+
+/// Live reply metadata only. Full question content is read for the selected item.
+struct WatchReviewRequest: Codable, Equatable, Identifiable {
+    let id: String
+    let taskID: String
+    var fingerprint: String? = nil
+}
+struct WatchReviewSnapshot: Codable {
+    let work: WatchWorkSnapshot
+    let requests: [WatchReviewRequest]
+    var continuationTaskIDs: [String] = []
+}
+
+/// One review destination, with stable questions and no navigation-stack growth.
+struct WatchReviewQueue {
+    private(set) var requests: [WatchReviewRequest] = []
+    private(set) var completed: Set<String> = []
+    var current: WatchReviewRequest? { requests.first }
+    mutating func reconcile(_ pending: [WatchReviewRequest], startingAt taskID: String? = nil) {
+        let previous = current
+        let available = pending.filter { !completed.contains($0.id) }
+        requests = requests.filter { available.contains($0) }
+        for request in available where !requests.contains(where: { $0.id == request.id }) { requests.append(request) }
+        // Finish siblings before moving to another session. Arrivals never
+        // replace a question that is still present in the current listing.
+        if previous.map({ !requests.contains($0) }) ?? true {
+            if let preferred = previous?.taskID ?? taskID,
+               let index = requests.firstIndex(where: { $0.taskID == preferred }) {
+                requests.insert(requests.remove(at: index), at: 0)
+            }
+        }
+    }
+    mutating func complete(_ request: WatchReviewRequest) {
+        guard current == request else { return } // Ignore callbacks from an old form.
+        completed.insert(request.id)
+        let previous = requests.removeFirst()
+        if let sibling = requests.firstIndex(where: { $0.taskID == previous.taskID }) {
+            requests.insert(requests.remove(at: sibling), at: 0)
+        }
+    }
+    mutating func withdraw(_ request: WatchReviewRequest) {
+        // Withdrawal is not completion: the identical request may reconnect.
+        guard current == request else { return }
+        let previous = requests.removeFirst()
+        if let sibling = requests.firstIndex(where: { $0.taskID == previous.taskID }) {
+            requests.insert(requests.remove(at: sibling), at: 0)
+        }
+    }
 }
 
 /// Interactive replies can cross in flight. A delayed pre-answer list must

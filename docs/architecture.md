@@ -55,6 +55,10 @@ cannot erase that reading.
 WatchConnectivity also supplies the paired-computer list and cached readings.
 The Watch app uses the phone's session presentation to answer supported questions
 and approvals, with continuation on iPhone through live WatchConnectivity.
+Watch Review follows the phone’s live pending-question identities across computers,
+finishes siblings in the selected session first, and returns to the sessions list
+when no questions remain. Canceled or unavailable questions leave automatically;
+unchanged questions retain their draft. Ordinary session details remain passive.
 Codex usage remains available in complications.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules

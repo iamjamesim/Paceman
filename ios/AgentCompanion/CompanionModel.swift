@@ -864,11 +864,12 @@ extension CompanionModel {
     private func reconcileWatchListing(sourceID: String, pending: [PendingInput]) {
         for (id, _) in watchTracking {
             guard let item = watchRequests[id], item.source.sourceID == sourceID else { continue }
-            let native = pending.first { $0.source.sourceID == sourceID
-                && $0.request.sessionID == item.request.sessionID && $0.request.provider == item.request.provider }
-            if let native {
-                if native.id != item.id || native.request.version != item.request.version { watchTracking[id]?.active = false }
-            } else if watchSubmissions[id] == nil { watchTracking[id]?.active = false }
+            let native = pending.first { $0.id == item.id && $0.request.hasSameReview(as: item.request) }
+            if native != nil {
+                watchTracking[id]?.active = true
+            } else if watchSubmissions[id] == nil || pending.contains(where: {
+                $0.request.sessionID == item.request.sessionID && $0.request.provider == item.request.provider
+            }) { watchTracking[id]?.active = false }
         }
     }
 
@@ -882,14 +883,11 @@ extension CompanionModel {
     }
 
     private func rememberWatchRequest(_ item: PendingInput, snapshot: Snapshot) {
-        if let old = watchRequests[item.id], old.request.version != item.request.version {
+        if let old = watchRequests[item.id], !old.request.hasSameReview(as: item.request) {
             watchSubmissions.removeValue(forKey: item.id)
             watchConfirmed.remove(item.id)
             watchRejected.remove(item.id)
         }
-        let siblings = watchRequests.values.filter { $0.source.sourceID == item.source.sourceID
-            && $0.request.sessionID == item.request.sessionID && $0.request.provider == item.request.provider && $0.id != item.id }
-        for previous in siblings { watchTracking[previous.id]?.active = false }
         watchRequests[item.id] = item
         watchTracking[item.id] = (snapshot.generation, snapshot.sessions?.first {
             $0.id == item.request.sessionID && $0.provider == item.request.provider
@@ -938,7 +936,8 @@ extension CompanionModel {
                     presentationGroup: item.group.rawValue,
                     project: session.detail.isEmpty ? nil : session.detail, observedAt: snapshot.observedAt,
                     presentationSymbol: item.statusToken.symbol ?? "circle.dotted",
-                    resultObservedAt: session.resultObservedAt, retainedCompletion: item.retainedCompletion)
+                    resultObservedAt: session.resultObservedAt, retainedCompletion: item.retainedCompletion,
+                    reviewable: item.request != nil ? true : item.delivery != nil || item.inputAvailability == .available || item.inputAvailability == .disabled ? false : nil)
             }
         }
         let current = values.filter { $0.temporalPresentation(at: now).glanceEligible }
@@ -1116,6 +1115,46 @@ extension CompanionModel {
 #endif
 
 extension CompanionModel {
+    private func watchReviewRequests(_ source: PairedSource, epoch: UUID) async -> [PendingInput]? {
+        if let refresh = startRefresh(source, fromWatch: true) { _ = await refresh.value }
+        guard !Task.isCancelled, sourceEpoch == epoch, !isRevoked(source.sourceID),
+              errors[source.sourceID] == nil, snapshotIsFresh(source.sourceID),
+              let snapshot = snapshots[source.sourceID] else { return nil }
+        guard snapshot.interactionsEnabled == true else { return [] }
+        if foreground {
+            // The phone's existing foreground owner is the sole native-list reader.
+            await requestRefreshes[source.sourceID]?.task.value
+            guard !Task.isCancelled, sourceEpoch == epoch, snapshots[source.sourceID]?.identity == snapshot.identity else { return nil }
+            let pending = (snapshot.sessions ?? []).flatMap {
+                interactions.pendingRequests(for: WorkIdentity(sourceID: source.sourceID, sessionID: $0.id, provider: $0.provider))
+            }
+            guard !pending.isEmpty || interactions.availability[source.sourceID] == .available
+                    || interactions.availability[source.sourceID] == .disabled else { return nil }
+            return pending
+        }
+        let started = ProcessInfo.processInfo.systemUptime
+        do {
+            let listing = try await client.inputRequests(source, contentVersion: snapshot.interactionContentVersion)
+            guard !Task.isCancelled, sourceEpoch == epoch, !isRevoked(source.sourceID),
+                  snapshots[source.sourceID]?.identity == snapshot.identity else { return nil }
+            let pending = listing.requests.compactMap { request -> PendingInput? in
+                guard started + request.remainingSeconds > ProcessInfo.processInfo.systemUptime,
+                      snapshot.sessions?.contains(where: { $0.id == request.sessionID && $0.provider == request.provider }) == true else { return nil }
+                return PendingInput(source: source, generation: listing.generation, request: request,
+                                    expiresAtUptime: started + request.remainingSeconds)
+            }
+            reconcileWatchListing(sourceID: source.sourceID, pending: pending)
+            reconcileWatchLifetime(sourceID: source.sourceID, awaiting: listing.awaitingRequestIDs.map(Set.init), confirmed: watchConfirmed)
+            for item in pending where watchRequests.count < 256 || watchRequests[item.id] != nil {
+                rememberWatchRequest(item, snapshot: snapshot)
+            }
+            return pending.filter {
+                !watchConfirmed.contains($0.id) && !watchRejected.contains($0.id)
+                    && interactions.response(for: $0)?.phase != .submitted && interactions.response(for: $0)?.phase != .rejected
+            }
+        } catch { return nil } // No usable native listing means no answerable review.
+    }
+
     /// Watch-initiated reads use background-owned fetches, without activating the
     /// phone's foreground response inbox or placing sensitive content in a queue.
     func handleWatchWork(_ message: [String: Any]) async -> [String: Any] {
@@ -1136,6 +1175,36 @@ extension CompanionModel {
         watchRejected = watchRejected.intersection(watchRequests.keys)
         watchTracking = watchTracking.filter { watchRequests[$0.key] != nil }
         do {
+            if message["operation"] as? String == "review" {
+                // This demand exists only while Watch Review is visible. It does
+                // not activate the phone inbox or install a background poll.
+                let reads = pairedSources.filter { !isRevoked($0.sourceID) }.map { source in
+                    Task { @MainActor in (source.sourceID, await self.watchReviewRequests(source, epoch: epoch)) }
+                }
+                var pending: [PendingInput] = []
+                var verifiedSources: Set<String> = []
+                for read in reads {
+                    let (sourceID, requests) = await read.value
+                    if let requests { pending += requests; verifiedSources.insert(sourceID) }
+                }
+                guard !Task.isCancelled, epoch == sourceEpoch else { return ["error": "Connections changed. Refresh Activity."] }
+                let work = watchWorkSnapshot()
+                let visible = Set(work.tasks.filter { !$0.historical(at: Date()) && $0.visible(at: Date()) }.map(\.id))
+                let requests = pending.compactMap { item -> WatchReviewRequest? in
+                    let taskID = "\(item.source.sourceID)/\(item.request.provider)/\(item.request.sessionID)"
+                    guard visible.contains(taskID) else { return nil }
+                    return WatchReviewRequest(id: item.id, taskID: taskID, fingerprint: item.request.reviewFingerprint)
+                }
+                let pendingTasks = Set(requests.map(\.taskID))
+                let continuations = work.tasks.filter {
+                    verifiedSources.contains($0.sourceID) && visible.contains($0.id)
+                        && $0.state == "needs_input" && !pendingTasks.contains($0.id)
+                        && $0.presentationSymbol != "paperplane"
+                }.map(\.id)
+                var reply = encoded(WatchReviewSnapshot(work: work, requests: requests, continuationTaskIDs: continuations))
+                reply["workSnapshot"] = encoded(work)["data"]
+                return reply
+            }
             if let operation = message["operation"] as? String, ["tasks", "cachedTasks", "refreshTasks"].contains(operation) {
                 if operation != "cachedTasks" {
                     let scope = message["sourceID"] as? String
@@ -1184,9 +1253,15 @@ extension CompanionModel {
                 let destination = ResponseGuidance.destination(for: provider)
                 guard snapshot.interactionsEnabled == true else { return ["nativeOnly": true] }
                 let identity = WorkIdentity(sourceID: sourceID, sessionID: sessionID, provider: provider)
-                let known = interactions.pendingRequests(for: identity).first
+                let requestedKey = message["requestKey"] as? String
+                let fingerprint = message["requestFingerprint"] as? String
+                let known = interactions.pendingRequests(for: identity).first {
+                    (requestedKey == nil || $0.id == requestedKey) && (fingerprint == nil || $0.request.reviewFingerprint == fingerprint)
+                }
                 let response = interactions.response(for: identity).flatMap {
-                    known == nil || known?.id == $0.item.id ? $0 : nil
+                    (requestedKey == nil || $0.item.id == requestedKey)
+                        && (fingerprint == nil || $0.item.request.reviewFingerprint == fingerprint)
+                        && (known == nil || known?.id == $0.item.id) ? $0 : nil
                 }
                 if let item = known ?? (response?.phase == .submitted ? nil : response?.item), item.expiresAtUptime > started,
                    watchRequests.count < 256 || watchRequests[item.id] != nil {
@@ -1212,11 +1287,25 @@ extension CompanionModel {
                       snapshot.sessions?.contains(where: { $0.id == sessionID && $0.provider == provider }) == true else {
                     return ["error": "No response is available. Check \(destination)."]
                 }
+                let listed = requests.requests.map {
+                    PendingInput(source: source, generation: requests.generation, request: $0,
+                                 expiresAtUptime: started + $0.remainingSeconds)
+                }
+                reconcileWatchListing(sourceID: sourceID, pending: listed)
                 reconcileWatchLifetime(sourceID: sourceID, awaiting: requests.awaitingRequestIDs.map(Set.init),
                     confirmed: confirmed)
                 interactions.reconcileNativeLifetime(requests, sourceID: sourceID, eligible: inboxConfirmed)
                 publishWatchWork()
-                guard let request = requests.requests.first(where: { $0.sessionID == sessionID && $0.provider == provider }) else {
+                guard let request = requests.requests.first(where: {
+                    $0.sessionID == sessionID && $0.provider == provider
+                        && (requestedKey == nil || "\(sourceID)/\(requests.generation)/\($0.id)" == requestedKey)
+                        && (fingerprint == nil || $0.reviewFingerprint == fingerprint)
+                }) else {
+                    if requestedKey != nil {
+                        var reply: [String: Any] = ["reviewUnavailable": true]
+                        reply["workSnapshot"] = encoded(watchWorkSnapshot())["data"]
+                        return reply
+                    }
                     if let item = watchRequests.values.first(where: {
                         $0.source.sourceID == sourceID && $0.generation == requests.generation
                             && $0.request.sessionID == sessionID && $0.request.provider == provider
@@ -1259,6 +1348,7 @@ extension CompanionModel {
                 let id = "\(sourceID)/\(submission.generation)/\(submission.requestID)"
                 let destination = ResponseGuidance.destination(for: watchRequests[id]?.request.provider)
                 guard let item = watchRequests[id], submission.valid(for: item.request),
+                      (message["requestFingerprint"] as? String).map({ $0 == item.request.reviewFingerprint }) ?? true,
                       !watchRejected.contains(id), interactions.response(for: item)?.phase != .rejected,
                       watchSubmissions[id] == nil || watchSubmissions[id] == submission,
                       interactions.response(for: item).map({ $0.submission == submission }) ?? true else {
