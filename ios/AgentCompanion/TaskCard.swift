@@ -458,7 +458,7 @@ struct TaskCard: View {
 
     private func continuationTitle(_ item: WorkItem) -> String {
         inbox.availability[item.id.sourceID] == .available
-            ? "Request unavailable" : ResponseGuidance.continuation(for: item.session.provider)
+            ? "Request not accessible yet" : ResponseGuidance.continuation(for: item.session.provider)
     }
 
     private func explanation(_ item: WorkItem) -> String? {
@@ -469,10 +469,9 @@ struct TaskCard: View {
         case .unavailable: return "Paceman couldn’t retrieve this request. It will retry while the app is open."
         case .disabled: return "Review the full request and all response options in the agent."
         case .available:
-            let missing = "Paceman doesn’t have an answerable request for this session."
             return item.session.provider == "codex"
-                ? missing + "\n\nIf you’re using the Codex desktop app on a Mac, requests from sessions started remotely may not appear until you open the thread there. Try that, then check Paceman again."
-                : missing
+                ? "If you use Codex desktop on a Mac, requests from remotely started sessions may not appear until you open the thread there. Then check Paceman again.\n\nAn assistant with access to your Mac may be able to open it for you."
+                : nil
         }
     }
 }
