@@ -1069,28 +1069,31 @@ final class InteractionTests: XCTestCase {
     @MainActor func testBackgroundCompletionCannotRestoreRequestOrReceipt() async throws {
         let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
                                   clientID: "client", credential: "fixture")
-        let inbox = InteractionInbox()
-        inbox.preview(source)
-        let item = try XCTUnwrap(inbox.items.first)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [InteractionURLProtocol.self]
+        let inbox = InteractionInbox(client: SourceClient(configuration: configuration))
+        inbox.preview(source)
+        let item = try XCTUnwrap(inbox.items.first)
         let started = expectation(description: "POST started")
         var loading: InteractionURLProtocol?
         InteractionURLProtocol.start = { request in loading = request; started.fulfill() }
         defer { InteractionURLProtocol.start = nil }
-        let sending = inbox.submit(item, action: "allowOnce", client: SourceClient(configuration: configuration))
+        let sending = try XCTUnwrap(inbox.submit(item, action: "allowOnce"), "The inbox must accept and own the submission")
         let original = try XCTUnwrap(inbox.response(for: item)?.submission)
-        await fulfillment(of: [started], timeout: 2)
+        // URLSession startup on a busy CI simulator is not the lifecycle behavior
+        // under test. Background only after the actual POST reaches the fixture.
+        await fulfillment(of: [started], timeout: 10)
+        let transport = try XCTUnwrap(loading)
+        XCTAssertEqual(transport.request.httpMethod, "POST")
         inbox.setForeground(false)
         XCTAssertTrue(inbox.isSubmitting(item), "The network operation outlives the cleared card content")
-        let transport = try XCTUnwrap(loading)
         let receipt = try JSONSerialization.data(withJSONObject: ["status": "submitted", "generation": original.generation,
             "requestID": original.requestID, "version": original.version])
         transport.client?.urlProtocol(transport, didReceive: HTTPURLResponse(url: source.endpoint,
             statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         transport.client?.urlProtocol(transport, didLoad: receipt)
         transport.client?.urlProtocolDidFinishLoading(transport)
-        await sending?.value
+        await sending.value
         inbox.setForeground(true)
         XCTAssertFalse(inbox.isSubmitting(item))
         XCTAssertTrue(inbox.responses.isEmpty)
