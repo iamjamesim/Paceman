@@ -4,7 +4,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import plistlib
 import socket
+import subprocess
 import sys
 import time
 import unicodedata
@@ -19,6 +21,48 @@ EVENTS = {
 }
 TERMINAL_HOOKS = {"Stop", "Interrupt", "SessionEnd"}
 QUESTION_MATCHER = "^request_user_input(_async)?$"
+
+
+def process_identity(pid):
+    result = subprocess.run(["/bin/ps", "-p", str(pid), "-o", "ppid=,comm="],
+                            capture_output=True, text=True, check=True, timeout=.15)
+    parent, executable = result.stdout.strip().split(None, 1)
+    return int(parent), Path(executable)
+
+
+def desktop_owned_runtime(*, reader=process_identity, pid=None):
+    """Recognize only the Codex runtime directly owned by its desktop app.
+
+    Inspect executable identities, never process arguments or conversation data.
+    A bundled CLI launched by a terminal or an agent tool is not the app owner.
+    """
+    pid = os.getppid() if pid is None else pid
+    visited = set()
+    try:
+        for _ in range(8):
+            if pid <= 1 or pid in visited:
+                return False
+            visited.add(pid)
+            parent, executable = reader(pid)
+            if executable.name == "codex":
+                _, owner = reader(parent)
+                bundle = owner.parent.parent.parent
+                info = plistlib.loads((bundle / "Contents/Info.plist").read_bytes())
+                return (info.get("CFBundleIdentifier") == "com.openai.codex"
+                        and owner == bundle / "Contents/MacOS" / info.get("CFBundleExecutable", "")
+                        and executable.resolve().is_relative_to(bundle.resolve()))
+            pid = parent
+    except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError, plistlib.InvalidFileException):
+        pass
+    return False
+
+
+def transient_desktop_fork(data):
+    # An explicitly absent transcript means this fork has no saved history.
+    # Missing fields and saved/user CLI forks must continue to be observed.
+    return (data.get("hook_event_name") == "SessionStart" and data.get("source") == "fork"
+            and "transcript_path" in data and data["transcript_path"] is None
+            and sys.platform == "darwin" and desktop_owned_runtime())
 
 
 def deliver(message, path, hook):
@@ -95,6 +139,10 @@ def main():
             path = Path(os.environ.get("PACEMAN_HOOK_SOCKET", str(Path.home() / "Library/Application Support/Paceman/hook.sock")))
             message = {"command": "agent-event", "session": session, "turn": turn,
                        "event": event, "hook": data["hook_event_name"]}
+            if transient_desktop_fork(data):
+                message["transientDesktopFork"] = True
+            if isinstance(data.get("transcript_path"), str) and data["transcript_path"]:
+                message["hasTranscript"] = True
             if data.get("hook_event_name") in ("PermissionRequest", "PostToolUse"):
                 if scope := attention_key(data):
                     message["attentionKey"] = scope
