@@ -504,8 +504,11 @@ class DesktopRequests:
                 decisions.add((turn, type(request['id']).__name__, str(request['id'])))
         # This is the owner's complete pending set, including native-only
         # decisions. Empty is confirmed resolution; disconnect publishes None.
+        outcomes = {t['turnId']: t['status'] for t in reversed(turns)
+                    if isinstance(t.get('turnId'), str) and isinstance(t.get('status'), str)}
         self.attention(session, PendingDecisions(self.owners[session], frozenset(decisions),
-            known_turns=frozenset(t['turnId'] for t in turns if isinstance(t.get('turnId'), str))))
+            known_turns=frozenset(t['turnId'] for t in turns if isinstance(t.get('turnId'), str)),
+            turn_states=frozenset(outcomes.items())))
         if counts != self.observed_counts.get(session):
             self.observed_counts[session] = counts
             if self.broker.diagnostics is not None:

@@ -119,6 +119,13 @@ start time and Linux boot. Saved Codex turn IDs and confirmed completed/failed
 outcomes recover missed hooks; a separate reader's interrupted status cannot
 finish live work.
 
+Mac retains up to 128 Codex lookup identities and lifecycle records in private
+SQLite. After restart, identities reattach the native adapters; active labels and
+decisions require fresh owner evidence. Saved history can establish completed or
+failed outcomes, never continued work from an interrupted status. Source disable,
+session end and normal retirement clear tracking; unverified recovery bindings
+remain bounded so a delayed owner can restore an older pending plan decision.
+
 Requests and answers are RAM-only and excluded from snapshots, SQLite, APNs,
 accessory BLE and diagnostics. Codex desktop requests use private versioned IPC
 and belong to the existing native owner. Disconnect withdraws remote cards

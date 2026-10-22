@@ -90,6 +90,7 @@ class MacSource:
         # Row IDs stay hashed; validated thread IDs also travel as app destinations.
         self.thread_ids = {}
         self.turn_ids = {}
+        self.recovering_sessions = {}
         self.confirmed_turns = {}
         self.closed = False
         self.titles = SessionTitles(self._titles_changed, reader=title_reader, monotonic=monotonic)
@@ -127,6 +128,35 @@ class MacSource:
             if tracked is None or by_turn is None:
                 # A missing owner/channel is unknown, not confirmed empty.
                 return
+            if key in self.recovering_sessions:
+                if not isinstance(by_turn, PendingDecisions):
+                    return
+                states = dict(by_turn.turn_states)
+                active = [turn for turn, state in states.items() if state == 'inProgress']
+                # The live owner can establish a newer turn missed while stopped.
+                turn = active[0] if len(active) == 1 else tracked[1]
+                outcome = states.get(turn)
+                if outcome not in ('inProgress', 'completed', 'failed', 'interrupted'):
+                    if not by_turn.for_turn(turn):
+                        return  # Ownership/connection alone does not prove activity.
+                    outcome = {'finished': 'completed', 'failed': 'failed'}.get(
+                        self.recovering_sessions[key]['state'], 'inProgress')
+                saved = self.recovering_sessions[key]
+                if saved['turn'] == turn and saved['state'] == 'failed' and outcome == 'completed':
+                    outcome = 'failed'
+                if (outcome in ('completed', 'failed') and saved['turn'] == turn
+                        and saved['state'] == {'completed': 'finished', 'failed': 'failed'}[outcome]
+                        and saved['updated'] <= time.time() - FINISHED_RETENTION
+                        and not native_waiting(by_turn, turn)):
+                    # This is verified history, not a new completion or a live
+                    # decision. Do not briefly revive it and alert again.
+                    self.recovering_sessions.pop(key)
+                    self.turn_ids.pop(key)
+                    self.publish_current()
+                    return
+                with self.store.connect() as db:
+                    self._restore_codex_session(db, key, turn, outcome)
+                tracked = self.turn_ids[key]
             previous = self._native_codex_waiting(key, tracked[1])
             if isinstance(by_turn, PendingDecisions):
                 self.native_attention[key] = by_turn
@@ -137,6 +167,16 @@ class MacSource:
                 with self.store.connect() as db:
                     db.execute("UPDATE mac_sessions SET updated=? WHERE id=? AND turn=? AND state IN ('finished','failed')",
                                (time.time(), key, tracked[1]))
+            if isinstance(by_turn, PendingDecisions):
+                outcome = dict(by_turn.turn_states).get(tracked[1])
+                if outcome in ('completed', 'failed'):
+                    self._refresh_turn_statuses([(key, tracked)], outcomes={tracked: outcome})
+                elif outcome == 'interrupted':
+                    with self.store.connect() as db:
+                        db.execute("UPDATE mac_sessions SET state='idle',updated=? WHERE id=? AND turn=? "
+                                   "AND state IN ('working','needs_input')", (time.time(), key, tracked[1]))
+                    self._clear_approvals(key)
+                    self._clear_questions(key)
             self.publish_current()
 
     def native_claude_sessions(self):
@@ -205,6 +245,13 @@ class MacSource:
                            "workspace_label TEXT)")
                 if "workspace_label" not in {row[1] for row in db.execute("PRAGMA table_info(mac_sessions)")}:
                     db.execute("ALTER TABLE mac_sessions ADD COLUMN workspace_label TEXT")
+                db.execute("CREATE TABLE IF NOT EXISTS mac_codex_tracking (id TEXT PRIMARY KEY, "
+                           "session TEXT NOT NULL, turn TEXT NOT NULL, state TEXT NOT NULL, "
+                           "updated REAL NOT NULL, workspace_label TEXT)")
+                if 'codex' in self.providers:
+                    for row in db.execute("SELECT * FROM mac_codex_tracking ORDER BY updated DESC LIMIT 128"):
+                        self.recovering_sessions[row['id']] = dict(row)
+                        self.turn_ids[row['id']] = (row['session'], row['turn'])
                 db.execute("INSERT OR REPLACE INTO metadata VALUES ('mode','macos')")
                 previous_event = db.execute("SELECT value FROM metadata WHERE key='mac_last_agent_event_at'").fetchone()
                 if previous_event:
@@ -235,8 +282,8 @@ class MacSource:
                         except (TypeError, ValueError):
                             pass
                 db.execute("DELETE FROM schedule WHERE fired=0")
-                # Hook IDs prove that a session emitted an event, not that it is
-                # still open after this receiver was stopped. Start clean.
+                # Saved identities let native adapters reattach, but old active
+                # labels remain hidden until fresh native evidence arrives.
                 db.execute("DELETE FROM mac_sessions")
             self.publish_current()
             self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=.05), daemon=True)
@@ -319,9 +366,10 @@ class MacSource:
             if "codex" not in self.providers:
                 return False
             db.execute("BEGIN IMMEDIATE")
+            recovering = self.recovering_sessions.get(key)
             if event != "ended":
                 self.titles.track(key, "codex", session)
-            previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
+            previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone() or recovering
             tool_id = command.get("toolID")
             if tool_id is not None and (not isinstance(tool_id, str) or not IDENTIFIER.fullmatch(tool_id)):
                 raise ValueError("Invalid tool ID")
@@ -332,6 +380,7 @@ class MacSource:
             if event != "ended" and valid_session_id(session):
                 self.thread_ids[key] = session
             if event == "ended":
+                self.recovering_sessions.pop(key, None)
                 self.native_attention.pop(key, None)
                 self.pending_turn_events.pop(key, None)
                 pending = self._clear_approvals(key)
@@ -340,7 +389,7 @@ class MacSource:
                 self.published_questions.discard(key)
                 self.turn_ids.pop(key, None)
                 self.confirmed_turns.pop(key, None)
-                if previous is None and pending is None and question is None:
+                if previous is None and pending is None and question is None and recovering is None:
                     return False
                 db.execute("DELETE FROM mac_sessions WHERE id=?", (key,))
             else:
@@ -381,6 +430,9 @@ class MacSource:
                 if (previous and previous["state"] in ("finished", "failed")
                         and (not turn or previous["turn"] == turn) and event != "completed"):
                     return False
+                if recovering and event == 'question-answered':
+                    return False  # A result without the original wait proves no active work.
+                self.recovering_sessions.pop(key, None)
                 if event == "question-answered":
                     pending = self.pending_questions.get(key)
                     calls = self.question_calls.get(key, set())
@@ -404,7 +456,7 @@ class MacSource:
                                                        workspace_label)
                         self.published_questions.discard(key)
                     self.question_calls.setdefault(key, set()).add(tool_id)
-                    if previous is None:
+                    if previous is None or recovering is not None:
                         db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
                                    (key, turn, "working", time.time(), workspace_label))
                     self._record_event(db, "codex")
@@ -415,7 +467,7 @@ class MacSource:
                         self._clear_approvals(key)
                         self.pending_attention[key] = (turn, self.monotonic() + ATTENTION_DELAY, workspace_label)
                     self.approval_calls.setdefault(key, {})[command.get("approvalToken") or "legacy"] = command.get("attentionKey")
-                    if previous is None:
+                    if previous is None or recovering is not None:
                         db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
                                    (key, turn, "working", time.time(), workspace_label))
                     self._record_event(db, "codex")
@@ -431,7 +483,7 @@ class MacSource:
                 if event == "completed" or command.get("hook") in ("UserPromptSubmit", "Interrupt"):
                     question_cleared = self._clear_questions(key) is not None
                     self.published_questions.discard(key)
-                if (previous and previous["turn"] == turn and previous["state"] == EVENT_STATES[event]
+                if (previous and recovering is None and previous["turn"] == turn and previous["state"] == EVENT_STATES[event]
                         and previous["workspace_label"] == workspace_label and not question_cleared and not approval_cleared):
                     return False
                 db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
@@ -446,6 +498,8 @@ class MacSource:
                    (str(self.last_event_at),))
         db.execute("INSERT OR REPLACE INTO metadata VALUES (?,?)",
                    ("mac_last_event_" + provider, str(self.last_event_at)))
+        if provider == 'codex':
+            self._persist_codex_tracking(db, [dict(row) for row in db.execute('SELECT * FROM mac_sessions')])
 
     def _receive_claude(self, command):
         validate_message(command)
@@ -520,6 +574,7 @@ class MacSource:
                 self.turn_ids.clear()
                 self.confirmed_turns.clear()
                 self.pending_turn_events.clear()
+                self.recovering_sessions.clear()
                 with self.store.connect() as db:
                     db.execute("DELETE FROM mac_sessions")
         if "claude" not in providers:
@@ -561,11 +616,12 @@ class MacSource:
             if newly_due:
                 self.published_questions.update(newly_due)
                 self.publish_current()
-            if (self.pending_turn_events and now >= self.next_turn_recovery_at
+            if ((self.pending_turn_events or self.recovering_sessions) and now >= self.next_turn_recovery_at
                     and (self.turn_recovery_thread is None or not self.turn_recovery_thread.is_alive())):
                 self.next_turn_recovery_at = now + TURN_STATUS_INTERVAL
                 self.turn_recovery_thread = threading.Thread(
-                    target=self._recover_turns, args=(list(self.pending_turn_events.items()),), daemon=True)
+                    target=self._recover_turns, args=(list(self.pending_turn_events.items()),
+                        dict(self.recovering_sessions)), daemon=True)
                 self.turn_recovery_thread.start()
             if (now >= self.next_turn_status_at
                     and (self.turn_status_thread is None or not self.turn_status_thread.is_alive())):
@@ -595,7 +651,8 @@ class MacSource:
                     self.resolved_approval_tools.pop(row["id"], None)
                     self._clear_questions(row["id"])
                     self.published_questions.discard(row["id"])
-                    self.turn_ids.pop(row["id"], None)
+                    if row['id'] not in self.recovering_sessions:
+                        self.turn_ids.pop(row["id"], None)
                     self.confirmed_turns.pop(row["id"], None)
                     self.pending_turn_events.pop(row["id"], None)
                 if retired:
@@ -621,10 +678,35 @@ class MacSource:
             self.allowance = selected_reading(self.allowances)
             self.publish_current()
 
-    def _recover_turns(self, tracked):
+    def _restore_codex_session(self, db, key, turn, outcome, *, owner_confirmed=True):
+        previous = self.recovering_sessions[key]
+        if previous['turn'] == turn and previous['state'] == 'failed' and outcome == 'completed':
+            outcome = 'failed'
+        state = {'inProgress': 'working', 'completed': 'finished',
+                 'failed': 'failed', 'interrupted': 'idle'}[outcome]
+        updated = previous['updated'] if previous['turn'] == turn and previous['state'] == state else time.time()
+        if owner_confirmed:
+            self.recovering_sessions.pop(key)
+        else:
+            # Saved completion does not prove that the owner has no pending
+            # plan decision. Keep its lookup binding beyond the display grace.
+            self.recovering_sessions[key] = {**previous, 'turn': turn, 'state': state, 'updated': updated}
+        if owner_confirmed or time.time() - updated < FINISHED_RETENTION:
+            db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
+                       (key, turn, state, updated, previous['workspace_label']))
+        self.turn_ids[key] = (previous['session'], turn)
+        if valid_session_id(previous['session']):
+            self.thread_ids[key] = previous['session']
+        self.titles.track(key, 'codex', previous['session'])
+        if state in ('finished', 'failed'):
+            self.confirmed_turns[key] = turn
+
+    def _recover_turns(self, tracked, restart=None):
         """Promote only the newest saved turn; replay hooks in arrival order."""
         try:
-            metadata = self.turn_metadata_reader([batch["session"] for _, batch in tracked])
+            metadata = self.turn_metadata_reader(list(dict.fromkeys(
+                [batch["session"] for _, batch in tracked] +
+                [row['session'] for row in (restart or {}).values()])))
         except Exception:
             return
         if not isinstance(metadata, dict):
@@ -632,6 +714,27 @@ class MacSource:
         with self.lock:
             if self.closed or "codex" not in self.providers:
                 return
+            for key, previous in (restart or {}).items():
+                if self.recovering_sessions.get(key) is not previous:
+                    continue  # A hook or owner snapshot superseded this read.
+                if key in self.pending_turn_events:
+                    continue  # Verify and replay the received hooks below instead.
+                rows = metadata.get(previous['session'])
+                if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+                    continue
+                latest, outcome = rows[0].get('id'), rows[0].get('status')
+                if not isinstance(latest, str) or not IDENTIFIER.fullmatch(latest):
+                    continue
+                with self.store.connect() as db:
+                    if outcome in ('completed', 'failed'):
+                        self._restore_codex_session(db, key, latest, outcome, owner_confirmed=False)
+                    elif latest != previous['turn']:
+                        # Saved order can select a turn; only its live owner can
+                        # confirm that it is still running or waiting for input.
+                        self.recovering_sessions[key] = {**previous, 'turn': latest, 'state': 'working',
+                                                         'updated': time.time()}
+                        self.turn_ids[key] = (previous['session'], latest)
+                    self._publish(db, lifecycle_only=True)
             for key, batch in tracked:
                 if self.pending_turn_events.get(key) is not batch:
                     continue  # A prompt, session end or disable invalidated this read.
@@ -649,13 +752,14 @@ class MacSource:
                         self.pending_turn_events.pop(key, None)
                     continue  # Unknown IDs may not have reached saved history yet.
                 with self.store.connect() as db:
-                    previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
+                    previous = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone() or self.recovering_sessions.get(key)
                     if previous is None or previous["turn"] != batch["previous"]:
                         self.pending_turn_events.pop(key, None)
                         continue
                     label = events[0].get("workspaceLabel") or previous["workspace_label"]
-                    db.execute("UPDATE mac_sessions SET turn=?,state='working',updated=?,workspace_label=? WHERE id=?",
-                               (latest, time.time(), label, key))
+                    self.recovering_sessions.pop(key, None)
+                    db.execute("INSERT OR REPLACE INTO mac_sessions VALUES (?,?,?,?,?)",
+                               (key, latest, 'working', time.time(), label))
                 self.pending_turn_events.pop(key, None)
                 self._clear_approvals(key)
                 self.resolved_approval_tools.pop(key, None)
@@ -696,6 +800,8 @@ class MacSource:
                 row = db.execute("SELECT * FROM mac_sessions WHERE id=?", (key,)).fetchone()
                 if row is None or row["turn"] != pair[1]:
                     continue
+                if row['state'] == 'failed' and status == 'completed':
+                    continue  # Generic completion cannot erase a confirmed failure.
                 self.confirmed_turns[key] = pair[1]
                 state = "failed" if status == "failed" else "finished"
                 self._clear_approvals(key)
@@ -721,10 +827,26 @@ class MacSource:
             db.execute("BEGIN IMMEDIATE")
             self._publish(db)
 
+    def _persist_codex_tracking(self, db, records):
+        # Only local lookup identities and lifecycle metadata are durable. Native
+        # requests, answers, owner handles and attention are always reacquired.
+        saved = {row['id']: tuple(row) for row in db.execute('SELECT * FROM mac_codex_tracking')}
+        candidates = {row['id']: (row['id'], self.turn_ids[row['id']][0], row['turn'],
+            row['state'], row['updated'], row['workspace_label']) for row in records if row['id'] in self.turn_ids}
+        candidates.update({key: (key, row['session'], row['turn'], row['state'], row['updated'], row['workspace_label'])
+                           for key, row in self.recovering_sessions.items()})
+        candidates = dict(sorted(candidates.items(), key=lambda pair: (-pair[1][4], pair[0]))[:128])
+        for key in saved.keys() - candidates.keys():
+            db.execute('DELETE FROM mac_codex_tracking WHERE id=?', (key,))
+        for key, row in candidates.items():
+            if saved.get(key) != row:
+                db.execute('INSERT OR REPLACE INTO mac_codex_tracking VALUES (?,?,?,?,?,?)', row)
+
     def _publish(self, db, *, lifecycle_only=False) -> bool:
         now_monotonic = self.monotonic()
         records = [{**dict(row), "provider": "codex"} for row in
                    db.execute("SELECT * FROM mac_sessions ORDER BY id")]
+        self._persist_codex_tracking(db, records)
         records.extend({"id": key, "turn": item.turn, "state": item.state(now_monotonic),
                         "updated": item.updated,
                         "workspace_label": item.workspace_label, "remote_session_id": item.remote_session_id, "provider": "claude"}

@@ -12,6 +12,8 @@ class PendingDecisions:
     known_turns: frozenset[str] = frozenset()
     uncertain: bool = False
     waiting_on_human: bool = False
+    # Fresh owner observations, never inferred from a separate saved-history reader.
+    turn_states: frozenset[tuple[str, str]] = frozenset()
 
     def __bool__(self):
         return self.uncertain or self.waiting_on_human or bool(self.requests)

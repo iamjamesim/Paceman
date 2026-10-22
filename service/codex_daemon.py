@@ -44,6 +44,7 @@ class DaemonRequests:
         self.retired = set()
         self.ready = set()
         self.native_waiting = {}
+        self.turn_states = {}
 
     def __enter__(self):
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -85,6 +86,7 @@ class DaemonRequests:
         self.items.pop(session, None)
         self.ready.discard(session)
         self.native_waiting.pop(session, None)
+        self.turn_states.pop(session, None)
         self.attention(session, None)
 
     def _set_turn(self, session, turn):
@@ -93,6 +95,7 @@ class DaemonRequests:
         self.joined[session] = turn
         self.items[session] = {}
         self.native_waiting.pop(session, None)
+        self.turn_states.pop(session, None)
         for key, raw in list(self.requests.items()):
             if key[0] == session and raw['params'].get('turnId') not in (None, '', turn):
                 self._resolve(key)
@@ -154,6 +157,8 @@ class DaemonRequests:
                             with self.lock:
                                 self.joined[session] = current[session]
                                 self.items[session] = {}
+                                self.native_waiting[session] = bool(set(summary.get('status', {}).get('activeFlags', []))
+                                    & {'waitingOnApproval', 'waitingOnUserInput'})
                             try:
                                 result = self._call('thread/resume', dict(threadId=session, excludeTurns=True,
                                     initialTurnsPage=dict(limit=1, sortDirection='desc', itemsView='full')), connection)
@@ -169,6 +174,8 @@ class DaemonRequests:
                             with self.lock:
                                 for turn in (result.get('initialTurnsPage') or {}).get('data', []):
                                     if turn.get('id') == current[session]:
+                                        if isinstance(turn.get('status'), str):
+                                            self.turn_states[session] = (turn['id'], turn['status'])
                                         for item in turn.get('items', []):
                                             if item.get('id') not in self.items[session]:
                                                 self._item(session, item)
@@ -254,7 +261,11 @@ class DaemonRequests:
             self._forget(session)
             return
         elif method == 'turn/completed' and params.get('turn', {}).get('id') == turn:
-            pass  # Outcome does not resolve pending native decisions.
+            outcome = params['turn'].get('status')
+            if outcome in ('completed', 'failed', 'interrupted'):
+                self.turn_states[session] = (turn, outcome)
+        elif method == 'turn/started' and params.get('turn', {}).get('id') == turn:
+            self.turn_states[session] = (turn, 'inProgress')
         elif method == 'thread/status/changed':
             status = params.get('status', {})
             self.native_waiting[session] = bool(set(status.get('activeFlags', [])) & {'waitingOnApproval', 'waitingOnUserInput'})
@@ -289,7 +300,8 @@ class DaemonRequests:
         if self.native_waiting.get(session, False):
             pending.add((self.joined[session], 'status', 'waitingOnHuman'))
         self.attention(session, PendingDecisions('daemon-' + str(id(self.connection)), frozenset(pending),
-            known_turns=frozenset({self.joined[session]})))
+            known_turns=frozenset({self.joined[session]}),
+            turn_states=frozenset({self.turn_states[session]}) if session in self.turn_states else frozenset()))
 
     def _answer(self, key, handle, encode, connection):
         handle.ready.wait()
