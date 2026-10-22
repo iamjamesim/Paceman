@@ -968,13 +968,20 @@ extension CompanionModel {
         return try? JSONDecoder().decode(PendingWatchHandoff.self, from: data)
     }
 
+    /// Match the activity list's retention and supersession rules without
+    /// treating retained results as live sessions or resolving aggregate rows.
+    private func handoffSessions(in snapshot: Snapshot) -> [AgentSession] {
+        guard case .sessions(let sessions) = AgentFeedContent.resolve(snapshot) else { return [] }
+        return sessions
+    }
+
     func handoffTarget(_ request: PendingWatchHandoff) -> (sourceID: String, computer: String, session: AgentSession)? {
         guard request.isCurrent(),
               handoffOwnerIsCurrent(request),
               let source = pairedSources.first(where: { WatchWire.sourceIdentifier($0.sourceID) == request.source }),
               !revokedSources.contains(source.sourceID),
               let snapshot = snapshots[source.sourceID],
-              let session = snapshot.sessions?.first(where: {
+              let session = handoffSessions(in: snapshot).first(where: {
                   WatchWire.sessionIdentifier(sourceID: source.sourceID, session: $0) == request.session
               }) else { return nil }
         return (source.sourceID, snapshot.sourceName, session)
@@ -1257,7 +1264,8 @@ extension CompanionModel {
                 if let sourceID = message["sourceID"] as? String,
                    pairedSources.contains(where: { $0.sourceID == sourceID }), !isRevoked(sourceID),
                    let sessionID = message["sessionID"] as? String, let provider = message["provider"] as? String,
-                   let session = snapshots[sourceID]?.sessions?.first(where: { $0.id == sessionID && $0.provider == provider }) {
+                   let snapshot = snapshots[sourceID],
+                   let session = handoffSessions(in: snapshot).first(where: { $0.id == sessionID && $0.provider == provider }) {
                     var data = Data([79, 72, 1, 0, 1, 0, 0, 0])
                     data.append(WatchWire.sourceIdentifier(sourceID))
                     data.append(WatchWire.sessionIdentifier(sourceID: sourceID, session: session))

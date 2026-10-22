@@ -1109,7 +1109,7 @@ private struct WatchPhoneContinuation: View {
     var body: some View {
         VStack(spacing: 10) {
             ForEach(destinations, id: \.rawValue) { destination in
-                continuationButton(destination).buttonStyle(.bordered)
+                continuationButton(destination).buttonStyle(.bordered).tint(Color.primary)
             }
             if preparing != nil { ProgressView("Preparing iPhone") }
             if let message { Text(message).font(.body).fixedSize(horizontal: false, vertical: true) }

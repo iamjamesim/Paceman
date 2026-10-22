@@ -3255,3 +3255,101 @@ extension InteractionTests {
         XCTAssertEqual(actions, ["release"])
     }
 }
+
+
+extension InteractionTests {
+    @MainActor func testRetainedRecentResultsSupportProviderHandoffsWithoutLiveSessions() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        let source = refreshSource("retained-agent-handoff")
+        let model = CompanionModel(preview: true, push: PushCoordinator(), appleWatchIdentity: { "watch" },
+            postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
+        model.pairedSources = [source]
+        defer {
+            model.setForeground(false)
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        for provider in ["codex", "claude"] {
+            for state in [ActivityState.finished, .failed] {
+                let threadID = UUID().uuidString.lowercased()
+                let session = AgentSession(id: "retained-task", provider: provider, state: state,
+                    remoteSessionID: "session_retained", threadID: threadID,
+                    resultObservedAt: Date().timeIntervalSince1970 - 3600)
+                var snapshot = try JSONDecoder().decode(Snapshot.self, from: refreshSnapshot(source, state: "idle"))
+                snapshot.sessions = []
+                snapshot.completedSessions = [session]
+                snapshot.configuredProviders = [provider]
+                model.snapshots = [source.sourceID: snapshot]
+                let exported = model.watchWorkSnapshot()
+                let task = try XCTUnwrap(exported.tasks.first)
+                XCTAssertEqual(task.sessionID, session.id)
+                XCTAssertEqual(task.group(at: Date()), "Recent")
+                XCTAssertEqual(task.state, state.rawValue, "Retained results remain completed activity")
+                let reply = await model.handleWatchWork(["operation": "continueOnPhone", "destination": "agent",
+                    "sourceID": source.sourceID, "sessionID": session.id, "provider": provider])
+                XCTAssertEqual(reply["selectionAvailable"] as? Bool, true)
+                XCTAssertEqual(reply["destination"] as? String, "agent")
+                let pending = try JSONDecoder().decode(PendingWatchHandoff.self, from: XCTUnwrap(defaults.data(forKey: key)))
+                XCTAssertEqual(model.handoffTarget(pending)?.session, session)
+                model.setForeground(true)
+                XCTAssertEqual(model.consumeAgentHandoff(pending)?.absoluteString,
+                    provider == "codex" ? "codex://threads/" + threadID : "claude://code/session_retained")
+                XCTAssertEqual(model.snapshots[source.sourceID]?.sessions, [], "Opening history must not revive a live session")
+                model.setForeground(false)
+            }
+        }
+    }
+
+    @MainActor func testRetainedProviderHandoffsRejectResultsThatLoseEligibility() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        let source = refreshSource("retained-agent-ineligible")
+        var watchID = "watch"
+        let model = CompanionModel(preview: true, push: PushCoordinator(), appleWatchIdentity: { watchID },
+            postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
+        let session = AgentSession(id: "retained-task", provider: "codex", state: .finished,
+            threadID: UUID().uuidString.lowercased(), resultObservedAt: Date().timeIntervalSince1970 - 3600)
+        var eligible = try JSONDecoder().decode(Snapshot.self, from: refreshSnapshot(source, state: "idle"))
+        eligible.sessions = []
+        eligible.completedSessions = [session]
+        eligible.configuredProviders = ["codex"]
+        let message: [String: Any] = ["operation": "continueOnPhone", "destination": "agent",
+            "sourceID": source.sourceID, "sessionID": session.id, "provider": session.provider]
+        defer {
+            model.setForeground(false)
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        for change in ["expired", "disabled", "removed-result", "removed-source", "revoked", "changed-watch", "different-provider"] {
+            watchID = "watch"
+            model.pairedSources = [source]
+            model.revokedSources = []
+            model.snapshots = [source.sourceID: eligible]
+            _ = await model.handleWatchWork(message)
+            model.setForeground(true)
+            let pending = try XCTUnwrap(model.handoff, change)
+            switch change {
+            case "expired":
+                model.snapshots[source.sourceID]?.completedSessions?[0].resultObservedAt =
+                    Date().timeIntervalSince1970 - SessionTimePolicy.historyDuration - 1
+            case "disabled": model.snapshots[source.sourceID]?.configuredProviders = ["claude"]
+            case "removed-result": model.snapshots[source.sourceID]?.completedSessions = []
+            case "removed-source": model.pairedSources = []
+            case "revoked": model.revokedSources.insert(source.sourceID)
+            case "changed-watch": watchID = "replacement-watch"
+            default:
+                model.snapshots[source.sourceID]?.completedSessions = [AgentSession(id: session.id, provider: "claude",
+                    state: .finished, remoteSessionID: "session_different", resultObservedAt: session.resultObservedAt)]
+                model.snapshots[source.sourceID]?.configuredProviders = ["claude"]
+            }
+            XCTAssertNil(model.handoffTarget(pending), change)
+            XCTAssertNil(model.consumeAgentHandoff(pending), change)
+            XCTAssertNil(defaults.data(forKey: key), change)
+            model.setForeground(false)
+            if change != "changed-watch" {
+                let reply = await model.handleWatchWork(message)
+                XCTAssertNotNil(reply["error"], "Selection must reject \(change) as well as final URL resolution")
+                XCTAssertNil(defaults.data(forKey: key), change)
+            }
+        }
+    }
+}
