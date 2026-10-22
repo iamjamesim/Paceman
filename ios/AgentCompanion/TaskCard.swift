@@ -120,8 +120,8 @@ enum TaskCardRequestAvailability {
         case .current: return nil
         case .reconnecting: return "Waiting for a current update from this computer. Your answer is kept here."
         case .resolvedElsewhere: return "The agent has moved on from this request."
-        case .replaced: return "A different request is now waiting in this session. Your answer hasn’t been sent."
-        case .unavailable: return "This request can’t be verified right now. Your answer hasn’t been sent."
+        case .replaced: return "A different request is now waiting in this session."
+        case .unavailable: return "This request can’t be verified right now."
         }
     }
 }

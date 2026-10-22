@@ -14,6 +14,7 @@ struct InteractionDetail: View {
     @Environment(\.scenePhase) private var phase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var answers: [String: InputAnswer] = [:]
+    @State private var responseStarted = false
     @State private var confirming: ApprovalResponseOption?
     @State private var showingCommand = false
     private var response: InputResponseState? { inbox.response(for: item) }
@@ -38,8 +39,9 @@ struct InteractionDetail: View {
         }
         return item.answersFitWireLimit(answers) ? nil : "The combined answer is too long. Shorten it to send."
     }
-    private var editable: Bool { response == nil && !sending && availability == .current && inbox.isCurrent(item) && phase == .active }
+    private var editable: Bool { !responseStarted && response == nil && !sending && availability == .current && inbox.isCurrent(item) && phase == .active }
     private var requestNotice: String? {
+        if responseStarted && response == nil && !sending { return "Response not confirmed. Check this request in the agent." }
         if retryable, message == nil { return "Response not confirmed. Retry sends the same response." }
         guard !sent && !sending && !retryable && !editable && message == nil else { return nil }
         return (response == nil ? availability.message : nil)
@@ -102,13 +104,16 @@ struct InteractionDetail: View {
             }
         }
         .onAppear {
-            if let submission { answers = submission.answers }
+            if let submission { answers = submission.answers; responseStarted = true }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--approval-confirmation-preview") {
                 confirming = item.request.approvalChoices.first { $0.confirmation != nil }
             }
             showingCommand = ProcessInfo.processInfo.arguments.contains("--approval-command-details-preview")
             #endif
+        }
+        .onChange(of: response?.phase, initial: true) { _, value in
+            if value != nil { responseStarted = true }
         }
         .sheet(isPresented: $showingCommand) {
             if let action = approvalAction {
@@ -328,9 +333,11 @@ struct InteractionDetail: View {
     }
 
     private func respond(_ action: String, optionID: String? = nil) {
-        guard inbox.isCurrent(item), phase == .active else { return }
+        guard editable else { return }
         focusedQuestion = nil
-        inbox.submit(item, action: action, answers: action == "answer" ? answers : [:], optionID: optionID)
+        if inbox.submit(item, action: action, answers: action == "answer" ? answers : [:], optionID: optionID) != nil {
+            responseStarted = true
+        }
     }
 }
 

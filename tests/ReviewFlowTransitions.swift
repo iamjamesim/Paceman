@@ -59,6 +59,8 @@ struct PendingWatchHandoff: Identifiable { let id = UUID() }
         var missing = snapshot
         missing.sessions = []
         check(availability(missing) == .unavailable, "An empty fetch is not resolution")
+        check(TaskCardRequestAvailability.unavailable.message?.contains("hasn’t been sent") == false,
+              "Missing delivery history cannot establish that an answer was never sent")
         missing.sessions = nil
         check(availability(missing) == .unavailable, "Missing metadata is not resolution")
         let moved = Snapshot(sourceID: "mac", generation: "source", revision: 2,
