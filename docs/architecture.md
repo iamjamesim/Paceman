@@ -25,7 +25,7 @@ Mac and Omarchy differ in how they know a session is still running:
 
 | Platform | Event input | Session liveness |
 | --- | --- | --- |
-| Mac | Reviewed Codex and Claude Code hooks. | Hook-observed; active sessions clear on source restart, observed results persist. |
+| Mac | Reviewed Codex and Claude Code hooks. | Codex lookup identities survive restart; fresh native owner state restores activity and decisions. Claude active sessions clear; observed results persist. |
 | Omarchy | Selected Codex and Claude Code hooks on a local socket. | Verifies the sending agent process and reconciles live sessions and pending attention after restart. |
 
 Both treat a completed turn as Finished. Codex rejects late turn events; Claude rejects old prompt callbacks and permits a new tool start when a Stop hook continues the same turn. Activity and allowance changes advance the snapshot revision, but allowance alone does not create an activity alert.
