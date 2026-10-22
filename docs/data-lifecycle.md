@@ -84,6 +84,9 @@ The source retains the latest observed result per session for seven days across
 restarts, bounded to 128 sessions and a 24 KiB history payload. The phone caches
 that metadata for Recent and shares it with Apple Watch; history does not extend
 live freshness or trigger activity alerts. A new turn supersedes its older result.
+Mac hooks exclude transcript-free forks from the runtime directly owned by the
+Codex desktop app. Saved forks, CLI sessions and unknown metadata remain visible;
+later transcript evidence restores ordinary tracking.
 Result times identify when Paceman observed completion, not an exact provider
 transition time.
 Disabling an agent clears its sessions; disabling Codex also clears usage.

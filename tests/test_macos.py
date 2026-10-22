@@ -1,5 +1,6 @@
 from contextlib import closing, ExitStack
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -26,6 +27,129 @@ from macos.codex_hook import workspace_label
 
 
 class MacSourceTests(unittest.TestCase):
+    def test_hook_sends_only_transcript_presence_and_transient_classification(self):
+        for transient in (True, False):
+            payload = dict(hook_event_name='SessionStart', session_id='fork', source='fork',
+                           transcript_path=None if transient else '/private/saved.jsonl',
+                           prompt='private prompt')
+            with patch.object(codex_hook.sys, 'stdin', io.StringIO(json.dumps(payload))), \
+                    patch.object(codex_hook.sys, 'stdout', io.StringIO()), \
+                    patch.object(codex_hook, 'transient_desktop_fork', return_value=transient), \
+                    patch.object(codex_hook, 'deliver') as deliver:
+                codex_hook.main()
+                message = deliver.call_args.args[0]
+                self.assertEqual(message.get('transientDesktopFork'), True if transient else None)
+                self.assertEqual(message.get('hasTranscript'), None if transient else True)
+                self.assertNotIn('/private', json.dumps(message))
+                self.assertNotIn('private prompt', json.dumps(message))
+
+    def test_transient_fork_requires_explicit_hook_metadata_and_desktop_owner(self):
+        fork = dict(hook_event_name='SessionStart', source='fork', transcript_path=None)
+        with patch.object(codex_hook.sys, 'platform', 'darwin'), \
+                patch.object(codex_hook, 'desktop_owned_runtime', return_value=True) as desktop:
+            self.assertTrue(codex_hook.transient_desktop_fork(fork))
+            for changed in [dict(fork, transcript_path='/private/saved.jsonl'),
+                            dict(fork, transcript_path=''), dict(fork, source='startup'),
+                            dict(fork, hook_event_name='Stop'),
+                            {k: v for k, v in fork.items() if k != 'transcript_path'}]:
+                self.assertFalse(codex_hook.transient_desktop_fork(changed))
+            self.assertEqual(desktop.call_count, 1)
+        with patch.object(codex_hook.sys, 'platform', 'darwin'), \
+                patch.object(codex_hook, 'desktop_owned_runtime', return_value=False):
+            self.assertFalse(codex_hook.transient_desktop_fork(fork), 'User CLI forks remain visible')
+
+    def test_desktop_runtime_requires_direct_app_parent_and_keeps_arguments_private(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = Path(temporary) / 'Codex.app'
+            (app / 'Contents').mkdir(parents=True)
+            (app / 'Contents/Info.plist').write_bytes(plistlib.dumps(
+                dict(CFBundleIdentifier='com.openai.codex', CFBundleExecutable='Codex')))
+            runtime = app / 'Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex'
+            owner = app / 'Contents/MacOS/Codex'
+            processes = {10: (20, Path('/bin/sh')), 20: (30, runtime), 30: (1, owner)}
+            self.assertTrue(codex_hook.desktop_owned_runtime(pid=10, reader=processes.__getitem__))
+            for parent in [Path('/bin/zsh'), Path('/usr/bin/python3')]:
+                processes[30] = (1, parent)
+                self.assertFalse(codex_hook.desktop_owned_runtime(pid=10, reader=processes.__getitem__))
+            processes[30] = (1, owner)
+            processes[20] = (30, Path('/usr/local/bin/codex'))
+            self.assertFalse(codex_hook.desktop_owned_runtime(pid=10, reader=processes.__getitem__))
+            with patch.object(codex_hook.subprocess, 'run', side_effect=OSError):
+                self.assertFalse(codex_hook.desktop_owned_runtime())
+            with patch.object(codex_hook.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                    [], 0, '20 /private/Codex App/codex\n', '')) as run:
+                self.assertEqual(codex_hook.process_identity(10), (20, Path('/private/Codex App/codex')))
+                self.assertEqual(run.call_args.args[0][-1], 'ppid=,comm=')
+
+    def test_transient_desktop_forks_never_publish_activity_or_history_across_restart(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = Store(root / 'hub.sqlite3')
+            session = str(uuid4())
+            base = dict(command='agent-event', session=session, turn='one')
+            def source():
+                return MacSource(store, socket_path=root / 'hook.sock', allowance_reader=lambda: None,
+                                 title_reader=lambda _: {}, turn_status_reader=lambda _: {})
+            with source() as first:
+                before = store.snapshot()
+                self.assertFalse(first.receive(dict(base, event='started', hook='SessionStart', transientDesktopFork=True)))
+                for event, hook in [('working', 'UserPromptSubmit'), ('needs-input', 'PermissionRequest'),
+                                    ('completed', 'Stop'), ('ended', 'SessionEnd'), ('completed', 'Stop')]:
+                    self.assertFalse(first.receive(dict(base, event=event, hook=hook)))
+                self.assertEqual(store.snapshot()['revision'], before['revision'])
+                self.assertEqual(first.last_event_at, 0)
+                self.assertFalse(first.native_sessions())
+                self.assertFalse(first.pending_attention)
+            with source() as restored:
+                restored.receive(dict(base, event='completed', hook='Stop'))
+                snapshot = store.snapshot()
+                self.assertFalse(snapshot.get('sessions'))
+                self.assertFalse(snapshot.get('completedSessions'))
+                with store.connect() as db:
+                    self.assertEqual(db.execute('SELECT COUNT(*) FROM mac_codex_visibility').fetchone()[0], 1)
+                    self.assertEqual(db.execute('SELECT COUNT(*) FROM mac_codex_tracking').fetchone()[0], 0)
+                    self.assertEqual(db.execute('SELECT COUNT(*) FROM completed_sessions').fetchone()[0], 0)
+
+    def test_late_transient_classification_cleans_only_matching_session_and_saved_evidence_wins(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = Store(root / 'hub.sqlite3')
+            with MacSource(store, socket_path=root / 'hook.sock', allowance_reader=lambda: None,
+                           title_reader=lambda _: {}, turn_status_reader=lambda _: {}) as source:
+                base = dict(command='agent-event', session='internal', turn='one')
+                real = dict(base, session='real')
+                source.receive(dict(real, event='working', hook='UserPromptSubmit', hasTranscript=True))
+                source.receive(dict(base, event='completed', hook='Stop'))
+                with store.connect() as db:
+                    self.assertEqual(db.execute('SELECT COUNT(*) FROM completed_sessions').fetchone()[0], 1)
+                source.receive(dict(base, event='started', hook='SessionStart', transientDesktopFork=True))
+                self.assertEqual(len(store.snapshot()['sessions']), 1)
+                self.assertFalse(store.snapshot().get('completedSessions'))
+                self.assertEqual(source.native_sessions(), ['real'])
+                # Materialization promotes the exact session; late starts cannot hide it again.
+                source.receive(dict(base, event='working', hook='UserPromptSubmit', hasTranscript=True))
+                source.receive(dict(base, event='started', hook='SessionStart', transientDesktopFork=True))
+                self.assertEqual(len(store.snapshot()['sessions']), 2)
+                # An unknown/older hook without classification retains ordinary behavior.
+                source.receive(dict(base, session='unknown', event='completed', hook='Stop'))
+                self.assertEqual(len(store.snapshot()['sessions']), 3)
+
+    def test_codex_visibility_metadata_expires_and_stays_bounded(self):
+        from service.macos import CODEX_VISIBILITY_RETENTION, MAX_CODEX_VISIBILITY
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = Store(root / 'hub.sqlite3')
+            with MacSource(store, socket_path=root / 'hook.sock', allowance_reader=lambda: None) as source:
+                now = time.time()
+                with store.connect() as db:
+                    db.executemany('INSERT INTO mac_codex_visibility VALUES (?,?,?)',
+                        [(str(i), i % 2, now - i) for i in range(MAX_CODEX_VISIBILITY + 2)])
+                    db.execute('INSERT INTO mac_codex_visibility VALUES (?,?,?)',
+                        ('expired', 0, now - CODEX_VISIBILITY_RETENTION))
+                    source._prune_codex_visibility(db)
+                    self.assertEqual(db.execute('SELECT COUNT(*) FROM mac_codex_visibility').fetchone()[0], MAX_CODEX_VISIBILITY)
+                    self.assertIsNone(db.execute("SELECT 1 FROM mac_codex_visibility WHERE id='expired'").fetchone())
+
     def test_claude_native_resolution_clears_only_matching_live_tool_waits(self):
         from macos.claude_hook import message_for
         with tempfile.TemporaryDirectory() as temporary:

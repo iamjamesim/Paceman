@@ -42,6 +42,8 @@ EVENT_STATES = {
 ATTENTION_DELAY = 5.0
 FINISHED_RETENTION = FINISHED_DISPLAY_DURATION
 TURN_STATUS_INTERVAL = 15.0
+CODEX_VISIBILITY_RETENTION = 7 * 24 * 60 * 60
+MAX_CODEX_VISIBILITY = 1024
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,160}\Z")
 
 
@@ -263,6 +265,9 @@ class MacSource:
                 db.execute("CREATE TABLE IF NOT EXISTS mac_codex_tracking (id TEXT PRIMARY KEY, "
                            "session TEXT NOT NULL, turn TEXT NOT NULL, state TEXT NOT NULL, "
                            "updated REAL NOT NULL, workspace_label TEXT)")
+                db.execute("CREATE TABLE IF NOT EXISTS mac_codex_visibility (id TEXT PRIMARY KEY, "
+                           "saved INTEGER NOT NULL, updated REAL NOT NULL)")
+                self._prune_codex_visibility(db)
                 if 'codex' in self.providers:
                     for row in db.execute("SELECT * FROM mac_codex_tracking ORDER BY updated DESC LIMIT 128"):
                         self.recovering_sessions[row['id']] = dict(row)
@@ -396,6 +401,9 @@ class MacSource:
             if "codex" not in self.providers:
                 return False
             db.execute("BEGIN IMMEDIATE")
+            ignored = self._filter_transient_fork(db, key, command)
+            if ignored is not None:
+                return ignored
             recovering = self.recovering_sessions.get(key)
             if event != "ended":
                 self.titles.track(key, "codex", session)
@@ -520,6 +528,47 @@ class MacSource:
                            (key, turn, EVENT_STATES[event], time.time(), workspace_label))
             self._record_event(db, "codex")
             return self._publish(db)
+
+    def _prune_codex_visibility(self, db):
+        db.execute("DELETE FROM mac_codex_visibility WHERE updated<=?", (time.time() - CODEX_VISIBILITY_RETENTION,))
+        db.execute("DELETE FROM mac_codex_visibility WHERE id IN "
+                   "(SELECT id FROM mac_codex_visibility ORDER BY updated DESC,id LIMIT -1 OFFSET ?)",
+                   (MAX_CODEX_VISIBILITY,))
+
+    def _filter_transient_fork(self, db, key, command):
+        known = db.execute("SELECT saved FROM mac_codex_visibility WHERE id=?", (key,)).fetchone()
+        if command.get('hasTranscript') is True:
+            # Saved evidence wins over a delayed unsaved SessionStart callback.
+            db.execute("INSERT OR REPLACE INTO mac_codex_visibility VALUES (?,?,?)", (key, 1, time.time()))
+            self._prune_codex_visibility(db)
+            return None
+        if known and known['saved']:
+            return None
+        if (command.get('transientDesktopFork') is True and command['event'] == 'started'
+                and command.get('hook') == 'SessionStart'):
+            db.execute("INSERT OR REPLACE INTO mac_codex_visibility VALUES (?,?,?)", (key, 0, time.time()))
+            self._prune_codex_visibility(db)
+            existed = db.execute("SELECT 1 FROM mac_sessions WHERE id=?", (key,)).fetchone()
+            completed = db.execute("SELECT 1 FROM completed_sessions WHERE provider='codex' AND id=?", (key,)).fetchone()
+            db.execute("DELETE FROM mac_sessions WHERE id=?", (key,))
+            db.execute("DELETE FROM mac_codex_tracking WHERE id=?", (key,))
+            db.execute("DELETE FROM completed_sessions WHERE provider='codex' AND id=?", (key,))
+            self.recovering_sessions.pop(key, None)
+            self.native_attention.pop(key, None)
+            self.pending_turn_events.pop(key, None)
+            self._clear_approvals(key)
+            self._clear_questions(key)
+            self.published_questions.discard(key)
+            self.resolved_approval_tools.pop(key, None)
+            self.turn_ids.pop(key, None)
+            self.thread_ids.pop(key, None)
+            self.confirmed_turns.pop(key, None)
+            return self._publish(db, lifecycle_only=True) if existed or completed else False
+        if known:
+            # Remember across source restarts and late Stop/SessionEnd callbacks.
+            db.execute("UPDATE mac_codex_visibility SET updated=? WHERE id=?", (time.time(), key))
+            return False
+        return None
 
     def _record_event(self, db, provider):
         self.last_event_at = time.time()
