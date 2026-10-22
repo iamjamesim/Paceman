@@ -55,6 +55,10 @@ cannot erase that reading.
 WatchConnectivity also supplies the paired-computer list and cached readings.
 The Watch app uses the phone's session presentation to answer supported questions
 and approvals, with continuation on iPhone through live WatchConnectivity.
+Watch Review follows the phone’s live pending-question identities across computers,
+finishes siblings in the selected session first, and returns to the sessions list
+when no questions remain. Canceled or unavailable questions leave automatically;
+unchanged questions retain their draft. Ordinary session details remain passive.
 Codex usage remains available in complications.
 Apple Watch delivery is independent of accessory Bluetooth. Exact fields and
 compatibility are in the [protocol](protocol.md); freshness and clearing rules
@@ -75,13 +79,18 @@ Sessions are keyed by source, provider, and session ID, never title. Activity ow
 and responses; Devices owns connections, accessories, and Live Activities.
 Ordering is stable and phone-observed, not durable task chronology: answerable
 requests lead Needs you, Working follows state-entry order, and Recent is newest
-first. Review freezes session order and drains each session after confirmed
-responses. Row visits stay in the selected session until dismissed. New requests
-never replace a draft or uncertain response; other sessions do not auto-present.
-Submission receipts show Response sent until native activity advances.
+first. Answerable requests open Review across computers on arrival and as new
+requests appear. Review keeps unchanged questions stable and appends new arrivals.
+Answered, canceled, replaced or unavailable questions leave automatically, advancing
+to the next current question or closing when none remain. Activity owns connection
+status; an unavailable question can return after reconnection. Dismissal sets aside
+only offered questions that are still pending. In-flight and uncertain submissions
+remain owned by the inbox, preserving their exact response for confirmation or retry.
+Submission receipts show Response sent in Activity until native activity advances.
 
-Live Activity taps open a unique session only when its source generation and
-revision match; otherwise they open source-filtered Activity. Watch resolves through
-iPhone and preserves an open response form across another tap. Opening the agent
+Live Activity taps open current Review, or source-filtered Activity when nothing
+is answerable. Watch resolves through iPhone and preserves an open form across
+another tap. Question row taps start the same Review at that session; passive
+rows open task details. Opening the agent
 app releases any pending phone request. Detail timestamps describe the computer
 snapshot, not session progress. A completed turn does not establish a successful outcome.

@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import AgentCompanion
 
 final class InteractionTests: XCTestCase {
@@ -1454,7 +1455,7 @@ final class InteractionTests: XCTestCase {
         }
     }
 
-    @MainActor func testActivityCardsFollowSessionUntilExplicitReleaseAndRetainTaskDetails() throws {
+    @MainActor func testIndividualCardsDismissOnlyAfterConfirmedResponsesAndRetainTaskDetails() throws {
         let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
                                   clientID: "client", credential: "fixture")
         let inbox = InteractionInbox()
@@ -1470,7 +1471,7 @@ final class InteractionTests: XCTestCase {
             let envelope = submission(pending, action: action)
             for phase in [InputResponsePhase.sending, .unconfirmed, .rejected, .submitted] {
                 let response = InputResponseState(item: pending, submission: envelope, startedAt: 1, phase: phase)
-                XCTAssertEqual(selection.shouldDismiss(response: response), phase == .submitted && action == "release")
+                XCTAssertEqual(selection.shouldDismiss(response: response), phase == .submitted)
             }
         }
         item.request = nil
@@ -1538,13 +1539,155 @@ final class InteractionTests: XCTestCase {
             XCTAssertEqual(TaskReviewQueue.advances(after: response), phase == .submitted)
             XCTAssertFalse(TaskCardSelection.review(queue).shouldDismiss(response: response))
         }
-        XCTAssertFalse(TaskReviewQueue.advances(after: nil), "Missing or expired requests require explicit Next")
+        XCTAssertFalse(TaskReviewQueue.advances(after: nil), "An unavailable request is not a confirmed response")
         XCTAssertEqual(queue.current, first, "Reading live response state never changes the selected task")
         XCTAssertTrue(queue.advance())
         XCTAssertEqual(queue.current, second)
         XCTAssertEqual(queue.progress, "2 of 2")
         XCTAssertFalse(queue.advance(), "The final item completes review rather than looping unanswered tasks")
         XCTAssertEqual(queue.current, second)
+    }
+
+    @MainActor func testReviewAppendsArrivalsWithoutReplacingCurrentAndRemovesUnavailableSessions() {
+        func identity(_ session: String) -> WorkIdentity {
+            WorkIdentity(sourceID: sourceID, sessionID: session, provider: "codex")
+        }
+        let first = identity("first"), resolved = identity("resolved"), arriving = identity("arriving")
+        var queue = TaskReviewQueue(tasks: [first, resolved])
+        let originalID = queue.id
+        queue.include([arriving, first])
+        XCTAssertEqual(queue.id, originalID)
+        XCTAssertEqual(queue.current, first, "Arrival cannot replace a decision or draft")
+        XCTAssertEqual(queue.tasks, [first, resolved, arriving])
+        XCTAssertTrue(queue.advance(pending: [arriving]))
+        XCTAssertEqual(queue.current, arriving, "A future session resolved elsewhere is skipped")
+        queue.include([first, arriving])
+        XCTAssertTrue(queue.advance(pending: [first]))
+        XCTAssertEqual(queue.current, first, "A new request in an already-reviewed session joins the end")
+        XCTAssertFalse(queue.advance(pending: []), "The last confirmed decision closes review")
+    }
+
+    @MainActor func testDismissingReviewDefersExactRequestsButNewRequestsCanPresent() throws {
+        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
+                                  clientID: "client", credential: "fixture")
+        let inbox = InteractionInbox()
+        inbox.preview(source, kind: "question")
+        let first = try XCTUnwrap(inbox.items.first)
+        var presentation = TaskReviewPresentation()
+        XCTAssertEqual(presentation.automaticRequests([first]).map(\.id), [first.id])
+        presentation.deferRequests([first])
+        XCTAssertTrue(presentation.automaticRequests([first]).isEmpty, "Polling the same request cannot reopen it")
+        inbox.preview(source, kind: "approval")
+        let next = try XCTUnwrap(inbox.items.last)
+        XCTAssertEqual(presentation.automaticRequests([first, next]).map(\.id), [next.id],
+                       "A new request can present in the same visit, including in the same session")
+        presentation = TaskReviewPresentation()
+        XCTAssertEqual(presentation.automaticRequests([first, next]).count, 2, "Returning to the app offers remaining decisions")
+    }
+
+    @MainActor func testAutomaticReviewIncludesOnlyCurrentAnswerableRequestsAcrossComputers() throws {
+        let inbox = InteractionInbox()
+        let sources = [sourceID, "another-computer"].map {
+            PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: $0,
+                         clientID: "client", credential: "fixture")
+        }
+        sources.forEach { inbox.preview($0, kind: "question") }
+        let requests = inbox.items
+        func row(_ request: PendingInput, historical: Bool = false, includesRequest: Bool = true) -> WorkItem {
+            let id = WorkIdentity(sourceID: request.source.sourceID, sessionID: request.request.sessionID, provider: request.request.provider)
+            return WorkItem(id: id, session: AgentSession(id: id.sessionID, provider: id.provider, state: .needsInput),
+                            computer: "Mac", historical: historical, request: includesRequest ? request : nil)
+        }
+        let items = requests.map { row($0) }
+        XCTAssertEqual(TaskReviewQueue.identities(for: TaskReviewQueue.requests(in: items, inbox: inbox)).count, 2)
+        XCTAssertTrue(TaskReviewQueue.requests(in: [row(requests[0], historical: true)], inbox: inbox).isEmpty)
+        XCTAssertTrue(TaskReviewQueue.requests(in: [row(requests[0], includesRequest: false)], inbox: inbox).isEmpty,
+                      "Native-only attention and Working details cannot automatically open review")
+        inbox.didSubmit(requests[0], submission: submission(requests[0], action: "answer"))
+        XCTAssertEqual(TaskReviewQueue.requests(in: items, inbox: inbox).map(\.id), [requests[1].id])
+        inbox.sourceUnavailable(requests[1].source.sourceID)
+        XCTAssertTrue(TaskReviewQueue.requests(in: items, inbox: inbox).isEmpty, "Disconnected requests cannot open a new form")
+    }
+
+    @MainActor func testHostedReviewPresentsDrainsClosesAndPresentsNewArrival() async throws {
+        let source = refreshSource("review-presentation")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        InteractionURLProtocol.start = { $0.finish(self.refreshSnapshot(source, state: "needs_input")) }
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config))
+        model.pairedSources = [source]
+        _ = await model.refresh(sourceID: source.sourceID)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: CompanionRoot(model: model, presentation: PresentationModel())
+            .environment(\.scenePhase, .active))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            previousWindow?.makeKeyAndVisible()
+            model.interactions.setForeground(false)
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+        }
+        func settle(_ presented: Bool, file: StaticString = #filePath, line: UInt = #line) async throws {
+            for _ in 0..<80 {
+                if (host.presentedViewController != nil) == presented { return }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            XCTFail(presented ? "Review did not automatically present" : "Completed review did not close", file: file, line: line)
+        }
+        model.interactions.preview(source)
+        let first = try XCTUnwrap(model.interactions.items.first)
+        try await settle(true)
+        // Let the sheet capture its first request before another one arrives.
+        try await Task.sleep(for: .milliseconds(500))
+        let question = InteractionQuestion(id: "q0", prompt: "Which checks?", multiple: false,
+                                          options: [.init(label: "All", description: "")])
+        let second = PendingInput(source: source, generation: first.generation,
+            request: InputRequest(requestID: UUID().uuidString, version: 1, provider: first.request.provider,
+                sessionID: first.request.sessionID, kind: "question", title: "Follow-up", detail: "",
+                questions: [question], remainingSeconds: 60), expiresAtUptime: first.expiresAtUptime)
+        model.interactions.observeWatchRequest(second)
+        model.interactions.didSubmit(first, submission: submission(first, action: "allowOnce"))
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertNotNil(host.presentedViewController, "A sibling question keeps review open")
+        let answer = InputSubmission(generation: second.generation, requestID: second.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        model.interactions.observeWatchSubmission(second, submission: answer, phase: .unconfirmed)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertNotNil(host.presentedViewController, "A current uncertain response remains available for explicit retry")
+        model.interactions.sourceUnavailable(source.sourceID)
+        try await settle(false)
+        XCTAssertEqual(model.interactions.response(for: second)?.submission, answer,
+                       "Closing an unavailable review preserves its exact response envelope")
+        model.interactions.observeWatchRequest(second)
+        try await settle(true)
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(model.interactions.response(for: second)?.phase, .unconfirmed,
+                       "Reconnection must not offer a fresh submission or retry automatically")
+        model.interactions.didSubmit(second, submission: answer)
+        try await settle(false)
+        model.interactions.preview(source)
+        let third = try XCTUnwrap(model.interactions.items.last)
+        try await settle(true)
+        try await Task.sleep(for: .milliseconds(500))
+        let sheet = try XCTUnwrap(host.presentedViewController)
+        let controller = try XCTUnwrap(sheet.presentationController)
+        let delegate = controller.delegate
+        sheet.dismiss(animated: false)
+        delegate?.presentationControllerDidDismiss?(controller)
+        try await settle(false)
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertNil(host.presentedViewController, "Dismissing an unanswered request must not immediately reopen it")
+        XCTAssertTrue(model.interactions.isCurrent(third), "Dismissal leaves the native request pending")
+        model.interactions.preview(source)
+        let fourth = try XCTUnwrap(model.interactions.items.last)
+        try await settle(true)
+        try await Task.sleep(for: .milliseconds(500))
+        model.interactions.didSubmit(fourth, submission: submission(fourth, action: "allowOnce"))
+        try await settle(false)
     }
 
     @MainActor func testOpenRequestDoesNotSwitchWhenSameTaskReceivesAnotherQuestion() throws {
@@ -1647,67 +1790,51 @@ final class InteractionTests: XCTestCase {
         }
     }
 
-    @MainActor func testSessionFlowProtectsDraftThenAdvancesOnlyOnExactAcknowledgement() throws {
-        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
-                                  clientID: "client", credential: "fixture")
+    @MainActor func testLiveReviewPreservesDraftUntilQuestionWithdrawnOrReplaced() throws {
+        let source = refreshSource("live-review")
         let inbox = InteractionInbox()
         inbox.preview(source, kind: "question")
         let first = try XCTUnwrap(inbox.items.first)
-        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: first.request.provider,
-            sessionID: first.request.sessionID, kind: "question", title: "Follow-up", detail: "", questions: [], remainingSeconds: 60)
-        let next = PendingInput(source: source, generation: first.generation, request: request, expiresAtUptime: first.expiresAtUptime)
+        let next = PendingInput(source: source, generation: first.generation,
+            request: InputRequest(requestID: UUID().uuidString, version: 1, provider: first.request.provider,
+                sessionID: first.request.sessionID, kind: "question", title: "Follow-up", detail: "",
+                questions: [], remainingSeconds: 60), expiresAtUptime: first.expiresAtUptime)
         var lock = TaskCardRequestLock()
-        lock.capture(first)
-        lock.capture(next)
+        XCTAssertTrue(lock.reconcile(pending: [first]))
+        let originalVisit = lock.visitID
+        XCTAssertFalse(lock.reconcile(pending: [next, first]))
         XCTAssertEqual(lock.request?.id, first.id)
-        for phase in [InputResponsePhase.sending, .unconfirmed, .rejected] {
-            let result = InputResponseState(item: first, submission: submission(first), startedAt: 1, phase: phase)
-            XCTAssertFalse(lock.advance(after: result, to: next))
-            XCTAssertEqual(lock.request?.id, first.id)
-        }
-        let wrong = InputResponseState(item: next, submission: submission(next), startedAt: 1, phase: .submitted)
-        XCTAssertFalse(lock.advance(after: wrong, to: next))
-        let confirmed = InputResponseState(item: first, submission: submission(first), startedAt: 1, phase: .submitted)
-        XCTAssertFalse(lock.advance(after: confirmed, to: first), "A stale listing cannot repeat the answered form")
-        XCTAssertTrue(lock.advance(after: confirmed, to: next))
+        XCTAssertEqual(lock.visitID, originalVisit, "A new arrival preserves the current draft")
+        XCTAssertTrue(lock.reconcile(pending: [next]), "Withdrawal advances without an extra tap")
         XCTAssertEqual(lock.request?.id, next.id)
-        XCTAssertFalse(lock.advance(after: confirmed, to: nil), "A delayed duplicate acknowledgement cannot advance another form")
-        let last = InputResponseState(item: next, submission: submission(next), startedAt: 1, phase: .submitted)
-        XCTAssertTrue(lock.advance(after: last, to: nil))
-        XCTAssertNil(lock.request)
-        let laterRequest = InputRequest(requestID: UUID().uuidString, version: 1, provider: first.request.provider,
-            sessionID: first.request.sessionID, kind: "question", title: "Later follow-up", detail: "", questions: [], remainingSeconds: 60)
-        let later = PendingInput(source: source, generation: first.generation, request: laterRequest, expiresAtUptime: first.expiresAtUptime)
-        lock.capture(later)
-        XCTAssertEqual(lock.request?.id, later.id, "An empty flow can display the next available request")
+        XCTAssertNotEqual(lock.visitID, originalVisit)
+        XCTAssertTrue(lock.reconcile(pending: []))
+        XCTAssertNil(lock.request, "An unavailable form leaves Review")
+        XCTAssertTrue(lock.reconcile(pending: [first]), "The same question can return after reconnection")
+        let reconnectVisit = lock.visitID
+        let replacement = PendingInput(source: source, generation: first.generation,
+            request: InputRequest(requestID: first.request.id, version: 1, provider: first.request.provider,
+                sessionID: first.request.sessionID, kind: "question", title: "Different question", detail: "",
+                questions: [], remainingSeconds: 60), expiresAtUptime: first.expiresAtUptime)
+        XCTAssertTrue(lock.reconcile(pending: [replacement]))
+        XCTAssertNotEqual(lock.visitID, reconnectVisit, "Replacement content receives a fresh form")
     }
 
-    @MainActor func testConfirmedSessionFlowCannotSwitchComputerSessionProviderOrBroker() throws {
-        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
-                                  clientID: "client", credential: "fixture")
-        let inbox = InteractionInbox()
-        inbox.preview(source, kind: "question")
-        let first = try XCTUnwrap(inbox.items.first)
-        let confirmed = InputResponseState(item: first, submission: submission(first), startedAt: 1, phase: .submitted)
-        for difference in ["computer", "session", "provider", "generation"] {
-            let otherSource = PairedSource(endpoint: source.endpoint, sourceID: UUID().uuidString,
-                                          clientID: "client", credential: "fixture")
-            let request = InputRequest(requestID: UUID().uuidString, version: 1,
-                provider: difference == "provider" ? "codex" : first.request.provider,
-                sessionID: difference == "session" ? "other-session" : first.request.sessionID,
-                kind: "question", title: "Other", detail: "", questions: [], remainingSeconds: 60)
-            let other = PendingInput(source: difference == "computer" ? otherSource : source,
-                generation: difference == "generation" ? UUID().uuidString : first.generation,
-                request: request, expiresAtUptime: first.expiresAtUptime)
-            var lock = TaskCardRequestLock()
-            lock.capture(first)
-            XCTAssertFalse(lock.advance(after: confirmed, to: other), difference)
-            XCTAssertEqual(lock.request?.id, first.id)
-        }
-        var lock = TaskCardRequestLock()
-        lock.capture(first)
-        let released = InputResponseState(item: first, submission: submission(first, action: "release"), startedAt: 1, phase: .submitted)
-        XCTAssertFalse(lock.advance(after: released, to: nil), "Opening the agent is not a decision to follow more phone forms")
+    @MainActor func testReviewWithdrawsCurrentAndUpcomingQuestionsWithoutAStopPage() {
+        let first = WorkIdentity(sourceID: "one", sessionID: "first", provider: "codex")
+        let upcoming = WorkIdentity(sourceID: "one", sessionID: "upcoming", provider: "codex")
+        let remote = WorkIdentity(sourceID: "two", sessionID: "remote", provider: "claude")
+        var queue = TaskReviewQueue(tasks: [first, upcoming, remote])
+        XCTAssertTrue(queue.reconcile(pending: [first, remote]))
+        XCTAssertEqual(queue.tasks, [first, remote])
+        XCTAssertEqual(queue.progress, "1 of 2")
+        XCTAssertTrue(queue.reconcile(pending: [remote]), "Losing one computer continues on another")
+        XCTAssertEqual(queue.current, remote)
+        XCTAssertTrue(queue.reconcile(pending: [remote, first]))
+        XCTAssertEqual(queue.current, remote, "Reconnect never steals the current question")
+        XCTAssertEqual(queue.tasks, [remote, first])
+        XCTAssertFalse(queue.reconcile(pending: []), "Nothing answerable ends Review")
+        XCTAssertNil(queue.current)
     }
 
     @MainActor func testTaskStatusAndSectionsStayConsistentAcrossLiveTransitions() throws {
@@ -2132,6 +2259,110 @@ extension InteractionTests {
         XCTAssertEqual(try phone().phase, .finished)
         XCTAssertEqual(watch.group(at: Date()), "Recent")
         XCTAssertEqual(watch.status, try phone().phase.title)
+    }
+
+    @MainActor func testWatchReviewProjectsExactPendingQuestionsAndPreservesUncertainResponses() async throws {
+        let firstSource = refreshSource("review-one"), secondSource = refreshSource("review-two")
+        var firstListing = fixture(), secondListing = fixture()
+        firstListing["sourceID"] = firstSource.sourceID
+        secondListing["sourceID"] = secondSource.sourceID
+        var firstRequests = try XCTUnwrap(firstListing["requests"] as? [[String: Any]])
+        var sibling = firstRequests[0]
+        sibling["requestID"] = UUID().uuidString
+        sibling["title"] = "Sibling question"
+        firstRequests.append(sibling)
+        firstListing["requests"] = firstRequests
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, client: SourceClient(configuration: config))
+        model.pairedSources = [firstSource, secondSource]
+        model.snapshots = [:]
+        var posts = 0
+        var secondUnavailable = false
+        var loseSubmissionReply = true
+        InteractionURLProtocol.start = { transport in
+            let first = transport.request.url?.host == firstSource.endpoint.host
+            let source = first ? firstSource : secondSource
+            if transport.request.httpMethod == "POST" {
+                posts += 1
+                if loseSubmissionReply {
+                    transport.client?.urlProtocol(transport, didFailWithError: URLError(.timedOut))
+                } else {
+                    let data = try! JSONSerialization.data(withJSONObject: ["status": "submitted",
+                        "generation": firstListing["generation"]!, "requestID": firstRequests[0]["requestID"]!, "version": 1])
+                    transport.finish(data)
+                }
+            } else if transport.request.url?.path == "/v1/snapshot" {
+                transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true))
+            } else if !first && secondUnavailable {
+                transport.client?.urlProtocol(transport, didFailWithError: URLError(.notConnectedToInternet))
+            } else {
+                transport.finish(try! JSONSerialization.data(withJSONObject: first ? firstListing : secondListing))
+            }
+        }
+        defer {
+            InteractionURLProtocol.start = nil
+            for source in [firstSource, secondSource] {
+                SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+            }
+        }
+        func review() async throws -> WatchReviewSnapshot {
+            let reply = await model.handleWatchWork(["operation": "review"])
+            return try JSONDecoder().decode(WatchReviewSnapshot.self, from: XCTUnwrap(reply["data"] as? Data))
+        }
+        let initial = try await review()
+        XCTAssertEqual(initial.requests.count, 3, "Full native listings include siblings and other computers")
+        XCTAssertEqual(Set(initial.requests.map(\.taskID)).count, 2)
+        XCTAssertTrue(initial.continuationTaskIDs.isEmpty)
+        XCTAssertTrue(model.interactions.items.isEmpty, "Watch demand does not activate the foreground phone inbox")
+        let siblingID = sibling["requestID"] as! String
+        let selected = try XCTUnwrap(initial.requests.first { $0.id.hasSuffix("/" + siblingID) })
+        var message: [String: Any] = ["operation": "request", "sourceID": firstSource.sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude", "requestKey": selected.id,
+            "requestFingerprint": selected.fingerprint!]
+        let reply = await model.handleWatchWork(message)
+        let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reply["data"] as? Data))
+        XCTAssertEqual(prompt.request.id, siblingID, "Exact selection must not return the first sibling instead")
+        message["requestFingerprint"] = "stale-content"
+        let stale = await model.handleWatchWork(message)
+        XCTAssertEqual(stale["reviewUnavailable"] as? Bool, true)
+        XCTAssertNil(stale["data"], "A stale form must not receive replacement content under the same request identity")
+        message["requestFingerprint"] = selected.fingerprint!
+        let response = InputSubmission(generation: prompt.generation, requestID: prompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        let payload: [String: Any] = ["operation": "submit", "sourceID": firstSource.sourceID,
+            "requestFingerprint": selected.fingerprint!, "submission": try JSONEncoder().encode(response)]
+        let uncertain = await model.handleWatchWork(payload)
+        XCTAssertEqual(uncertain["unconfirmed"] as? Bool, true)
+        let stillPending = try await review()
+        XCTAssertTrue(stillPending.requests.contains(selected), "A live uncertain question remains available for explicit retry")
+        let reopened = await model.handleWatchWork(message)
+        let retained = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(reopened["data"] as? Data))
+        XCTAssertEqual(retained.submission, response, "Navigation retains the exact idempotent response")
+        XCTAssertEqual(posts, 1, "Reads and queue changes never retry a response")
+        firstListing["requests"] = [firstRequests[0]]
+        let removed = try await review()
+        XCTAssertFalse(removed.requests.contains(selected), "Canceled native questions leave Review even with a retained uncertain envelope")
+        secondUnavailable = true
+        let partial = try await review()
+        XCTAssertEqual(partial.requests.count, 1, "An unavailable computer does not block another computer's question")
+        XCTAssertTrue(partial.continuationTaskIDs.isEmpty, "Failed native reads must not invent an actionable continuation")
+        XCTAssertEqual(posts, 1)
+        let last = try XCTUnwrap(partial.requests.first)
+        let lastRead = await model.handleWatchWork(["operation": "request", "sourceID": firstSource.sourceID,
+            "sessionID": String(repeating: "a", count: 64), "provider": "claude", "requestKey": last.id,
+            "requestFingerprint": last.fingerprint!])
+        let lastPrompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(lastRead["data"] as? Data))
+        loseSubmissionReply = false
+        let lastResponse = InputSubmission(generation: lastPrompt.generation, requestID: lastPrompt.request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
+        let sent = await model.handleWatchWork(["operation": "submit", "sourceID": firstSource.sourceID,
+            "requestFingerprint": last.fingerprint!, "submission": try JSONEncoder().encode(lastResponse)])
+        XCTAssertEqual(sent["submitted"] as? Bool, true)
+        let finished = try await review()
+        XCTAssertTrue(finished.requests.isEmpty, "A delayed native listing cannot revive a confirmed response")
+        XCTAssertTrue(finished.continuationTaskIDs.isEmpty, "A sent receipt is not a new continuation question")
+        XCTAssertEqual(posts, 2)
     }
 
     @MainActor func testLateWatchReceiptDoesNotRestoreInboxContentAfterLifecycleChange() async throws {
@@ -2820,6 +3051,14 @@ extension InteractionTests {
         XCTAssertNil(model.handoff)
         model.presentStoredHandoff()
         XCTAssertEqual(model.handoff?.id, pending.id, "Closing an existing form must restore the deferred selection")
+        model.deferHandoff()
+        model.dismissHandoff(includingDeferred: true)
+        XCTAssertNil(defaults.data(forKey: key), "Completing or dismissing review consumes its deferred continuation")
+        model.presentStoredHandoff()
+        XCTAssertNil(model.handoff, "An old Watch continuation cannot reopen a Working sheet after review")
+        defaults.set(stored, forKey: key)
+        model.presentStoredHandoff()
+        XCTAssertEqual(model.handoff?.id, pending.id)
         watchID = "different-watch"
         model.presentStoredHandoff()
         XCTAssertNil(model.handoff)

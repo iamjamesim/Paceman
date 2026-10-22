@@ -1,11 +1,15 @@
 import SwiftUI
 
-/// Membership and order are captured at entry. Source updates never insert,
-/// reorder, or replace the request under the user's finger.
+/// Review contains current answerable sessions; new arrivals join the end.
 struct TaskReviewQueue: Identifiable {
     let id = UUID()
-    let tasks: [WorkIdentity]
+    private(set) var tasks: [WorkIdentity]
+    var excludedRequestIDs: Set<String> = []
     private(set) var index = 0
+    init(tasks: [WorkIdentity], excludedRequestIDs: Set<String> = []) {
+        self.tasks = tasks
+        self.excludedRequestIDs = excludedRequestIDs
+    }
     var current: WorkIdentity? { tasks.indices.contains(index) ? tasks[index] : nil }
     var progress: String { "\(index + 1) of \(tasks.count)" }
     var hasNext: Bool { index + 1 < tasks.count }
@@ -17,31 +21,105 @@ struct TaskReviewQueue: Identifiable {
         index += 1
         return true
     }
+    mutating func include(_ pending: [WorkIdentity]) {
+        var remaining = Set(tasks.dropFirst(index))
+        for identity in pending where remaining.insert(identity).inserted {
+            tasks.append(identity)
+        }
+    }
+    /// Remove unavailable questions without declaring their native work resolved.
+    /// Keep the current session and remaining order while they are still pending.
+    @discardableResult mutating func reconcile(pending: [WorkIdentity]) -> Bool {
+        include(pending)
+        let available = Set(pending)
+        tasks = Array(tasks.prefix(index)) + tasks.dropFirst(index).filter { available.contains($0) }
+        return current != nil
+    }
+    @discardableResult mutating func advance(pending: [WorkIdentity]) -> Bool {
+        include(pending)
+        // Unlike manual advance(), completion must also consume the last item.
+        if current != nil { index += 1 }
+        return reconcile(pending: pending)
+    }
+    @MainActor static func requests(in items: [WorkItem], inbox: InteractionInbox) -> [PendingInput] {
+        WorkCatalog.sorted(items).filter { !$0.historical && $0.request != nil }.flatMap {
+            inbox.pendingRequests(for: $0.id)
+        }
+    }
+    static func identities(for requests: [PendingInput], startingAt selected: WorkIdentity? = nil) -> [WorkIdentity] {
+        var seen = Set<WorkIdentity>()
+        let tasks: [WorkIdentity] = requests.compactMap {
+            let identity = WorkIdentity(sourceID: $0.source.sourceID, sessionID: $0.request.sessionID, provider: $0.request.provider)
+            return seen.insert(identity).inserted ? identity : nil
+        }
+        guard let selected, tasks.contains(selected) else { return tasks }
+        return [selected] + tasks.filter { $0 != selected }
+    }
 }
 
-/// Capture the first concrete request for this visit. New requests for the same
-/// task cannot erase a draft or redirect a response. The inbox still validates
-/// freshness and the exact version before submission.
+/// Dismissing sets aside the requests already offered, not future questions.
+/// Content and this policy are both reset when the phone backgrounds.
+struct TaskReviewPresentation {
+    private(set) var deferredRequestIDs: Set<String> = []
+    func automaticRequests(_ requests: [PendingInput]) -> [PendingInput] {
+        requests.filter { !deferredRequestIDs.contains($0.id) }
+    }
+    mutating func deferOfferedRequests(_ ids: Set<String>, pending: [PendingInput]) {
+        // Automatic withdrawal must not suppress the same question on reconnect.
+        deferRequestIDs(ids.intersection(Set(pending.map(\.id))))
+    }
+    mutating func deferRequests(_ requests: [PendingInput]) {
+        deferRequestIDs(Set(requests.map(\.id)))
+    }
+    mutating func deferRequestIDs(_ ids: Set<String>) {
+        deferredRequestIDs.formUnion(ids)
+    }
+}
+
+/// Context is stable only while this exact question remains answerable.
+struct TaskCardVisit {
+    let item: WorkItem
+    let request: PendingInput
+}
+
+/// Observe content changes even when a source reuses a native request ID.
+struct TaskReviewRequestVersion: Equatable {
+    let id: String
+    let request: InputRequest
+    init(_ pending: PendingInput) { id = pending.id; request = pending.request }
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && lhs.request.hasSameReview(as: rhs.request)
+    }
+}
+
+enum TaskCardRequestAvailability {
+    case current, unavailable
+    var message: String? {
+        switch self {
+        case .current: return nil
+        case .unavailable: return "This request can’t be verified right now."
+        }
+    }
+}
+
+/// Keep an unchanged question stable when siblings or other sessions arrive.
+/// The inbox validates freshness and the exact version before submission.
 struct TaskCardRequestLock {
     private(set) var request: PendingInput?
+    private(set) var visitID = UUID()
     mutating func capture(_ candidate: PendingInput?) {
-        if request == nil { request = candidate }
+        if request == nil, let candidate { request = candidate; visitID = UUID() }
     }
-    /// A new arrival cannot redirect an answer. Only an exact acknowledgement
-    /// releases this form and permits the next request in the selected session.
-    @discardableResult mutating func advance(after response: InputResponseState?, to next: PendingInput?) -> Bool {
-        guard let current = request, let response, response.item.id == current.id,
-              response.phase == .submitted, response.submission.action != "release",
-              response.submission.requestID == current.request.id,
-              response.submission.generation == current.generation,
-              response.submission.version == current.request.version else { return false }
-        if let next {
-            guard next.id != current.id, next.generation == current.generation,
-                  next.source.sourceID == current.source.sourceID,
-                  next.request.provider == current.request.provider,
-                  next.request.sessionID == current.request.sessionID else { return false }
+    /// Keep a draft for the exact live question; withdrawal or replacement
+    /// starts a fresh form. Submission state stays owned by InteractionInbox.
+    @discardableResult mutating func reconcile(pending: [PendingInput]) -> Bool {
+        if let request, pending.contains(where: { $0.id == request.id && $0.request.hasSameReview(as: request.request) }) {
+            return false
         }
+        let next = pending.first
+        guard request != nil || next != nil else { return false }
         request = next
+        visitID = UUID()
         return true
     }
 }
@@ -58,10 +136,9 @@ enum TaskCardSelection: Identifiable {
     }
 
     func shouldDismiss(response: InputResponseState?) -> Bool {
-        // Queues handle confirmed responses by advancing. Passive state changes
-        // do not close details or replace a request being answered.
-        if case .review = self { return false }
-        return response?.phase == .submitted && response?.submission.action == "release"
+        // Review advances after answers; opening the native agent ends the flow.
+        if case .review = self { return response?.phase == .submitted && response?.submission.action == "release" }
+        return response?.phase == .submitted
     }
 }
 
@@ -72,27 +149,33 @@ struct TaskCard: View {
     @ObservedObject var presentation: PresentationModel
     @ObservedObject var inbox: InteractionInbox
     let theme: CompanionTheme
+    var onOfferRequests: ([PendingInput]) -> Void = { _ in }
+    var onFinishReview: (Set<String>) -> Void = { _ in }
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .subheadline) private var detailIconSize = 20.0
     @Environment(\.scenePhase) private var phase
     @Environment(\.dismiss) private var dismiss
     @State private var queue: TaskReviewQueue?
     @State private var requestLock = TaskCardRequestLock()
+    @State private var visit: TaskCardVisit?
+    @State private var reviewEnded = false
     private var displayedRequest: PendingInput? { requestLock.request }
-    private var candidateRequest: PendingInput? {
-        guard let request = inbox.cardRequest(for: item), inbox.response(for: request)?.phase != .submitted else { return nil }
-        return request
-    }
     private var response: InputResponseState? { displayedRequest.flatMap { inbox.response(for: $0) } }
     private var sessionRequests: [PendingInput] {
-        guard let item, !item.historical else { return [] }
-        return inbox.pendingRequests(for: item.id)
+        guard let item = liveItem, !item.historical, item.request != nil else { return [] }
+        return inbox.pendingRequests(for: item.id).filter { review?.excludedRequestIDs.contains($0.id) != true }
     }
-    private var nextAvailableRequest: PendingInput? {
-        guard let displayedRequest, response?.phase != .sending, response?.phase != .unconfirmed,
-              !inbox.isCurrent(displayedRequest) || response?.phase == .rejected else { return nil }
-        return sessionRequests.first { $0.id != displayedRequest.id }
+    private var reviewRequests: [PendingInput] {
+        TaskReviewQueue.requests(in: WorkCatalog.live(model: model, presentation: presentation, inbox: inbox), inbox: inbox)
+            .filter { review?.excludedRequestIDs.contains($0.id) != true }
     }
+    private var pendingReviewTasks: [WorkIdentity] { TaskReviewQueue.identities(for: reviewRequests) }
+    private var requestAvailability: TaskCardRequestAvailability {
+        guard let request = displayedRequest,
+              sessionRequests.contains(where: { $0.id == request.id && $0.request.hasSameReview(as: request.request) }) else { return .unavailable }
+        return .current
+    }
+    private var reviewVersions: [TaskReviewRequestVersion] { reviewRequests.map(TaskReviewRequestVersion.init) }
     private var isReview: Bool { if case .review = selection { return true }; return false }
     private var currentIdentity: WorkIdentity? {
         switch selection {
@@ -108,7 +191,7 @@ struct TaskCard: View {
     @State private var heights: [TaskCardPart: CGFloat] = [:]
     @State private var detent: PresentationDetent = .height(160)
 
-    private var item: WorkItem? {
+    private var liveItem: WorkItem? {
         switch selection {
         case .activity, .review:
             return WorkCatalog.live(model: model, presentation: presentation, inbox: inbox).first { $0.id == currentIdentity }
@@ -118,6 +201,10 @@ struct TaskCard: View {
             return WorkCatalog.item(session: target.session, source: source, model: model,
                                     presentation: presentation, inbox: inbox)
         }
+    }
+    private var item: WorkItem? {
+        if let visit, currentIdentity == visit.item.id || currentIdentity == nil { return visit.item }
+        return liveItem
     }
     private var fittedHeight: CGFloat { max(160, min(480, heights.values.reduce(0, +))) }
     private var needsAgentApp: Bool {
@@ -154,13 +241,9 @@ struct TaskCard: View {
 
             if item != nil, let request = displayedRequest, phase == .active {
                 InteractionDetail(item: request, inbox: inbox, theme: theme,
+                    availability: requestAvailability,
                     heading: scrollingHeading, context: isReview && typeSize.isAccessibilitySize ? reviewContext : nil, contentTopInset: isReview || (showsIdentity && !typeSize.isAccessibilitySize) ? 16 : CompanionLayout.taskCardTopInset,
-                    openSession: handoffOpen, nextRequest: nextAvailableRequest.map { next in
-                        { guard inbox.isCurrent(next) else { return }
-                            requestLock = TaskCardRequestLock()
-                            requestLock.capture(next)
-                        }
-                    }).id(request.id)
+                    openSession: handoffOpen).id(requestLock.visitID)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
@@ -208,24 +291,12 @@ struct TaskCard: View {
         .onChange(of: shouldDismiss, initial: true) { _, close in
             if close { dismiss() }
         }
-        .onChange(of: response?.phase) { _, value in
-            guard TaskReviewQueue.advances(after: response), response?.submission.action != "release" else { return }
-            if let next = sessionRequests.first {
-                requestLock.advance(after: response, to: next)
-            } else if review?.hasNext == true {
-                advanceReview()
-            } else {
-                // Remain in the selected session. A later question can open
-                // here without another row tap; closing the sheet ends this flow.
-                requestLock.advance(after: response, to: nil)
-            }
-        }
-        .onChange(of: candidateRequest?.id, initial: true) { _, _ in
-            requestLock.capture(candidateRequest)
-        }
+        .onChange(of: response?.phase) { _, _ in reconcileReview() }
+        .onChange(of: reviewVersions, initial: true) { _, _ in reconcileReview() }
         .onChange(of: phase) { _, value in
             // Pending request content and drafts do not survive backgrounding.
-            if value == .background { requestLock = TaskCardRequestLock(); dismiss() }
+            if value == .background { requestLock = TaskCardRequestLock(); visit = nil; dismiss() }
+            if value == .active { reconcileReview() }
         }
         .task(id: selection.id) {
             if case .handoff(let request) = selection,
@@ -254,7 +325,7 @@ struct TaskCard: View {
             Text(review.progress).companionText(.supporting, theme: theme).monospacedDigit()
                 .accessibilityLabel("Session \(review.progress)")
             Spacer(minLength: 0)
-            Button(review.hasNext ? (displayedRequest.map { inbox.isCurrent($0) } == true && response == nil ? "Skip" : "Next") : "Done") {
+            Button(pendingReviewTasks.contains(where: { $0 != currentIdentity }) ? (response == nil ? "Skip" : "Next") : "Done") {
                 advanceReview()
             }.font(CompanionTextRole.label.font).foregroundStyle(theme.tint)
                 .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
@@ -270,14 +341,43 @@ struct TaskCard: View {
             .taskCardMeasure(.review)
     }
 
+    private func reconcileReview() {
+        guard isReview, !reviewEnded, phase == .active, var updated = review else { return }
+        let requests = reviewRequests
+        guard updated.reconcile(pending: TaskReviewQueue.identities(for: requests)) else {
+            finishReview(updated)
+            return
+        }
+        queue = updated
+        let pending = requests.filter {
+            WorkIdentity(sourceID: $0.source.sourceID, sessionID: $0.request.sessionID,
+                         provider: $0.request.provider) == updated.current
+        }
+        if requestLock.reconcile(pending: pending) {
+            visit = requestLock.request.flatMap { request in
+                WorkCatalog.live(model: model, presentation: presentation, inbox: inbox)
+                    .first { $0.id == updated.current }.map { TaskCardVisit(item: $0, request: request) }
+            }
+        }
+        onOfferRequests(requests)
+    }
+
+    private func finishReview(_ review: TaskReviewQueue) {
+        reviewEnded = true
+        // Only explicit skips should be deferred when Review ends on its own.
+        // A question returning during sheet dismissal must remain eligible.
+        onFinishReview(review.excludedRequestIDs)
+        dismiss()
+    }
+
     private func advanceReview() {
         guard var next = review else { return }
-        guard next.advance() else { dismiss(); return }
+        next.excludedRequestIDs.formUnion(sessionRequests.map(\.id))
+        if let displayedRequest { next.excludedRequestIDs.insert(displayedRequest.id) }
+        let pending = TaskReviewQueue.identities(for: reviewRequests.filter { !next.excludedRequestIDs.contains($0.id) })
+        guard next.advance(pending: pending) else { finishReview(next); return }
         queue = next
-        requestLock = TaskCardRequestLock()
-        // Capture synchronously, including when two queue entries happen to have
-        // the same nil candidate. No source callback may choose the next task.
-        requestLock.capture(candidateRequest)
+        reconcileReview()
     }
 
     private func taskDetails(_ item: WorkItem) -> some View {

@@ -5,14 +5,15 @@ struct InteractionDetail: View {
     let item: PendingInput
     @ObservedObject var inbox: InteractionInbox
     let theme: CompanionTheme
+    var availability: TaskCardRequestAvailability = .current
     var heading: TaskCardHeading? = nil
     var context: String? = nil
     var contentTopInset: CGFloat = 16
     var openSession: SessionOpenButton? = nil
-    var nextRequest: (() -> Void)? = nil
     @Environment(\.scenePhase) private var phase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var answers: [String: InputAnswer] = [:]
+    @State private var responseStarted = false
     @State private var confirming: ApprovalResponseOption?
     @State private var showingCommand = false
     private var response: InputResponseState? { inbox.response(for: item) }
@@ -37,10 +38,17 @@ struct InteractionDetail: View {
         }
         return item.answersFitWireLimit(answers) ? nil : "The combined answer is too long. Shorten it to send."
     }
-    private var editable: Bool { response == nil && !sending && inbox.isCurrent(item) && phase == .active }
+    private var editable: Bool { !responseStarted && response == nil && !sending && availability == .current && inbox.isCurrent(item) && phase == .active }
+    private var requestNotice: String? {
+        if responseStarted && response == nil && !sending { return "Response not confirmed. Check this request in the agent." }
+        if retryable, message == nil { return "Response not confirmed. Retry sends the same response." }
+        guard !sent && !sending && !retryable && !editable && message == nil else { return nil }
+        return (response == nil ? availability.message : nil)
+            ?? "This request is no longer available. \(ResponseGuidance.continuation(for: item.request.provider))."
+    }
     private var inlineActions: Bool { approvalAction?.kind == .command || typeSize.isAccessibilitySize }
     private var hasDecisionControls: Bool {
-        message != nil || (!sent && (sending || retryable || editable)) || openSession != nil || nextRequest != nil
+        message != nil || (!sent && (sending || retryable || editable)) || openSession != nil
     }
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
@@ -71,8 +79,8 @@ struct InteractionDetail: View {
                     if editable, let validationMessage {
                         Text(validationMessage).companionText(.body, theme: theme)
                     }
-                    if !sent && !sending && !retryable && !editable && message == nil {
-                        Text("This request is no longer available. \(ResponseGuidance.continuation(for: item.request.provider)).").companionText(.body, theme: theme)
+                    if let requestNotice {
+                        Text(requestNotice).companionText(.body, theme: theme)
                     }
                     if inlineActions { decisionControls }
                 }.frame(maxWidth: .infinity, alignment: .leading)
@@ -95,13 +103,16 @@ struct InteractionDetail: View {
             }
         }
         .onAppear {
-            if let submission { answers = submission.answers }
+            if let submission { answers = submission.answers; responseStarted = true }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--approval-confirmation-preview") {
                 confirming = item.request.approvalChoices.first { $0.confirmation != nil }
             }
             showingCommand = ProcessInfo.processInfo.arguments.contains("--approval-command-details-preview")
             #endif
+        }
+        .onChange(of: response?.phase, initial: true) { _, value in
+            if value != nil { responseStarted = true }
         }
         .sheet(isPresented: $showingCommand) {
             if let action = approvalAction {
@@ -167,9 +178,6 @@ struct InteractionDetail: View {
                     Text(message).companionText(.body, theme: theme).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !sent && (sending || retryable || editable) { responseActions }
-                if !sending && !retryable, let nextRequest {
-                    InputActionButton(title: "Next request", theme: theme, action: nextRequest)
-                }
                 if let openSession { openSession }
             }
         }
@@ -321,9 +329,11 @@ struct InteractionDetail: View {
     }
 
     private func respond(_ action: String, optionID: String? = nil) {
-        guard inbox.isCurrent(item), phase == .active else { return }
+        guard editable else { return }
         focusedQuestion = nil
-        inbox.submit(item, action: action, answers: action == "answer" ? answers : [:], optionID: optionID)
+        if inbox.submit(item, action: action, answers: action == "answer" ? answers : [:], optionID: optionID) != nil {
+            responseStarted = true
+        }
     }
 }
 

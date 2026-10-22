@@ -205,8 +205,9 @@ struct InputResponseState {
     }
 
     func isCurrent(_ item: PendingInput) -> Bool {
-        active && ProcessInfo.processInfo.systemUptime < item.expiresAtUptime
-            && bySource[item.source.sourceID]?.contains(where: { $0.id == item.id }) == true
+        guard active, let current = bySource[item.source.sourceID]?.first(where: { $0.id == item.id }) else { return false }
+        return ProcessInfo.processInfo.systemUptime < current.expiresAtUptime
+            && item.request.hasSameReview(as: current.request)
     }
     @discardableResult func refresh(_ source: PairedSource, snapshot: Snapshot, client: SourceClient) async -> InputRequests? {
         reconcile(snapshot)

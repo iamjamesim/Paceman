@@ -23,3 +23,5 @@ class WatchWorkTests(unittest.TestCase):
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("watch work transitions passed", result.stdout)
+            self.assertIn("watch review transitions passed", result.stdout)
+            print(result.stdout.strip())
