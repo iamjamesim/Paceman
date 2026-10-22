@@ -54,7 +54,7 @@ class ProcessTrackingTests(unittest.TestCase):
         shutil.copy2(Path(sys.executable).resolve(), self.executable)
         self.store = Store(self.root / 'hub.sqlite3')
         self.address = self.root / 'agent.sock'
-        self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root / 'theme', providers=("codex", "claude"))
+        self.source = OmarchySource(self.store, allowance_reader=lambda: [], socket_path=self.address, state_dir=self.root / 'theme', providers=("codex", "claude"))
         self.source.__enter__()
         self.addCleanup(lambda: self.source.__exit__(None, None, None))
 
@@ -89,7 +89,7 @@ class ProcessTrackingTests(unittest.TestCase):
 
     def restart(self):
         self.source.__exit__(None, None, None)
-        self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root / 'theme', providers=("codex", "claude"))
+        self.source = OmarchySource(self.store, allowance_reader=lambda: [], socket_path=self.address, state_dir=self.root / 'theme', providers=("codex", "claude"))
         self.source.__enter__()
 
     def assert_retained_result_without_owner(self, before):
@@ -111,7 +111,7 @@ class ProcessTrackingTests(unittest.TestCase):
         # Use the production socket path expected by the installed hook.
         self.source.__exit__(None, None, None)
         self.address = self.root / "omarchy-watch.sock"
-        self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root,
+        self.source = OmarchySource(self.store, allowance_reader=lambda: [], socket_path=self.address, state_dir=self.root,
                                    processes=self.source.processes, providers=("codex", "claude"))
         self.source.__enter__()
         hook = Path(__file__).resolve().parents[1] / "omarchy/claude_hook.py"
@@ -263,7 +263,7 @@ for line in sys.stdin:
         self.source.thread = None
         owner.kill()
         owner.wait(timeout=3)
-        self.source = OmarchySource(self.store, socket_path=self.address, state_dir=self.root / 'theme', providers=("codex", "claude"))
+        self.source = OmarchySource(self.store, allowance_reader=lambda: [], socket_path=self.address, state_dir=self.root / 'theme', providers=("codex", "claude"))
         self.source.__enter__()
         self.assertEqual(self.store.snapshot()['sessions'], [])
 

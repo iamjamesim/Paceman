@@ -52,7 +52,7 @@ Installing and pairing do not enable session monitoring until you review the hoo
 /usr/bin/python3 -I /home/YOU/.local/lib/paceman/omarchy/codex_hook.py
 ```
 
-The seven events are `UserPromptSubmit` (new work), `PreToolUse` (tool calls and input questions), `PermissionRequest` (approval needed), `PostToolUse` (resolved blocking input and approvals), `Stop` (finished turn), `Interrupt` (interrupted turn), and `SessionEnd` (closed session). The hook sends event and tool names plus opaque session, turn, and call IDs to Paceman's private local socket. It does not send prompts, replies, command arguments, or answers. The user decides whether to trust each entry.
+The seven events are `UserPromptSubmit` (new work), `PreToolUse` (tool calls and input questions), `PermissionRequest` (approval needed), `PostToolUse` (resolved blocking input and approvals), `Stop` (finished turn), `Interrupt` (interrupted turn), and `SessionEnd` (closed session). The hook sends event and tool names, project labels and opaque session, turn, and call IDs to Paceman's private local socket. It does not send prompts, replies, command arguments, full paths, or answers. The user decides whether to trust each entry.
 
 After review, start a fresh local Codex task and submit a prompt. Check that `lastAgentEventAt` advances in `pacemanctl status`. If it does not, review the hook rows and installed command; monitoring setup remains incomplete. Paceman verifies the sending Codex process and reconciles its identity after source restart.
 
@@ -87,8 +87,10 @@ Control session. Hooks return immediately without taking over native prompts.
 Known native-only requests remain visible with continuation in the agent. Pending
 decisions can outlive a completed turn. See [verified coverage and limits](../docs/native-request-coverage.md). Restart restores attention only for
 the same verified live process; saved Codex outcomes recover missed completion
-hooks. Codex quota snapshots retain both short and weekly windows, including
-their durations, for phone and direct Apple Watch delivery.
+hooks. Both agent hooks briefly retry terminal-event delivery during a source
+restart. Codex usage is read directly through the local App Server every five
+minutes; existing Omarchy usage-file output remains a fallback. Snapshots retain
+both short and weekly windows, including durations, for phone and direct Apple Watch delivery.
 
 ## Panel and control
 

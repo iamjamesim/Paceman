@@ -24,7 +24,7 @@ class SessionLinkTests(unittest.TestCase):
         processes = Mock(spec=AgentProcesses)
         processes.identify.side_effect = lambda pid: ProcessIdentity(pid, '1', 'boot')
         processes.is_alive.return_value = True
-        return OmarchySource(store, state_dir=root, processes=processes,
+        return OmarchySource(store, allowance_reader=lambda: [], state_dir=root, processes=processes,
                              turn_metadata_reader=lambda _: {}, **args)
 
     def receive(self, source, session, event='working', pid=100):

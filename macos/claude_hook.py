@@ -5,13 +5,9 @@ import os
 from pathlib import Path
 import sys
 
-if __package__:
-    from .codex_hook import deliver, workspace_label
-else:
-    from codex_hook import deliver, workspace_label
-
 # Direct scripts run with an isolated interpreter; import only the installed package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from service.hook_delivery import deliver, workspace_label
 from service.claude_hooks import EVENTS, message_for as normalize_message
 
 

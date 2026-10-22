@@ -25,7 +25,7 @@ Mac and Omarchy differ in how they know a session is still running:
 
 | Platform | Event input | Session liveness |
 | --- | --- | --- |
-| Mac | Reviewed Codex and Claude Code hooks. | Codex lookup identities survive restart; fresh native owner state restores activity and decisions. Claude active sessions clear; observed results persist. |
+| Mac | Reviewed Codex and Claude Code hooks. | Codex recovers through fresh native owner state; Claude recovers only for the same verified live process. Observed results persist. |
 | Omarchy | Selected Codex and Claude Code hooks on a local socket. | Verifies the sending agent process and reconciles live sessions and pending attention after restart. |
 
 Both treat a completed turn as Finished. Codex rejects late turn events; Claude rejects old prompt callbacks and permits a new tool start when a Stop hook continues the same turn. Activity and allowance changes advance the snapshot revision, but allowance alone does not create an activity alert.
@@ -44,6 +44,9 @@ Usage is Codex-only and assumes one Codex account across computers. The phone
 prefers a recent reading from a connected computer, then recent cached usage,
 then older cached usage, in pairing order. Windows come from one computer;
 accounts are not combined. Claude Code contributes activity only.
+Both desktop sources read local Codex usage every five minutes. Omarchy can also
+use its existing usage file; the newest complete reading wins without combining
+windows from different observations. Usage failures never renew observation times.
 
 Apple Watch registers for direct background pushes from every paired computer,
 so one computer going offline does not require the phone to switch sources.
