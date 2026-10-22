@@ -1118,6 +1118,13 @@ private struct WatchPhoneContinuation: View {
             if value == .background { epoch = UUID(); preparing = nil; message = nil }
         }
         .onDisappear { epoch = UUID(); preparing = nil; message = nil }
+        #if DEBUG
+        .task {
+            if WatchWorkPreview.scenario != nil, ProcessInfo.processInfo.arguments.contains("--handoff-guidance-preview") {
+                await prepare(destinations.last ?? .paceman)
+            }
+        }
+        #endif
     }
 
     private func continuationButton(_ destination: WatchContinuationDestination) -> some View {
@@ -1154,17 +1161,7 @@ private struct WatchPhoneContinuation: View {
             } else if reply["selectionAvailable"] as? Bool == false, task != nil {
                 message = "This session is no longer available. Open Paceman on iPhone for current activity."
             } else {
-                switch reply["handoff"] as? Int {
-                case 2:
-                    message = destination == .agent
-                        ? "Tap the notification on iPhone to open \(task?.providerName ?? "the agent app")."
-                        : "Tap the Paceman notification on iPhone."
-                case 3:
-                    message = destination == .agent
-                        ? "Open Paceman on iPhone to continue in \(task?.providerName ?? "the agent app")."
-                        : "Open Paceman on iPhone."
-                default: message = "Ready on iPhone."
-                }
+                message = WatchContinuationDestination.confirmation(handoff: reply["handoff"] as? Int)
             }
         } catch {
             guard epoch == expected, phase == .active else { return }

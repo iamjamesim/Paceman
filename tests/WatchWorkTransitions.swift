@@ -65,6 +65,11 @@ import Foundation
             title: "Task", computer: "Mac", state: "needs_input", freshUntil: 200)
         precondition(unknown.continuationDestinations(nativeOnly: true, at: Date(timeIntervalSince1970: 100)) == [.paceman])
 
+        precondition(WatchContinuationDestination.confirmation(handoff: 1) == "Ready on iPhone.")
+        for result in [2, 3] {
+            precondition(WatchContinuationDestination.confirmation(handoff: result) == "Ready on iPhone. Open Paceman to continue.")
+        }
+
         let activation = WatchWorkActivation()
         // Already activated reads need no subsequent delegate callback.
         try await activation.wait(activated: true, timeout: .zero)

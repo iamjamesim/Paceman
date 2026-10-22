@@ -3385,3 +3385,182 @@ extension InteractionTests {
         }
     }
 }
+
+extension InteractionTests {
+    @MainActor func testWatchPriorityReservesBeforeActivationAndIgnoresLateNavigationAfterConsumption() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        let source = refreshSource("watch-priority")
+        let model = CompanionModel(preview: true, push: PushCoordinator(), appleWatchIdentity: { "watch" },
+            postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
+        var snapshot = try JSONDecoder().decode(Snapshot.self, from: refreshSnapshot(source))
+        let session = AgentSession(id: "selected", provider: "codex", state: .working, threadID: UUID().uuidString)
+        snapshot.sessions = [session]
+        model.pairedSources = [source]
+        model.snapshots = [source.sourceID: snapshot]
+        defer {
+            model.setForeground(false)
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        let reply = await model.handleWatchWork(["operation": "continueOnPhone", "destination": "agent",
+            "sourceID": source.sourceID, "sessionID": session.id, "provider": session.provider])
+        XCTAssertEqual(reply["handoff"] as? Int, 3, "Opening Paceman works without a notification")
+        XCTAssertTrue(model.prioritizeWatchHandoff(), "An active view must reserve the selection before model activation")
+        XCTAssertNil(model.handoff)
+        model.setForeground(true)
+        let pending = try XCTUnwrap(model.handoff)
+        XCTAssertTrue(model.prioritizeWatchHandoff())
+        XCTAssertEqual(model.consumeAgentHandoff(pending), session.appURL)
+        XCTAssertNil(defaults.data(forKey: key))
+        XCTAssertTrue(model.prioritizeWatchHandoff(), "A late Activity refresh cannot replace the completed handoff")
+        XCTAssertFalse(model.prioritizeWatchHandoff(includingOpenedAgent: false), "An explicit later Review action remains usable")
+        XCTAssertNil(model.consumeAgentHandoff(pending), "Late callbacks cannot launch twice")
+        model.agentHandoffDidFailToOpen(UUID())
+        XCTAssertTrue(model.prioritizeWatchHandoff(), "An older launch callback cannot release the current destination")
+        model.agentHandoffDidFailToOpen(pending.id)
+        XCTAssertFalse(model.prioritizeWatchHandoff(), "Failed app opening allows normal Activity fallback")
+        model.setForeground(false)
+        XCTAssertFalse(model.prioritizeWatchHandoff(), "The next foreground has no consumed selection to replay")
+    }
+
+    @MainActor func testWatchPriorityDropsExpiredAndRevokedSelectionsBeforeReviewFallback() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        let source = refreshSource("watch-priority-expiry")
+        let model = CompanionModel(preview: true, push: PushCoordinator(), appleWatchIdentity: { "watch" },
+            postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
+        var snapshot = try JSONDecoder().decode(Snapshot.self, from: refreshSnapshot(source))
+        let session = AgentSession(id: "selected", provider: "codex", state: .working, threadID: UUID().uuidString)
+        snapshot.sessions = [session]
+        model.pairedSources = [source]
+        model.snapshots = [source.sourceID: snapshot]
+        defer {
+            model.setForeground(false)
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        for invalidation in ["expired", "revoked"] {
+            model.revokedSources = []
+            _ = await model.handleWatchWork(["operation": "continueOnPhone", "destination": "agent",
+                "sourceID": source.sourceID, "sessionID": session.id, "provider": session.provider])
+            if invalidation == "expired" {
+                var stored = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(defaults.data(forKey: key))) as? [String: Any])
+                stored["createdAt"] = Date().timeIntervalSinceReferenceDate - 601
+                defaults.set(try JSONSerialization.data(withJSONObject: stored), forKey: key)
+            } else { model.revokedSources.insert(source.sourceID) }
+            XCTAssertFalse(model.prioritizeWatchHandoff(), invalidation)
+            XCTAssertNil(defaults.data(forKey: key), invalidation)
+            XCTAssertNil(model.handoff, invalidation)
+        }
+    }
+
+    @MainActor func testHostedWatchHandoffWaitsForAnOpenPhoneResponseForm() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        let source = refreshSource("watch-priority-active-form")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config),
+            appleWatchIdentity: { "watch" }, postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
+        var snapshot = try JSONDecoder().decode(Snapshot.self, from: refreshSnapshot(source, state: "needs_input"))
+        let selected = AgentSession(id: "selected", provider: "codex", state: .working, threadID: UUID().uuidString)
+        snapshot.sessions?.append(selected)
+        let data = try JSONEncoder().encode(snapshot)
+        var holdRefreshes = false
+        InteractionURLProtocol.start = { if !holdRefreshes { $0.finish(data) } }
+        model.pairedSources = [source]
+        _ = await model.refresh(sourceID: source.sourceID)
+        holdRefreshes = true // Keep the open request stable while foreground polling is pending.
+        model.setForeground(true)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        var opened: [URL] = []
+        let launched = expectation(description: "Explicit agent selection resumes after the form closes")
+        let host = UIHostingController(rootView: CompanionRoot(model: model, presentation: PresentationModel())
+            .environment(\.scenePhase, .active)
+            .environment(\.openURL, OpenURLAction { url in opened.append(url); launched.fulfill(); return .handled }))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            model.setForeground(false)
+            window.isHidden = true
+            previous?.makeKeyAndVisible()
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        model.interactions.preview(source, kind: "question")
+        for _ in 0..<80 {
+            if host.presentedViewController != nil { break }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let form = try XCTUnwrap(host.presentedViewController)
+        try await Task.sleep(for: .milliseconds(300))
+        _ = await model.handleWatchWork(["operation": "continueOnPhone", "destination": "agent",
+            "sourceID": source.sourceID, "sessionID": selected.id, "provider": selected.provider])
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertTrue(host.presentedViewController === form, "Watch cannot replace an active phone form")
+        XCTAssertTrue(opened.isEmpty)
+        XCTAssertNotNil(defaults.data(forKey: key))
+        let controller = try XCTUnwrap(form.presentationController)
+        let delegate = controller.delegate
+        form.dismiss(animated: false)
+        delegate?.presentationControllerDidDismiss?(controller)
+        await fulfillment(of: [launched], timeout: 4)
+        XCTAssertEqual(opened, [try XCTUnwrap(selected.appURL)])
+        XCTAssertNil(defaults.data(forKey: key))
+        XCTAssertTrue(model.prioritizeWatchHandoff(), "Late Review callbacks cannot take over after launch")
+    }
+}
+
+extension InteractionTests {
+    @MainActor func testHostedWatchSelectionPrecedesAutomaticReviewBeforeModelActivation() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        let source = refreshSource("watch-priority-activation")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config),
+            appleWatchIdentity: { "watch" }, postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
+        var snapshot = try JSONDecoder().decode(Snapshot.self, from: refreshSnapshot(source, state: "needs_input"))
+        let selected = AgentSession(id: "selected", provider: "codex", state: .working, threadID: UUID().uuidString)
+        snapshot.sessions?.append(selected)
+        let data = try JSONEncoder().encode(snapshot)
+        var holdRefreshes = false
+        InteractionURLProtocol.start = { if !holdRefreshes { $0.finish(data) } }
+        model.pairedSources = [source]
+        _ = await model.refresh(sourceID: source.sourceID)
+        holdRefreshes = true
+        model.interactions.preview(source, kind: "question")
+        _ = await model.handleWatchWork(["operation": "continueOnPhone", "destination": "agent",
+            "sourceID": source.sourceID, "sessionID": selected.id, "provider": selected.provider])
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        var opened: [URL] = []
+        let launched = expectation(description: "Foreground continues the explicit Watch selection")
+        let host = UIHostingController(rootView: CompanionRoot(model: model, presentation: PresentationModel())
+            .environment(\.scenePhase, .active)
+            .environment(\.openURL, OpenURLAction { url in opened.append(url); launched.fulfill(); return .handled }))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            model.setForeground(false)
+            window.isHidden = true
+            previous?.makeKeyAndVisible()
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: source.sourceID))
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertNil(host.presentedViewController, "Review must wait when the view activates before the model")
+        XCTAssertTrue(opened.isEmpty)
+        model.setForeground(true)
+        await fulfillment(of: [launched], timeout: 4)
+        XCTAssertEqual(opened, [try XCTUnwrap(selected.appURL)])
+        model.interactions.preview(source, kind: "question")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertNil(host.presentedViewController, "An arriving question cannot overtake the same foreground's agent launch")
+        XCTAssertNil(defaults.data(forKey: key))
+    }
+}
