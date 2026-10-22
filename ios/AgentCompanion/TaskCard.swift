@@ -541,9 +541,9 @@ struct SessionOpenButton: View {
             } else {
                 Group {
                     if session.provider == "claude" {
-                        Text("CC").font(.caption.weight(.semibold)).fixedSize()
+                        Image(systemName: "arrow.up.forward").font(CompanionTextRole.link.font)
                     } else {
-                        Image("ProviderCodex").resizable().scaledToFit().frame(width: 18, height: 18)
+                        Image("ProviderChatGPT").resizable().scaledToFit().frame(width: 18, height: 18)
                     }
                 }
                     .foregroundStyle(theme.ink).accessibilityHidden(true)

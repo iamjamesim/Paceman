@@ -1167,10 +1167,8 @@ private struct WatchPhoneContinuation: View {
             Task { await prepare(destination) }
         } label: {
             HStack(alignment: .center, spacing: 8) {
-                if destination == .agent, task?.provider == "claude" {
-                    Text("CC").font(.caption.weight(.semibold)).fixedSize().accessibilityHidden(true)
-                } else if destination == .agent, task?.provider == "codex" {
-                    Image("ProviderCodex").resizable().scaledToFit()
+                if destination == .agent, task?.provider == "codex" {
+                    Image("ProviderChatGPT").resizable().scaledToFit()
                         .frame(width: 18, height: 18).accessibilityHidden(true)
                 } else {
                     Image(systemName: "iphone").fixedSize().accessibilityHidden(true)

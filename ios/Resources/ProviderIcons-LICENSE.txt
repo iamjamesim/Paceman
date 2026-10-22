@@ -1,9 +1,10 @@
-Codex vector artwork from LobeHub Icons, commit
+ChatGPT/OpenAI knot vector artwork from LobeHub Icons, commit
 453719ea68e6d480d0109a598c5a4cf80cda6a84:
 https://github.com/lobehub/lobe-icons/tree/453719ea68e6d480d0109a598c5a4cf80cda6a84/packages/static-svg/icons
-File: codex.svg (unmodified).
+File: openai.svg (unmodified).
 
-The mark identifies the destination provider. Codex belongs to OpenAI.
+The mark identifies the OpenAI provider for Codex.
+The ChatGPT/OpenAI mark belongs to OpenAI.
 No endorsement or affiliation is implied.
 
 MIT License
