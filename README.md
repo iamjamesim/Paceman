@@ -45,6 +45,14 @@ The service listens on loopback. Paceman configures Tailscale Serve and issues a
 separate credential for each paired phone. Notifications and Live Activities use
 Paceman's relay and Apple Push Notification service.
 
+### Availability gaps
+
+- Cloud-only sessions are unsupported.
+- Sessions started remotely but running in Codex desktop on a Mac can show
+  activity while approvals are inaccessible. Try opening the thread in Codex on
+  that Mac, then check Paceman again. An assistant with access to your Mac may be
+  able to do this for you.
+
 ### Manual installation
 
 - **Mac:** [Build and install from source](macos/README.md#build-and-install-from-source).
