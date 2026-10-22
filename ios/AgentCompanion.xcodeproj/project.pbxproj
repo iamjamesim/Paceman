@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		FDA000000000000000000001 /* ProviderAssets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FDB000000000000000000001 /* ProviderAssets.xcassets */; };
+		FDA000000000000000000002 /* ProviderAssets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = FDB000000000000000000001 /* ProviderAssets.xcassets */; };
+		FDA000000000000000000003 /* ProviderIcons-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = FDB000000000000000000002 /* ProviderIcons-LICENSE.txt */; };
+		FDA000000000000000000004 /* ProviderIcons-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = FDB000000000000000000002 /* ProviderIcons-LICENSE.txt */; };
+
         DAB000000000000000000021 /* ApprovalContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAF000000000000000000021; };
         DAB000000000000000000022 /* ApprovalContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAF000000000000000000021; };
         DAB000000000000000000011 = {isa = PBXBuildFile; fileRef = DAF000000000000000000011; };
@@ -147,6 +152,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+        FDB000000000000000000001 /* ProviderAssets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = ../Resources/ProviderAssets.xcassets; sourceTree = "<group>"; };
+        FDB000000000000000000002 /* ProviderIcons-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "../Resources/ProviderIcons-LICENSE.txt"; sourceTree = "<group>"; };
         DAF000000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/ApprovalContent.swift; sourceTree = "<group>"; };
         DAF000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/LiveActivityRoute.swift; sourceTree = "<group>"; };
         DAF000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Shared/WatchWork.swift; sourceTree = "<group>"; };
@@ -321,6 +328,8 @@
 				A8C8DF105E4285CAFDDFCB64 /* ../Shared/MonitoringActivity.swift */,
 				74DC4E2181E4A50618ECF63E /* ../Shared/PacemanMark.swift */,
 				2FE30F3CCFF8D70208F26CEB /* ../Resources/Assets.xcassets */,
+                FDB000000000000000000001 /* ProviderAssets.xcassets */,
+                FDB000000000000000000002 /* ProviderIcons-LICENSE.txt */,
 				533E91AE7A7B11C6F2BE02C4 /* ../Resources/JetBrainsMono-OFL.txt */,
 				0EC3990017A5B1462F8B45ED /* ../Resources/JetBrainsMono-Regular.ttf */,
 				4E4A1F447E8A84C824FABEA4 /* ../Resources/JetBrainsMono-SemiBold.ttf */,
@@ -521,6 +530,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                FDA000000000000000000002 /* Provider assets in Resources */,
+                FDA000000000000000000004 /* Provider license in Resources */,
 				BBB000000000000000000009 /* Assets.xcassets in Resources */,
 				F0A000000000000000000009 /* ../Resources/Sounds/PacemanInput.wav in Resources */,
 				F0A00000000000000000000A /* ../Resources/Sounds/PacemanFinished.wav in Resources */,
@@ -547,6 +558,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                FDA000000000000000000001 /* Provider assets in Resources */,
+                FDA000000000000000000003 /* Provider license in Resources */,
 				EACE2D07DA83C10B6636B3DF /* ../Resources/Assets.xcassets in Resources */,
 				3A3E911E297CAD2837216AA2 /* ../Resources/JetBrainsMono-OFL.txt in Resources */,
 				5324DEFFDA216314A48C0920 /* ../Resources/JetBrainsMono-Regular.ttf in Resources */,

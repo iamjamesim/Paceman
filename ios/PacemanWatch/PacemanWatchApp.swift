@@ -490,20 +490,19 @@ private struct WatchActivityRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(task.title).font(.body).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text([task.providerName, showComputer ? task.computer : ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                    context
                         .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     if ["Finished", "Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed"
                         || task.status(at: date) == "Response sent" {
-                        if let resultObservedAt = task.resultObservedAt {
-                            let completed = Date(timeIntervalSince1970: resultObservedAt)
-                            let clockTime = completed.formatted(date: .omitted, time: .shortened)
-                            let time = completed.formatted(date: task.group(at: date) == "Recent" || Calendar.current.isDateInToday(completed) ? .omitted : .abbreviated, time: .shortened)
-                                .replacingOccurrences(of: clockTime, with: clockTime.replacingOccurrences(of: " ", with: "\u{00a0}"))
-                            Text("\(task.status(at: date)) · \(time)")
-                                .font(.caption).fixedSize(horizontal: false, vertical: true)
-                        } else {
-                            Text(task.status(at: date)).font(.caption)
+                        if let detail = SessionRowMetadata.detail(state: task.state, status: task.status(at: date),
+                            historical: task.historical(at: date), group: task.temporalPresentation(at: date).group,
+                            resultObservedAt: task.resultObservedAt, activityObservedAt: task.activityObservedAt, at: date) {
+                            Text(detail).font(.caption).fixedSize(horizontal: false, vertical: true)
+                                .accessibilityLabel(SessionRowMetadata.detail(state: task.state, status: task.status(at: date),
+                                    historical: task.historical(at: date), group: task.temporalPresentation(at: date).group,
+                                    resultObservedAt: task.resultObservedAt, activityObservedAt: task.activityObservedAt,
+                                    at: date, accessibility: true) ?? detail)
                         }
                     }
                 }
@@ -511,6 +510,13 @@ private struct WatchActivityRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(task.status(at: date))
+    }
+
+    private var context: Text {
+        let trailing = [task.providerName, showComputer ? task.computer : ""]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+        guard let project = task.project, !project.isEmpty else { return Text(trailing) }
+        return Text("\(Image(systemName: "folder")) \(project) · \(trailing)")
     }
 }
 
@@ -1165,7 +1171,12 @@ private struct WatchPhoneContinuation: View {
             Task { await prepare(destination) }
         } label: {
             HStack(alignment: .center, spacing: 8) {
-                Image(systemName: "iphone").fixedSize().accessibilityHidden(true)
+                if destination == .agent, let provider = task?.provider, ["codex", "claude"].contains(provider) {
+                    Image(provider == "claude" ? "ProviderClaude" : "ProviderChatGPT").resizable().scaledToFit()
+                        .frame(width: 18, height: 18).accessibilityHidden(true)
+                } else {
+                    Image(systemName: "iphone").fixedSize().accessibilityHidden(true)
+                }
                 Text(destination == .agent ? "Open \(task?.providerName ?? "agent app")"
                     : "Open Paceman")
                     .multilineTextAlignment(.center)
@@ -1205,16 +1216,18 @@ private struct WatchPhoneContinuation: View {
 
 #if DEBUG
 private enum WatchWorkPreview {
+    static let observationDate = Date()
     struct ScrollPosition: ViewModifier {
         let target: String?
         func body(content: Content) -> some View {
             ScrollViewReader { proxy in
                 content.task(id: target) {
                     guard let target else { return }
-                    let result = scenario?.hasSuffix("-result") == true
-                    guard result || scenario?.hasSuffix("-bottom") == true else { return }
+                    let focus = [("-result", "just-finished"), ("-today", "history-0"), ("-yesterday", "history-1")]
+                        .first { scenario?.hasSuffix($0.0) == true }?.1
+                    guard focus != nil || scenario?.hasSuffix("-bottom") == true else { return }
                     await Task.yield()
-                    proxy.scrollTo(result ? "preview/codex/just-finished" : target, anchor: .bottom)
+                    proxy.scrollTo(focus.map { "preview/codex/" + $0 } ?? target, anchor: .bottom)
                 }
             }
         }
@@ -1261,7 +1274,7 @@ private enum WatchWorkPreview {
         }
         if let operation = payload["operation"] as? String,
            ["tasks", "cachedTasks", "refreshTasks"].contains(operation) {
-            let now = Date().timeIntervalSince1970
+            let now = observationDate.timeIntervalSince1970
             let tasks = [task] + ["working", "finished", "failed"].enumerated().map { index, state in
                 WatchWorkTask(sourceID: index == 0 ? "other" : "preview", sessionID: "task-\(index)", provider: index == 0 ? "claude" : "codex",
                     title: scenario == "long" ? "Review accessibility and notifications throughout the entire onboarding experience" : ["Update the Watch app", "Run regression tests", "Build the release"][index],
@@ -1270,23 +1283,25 @@ private enum WatchWorkPreview {
             }
             var values = scenario == "stale" ? tasks.dropFirst().map { $0 } : tasks
             if scenario.hasPrefix("history") {
-                let today = Calendar.current.startOfDay(for: Date())
+                let today = Calendar.current.startOfDay(for: observationDate)
                 let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today)!
-                let dates = [now - min(3600, Date().timeIntervalSince(today) / 2), yesterday.addingTimeInterval(12 * 3600).timeIntervalSince1970, now - 3 * 86400]
+                let dates = [now - min(3600, observationDate.timeIntervalSince(today) / 2), yesterday.addingTimeInterval(12 * 3600).timeIntervalSince1970, now - 3 * 86400]
                 let titles = ["Check notification delivery", "Improve onboarding", "Run integration tests"]
                 let history = dates.enumerated().map { index, date in
                     WatchWorkTask(sourceID: "preview", sessionID: "history-\(index)", provider: "codex",
                         title: scenario.hasPrefix("history-long") && index == 0
                             ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : titles[index],
                         computer: "MacBook Pro", state: index == 2 ? "failed" : "finished",
-                        freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300), resultObservedAt: date)
+                        freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300),
+                        project: "paceman", resultObservedAt: date)
                 }
                 values = scenario.hasPrefix("history-mixed") ? Array(tasks.prefix(2)) + history : history
                 if scenario.hasPrefix("history-finished") {
                     values.insert(WatchWorkTask(sourceID: "preview", sessionID: "just-finished", provider: "codex",
                         title: scenario.contains("long") ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : "Update the Watch app",
                         computer: "MacBook Pro", state: "finished", freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300),
-                        resultObservedAt: now - 60), at: 0)
+                        project: scenario.contains("long") ? "launch-creative-direction-and-visual-assets" : "paceman",
+                        resultObservedAt: now - (scenario.contains("live") ? 30 : 60)), at: 0)
                     values.insert(WatchWorkTask(sourceID: "preview", sessionID: "working", provider: "claude",
                         title: "Build Mac client", computer: "MacBook Pro", state: "working",
                         freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300)), at: 0)
@@ -1295,7 +1310,7 @@ private enum WatchWorkPreview {
                     values.append(WatchWorkTask(sourceID: "preview", sessionID: "idle", provider: "codex",
                         title: "Investigate Pebble notification relay", computer: "MacBook Pro", state: "idle",
                         freshUntil: now + 300,
-                        activityObservedAt: now - min(900, Date().timeIntervalSince(today) / 2)))
+                        activityObservedAt: now - min(900, observationDate.timeIntervalSince(today) / 2)))
                 }
             }
             if responseSent || scenario == "response-sent", !values.isEmpty {

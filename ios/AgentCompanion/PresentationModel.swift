@@ -7,6 +7,7 @@ final class PresentationModel: ObservableObject {
     @Published private var nameRevision = 0
     @Published private(set) var themeFamily: ThemeFamily
     let preview: Bool
+    private let previewObservationDate = Date()
     let previewScreen: String
     let neutralPreview: Bool
     init() {
@@ -62,12 +63,12 @@ final class PresentationModel: ObservableObject {
     var previewOffline: Bool { ["offline", "computer-offline", "computer-usage-stale", "single-offline", "offline-empty", "claude-offline", "history-offline", "history-finished-offline"].contains(previewScreen) }
     var previewSessions: [AgentSession] {
         if previewScreen.hasPrefix("history") {
-            let now = Date().timeIntervalSince1970
-            let today = Calendar.current.startOfDay(for: Date())
+            let now = previewObservationDate.timeIntervalSince1970
+            let today = Calendar.current.startOfDay(for: previewObservationDate)
             let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today)!
             var rows = [AgentSession(id: "morning", provider: "codex", state: .finished,
                 name: previewScreen.hasPrefix("history-long") ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : "Check notification delivery",
-                workspaceLabel: "paceman", resultObservedAt: now - min(3600, Date().timeIntervalSince(today) / 2)),
+                workspaceLabel: "paceman", resultObservedAt: now - min(3600, previewObservationDate.timeIntervalSince(today) / 2)),
                 AgentSession(id: "last-night", provider: "claude", state: .finished,
                     name: "Improve onboarding", workspaceLabel: "paceman", resultObservedAt: yesterday.addingTimeInterval(12 * 3600).timeIntervalSince1970),
                 AgentSession(id: "failed", provider: "codex", state: .failed,
@@ -75,13 +76,14 @@ final class PresentationModel: ObservableObject {
             if previewScreen.hasPrefix("history-finished") {
                 rows.insert(AgentSession(id: "just-finished", provider: "codex", state: .finished,
                     name: previewScreen.contains("long") ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : "Update the Watch app",
-                    workspaceLabel: "paceman", resultObservedAt: now - 60), at: 0)
+                    workspaceLabel: previewScreen.contains("long") ? "launch-creative-direction-and-visual-assets" : "paceman",
+                    resultObservedAt: now - (previewScreen.contains("live") ? 30 : 60)), at: 0)
                 rows.insert(AgentSession(id: "current", provider: "claude", state: .working, name: "Build Mac client"), at: 0)
             }
             if previewScreen.hasPrefix("history-idle") {
                 rows.append(AgentSession(id: "idle", provider: "codex", state: .idle,
                     name: "Investigate Pebble notification relay", workspaceLabel: "paceman",
-                    activityObservedAt: now - min(900, Date().timeIntervalSince(today) / 2)))
+                    activityObservedAt: now - min(900, previewObservationDate.timeIntervalSince(today) / 2)))
             }
             if previewScreen.hasPrefix("history-mixed") {
                 rows.insert(AgentSession(id: "current", provider: "claude", state: .working, name: "Build Mac client"), at: 0)
