@@ -269,8 +269,10 @@ reads the phone's list; `refreshTasks` requests source refreshes without waiting
 replies. [Shared types](../ios/Shared/WatchWork.swift) define the payloads.
 
 `continueOnPhone` returns `handoff` results 1–3 from
-[session handoff](#accessory-session-handoff); `selectionAvailable: false` prepares
-Activity instead of a removed session. Storage and retry rules are defined in
+[session handoff](#accessory-session-handoff). Optional `destination` is `paceman`
+(the default) or `agent`, echoed in the reply. Paceman can return
+`selectionAvailable: false` and prepare Activity instead of a removed session;
+agent handoffs require an available session and provider link. Storage and retry rules are defined in
 [data lifecycle](data-lifecycle.md#questions-and-approvals).
 
 Example background push:
@@ -451,8 +453,10 @@ never supplies a URL. One pending selection (opaque IDs, watch identity, timesta
 is kept in phone preferences for up to ten minutes and cleared on dismissal;
 expired or removed-watch selections are discarded on access. Local notifications
 contain a request token and generic copy, not session content. Selecting a
-notification or foregrounding Paceman presents the handoff; opening the agent
-app remains an explicit phone action.
+notification or foregrounding Paceman presents the handoff. An Apple Watch
+selection with destination `agent` instead opens the current provider link once
+the phone is active and has no other response form open. Provider URLs are
+resolved again at that point, never stored in the handoff.
 
 ## Accessory authorization baseline
 

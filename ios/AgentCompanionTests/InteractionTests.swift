@@ -3103,3 +3103,155 @@ extension InteractionTests {
         XCTAssertFalse(malformed.valid(for: request))
     }
 }
+
+
+extension InteractionTests {
+    @MainActor func testAgentHandoffResolvesCurrentProviderLinkAndConsumesOnlyOnce() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        let model = CompanionModel(preview: true, push: PushCoordinator(), appleWatchIdentity: { "watch" },
+            postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
+        let source = refreshSource("agent-handoff")
+        var snapshot = try JSONDecoder().decode(Snapshot.self, from: refreshSnapshot(source))
+        model.pairedSources = [source]
+        defer {
+            model.setForeground(false)
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        for provider in ["codex", "claude"] {
+            let threadID = UUID().uuidString.lowercased()
+            let session = AgentSession(id: String(repeating: "a", count: 64), provider: provider, state: .needsInput,
+                remoteSessionID: "session_original", threadID: threadID)
+            snapshot.sessions = [session]
+            model.snapshots = [source.sourceID: snapshot]
+            let reply = await model.handleWatchWork(["operation": "continueOnPhone", "destination": "agent",
+                "sourceID": source.sourceID, "sessionID": session.id, "provider": provider])
+            XCTAssertEqual(reply["destination"] as? String, "agent")
+            XCTAssertEqual(reply["selectionAvailable"] as? Bool, true)
+            let stored = try XCTUnwrap(defaults.data(forKey: key))
+            let pending = try JSONDecoder().decode(PendingWatchHandoff.self, from: stored)
+            XCTAssertEqual(pending.destination, .agent)
+            XCTAssertFalse(String(decoding: stored, as: UTF8.self).contains(threadID))
+            XCTAssertFalse(String(decoding: stored, as: UTF8.self).contains("session_original"))
+            XCTAssertEqual(model.handoffNotificationSelection(pending.id), pending)
+            // Resolve the current native destination after the phone wakes,
+            // rather than a URL captured when the Watch button was tapped.
+            let updatedThreadID = UUID().uuidString.lowercased()
+            model.snapshots[source.sourceID]?.sessions?[0].threadID = updatedThreadID
+            model.snapshots[source.sourceID]?.sessions?[0].remoteSessionID = "session_updated"
+            model.presentStoredHandoff() // Still in the background.
+            XCTAssertNil(model.handoff)
+            model.setForeground(true)
+            XCTAssertEqual(model.handoff?.id, pending.id)
+            model.deferHandoff() // An open phone response form keeps ownership.
+            model.dismissHandoff(includingDeferred: true, preservingDeferredAgent: true)
+            XCTAssertNil(model.handoff)
+            XCTAssertNotNil(defaults.data(forKey: key), "Closing Review must preserve the explicit agent destination")
+            model.presentStoredHandoff()
+            XCTAssertEqual(model.handoff?.id, pending.id)
+            XCTAssertEqual(model.consumeAgentHandoff(pending)?.absoluteString,
+                provider == "codex" ? "codex://threads/" + updatedThreadID : "claude://code/session_updated")
+            XCTAssertNil(model.handoff)
+            XCTAssertNil(defaults.data(forKey: key))
+            XCTAssertNil(model.consumeAgentHandoff(pending))
+            model.setForeground(false)
+        }
+    }
+
+    @MainActor func testAgentHandoffRejectsMissingSessionAndChangedWatchWithoutActivityFallback() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        var watchID: String? = "watch"
+        let model = CompanionModel(preview: true, push: PushCoordinator(), appleWatchIdentity: { watchID },
+            postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
+        let source = refreshSource("agent-handoff-invalid")
+        let snapshot = try JSONDecoder().decode(Snapshot.self, from: refreshSnapshot(source))
+        model.pairedSources = [source]
+        model.snapshots = [source.sourceID: snapshot]
+        defaults.removeObject(forKey: key)
+        defer {
+            model.setForeground(false)
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        let session = try XCTUnwrap(snapshot.sessions?.first)
+        let message: [String: Any] = ["operation": "continueOnPhone", "destination": "agent",
+            "sourceID": source.sourceID, "sessionID": session.id, "provider": session.provider]
+        var missing = message
+        missing["sessionID"] = "removed"
+        let reply = await model.handleWatchWork(missing)
+        XCTAssertNotNil(reply["error"])
+        XCTAssertNil(defaults.data(forKey: key), "Agent requests cannot silently become Activity handoffs")
+        _ = await model.handleWatchWork(message)
+        model.setForeground(true)
+        let pending = try XCTUnwrap(model.handoff)
+        watchID = "replacement-watch"
+        XCTAssertNil(model.consumeAgentHandoff(pending))
+        XCTAssertNil(model.handoff)
+        XCTAssertNil(defaults.data(forKey: key))
+        watchID = "watch"
+        _ = await model.handleWatchWork(message)
+        let removed = try XCTUnwrap(model.handoff)
+        model.snapshots[source.sourceID]?.sessions = []
+        XCTAssertNil(model.consumeAgentHandoff(removed))
+        XCTAssertNil(model.handoff)
+    }
+}
+
+
+extension InteractionTests {
+    @MainActor func testAgentHandoffReleasesWatchRequestWithoutAnsweringIt() async throws {
+        let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
+        let original = defaults.data(forKey: key)
+        let source = PairedSource(endpoint: URL(string: "https://watch-agent-release.example")!, sourceID: sourceID,
+            clientID: "client", credential: "fixture")
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [InteractionURLProtocol.self]
+        let listing = try JSONSerialization.data(withJSONObject: fixture())
+        let snapshot = refreshSnapshot(source, state: "needs_input", interactions: true)
+        let released = expectation(description: "Release the native request for the provider app")
+        var actions: [String] = []
+        InteractionURLProtocol.start = { transport in
+            if transport.request.httpMethod == "POST" {
+                var data = transport.request.httpBody ?? Data()
+                if let stream = transport.request.httpBodyStream {
+                    stream.open()
+                    defer { stream.close() }
+                    var buffer = [UInt8](repeating: 0, count: 4096)
+                    while stream.hasBytesAvailable {
+                        let count = stream.read(&buffer, maxLength: buffer.count)
+                        guard count > 0 else { break }
+                        data.append(contentsOf: buffer.prefix(count))
+                    }
+                }
+                var payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+                actions.append(payload["action"] as? String ?? "missing")
+                payload["status"] = "submitted"
+                transport.finish((try? JSONSerialization.data(withJSONObject: payload)) ?? Data())
+                released.fulfill()
+                return
+            }
+            transport.finish(transport.request.url?.path == "/v1/snapshot" ? snapshot : listing)
+        }
+        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config),
+            appleWatchIdentity: { "watch" }, postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
+        model.pairedSources = [source]
+        model.snapshots = [:]
+        defer {
+            model.setForeground(false)
+            InteractionURLProtocol.start = nil
+            SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: sourceID))
+            if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        let identity = WorkIdentity(sourceID: sourceID, sessionID: String(repeating: "a", count: 64), provider: "claude")
+        let request = await model.handleWatchWork(["operation": "request", "sourceID": sourceID,
+            "sessionID": identity.sessionID, "provider": identity.provider])
+        XCTAssertNotNil(request["data"])
+        _ = await model.handleWatchWork(["operation": "continueOnPhone", "destination": "agent", "sourceID": sourceID,
+            "sessionID": identity.sessionID, "provider": identity.provider])
+        model.setForeground(true)
+        let pending = try XCTUnwrap(model.handoff)
+        XCTAssertNotNil(model.consumeAgentHandoff(pending))
+        await fulfillment(of: [released], timeout: 2)
+        XCTAssertEqual(actions, ["release"])
+    }
+}

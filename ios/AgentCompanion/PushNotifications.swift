@@ -147,7 +147,14 @@ final class PushCoordinator: NSObject, ObservableObject, UNUserNotificationCente
         guard model?.handoffNotificationIsCurrent(id) == true else { return false }
         let content = UNMutableNotificationContent()
         content.title = "Continue on phone"
-        content.body = "Open Paceman to continue your selected session."
+        if let pending = model?.handoffNotificationSelection(id), pending.destination == .agent,
+           let target = model?.handoffTarget(pending) {
+            let provider = target.session.provider == "claude" ? "Claude Code" : "Codex"
+            content.title = "Open \(provider)"
+            content.body = "Tap to continue in \(provider) on this iPhone."
+        } else {
+            content.body = "Open Paceman to continue your selected session."
+        }
         content.userInfo = ["pacemanHandoff": id.uuidString]
         // Explicit watch selection, not another agent-progress alert. Keep it silent.
         do {

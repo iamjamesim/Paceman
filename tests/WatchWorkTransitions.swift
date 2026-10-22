@@ -45,6 +45,26 @@ import Foundation
             precondition(SessionTimePolicy.shouldEndLiveActivity(state: fixture.state, sessions: facts,
                 legacyChangedAt: fixture.changedAt, at: date) == fixture.expectedEnd, fixture.name)
         }
+        // Questions and approvals share the same destinations; only native
+        // availability and freshness change where the user can continue.
+        for provider in ["codex", "claude"] {
+            for state in ["needs_input", "working", "finished", "failed", "idle"] {
+                for historical in [false, true] {
+                    let task = WatchWorkTask(sourceID: "mac", sessionID: "task", provider: provider,
+                        title: "Task", computer: "Mac", state: state,
+                        freshUntil: historical ? 0 : 200)
+                    for nativeOnly in [false, true] {
+                        let expected: [WatchContinuationDestination] = state == "needs_input" && !historical && !nativeOnly
+                            ? [.paceman, .agent] : [.agent]
+                        precondition(task.continuationDestinations(nativeOnly: nativeOnly, at: Date(timeIntervalSince1970: 100)) == expected)
+                    }
+                }
+            }
+        }
+        let unknown = WatchWorkTask(sourceID: "mac", sessionID: "task", provider: "fixture",
+            title: "Task", computer: "Mac", state: "needs_input", freshUntil: 200)
+        precondition(unknown.continuationDestinations(nativeOnly: true, at: Date(timeIntervalSince1970: 100)) == [.paceman])
+
         let activation = WatchWorkActivation()
         // Already activated reads need no subsequent delegate callback.
         try await activation.wait(activated: true, timeout: .zero)

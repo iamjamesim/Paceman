@@ -48,6 +48,8 @@ enum FeedDestination: Hashable { case computer, otherComputer(String), liveActiv
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
+    @Environment(\.openURL) private var openURL
+    @State private var handoffIssue: String?
     @State private var path = NavigationPath()
     @State private var selectedSection: CompanionSection = .work
     @State private var sidebarPresented = false
@@ -100,6 +102,14 @@ struct CompanionRoot: View {
                 if selectedTask != nil || reviewQueue != nil {
                     if model.handoff?.appleWatch == true { model.deferHandoff() }
                     else { model.dismissHandoff() }
+                } else if let pending = model.handoff, pending.destination == .agent {
+                    guard let url = model.consumeAgentHandoff(pending) else {
+                        handoffIssue = "This session is no longer available. Check the latest activity in Paceman."
+                        return
+                    }
+                    openURL(url) { accepted in
+                        if !accepted { handoffIssue = "Check that the agent app is installed on this iPhone, then try again from your Watch." }
+                    }
                 } else if !reviewRequests.isEmpty {
                     let startingAt = handoffIdentity
                     model.dismissHandoff()
@@ -128,6 +138,10 @@ struct CompanionRoot: View {
             if value == .background { reviewPresentation = TaskReviewPresentation() }
             if value == .active { presentReviewIfNeeded() }
         }
+        .alert("Couldn’t open the agent app", isPresented: Binding(
+            get: { handoffIssue != nil }, set: { if !$0 { handoffIssue = nil } })) {
+                Button("OK", role: .cancel) { handoffIssue = nil }
+            } message: { Text(handoffIssue ?? "") }
         .onOpenURL(perform: handleURL)
         .task(id: activityNavigation) {
             guard let pending = activityNavigation else { return }
@@ -142,7 +156,7 @@ struct CompanionRoot: View {
         Binding(get: {
             if let reviewQueue { return .review(reviewQueue) }
             if let selectedTask { return .activity(selectedTask) }
-            return model.handoff.flatMap { $0.activityOnly == true ? nil : .handoff($0) }
+            return model.handoff.flatMap { $0.activityOnly == true || $0.destination == .agent ? nil : .handoff($0) }
         }, set: { value in
             if value == nil {
                 dismissingTaskCard = true
@@ -151,9 +165,9 @@ struct CompanionRoot: View {
                 }
                 offeredRequestIDs = []
                 selectedTask = nil; reviewQueue = nil
-                // Review has already offered the current decisions. A deferred
-                // Watch selection must not reopen a Working sheet afterward.
-                model.dismissHandoff(includingDeferred: true)
+                // Review has already offered the current decisions. Clear its
+                // deferred Paceman selection, but keep an explicit agent launch.
+                model.dismissHandoff(includingDeferred: true, preservingDeferredAgent: true)
             }
         })
     }
@@ -163,7 +177,7 @@ struct CompanionRoot: View {
     }
 
     private var handoffIdentity: WorkIdentity? {
-        model.handoff.flatMap { model.handoffTarget($0) }.map {
+        model.handoff.flatMap { $0.destination == .agent ? nil : model.handoffTarget($0) }.map {
             WorkIdentity(sourceID: $0.sourceID, sessionID: $0.session.id, provider: $0.session.provider)
         }
     }

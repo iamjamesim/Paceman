@@ -992,6 +992,11 @@ extension CompanionModel {
             && (request.activityOnly == true || handoffTarget(request) != nil)
     }
 
+    func handoffNotificationSelection(_ id: UUID) -> PendingWatchHandoff? {
+        guard let pending = storedHandoff, pending.id == id, handoffIsCurrent(pending) else { return nil }
+        return pending
+    }
+
     func handoffNotificationIsCurrent(_ id: UUID) -> Bool {
         storedHandoff.map { $0.id == id && handoffIsCurrent($0) } == true && !foreground
     }
@@ -1063,7 +1068,23 @@ extension CompanionModel {
         }
     }
 
-    func dismissHandoff(includingDeferred: Bool = false) {
+    /// Resolve only when the phone is ready to open; never persist a provider URL.
+    /// Consume before leaving Paceman so returning cannot launch the app again.
+    func consumeAgentHandoff(_ pending: PendingWatchHandoff) -> URL? {
+        guard pending.destination == .agent, handoff?.id == pending.id else { return nil }
+        guard handoffIsCurrent(pending), let target = handoffTarget(pending),
+              let url = target.session.appURL else {
+            dismissHandoff()
+            return nil
+        }
+        interactions.releaseRequest(for: WorkIdentity(sourceID: target.sourceID,
+            sessionID: target.session.id, provider: target.session.provider))
+        dismissHandoff()
+        return url
+    }
+
+    func dismissHandoff(includingDeferred: Bool = false, preservingDeferredAgent: Bool = false) {
+        if preservingDeferredAgent, handoff == nil, storedHandoff?.destination == .agent { return }
         guard let pending = handoff ?? (includingDeferred ? storedHandoff : nil) else { return }
         let stored = storedHandoff
         if let stored, includingDeferred || pending.id == stored.id {
@@ -1109,7 +1130,9 @@ extension CompanionModel {
         data.append(WatchWire.sourceIdentifier(sourceID))
         data.append(WatchWire.sessionIdentifier(sourceID: sourceID, session: session))
         if let request = WatchHandoffRequest(data) {
-            handoff = PendingWatchHandoff(watchID: "preview", request: request)
+            var pending = PendingWatchHandoff(watchID: "preview", request: request)
+            if screen.contains("agent") { pending.destination = .agent }
+            handoff = pending
         }
     }
 }
@@ -1222,6 +1245,13 @@ extension CompanionModel {
                 guard let watchID = appleWatchIdentity() else {
                     return ["error": "Reconnect your Apple Watch in Paceman on iPhone."]
                 }
+                let destination: WatchContinuationDestination
+                if let raw = message["destination"] as? String {
+                    guard let value = WatchContinuationDestination(rawValue: raw) else {
+                        return ["error": "Update Paceman on iPhone and Apple Watch."]
+                    }
+                    destination = value
+                } else { destination = .paceman }
                 var pending = PendingWatchHandoff(appleWatchID: watchID)
                 var selected = false
                 if let sourceID = message["sourceID"] as? String,
@@ -1236,9 +1266,15 @@ extension CompanionModel {
                         selected = true
                     }
                 }
+                if destination == .agent {
+                    guard selected, handoffTarget(pending)?.session.appURL != nil else {
+                        return ["error": "This session is no longer available. Open Paceman on iPhone for current activity."]
+                    }
+                }
+                pending.destination = destination
                 let result = await receiveHandoff(pending)
                 guard result != .unavailable else { return ["error": "Couldn’t prepare iPhone. Try again."] }
-                return ["handoff": Int(result.rawValue), "selectionAvailable": selected]
+                return ["handoff": Int(result.rawValue), "selectionAvailable": selected, "destination": destination.rawValue]
             }
             guard let sourceID = message["sourceID"] as? String,
                   let source = pairedSources.first(where: { $0.sourceID == sourceID }), !isRevoked(sourceID) else {
