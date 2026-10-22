@@ -285,6 +285,32 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(AgentSession(id: "test", provider: "fixture", state: .working).appURL)
     }
 
+    func testCodexSessionLinksUseThreadIdentityAcrossActivityStatesAndCache() throws {
+        let threadID = "01a15fac-3987-72a0-aebc-48995026e622"
+        let session = try JSONDecoder().decode(AgentSession.self, from: Data(
+            #"{"id":"hashed-local-row","provider":"codex","state":"working","threadID":"01a15fac-3987-72a0-aebc-48995026e622"}"#.utf8))
+        for state in ActivityState.allCases {
+            var codex = AgentSession(id: session.id, provider: "codex", state: state, threadID: session.threadID)
+            codex = try JSONDecoder().decode(AgentSession.self, from: JSONEncoder().encode(codex))
+            XCTAssertEqual(codex.appURL?.absoluteString, "codex://threads/" + threadID)
+            XCTAssertEqual(codex.appLinkTitle, "Open in Codex")
+        }
+        let other = AgentSession(id: session.id, provider: "codex", state: .working,
+                                threadID: "01a15fac-3987-72a0-aebc-48995026e623")
+        XCTAssertNotEqual(session.appURL, other.appURL)
+    }
+
+    func testCodexSessionLinksNeverUseOpaqueRowIDsOrMalformedDestinations() {
+        let threadID = "01a15fac-3987-72a0-aebc-48995026e622"
+        for invalid in [nil, "", "opaque-row", threadID + "\n", threadID + "/other",
+                        threadID + "?prompt=secret", threadID + "#fragment",
+                        threadID.replacingOccurrences(of: "-", with: "")] {
+            let session = AgentSession(id: threadID, provider: "codex", state: .working, threadID: invalid)
+            XCTAssertEqual(session.appURL?.absoluteString, "chatgpt://codex")
+            XCTAssertEqual(session.appLinkTitle, "Open Codex")
+        }
+    }
+
     func testRemotelyAddressableClaudeSessionsHaveDistinctLinks() {
         let sessions = [
             AgentSession(id: "a", provider: "claude", state: .working, remoteSessionID: "session_a"),

@@ -145,6 +145,7 @@ struct AgentSession: Codable, Identifiable, Equatable {
     var project: String?
     var workspaceLabel: String?
     var remoteSessionID: String?
+    var threadID: String? = nil
     var resultObservedAt: Double? = nil
     var hasResult: Bool { state == .finished || state == .failed }
     func timeFacts(freshUntil: Double = .infinity) -> SessionTimePolicy.Facts {
@@ -155,7 +156,12 @@ struct AgentSession: Codable, Identifiable, Equatable {
     }
     var appURL: URL? {
         switch provider {
-        case "codex": return URL(string: "chatgpt://codex")
+        case "codex":
+            if let threadID,
+               threadID.range(of: "^[A-Fa-f0-9]{8}(-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}\\z", options: .regularExpression) != nil {
+                return URL(string: "codex://threads/" + threadID)
+            }
+            return URL(string: "chatgpt://codex")
         case "claude":
             if let remoteSessionID,
                remoteSessionID.range(of: "^session_[A-Za-z0-9_-]{1,152}\\z", options: .regularExpression) != nil {
@@ -166,7 +172,7 @@ struct AgentSession: Codable, Identifiable, Equatable {
         }
     }
     var appLinkTitle: String {
-        if provider == "codex" { return "Open Codex" }
+        if provider == "codex" { return appURL?.host == "threads" ? "Open in Codex" : "Open Codex" }
         if provider == "claude" { return appURL?.path.isEmpty == false ? "Open in Claude" : "Open Claude" }
         return "Open agent app"
     }
