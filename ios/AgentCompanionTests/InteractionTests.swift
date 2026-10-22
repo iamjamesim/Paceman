@@ -16,23 +16,76 @@ final class InteractionTests: XCTestCase {
         let rows = [item("today", daysAgo: 0), item("also-today", daysAgo: 0),
                     item("yesterday", daysAgo: 1), item("monday", daysAgo: 2),
                     item("sunday", daysAgo: 3), item("last-wednesday", daysAgo: 7), item("legacy", daysAgo: nil)]
-        let days = WorkCatalog.recentDays(rows, at: now, calendar: calendar)
+        let days = WorkCatalog.activitySections(rows, at: now, calendar: calendar)
         XCTAssertEqual(days.prefix(2).map(\.title), ["Today", "Yesterday"])
         XCTAssertEqual(days.map { $0.rows.map(\.session.id) },
             [["today", "also-today"], ["yesterday"], ["monday"], ["sunday"], ["last-wednesday"], ["legacy"]])
         XCTAssertEqual(days.last?.title, "Undated")
         XCTAssertNotEqual(days[4].title, days[2].title)
-        XCTAssertTrue(WorkCatalog.recentDays([], at: now, calendar: calendar).isEmpty)
+        XCTAssertTrue(WorkCatalog.activitySections([], at: now, calendar: calendar).isEmpty)
 
         // Local midnight moves today's rows to Yesterday without another snapshot.
         let tomorrow = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: now))
-        XCTAssertEqual(WorkCatalog.recentDays([rows[0]], at: tomorrow, calendar: calendar).first?.title, "Yesterday")
+        XCTAssertEqual(WorkCatalog.activitySections([rows[0]], at: tomorrow, calendar: calendar).first?.title, "Yesterday")
         // The fall DST day is 25 hours long; elapsed seconds must not split it.
         let dstNow = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 0)))
         let dstResult = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 0)))
         let dstRow = WorkItem(id: rows[0].id, session: AgentSession(id: "dst", provider: "codex", state: .finished,
             resultObservedAt: dstResult.timeIntervalSince1970), computer: "Mac", historical: false)
-        XCTAssertEqual(WorkCatalog.recentDays([dstRow], at: dstNow, calendar: calendar).first?.title, "Yesterday")
+        XCTAssertEqual(WorkCatalog.activitySections([dstRow], at: dstNow, calendar: calendar).first?.title, "Yesterday")
+    }
+
+    @MainActor func testDaySectionsKeepActiveGroupsCountsAndPhoneWatchOrder() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 21, hour: 20)))
+        let source = refreshSource("day-sections")
+        let model = CompanionModel(preview: true)
+        model.pairedSources = [source]
+        let today = calendar.startOfDay(for: now).timeIntervalSince1970
+        let sessions = [
+            AgentSession(id: "question", provider: "codex", state: .needsInput),
+            AgentSession(id: "working", provider: "claude", state: .working),
+            AgentSession(id: "today-newer", provider: "codex", state: .finished, resultObservedAt: today + 3600),
+            AgentSession(id: "today-older", provider: "claude", state: .failed, resultObservedAt: today),
+            AgentSession(id: "yesterday", provider: "codex", state: .finished, resultObservedAt: today - 3600),
+            AgentSession(id: "older", provider: "codex", state: .finished, resultObservedAt: today - 3 * 86400),
+            AgentSession(id: "undated", provider: "claude", state: .idle)
+        ]
+        model.snapshots[source.sourceID] = Snapshot(schema: 1, sourceID: source.sourceID,
+            generation: source.sourceID, revision: 1, sourceName: "Mac", observedAt: now.timeIntervalSince1970,
+            changedAt: now.timeIntervalSince1970, freshFor: 30, state: .needsInput, eventID: "1", sessions: sessions)
+        let phone = WorkCatalog.sorted(sessions.map {
+            WorkCatalog.item(session: $0, source: source, model: model, inbox: model.interactions,
+                computer: "Mac", connected: true, current: true, at: now)
+        })
+        let sections = WorkCatalog.activitySections(phone, at: now, calendar: calendar)
+        XCTAssertEqual(sections.prefix(4).map(\.title), ["Needs you", "Working", "Today", "Yesterday"])
+        XCTAssertEqual(sections.map(\.count), [1, 1, 2, 1, 1, 1])
+        XCTAssertEqual(sections[2].rows.map(\.session.id), ["today-newer", "today-older"])
+        XCTAssertEqual(sections[2].accessibilityLabel, "Today, 2 sessions")
+        XCTAssertEqual(sections[3].accessibilityLabel, "Yesterday, 1 session")
+        XCTAssertEqual(Set(sections.map(\.id)).count, sections.count)
+        XCTAssertFalse(sections.contains { $0.title == "Recent" })
+
+        let watch = model.watchWorkSnapshot(at: now)
+        let watchSections = SessionTimePolicy.activitySections(watch.tasks, at: now, calendar: calendar,
+            group: { let value = $0.temporalPresentation(at: now); return value.visible ? value.group : nil },
+            resultObservedAt: { $0.resultObservedAt })
+        XCTAssertEqual(sections.map(\.id), watchSections.map(\.id))
+        XCTAssertEqual(sections.map(\.title), watchSections.map(\.title))
+        XCTAssertEqual(sections.map(\.count), watchSections.map(\.count))
+        XCTAssertEqual(sections.map { $0.rows.map(\.session.id) }, watchSections.map { $0.rows.map(\.sessionID) })
+
+        // Connection loss keeps dated completions in their days and active work Last known.
+        let offline = WorkCatalog.sorted(sessions.map {
+            WorkCatalog.item(session: $0, source: source, model: model, inbox: model.interactions,
+                computer: "Mac", connected: false, current: false, at: now)
+        })
+        let offlineSections = WorkCatalog.activitySections(offline, at: now, calendar: calendar)
+        XCTAssertEqual(offlineSections.prefix(2).map(\.title), ["Today", "Yesterday"])
+        XCTAssertEqual(offlineSections.last?.group, .lastKnown)
+        XCTAssertEqual(offlineSections.last?.rows.map(\.session.id).sorted(), ["question", "undated", "working"])
     }
 
     @MainActor func testSharedTemporalSectionsAndCountsAgeWithoutNetworkRefresh() throws {
