@@ -458,7 +458,7 @@ struct TaskCard: View {
 
     private func continuationTitle(_ item: WorkItem) -> String {
         inbox.availability[item.id.sourceID] == .available
-            ? "Request not accessible yet" : ResponseGuidance.continuation(for: item.session.provider)
+            ? "Request not accessible here" : ResponseGuidance.continuation(for: item.session.provider)
     }
 
     private func explanation(_ item: WorkItem) -> String? {
@@ -470,9 +470,7 @@ struct TaskCard: View {
         case .disabled: return "Review the full request and all response options in the agent."
         case .available:
             let provider = item.session.provider == "claude" ? "Claude Code" : item.session.provider.capitalized
-            return item.session.provider == "codex"
-                ? "If you use Codex desktop on a Mac, requests from remotely started sessions may not appear until you open the thread there. Then check Paceman again.\n\nAn assistant with access to your Mac may be able to open it for you."
-                : "Open this session in \(provider) to check whether it still needs your input."
+            return "Continue in \(provider) to check this request."
         }
     }
 }

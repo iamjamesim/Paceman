@@ -49,8 +49,9 @@ Paceman's relay and Apple Push Notification service.
 
 - Cloud-only sessions are unsupported.
 - Sessions started remotely but running in Codex desktop on a Mac can show
-  activity while approvals are inaccessible. Opening the thread on that Mac may
-  make those approvals accessible.
+  activity while approvals are inaccessible. Try opening the thread in Codex on
+  that Mac, then check Paceman again. An assistant with access to your Mac may be
+  able to do this for you.
 
 ### Manual installation
 
