@@ -122,7 +122,8 @@ struct WorkItem: Identifiable {
     var statusDetail: String? {
         if let resultObservedAt = session.resultObservedAt {
             let date = Date(timeIntervalSince1970: resultObservedAt)
-            let time = date.formatted(date: Calendar.current.isDateInToday(date) ? .omitted : .abbreviated, time: .shortened)
+            let time = date.formatted(date: group == .recent || Calendar.current.isDateInToday(date) ? .omitted : .abbreviated,
+                                      time: .shortened)
             return "\(session.state.title) · seen \(time)"
         }
         // The section establishes that these are historical observations; the
@@ -203,7 +204,45 @@ enum WorkStatusToken: Hashable {
 typealias WorkGroup = SessionTimePolicy.Group
 typealias WorkSectionData = SessionTimePolicy.Section<WorkItem>
 
+struct RecentWorkDay: Identifiable {
+    let day: Date?
+    let title: String
+    let rows: [WorkItem]
+    var id: Date? { day }
+}
+
 @MainActor enum WorkCatalog {
+    static func recentDays(_ rows: [WorkItem], at now: Date, calendar: Calendar = .current) -> [RecentWorkDay] {
+        let today = calendar.startOfDay(for: now)
+        let grouped = Dictionary(grouping: rows) { item -> Date? in
+            guard let time = item.session.resultObservedAt, time.isFinite else { return nil }
+            return calendar.startOfDay(for: Date(timeIntervalSince1970: time))
+        }
+        return grouped.keys.sorted { left, right in
+            guard let left else { return false }
+            guard let right else { return true }
+            return left > right
+        }.map { day in
+            let title: String
+            if let day {
+                let age = calendar.dateComponents([.day], from: day, to: today).day
+                switch age {
+                case 0: title = "Today"
+                case 1: title = "Yesterday"
+                default:
+                    let formatter = DateFormatter()
+                    formatter.calendar = calendar
+                    formatter.timeZone = calendar.timeZone
+                    formatter.setLocalizedDateFormatFromTemplate((2...6).contains(age ?? -1) ? "EEEE" : "MMMd")
+                    title = formatter.string(from: day)
+                }
+            } else {
+                title = "Undated" // Legacy and idle rows have no recorded result date.
+            }
+            return RecentWorkDay(day: day, title: title, rows: grouped[day] ?? [])
+        }
+    }
+
     static func sorted(_ items: [WorkItem]) -> [WorkItem] {
         items.sorted { left, right in
             let a = WorkGroup.allCases.firstIndex(of: left.group)!, b = WorkGroup.allCases.firstIndex(of: right.group)!
@@ -342,7 +381,7 @@ struct CompanionWork: View {
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
                 }
                 ForEach(WorkCatalog.sections(currentRows)) { section in
-                    workSection(section)
+                    workSection(section, at: now)
                 }
                 if !model.pairedSources.isEmpty && currentRows.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
@@ -361,17 +400,21 @@ struct CompanionWork: View {
             .refreshable { if !presentation.preview { await model.refreshAll() } }
     }
 
-    private func workSection(_ section: WorkSectionData) -> some View {
+    private func workSection(_ section: WorkSectionData, at now: Date) -> some View {
         let group = section.group
         let rows = section.rows
         return Section {
             if group != .recent || recentExpanded {
-                ForEach(rows, id: \.rowIdentity) { item in
-                    WorkTaskRow(item: item, theme: theme,
-                        showComputer: filter == nil && Set(items.map { $0.id.sourceID }).count > 1,
-                        inspect: { inspectTask(item.id) },
-                        prepareToOpen: { inbox.releaseRequest(for: item.id) },
-                        currentSession: { items.first { $0.id == item.id }?.session })
+                if group == .recent, rows.contains(where: { $0.session.resultObservedAt?.isFinite == true }) {
+                    ForEach(WorkCatalog.recentDays(rows, at: now)) { day in
+                        Text(day.title).companionText(.label, theme: theme)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 8)
+                            .accessibilityAddTraits(.isHeader)
+                        workRows(day.rows)
+                    }
+                } else {
+                    workRows(rows)
                 }
             }
         } header: {
@@ -400,6 +443,16 @@ struct CompanionWork: View {
                     }
                 }
             }
+        }
+    }
+
+    private func workRows(_ rows: [WorkItem]) -> some View {
+        ForEach(rows, id: \.rowIdentity) { item in
+            WorkTaskRow(item: item, theme: theme,
+                showComputer: filter == nil && Set(items.map { $0.id.sourceID }).count > 1,
+                inspect: { inspectTask(item.id) },
+                prepareToOpen: { inbox.releaseRequest(for: item.id) },
+                currentSession: { items.first { $0.id == item.id }?.session })
         }
     }
 

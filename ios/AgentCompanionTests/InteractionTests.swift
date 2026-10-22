@@ -3,6 +3,38 @@ import SwiftUI
 @testable import AgentCompanion
 
 final class InteractionTests: XCTestCase {
+    @MainActor func testRecentDaysUseLocalCalendarAndKeepUnknownDatesUndated() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 21, hour: 20)))
+        func item(_ id: String, daysAgo: Int?) -> WorkItem {
+            let date = daysAgo.flatMap { calendar.date(byAdding: .day, value: -$0, to: calendar.startOfDay(for: now)) }
+            return WorkItem(id: .init(sourceID: "Mac", sessionID: id, provider: "codex"),
+                session: AgentSession(id: id, provider: "codex", state: .finished,
+                    resultObservedAt: date?.timeIntervalSince1970), computer: "Mac", historical: false)
+        }
+        let rows = [item("today", daysAgo: 0), item("also-today", daysAgo: 0),
+                    item("yesterday", daysAgo: 1), item("monday", daysAgo: 2),
+                    item("sunday", daysAgo: 3), item("last-wednesday", daysAgo: 7), item("legacy", daysAgo: nil)]
+        let days = WorkCatalog.recentDays(rows, at: now, calendar: calendar)
+        XCTAssertEqual(days.prefix(2).map(\.title), ["Today", "Yesterday"])
+        XCTAssertEqual(days.map { $0.rows.map(\.session.id) },
+            [["today", "also-today"], ["yesterday"], ["monday"], ["sunday"], ["last-wednesday"], ["legacy"]])
+        XCTAssertEqual(days.last?.title, "Undated")
+        XCTAssertNotEqual(days[4].title, days[2].title)
+        XCTAssertTrue(WorkCatalog.recentDays([], at: now, calendar: calendar).isEmpty)
+
+        // Local midnight moves today's rows to Yesterday without another snapshot.
+        let tomorrow = try XCTUnwrap(calendar.date(byAdding: .day, value: 1, to: now))
+        XCTAssertEqual(WorkCatalog.recentDays([rows[0]], at: tomorrow, calendar: calendar).first?.title, "Yesterday")
+        // The fall DST day is 25 hours long; elapsed seconds must not split it.
+        let dstNow = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 0)))
+        let dstResult = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 0)))
+        let dstRow = WorkItem(id: rows[0].id, session: AgentSession(id: "dst", provider: "codex", state: .finished,
+            resultObservedAt: dstResult.timeIntervalSince1970), computer: "Mac", historical: false)
+        XCTAssertEqual(WorkCatalog.recentDays([dstRow], at: dstNow, calendar: calendar).first?.title, "Yesterday")
+    }
+
     @MainActor func testSharedTemporalSectionsAndCountsAgeWithoutNetworkRefresh() throws {
         let model = CompanionModel(preview: true)
         let source = refreshSource("temporal")
