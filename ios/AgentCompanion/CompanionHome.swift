@@ -126,7 +126,7 @@ struct WorkItem: Identifiable {
             let time = date.formatted(date: group == .recent || Calendar.current.isDateInToday(date) ? .omitted : .abbreviated,
                                       time: .shortened)
                 .replacingOccurrences(of: clockTime, with: clockTime.replacingOccurrences(of: " ", with: "\u{00a0}"))
-            return "\(session.state.title) · seen \(time)"
+            return "\(session.state.title) · \(time)"
         }
         // The section establishes that these are historical observations; the
         // row still needs to say what was observed, without relying on a glyph.

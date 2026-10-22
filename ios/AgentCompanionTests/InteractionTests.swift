@@ -226,7 +226,11 @@ final class InteractionTests: XCTestCase {
         XCTAssertTrue(items.allSatisfy { $0.group == .recent && !$0.historical && $0.request == nil })
         XCTAssertEqual(WorkCatalog.sorted(items).map(\.session.id), ["morning", "last-night"])
         XCTAssertEqual(items.first?.state, .failed)
-        XCTAssertTrue(items.allSatisfy { $0.statusDetail?.contains("seen") == true })
+        for item in items {
+            let detail = try XCTUnwrap(item.statusDetail)
+            XCTAssertTrue(detail.hasPrefix("\(item.state.title) · "))
+            XCTAssertFalse(detail.contains("seen"))
+        }
     }
     func testReviewLeaseRenewalCannotReuseDraftForChangedContent() throws {
         let original = InputRequest(requestID: "request", version: 1, provider: "codex", sessionID: "session",
