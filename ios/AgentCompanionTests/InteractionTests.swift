@@ -1188,23 +1188,22 @@ final class InteractionTests: XCTestCase {
         var requests: [InteractionURLProtocol] = []
         InteractionURLProtocol.start = { request in requests.append(request); started.fulfill() }
         defer { InteractionURLProtocol.start = nil }
-        let sending = inbox.submit(item, action: "allowOnce")
+        let sending = try XCTUnwrap(inbox.submit(item, action: "allowOnce"))
         let original = try XCTUnwrap(inbox.response(for: item)?.submission)
         inbox.submit(item, action: "deny")
         XCTAssertEqual(inbox.response(for: item)?.submission, original)
         await fulfillment(of: [started], timeout: 2)
         XCTAssertEqual(requests.count, 1)
-        let uncertain = expectation(description: "Delivery unconfirmed")
-        let uncertainObserver = inbox.$responses.sink { values in
-            if values[item.id]?.phase == .unconfirmed { uncertain.fulfill() }
-        }
         requests[0].client?.urlProtocol(requests[0], didFailWithError: URLError(.timedOut))
-        await fulfillment(of: [uncertain], timeout: 2)
-        await sending?.value
-        uncertainObserver.cancel()
+        // The inbox-owned operation, not a publisher delivery deadline, defines
+        // when the transport error has been handled on the main actor.
+        await sending.value
+        XCTAssertEqual(inbox.response(for: item)?.phase, .unconfirmed)
+        XCTAssertEqual(inbox.response(for: item)?.submission, original)
+        XCTAssertFalse(inbox.isSubmitting(item))
         let retryStarted = expectation(description: "Retry started")
         InteractionURLProtocol.start = { request in requests.append(request); retryStarted.fulfill() }
-        let retryTask = inbox.retry(item)
+        let retryTask = try XCTUnwrap(inbox.retry(item))
         XCTAssertEqual(inbox.response(for: item)?.submission, original, "Retry preserves action, answers, and idempotency key")
         await fulfillment(of: [retryStarted], timeout: 2)
         let traces = try requests.map {
@@ -1212,10 +1211,6 @@ final class InteractionTests: XCTestCase {
         }
         XCTAssertTrue(traces.allSatisfy { UUID(uuidString: $0) != nil })
         XCTAssertNotEqual(traces[0], traces[1], "Each HTTP attempt has its own trace; the decision's idempotency key stays unchanged")
-        let confirmed = expectation(description: "Receipt accepted")
-        let confirmationObserver = inbox.$responses.sink { values in
-            if values[item.id]?.phase == .submitted { confirmed.fulfill() }
-        }
         let receipt = try JSONSerialization.data(withJSONObject: ["status": "submitted",
             "generation": original.generation, "requestID": original.requestID, "version": original.version])
         let retry = requests[1]
@@ -1223,9 +1218,10 @@ final class InteractionTests: XCTestCase {
             statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         retry.client?.urlProtocol(retry, didLoad: receipt)
         retry.client?.urlProtocolDidFinishLoading(retry)
-        await fulfillment(of: [confirmed], timeout: 2)
-        await retryTask?.value
-        confirmationObserver.cancel()
+        await retryTask.value
+        XCTAssertEqual(inbox.response(for: item)?.phase, .submitted)
+        XCTAssertEqual(inbox.response(for: item)?.submission, original)
+        XCTAssertFalse(inbox.isSubmitting(item))
         XCTAssertFalse(inbox.isCurrent(item))
     }
 
