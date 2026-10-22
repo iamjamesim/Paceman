@@ -34,6 +34,27 @@ class OmarchyTests(unittest.TestCase):
             socket_path=self.root / 'omarchy-watch.sock', state_dir=self.root / 'omarchy',
             processes=self.processes, computer_name='build-station.example.net'))
 
+    def test_idle_observation_uses_recorded_lifecycle_time_without_a_result_or_new_alert(self):
+        self.event('working')
+        observed = time.time()
+        with patch('service.omarchy.time.time', return_value=observed):
+            before = self.event('interrupted')
+        self.assertEqual(before['sessions'][0]['activityObservedAt'], observed)
+        self.assertNotIn('resultObservedAt', before['sessions'][0])
+        self.assertFalse(before.get('completedSessions'))
+        with patch('service.omarchy.time.time', return_value=observed + 3600):
+            with self.source.lock, self.store.connect() as db:
+                self.source.publish(db)
+            after = self.store.snapshot()
+        self.assertEqual(after['sessions'][0]['activityObservedAt'], observed)
+        self.assertEqual(after['eventID'], before['eventID'])
+        self.assertEqual(after['changedAt'], before['changedAt'])
+        self.event('working', turn='turn-2')
+        self.assertNotIn('activityObservedAt', self.store.snapshot()['sessions'][0])
+        result = self.event('completed', turn='turn-2')['sessions'][0]
+        self.assertIn('resultObservedAt', result)
+        self.assertNotIn('activityObservedAt', result)
+
     def test_title_refresh_preserves_activity_identity(self):
         self.source.titles.reader = lambda refs: {ref: "Fix watch scrolling" for ref in refs}
         self.event('working')

@@ -54,7 +54,6 @@ struct CompanionRoot: View {
     @State private var selectedSection: CompanionSection = .work
     @State private var sidebarPresented = false
     @State private var workFilter: String?
-    @State private var recentExpanded = true
     @State private var selectedTask: WorkIdentity?
     @State private var reviewQueue: TaskReviewQueue?
     @State private var reviewPresentation = TaskReviewPresentation()
@@ -217,7 +216,7 @@ struct CompanionRoot: View {
             switch selectedSection {
             case .work:
                 CompanionWork(model: model, presentation: presentation, inbox: model.interactions,
-                    theme: theme, filter: $workFilter, recentExpanded: $recentExpanded,
+                    theme: theme, filter: $workFilter,
                     connectComputer: { path.append(FeedDestination.pairing) },
                     inspectTask: inspectTask,
                     reviewTasks: { _ in presentReviewIfNeeded(includeDeferred: true) })
@@ -322,7 +321,6 @@ struct CompanionRoot: View {
             selectedSection = .work
             path = NavigationPath()
             workFilter = model.pairedSources.contains(where: { $0.sourceID == route.sourceID }) ? route.sourceID : nil
-            recentExpanded = true
             activityNavigation = UUID()
             return
         }
@@ -333,7 +331,6 @@ struct CompanionRoot: View {
             selectedSection = .work
             path = NavigationPath()
             workFilter = id
-            recentExpanded = true
             activityNavigation = UUID()
         } else {
             path = NavigationPath()

@@ -63,14 +63,21 @@ final class PresentationModel: ObservableObject {
     var previewSessions: [AgentSession] {
         if previewScreen.hasPrefix("history") {
             let now = Date().timeIntervalSince1970
+            let today = Calendar.current.startOfDay(for: Date())
+            let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today)!
             var rows = [AgentSession(id: "morning", provider: "codex", state: .finished,
-                name: previewScreen == "history-long" ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : "Check notification delivery",
-                workspaceLabel: "paceman", resultObservedAt: now - 3600),
+                name: previewScreen.hasPrefix("history-long") ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : "Check notification delivery",
+                workspaceLabel: "paceman", resultObservedAt: now - min(3600, Date().timeIntervalSince(today) / 2)),
                 AgentSession(id: "last-night", provider: "claude", state: .finished,
-                    name: "Improve onboarding", workspaceLabel: "paceman", resultObservedAt: now - 14 * 3600),
+                    name: "Improve onboarding", workspaceLabel: "paceman", resultObservedAt: yesterday.addingTimeInterval(12 * 3600).timeIntervalSince1970),
                 AgentSession(id: "failed", provider: "codex", state: .failed,
                     name: "Run integration tests", resultObservedAt: now - 3 * 86400)]
-            if previewScreen == "history-mixed" {
+            if previewScreen.hasPrefix("history-idle") {
+                rows.append(AgentSession(id: "idle", provider: "codex", state: .idle,
+                    name: "Investigate Pebble notification relay", workspaceLabel: "paceman",
+                    activityObservedAt: now - min(900, Date().timeIntervalSince(today) / 2)))
+            }
+            if previewScreen.hasPrefix("history-mixed") {
                 rows.insert(AgentSession(id: "current", provider: "claude", state: .working, name: "Build Mac client"), at: 0)
             }
             return rows
@@ -100,7 +107,7 @@ final class PresentationModel: ObservableObject {
                     AgentSession(id: "3", provider: "codex", state: .finished),
                     AgentSession(id: "4", provider: "codex", state: .failed)]
         }
-        guard !["empty", "claude-empty", "legacy-empty", "providers-none"].contains(previewScreen) else { return [] }
+        guard !["empty", "waiting", "claude-empty", "legacy-empty", "providers-none"].contains(previewScreen) else { return [] }
         if ["claude-only", "claude-offline", "claude-long", "claude-local"].contains(previewScreen) {
             return [AgentSession(id: "1", provider: "claude", state: .working,
                 name: previewScreen == "claude-long" ? "Investigate multi-machine source recovery after a long disconnect" : "API cleanup",
@@ -147,6 +154,8 @@ struct AgentSession: Codable, Identifiable, Equatable {
     var remoteSessionID: String?
     var threadID: String? = nil
     var resultObservedAt: Double? = nil
+    var activityObservedAt: Double? = nil
+    var dayObservedAt: Double? { resultObservedAt ?? (state == .idle ? activityObservedAt : nil) }
     var hasResult: Bool { state == .finished || state == .failed }
     func timeFacts(freshUntil: Double = .infinity) -> SessionTimePolicy.Facts {
         .init(state: state.rawValue, resultObservedAt: resultObservedAt, freshUntil: freshUntil)

@@ -59,6 +59,57 @@ enum SessionTimePolicy {
         return Group.allCases.compactMap { key in grouped[key].map { Section(group: key, rows: $0) } }
     }
 
+    /// List headings only. Temporal groups, retention, and caller-supplied row order stay intact.
+    enum ActivitySectionID: Hashable {
+        case group(Group), day(Date?)
+    }
+    struct ActivitySection<Row>: Identifiable {
+        let id: ActivitySectionID
+        let group: Group
+        let title: String
+        let rows: [Row]
+        var count: Int { rows.count }
+        var accessibilityLabel: String { "\(title), \(count) \(count == 1 ? "session" : "sessions")" }
+    }
+
+    static func activitySections<Row>(_ rows: [Row], at now: Date, calendar: Calendar = .current,
+                                      group: (Row) -> Group?, observedAt: (Row) -> Double?) -> [ActivitySection<Row>] {
+        let today = calendar.startOfDay(for: now)
+        return sections(rows, group: group).flatMap { section -> [ActivitySection<Row>] in
+            guard section.group == .recent else {
+                return [ActivitySection(id: .group(section.group), group: section.group,
+                                        title: section.group.rawValue, rows: section.rows)]
+            }
+            let days = Dictionary(grouping: section.rows) { row -> Date? in
+                guard let time = observedAt(row), time.isFinite, time > 0, time <= now.timeIntervalSince1970 else { return nil }
+                return calendar.startOfDay(for: Date(timeIntervalSince1970: time))
+            }
+            return days.keys.sorted { left, right in
+                guard let left else { return false }
+                guard let right else { return true }
+                return left > right
+            }.map { day in
+                let title: String
+                if let day {
+                    let age = calendar.dateComponents([.day], from: day, to: today).day
+                    switch age {
+                    case 0: title = "Today"
+                    case 1: title = "Yesterday"
+                    default:
+                        let formatter = DateFormatter()
+                        formatter.calendar = calendar
+                        formatter.timeZone = calendar.timeZone
+                        formatter.setLocalizedDateFormatFromTemplate((2...6).contains(age ?? -1) ? "EEEE" : "MMMd")
+                        title = formatter.string(from: day)
+                    }
+                } else {
+                    title = "Undated" // Legacy and idle rows have no recorded result date.
+                }
+                return ActivitySection(id: .day(day), group: .recent, title: title, rows: days[day] ?? [])
+            }
+        }
+    }
+
     static func shouldEndLiveActivity(state: String, sessions: [Facts], legacyChangedAt: Double, at now: Date) -> Bool {
         if sessions.contains(where: { $0.state == "working" || $0.state == "needs_input" }) { return false }
         if state == "idle" { return true }
@@ -256,6 +307,8 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
     var observedAt: Double? = nil
     var presentationSymbol: String? = nil
     var resultObservedAt: Double? = nil
+    var activityObservedAt: Double? = nil
+    var dayObservedAt: Double? { resultObservedAt ?? (state == "idle" ? activityObservedAt : nil) }
     var retainedCompletion: Bool? = nil
     var reviewable: Bool? = nil
     var id: String { "\(sourceID)/\(provider)/\(sessionID)" }

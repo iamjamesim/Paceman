@@ -296,16 +296,17 @@ private struct WatchActivityView: View {
     @State private var refreshID = UUID()
     @State private var cacheReadID = UUID()
     @State private var consumedLaunchID: UUID?
+    @State private var collapsedSections: Set<SessionTimePolicy.ActivitySectionID> = []
     private var route: LiveActivityRoute? { launch?.route }
     private var source: WatchWorkSource? {
         snapshot?.sources?.first { $0.sourceID == route?.sourceID }
     }
-    private func sections(at date: Date) -> [SessionTimePolicy.Section<WatchWorkTask>] {
+    private func sections(at date: Date) -> [SessionTimePolicy.ActivitySection<WatchWorkTask>] {
         let tasks = (snapshot?.tasks ?? []).filter { route == nil || $0.sourceID == route?.sourceID }
-        return SessionTimePolicy.sections(tasks) {
+        return SessionTimePolicy.activitySections(tasks, at: date, group: {
             let temporal = $0.temporalPresentation(at: date)
             return temporal.visible ? temporal.group : nil
-        }
+        }, observedAt: { $0.dayObservedAt })
     }
     private var receivedActivity: Bool {
         if route != nil { return source?.generation != nil }
@@ -325,15 +326,43 @@ private struct WatchActivityView: View {
                             Text("Connect to iPhone to respond.").font(.body)
                         }
                         ForEach(sections) { section in
-                                Section(section.group.rawValue) {
+                            let expanded = !collapsedSections.contains(section.id)
+                            Section {
+                                if expanded {
                                     ForEach(section.rows) { task in
                                         NavigationLink(value: WatchDestination.open(task, canReview: store.workReachable)) {
                                             WatchActivityRow(task: task, showComputer: route == nil, date: context.date)
                                         }
                                     }
                                 }
+                            } header: {
+                                let aggregate = section.rows.contains { $0.provider == "aggregate" }
+                                Button {
+                                    if expanded { collapsedSections.insert(section.id) }
+                                    else { collapsedSections.remove(section.id) }
+                                } label: {
+                                    HStack {
+                                        Text(aggregate ? section.title : "\(section.title) · \(section.count)")
+                                        Spacer(minLength: 8)
+                                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                                            .font(.caption.weight(.semibold))
+                                    }.frame(minHeight: 44).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
+                                    .accessibilityLabel(aggregate ? section.title : section.accessibilityLabel)
+                                    .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                                    .accessibilityHint("Show or hide sessions in this section")
+                                    .accessibilityAddTraits(.isHeader)
+                            }
                         }
                     }
+                    #if DEBUG
+                    .modifier(WatchWorkPreview.ScrollPosition(target: sections.last?.rows.last?.id))
+                    .onChange(of: sections.map(\.id), initial: true) { _, ids in
+                        if ProcessInfo.processInfo.arguments.contains("--sections-collapsed-preview") {
+                            collapsedSections.formUnion(ids)
+                        }
+                    }
+                    #endif
                 }
             }
         }
@@ -1172,6 +1201,18 @@ private struct WatchPhoneContinuation: View {
 
 #if DEBUG
 private enum WatchWorkPreview {
+    struct ScrollPosition: ViewModifier {
+        let target: String?
+        func body(content: Content) -> some View {
+            ScrollViewReader { proxy in
+                content.task(id: target) {
+                    guard scenario?.hasSuffix("-bottom") == true, let target else { return }
+                    await Task.yield()
+                    proxy.scrollTo(target, anchor: .bottom)
+                }
+            }
+        }
+    }
     static var scenario: String? {
         ProcessInfo.processInfo.arguments.first { $0.hasPrefix("--work-preview=") }.map { String($0.dropFirst(15)) }
     }
@@ -1222,6 +1263,26 @@ private enum WatchWorkPreview {
                     freshUntil: now + (scenario == "stale" ? -600 : 300))
             }
             var values = scenario == "stale" ? tasks.dropFirst().map { $0 } : tasks
+            if scenario.hasPrefix("history") {
+                let today = Calendar.current.startOfDay(for: Date())
+                let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today)!
+                let dates = [now - min(3600, Date().timeIntervalSince(today) / 2), yesterday.addingTimeInterval(12 * 3600).timeIntervalSince1970, now - 3 * 86400]
+                let titles = ["Check notification delivery", "Improve onboarding", "Run integration tests"]
+                let history = dates.enumerated().map { index, date in
+                    WatchWorkTask(sourceID: "preview", sessionID: "history-\(index)", provider: "codex",
+                        title: scenario.hasPrefix("history-long") && index == 0
+                            ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : titles[index],
+                        computer: "MacBook Pro", state: index == 2 ? "failed" : "finished",
+                        freshUntil: now + (scenario == "history-offline" ? -600 : 300), resultObservedAt: date)
+                }
+                values = scenario.hasPrefix("history-mixed") ? Array(tasks.prefix(2)) + history : history
+                if scenario.hasPrefix("history-idle") {
+                    values.append(WatchWorkTask(sourceID: "preview", sessionID: "idle", provider: "codex",
+                        title: "Investigate Pebble notification relay", computer: "MacBook Pro", state: "idle",
+                        freshUntil: now + 300,
+                        activityObservedAt: now - min(900, Date().timeIntervalSince(today) / 2)))
+                }
+            }
             if responseSent || scenario == "response-sent", !values.isEmpty {
                 values[0].presentationStatus = "Response sent"
                 values[0].presentationGroup = "Needs you"
@@ -1243,7 +1304,7 @@ private enum WatchWorkPreview {
                     stateCounts: Dictionary(grouping: values.filter { $0.sourceID == id }, by: \.state).mapValues(\.count))
             }
             return try encoded(WatchWorkSnapshot(tasks: values, computers: sources.count,
-                unavailable: ["stale", "waiting"].contains(scenario) ? 2 : scenario == "partial" ? 1 : 0, sources: sources))
+                unavailable: ["stale", "waiting", "history-offline"].contains(scenario) ? 2 : scenario == "partial" ? 1 : 0, sources: sources))
         }
         if payload["operation"] as? String == "request", scenario.hasPrefix("native-") {
             return ["nativeOnly": true]

@@ -204,43 +204,10 @@ enum WorkStatusToken: Hashable {
 typealias WorkGroup = SessionTimePolicy.Group
 typealias WorkSectionData = SessionTimePolicy.Section<WorkItem>
 
-struct RecentWorkDay: Identifiable {
-    let day: Date?
-    let title: String
-    let rows: [WorkItem]
-    var id: Date? { day }
-}
-
 @MainActor enum WorkCatalog {
-    static func recentDays(_ rows: [WorkItem], at now: Date, calendar: Calendar = .current) -> [RecentWorkDay] {
-        let today = calendar.startOfDay(for: now)
-        let grouped = Dictionary(grouping: rows) { item -> Date? in
-            guard let time = item.session.resultObservedAt, time.isFinite else { return nil }
-            return calendar.startOfDay(for: Date(timeIntervalSince1970: time))
-        }
-        return grouped.keys.sorted { left, right in
-            guard let left else { return false }
-            guard let right else { return true }
-            return left > right
-        }.map { day in
-            let title: String
-            if let day {
-                let age = calendar.dateComponents([.day], from: day, to: today).day
-                switch age {
-                case 0: title = "Today"
-                case 1: title = "Yesterday"
-                default:
-                    let formatter = DateFormatter()
-                    formatter.calendar = calendar
-                    formatter.timeZone = calendar.timeZone
-                    formatter.setLocalizedDateFormatFromTemplate((2...6).contains(age ?? -1) ? "EEEE" : "MMMd")
-                    title = formatter.string(from: day)
-                }
-            } else {
-                title = "Undated" // Legacy and idle rows have no recorded result date.
-            }
-            return RecentWorkDay(day: day, title: title, rows: grouped[day] ?? [])
-        }
+    static func activitySections(_ items: [WorkItem], at now: Date, calendar: Calendar = .current) -> [SessionTimePolicy.ActivitySection<WorkItem>] {
+        SessionTimePolicy.activitySections(items, at: now, calendar: calendar,
+            group: { $0.visible ? $0.group : nil }, observedAt: { $0.session.dayObservedAt })
     }
 
     static func sorted(_ items: [WorkItem]) -> [WorkItem] {
@@ -320,10 +287,10 @@ struct CompanionWork: View {
     @ObservedObject var inbox: InteractionInbox
     let theme: CompanionTheme
     @Binding var filter: String?
-    @Binding var recentExpanded: Bool
     let connectComputer: () -> Void
     let inspectTask: (WorkIdentity) -> Void
     let reviewTasks: ([WorkIdentity]) -> Void
+    @State private var collapsedSections: Set<SessionTimePolicy.ActivitySectionID> = []
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
     var items: [WorkItem] {
@@ -353,6 +320,13 @@ struct CompanionWork: View {
         .background(CompanionCanvas(theme: theme))
         .toolbarBackground(.hidden, for: .navigationBar)
         .foregroundStyle(theme.ink).navigationTitle("Activity").navigationBarTitleDisplayMode(.inline)
+        #if DEBUG
+        .onAppear {
+            if presentation.preview, ProcessInfo.processInfo.arguments.contains("--sections-collapsed-preview") {
+                collapsedSections = Set(WorkCatalog.activitySections(items, at: Date()).map(\.id))
+            }
+        }
+        #endif
         .onChange(of: model.pairedSources.map(\.sourceID)) { _, ids in
             if let filter, !ids.contains(filter) { self.filter = nil }
         }
@@ -380,8 +354,8 @@ struct CompanionWork: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
                 }
-                ForEach(WorkCatalog.sections(currentRows)) { section in
-                    workSection(section, at: now)
+                ForEach(WorkCatalog.activitySections(currentRows, at: now)) { section in
+                    workSection(section)
                 }
                 if !model.pairedSources.isEmpty && currentRows.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
@@ -393,53 +367,42 @@ struct CompanionWork: View {
                         .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 16)
                 }
             }.padding(.top, 4)
-        }.defaultScrollAnchor(presentation.previewScreen == "work-scrolled" ? .center : .top)
+        }.defaultScrollAnchor(presentation.preview && presentation.previewScreen.hasSuffix("-bottom") ? .bottom
+            : presentation.previewScreen == "work-scrolled" ? .center : .top)
             .accessibilityIdentifier("work-list")
             // The list owns its scroll effects; the stationary filter is a sibling.
             .modifier(WorkScrollEdge())
             .refreshable { if !presentation.preview { await model.refreshAll() } }
     }
 
-    private func workSection(_ section: WorkSectionData, at now: Date) -> some View {
-        let group = section.group
+    private func workSection(_ section: SessionTimePolicy.ActivitySection<WorkItem>) -> some View {
         let rows = section.rows
+        let expanded = !collapsedSections.contains(section.id)
         return Section {
-            if group != .recent || recentExpanded {
-                if group == .recent, rows.contains(where: { $0.session.resultObservedAt?.isFinite == true }) {
-                    ForEach(WorkCatalog.recentDays(rows, at: now)) { day in
-                        Text(day.title).companionText(.label, theme: theme)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 8)
-                            .accessibilityAddTraits(.isHeader)
-                        workRows(day.rows)
-                    }
-                } else {
-                    workRows(rows)
-                }
-            }
+            if expanded { workRows(rows) }
         } header: {
             WorkSectionSurface(theme: theme) {
-                if group == .recent {
-                    Button { recentExpanded.toggle() } label: {
-                        groupHeading(group, count: rows.contains { $0.aggregate } ? nil : section.count)
+                let layout = typeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                    : AnyLayout(HStackLayout(spacing: 12))
+                layout {
+                    Button {
+                        if expanded { collapsedSections.insert(section.id) }
+                        else { collapsedSections.remove(section.id) }
+                    } label: {
+                        groupHeading(section.title, count: rows.contains { $0.aggregate } ? nil : section.count,
+                                     expanded: expanded)
                     }.buttonStyle(.plain)
-                        .accessibilityValue(recentExpanded ? "Expanded" : "Collapsed")
-                        .accessibilityHint("Show or hide recent sessions")
-                } else {
-                    let layout = typeSize.isAccessibilitySize
-                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                        : AnyLayout(HStackLayout(spacing: 12))
-                    layout {
-                        groupHeading(group, count: rows.contains { $0.aggregate } ? nil : section.count)
-                        if group == .attention, rows.contains(where: { !$0.historical && $0.request != nil }) {
-                            Button { reviewTasks(rows.filter { !$0.historical && $0.request != nil }.map(\.id)) } label: {
-                                Text("Review").font(CompanionTextRole.label.font).fixedSize(horizontal: true, vertical: false)
-                                    .foregroundStyle(theme.tint)
-                                    .padding(.horizontal, 14).padding(.vertical, 8)
-                                    .background(theme.tint.opacity(0.12), in: Capsule())
-                                    .frame(minHeight: 44).contentShape(Capsule())
-                            }.buttonStyle(.plain).accessibilityLabel("Review sessions needing you")
-                        }
+                        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                        .accessibilityHint("Show or hide sessions in this section")
+                    if section.group == .attention, rows.contains(where: { !$0.historical && $0.request != nil }) {
+                        Button { reviewTasks(rows.filter { !$0.historical && $0.request != nil }.map(\.id)) } label: {
+                            Text("Review").font(CompanionTextRole.label.font).fixedSize(horizontal: true, vertical: false)
+                                .foregroundStyle(theme.tint)
+                                .padding(.horizontal, 14).padding(.vertical, 8)
+                                .background(theme.tint.opacity(0.12), in: Capsule())
+                                .frame(minHeight: 44).contentShape(Capsule())
+                        }.buttonStyle(.plain).accessibilityLabel("Review sessions needing you")
                     }
                 }
             }
@@ -456,20 +419,23 @@ struct CompanionWork: View {
         }
     }
 
-    private func groupHeading(_ group: WorkGroup, count: Int?) -> some View {
-        HStack(spacing: 8) {
-            Text(group.rawValue).companionText(.sectionTitle, theme: theme)
-            if let count { Text("\(count)").companionText(.supporting, theme: theme).monospacedDigit() }
-            if group == .recent {
-                Image(systemName: recentExpanded ? "chevron.down" : "chevron.right")
+    private func groupHeading(_ title: String, count: Int?, expanded: Bool) -> some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 8))
+        return layout {
+            Text(title).companionText(.sectionTitle, theme: theme)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                if let count { Text("\(count)").companionText(.supporting, theme: theme).monospacedDigit() }
+                Spacer(minLength: 0)
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
                     .font(.caption.weight(.semibold)).foregroundStyle(theme.secondaryInk)
             }
-            Spacer(minLength: 0)
-        }.frame(minHeight: group == .recent ? 44 : 32).contentShape(Rectangle())
+        }.frame(minHeight: 44).contentShape(Rectangle())
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(count.map { "\(group.rawValue), \($0) \($0 == 1 ? "session" : "sessions")" } ?? group.rawValue)
+            .accessibilityLabel(count.map { "\(title), \($0) \($0 == 1 ? "session" : "sessions")" } ?? title)
             .accessibilityAddTraits(.isHeader)
-
     }
 
     private var filterName: String {

@@ -27,6 +27,33 @@ from macos.codex_hook import workspace_label
 
 
 class MacSourceTests(unittest.TestCase):
+    def test_idle_observation_uses_recorded_lifecycle_time_without_a_result_or_new_alert(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = Store(root / 'hub.sqlite3')
+            with MacSource(store, socket_path=root / 'hook.sock', allowance_reader=lambda: None,
+                           title_reader=lambda _: {}, turn_status_reader=lambda _: {}) as source:
+                base = dict(command='agent-event', session='idle-observation', turn='one')
+                observed = time.time()
+                with patch('service.macos.time.time', return_value=observed):
+                    source.receive(dict(base, event='started', hook='SessionStart'))
+                before = store.snapshot()
+                self.assertEqual(before['sessions'][0]['activityObservedAt'], observed)
+                self.assertNotIn('resultObservedAt', before['sessions'][0])
+                self.assertFalse(before.get('completedSessions'))
+                with patch('service.macos.time.time', return_value=observed + 3600):
+                    source.publish_current()
+                    after = store.snapshot()
+                self.assertEqual(after['sessions'][0]['activityObservedAt'], observed)
+                self.assertEqual(after['eventID'], before['eventID'])
+                self.assertEqual(after['changedAt'], before['changedAt'])
+                source.receive(dict(base, event='working', hook='UserPromptSubmit'))
+                self.assertNotIn('activityObservedAt', store.snapshot()['sessions'][0])
+                source.receive(dict(base, event='completed', hook='Stop'))
+                result = store.snapshot()['sessions'][0]
+                self.assertIn('resultObservedAt', result)
+                self.assertNotIn('activityObservedAt', result)
+
     def test_hook_sends_only_transcript_presence_and_transient_classification(self):
         for transient in (True, False):
             payload = dict(hook_event_name='SessionStart', session_id='fork', source='fork',

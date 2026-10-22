@@ -1005,6 +1005,9 @@ class MacSource:
             session = {"id": row["id"], "provider": row["provider"], "state": state}
             if row["provider"] == "codex" and (thread_id := self.thread_ids.get(row["id"])):
                 session["threadID"] = thread_id
+            if state == "idle":
+                # Received lifecycle/state observation, never snapshot fetch time or a result.
+                session["activityObservedAt"] = row["updated"]
             if state in ("finished", "failed"):
                 # This is the received lifecycle observation, not provider wall time.
                 session["resultObservedAt"] = row["updated"]
