@@ -122,8 +122,10 @@ struct WorkItem: Identifiable {
     var statusDetail: String? {
         if let resultObservedAt = session.resultObservedAt {
             let date = Date(timeIntervalSince1970: resultObservedAt)
+            let clockTime = date.formatted(date: .omitted, time: .shortened)
             let time = date.formatted(date: group == .recent || Calendar.current.isDateInToday(date) ? .omitted : .abbreviated,
                                       time: .shortened)
+                .replacingOccurrences(of: clockTime, with: clockTime.replacingOccurrences(of: " ", with: "\u{00a0}"))
             return "\(session.state.title) · seen \(time)"
         }
         // The section establishes that these are historical observations; the
@@ -390,8 +392,7 @@ struct CompanionWork: View {
                         if expanded { collapsedSections.insert(section.id) }
                         else { collapsedSections.remove(section.id) }
                     } label: {
-                        groupHeading(section.title, count: rows.contains { $0.aggregate } ? nil : section.count,
-                                     expanded: expanded)
+                        groupHeading(section.title, expanded: expanded)
                     }.buttonStyle(.plain)
                         .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                         .accessibilityHint("Show or hide sessions in this section")
@@ -419,22 +420,16 @@ struct CompanionWork: View {
         }
     }
 
-    private func groupHeading(_ title: String, count: Int?, expanded: Bool) -> some View {
-        let layout = typeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-            : AnyLayout(HStackLayout(spacing: 8))
-        return layout {
+    private func groupHeading(_ title: String, expanded: Bool) -> some View {
+        HStack(spacing: 8) {
             Text(title).companionText(.sectionTitle, theme: theme)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                if let count { Text("\(count)").companionText(.supporting, theme: theme).monospacedDigit() }
-                Spacer(minLength: 0)
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.semibold)).foregroundStyle(theme.secondaryInk)
-            }
-        }.frame(minHeight: 44).contentShape(Rectangle())
+            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                .font(.caption.weight(.semibold)).foregroundStyle(theme.secondaryInk)
+                .fixedSize()
+        }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(count.map { "\(title), \($0) \($0 == 1 ? "session" : "sessions")" } ?? title)
+            .accessibilityLabel(title)
             .accessibilityAddTraits(.isHeader)
     }
 
@@ -600,11 +595,14 @@ struct WorkRow: View {
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                 Text(item.aggregate ? item.computer : [item.request != nil ? (item.request?.request.kind == "approval" ? "Approval" : "Question") : nil,
                       item.session.provider.capitalized, item.session.detail,
-                      showComputer ? item.computer : nil,
-                      item.statusDetail]
+                      showComputer ? item.computer : nil]
                     .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                     .companionText(.supporting, theme: theme)
                     .fixedSize(horizontal: false, vertical: true)
+                if !item.aggregate, let status = item.statusDetail {
+                    Text(status).companionText(item.state == .needsInput && !item.historical && item.phase != .responded ? .body : .supporting, theme: theme)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
             .accessibilityElement(children: .combine)
