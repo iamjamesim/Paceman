@@ -1167,8 +1167,8 @@ private struct WatchPhoneContinuation: View {
             Task { await prepare(destination) }
         } label: {
             HStack(alignment: .center, spacing: 8) {
-                if destination == .agent, task?.provider == "codex" {
-                    Image("ProviderChatGPT").resizable().scaledToFit()
+                if destination == .agent, let provider = task?.provider, ["codex", "claude"].contains(provider) {
+                    Image(provider == "claude" ? "ProviderClaude" : "ProviderChatGPT").resizable().scaledToFit()
                         .frame(width: 18, height: 18).accessibilityHidden(true)
                 } else {
                     Image(systemName: "iphone").fixedSize().accessibilityHidden(true)

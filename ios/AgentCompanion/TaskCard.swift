@@ -539,13 +539,8 @@ struct SessionOpenButton: View {
                 TaskCardActionLabel(title: session.provider == "claude" ? "Open Claude Code" : session.appLinkTitle,
                                     theme: theme, primary: false)
             } else {
-                Group {
-                    if session.provider == "claude" {
-                        Image(systemName: "arrow.up.forward").font(CompanionTextRole.link.font)
-                    } else {
-                        Image("ProviderChatGPT").resizable().scaledToFit().frame(width: 18, height: 18)
-                    }
-                }
+                Image(session.provider == "claude" ? "ProviderClaude" : "ProviderChatGPT")
+                    .resizable().scaledToFit().frame(width: 18, height: 18)
                     .foregroundStyle(theme.ink).accessibilityHidden(true)
                     .padding(8).frame(minWidth: 32, minHeight: 32)
                     .background(theme.ink.opacity(0.07), in: Circle())
