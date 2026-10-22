@@ -388,8 +388,8 @@ struct CompanionWork: View {
                         : AnyLayout(HStackLayout(spacing: 12))
                     layout {
                         groupHeading(group, count: rows.contains { $0.aggregate } ? nil : section.count)
-                        if group == .attention, rows.contains(where: { $0.opensActivityCard }) {
-                            Button { reviewTasks(rows.filter(\.opensActivityCard).map(\.id)) } label: {
+                        if group == .attention, rows.contains(where: { !$0.historical && $0.request != nil }) {
+                            Button { reviewTasks(rows.filter { !$0.historical && $0.request != nil }.map(\.id)) } label: {
                                 Text("Review").font(CompanionTextRole.label.font).fixedSize(horizontal: true, vertical: false)
                                     .foregroundStyle(theme.tint)
                                     .padding(.horizontal, 14).padding(.vertical, 8)

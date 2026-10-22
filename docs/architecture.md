@@ -75,13 +75,16 @@ Sessions are keyed by source, provider, and session ID, never title. Activity ow
 and responses; Devices owns connections, accessories, and Live Activities.
 Ordering is stable and phone-observed, not durable task chronology: answerable
 requests lead Needs you, Working follows state-entry order, and Recent is newest
-first. Review freezes session order and drains each session after confirmed
-responses. Row visits stay in the selected session until dismissed. New requests
-never replace a draft or uncertain response; other sessions do not auto-present.
-Submission receipts show Response sent until native activity advances.
+first. Answerable requests open Review across computers on arrival and as new
+requests appear. Review retains each decision’s context, appends new arrivals,
+advances after confirmed responses and closes after the last decision. Dismissal
+sets aside only requests already offered. New arrivals never replace a draft or
+uncertain response. Missing requests remain unavailable unless current metadata
+confirms the session moved on; upcoming confirmed resolutions are skipped.
+Submission receipts show Response sent in Activity until native activity advances.
 
-Live Activity taps open a unique session only when its source generation and
-revision match; otherwise they open source-filtered Activity. Watch resolves through
-iPhone and preserves an open response form across another tap. Opening the agent
+Live Activity taps open current Review, or source-filtered Activity when nothing
+is answerable. Watch resolves through iPhone and preserves an open form across
+another tap. Individual response sheets close after confirmation. Opening the agent
 app releases any pending phone request. Detail timestamps describe the computer
 snapshot, not session progress. A completed turn does not establish a successful outcome.

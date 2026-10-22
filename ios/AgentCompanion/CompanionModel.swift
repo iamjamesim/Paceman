@@ -1064,11 +1064,15 @@ extension CompanionModel {
         }
     }
 
-    func dismissHandoff() {
-        guard let pending = handoff else { return }
-        if pending.id == storedHandoff?.id { UserDefaults.standard.removeObject(forKey: handoffKey) }
+    func dismissHandoff(includingDeferred: Bool = false) {
+        guard let pending = handoff ?? (includingDeferred ? storedHandoff : nil) else { return }
+        let stored = storedHandoff
+        if let stored, includingDeferred || pending.id == stored.id {
+            UserDefaults.standard.removeObject(forKey: handoffKey)
+            clearHandoffNotification(stored.id)
+        }
         handoff = nil
-        clearHandoffNotification(pending.id)
+        if pending.id != stored?.id { clearHandoffNotification(pending.id) }
     }
 
     func deferHandoff() {

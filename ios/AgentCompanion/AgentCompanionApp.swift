@@ -45,11 +45,6 @@ struct AgentCompanionApp: App {
 
 enum FeedDestination: Hashable { case computer, otherComputer(String), liveActivities, watch, connectAccessory, accessory(String), watchPairing, pairing, reconnect(String), notifications, watchNotifications, watchWeatherSetup, watchTroubleshooting, settings, appearance, weather, diagnostics }
 
-private struct PendingActivityNavigation: Identifiable {
-    let id = UUID()
-    let route: LiveActivityRoute
-}
-
 struct CompanionRoot: View {
     @ObservedObject var model: CompanionModel
     @ObservedObject var presentation: PresentationModel
@@ -60,7 +55,11 @@ struct CompanionRoot: View {
     @State private var recentExpanded = true
     @State private var selectedTask: WorkIdentity?
     @State private var reviewQueue: TaskReviewQueue?
-    @State private var activityNavigation: PendingActivityNavigation?
+    @State private var reviewPresentation = TaskReviewPresentation()
+    @State private var dismissingTaskCard = false
+    @State private var offeredRequestIDs: Set<String> = []
+    @State private var activityNavigation: UUID?
+    @Environment(\.scenePhase) private var phase
     var theme: CompanionTheme { presentation.theme(dark: true) }
     var body: some View {
         CompanionSidebar(selection: $selectedSection, isPresented: $sidebarPresented,
@@ -73,9 +72,14 @@ struct CompanionRoot: View {
                         open: { path.append($0) }, replacePath: { path = NavigationPath($0) }))
             }
         }
-        .sheet(item: taskCardSelection) { selection in
+        .sheet(item: taskCardSelection, onDismiss: {
+            dismissingTaskCard = false
+            model.presentStoredHandoff()
+            presentReviewIfNeeded()
+        }) { selection in
             TaskCard(selection: selection, model: model, presentation: presentation,
-                     inbox: model.interactions, theme: theme).id(selection.id)
+                     inbox: model.interactions, theme: theme,
+                     onOfferRequests: { offeredRequestIDs.formUnion($0.map(\.id)) }).id(selection.id)
         }
         .tint(theme.tint)
         .preferredColorScheme(.dark)
@@ -95,6 +99,9 @@ struct CompanionRoot: View {
                 if selectedTask != nil || reviewQueue != nil {
                     if model.handoff?.appleWatch == true { model.deferHandoff() }
                     else { model.dismissHandoff() }
+                } else if !reviewRequests.isEmpty {
+                    model.dismissHandoff()
+                    presentReviewIfNeeded(includeDeferred: true)
                 } else if model.handoff?.activityOnly == true {
                     sidebarPresented = false
                     path = NavigationPath()
@@ -104,29 +111,20 @@ struct CompanionRoot: View {
                 } else { sidebarPresented = false }
             }
         }
-        .onChange(of: selectedTask) { _, value in
-            if value == nil, reviewQueue == nil { model.presentStoredHandoff() }
+        .onChange(of: reviewRequests.map(\.id), initial: true) { _, _ in
+            presentReviewIfNeeded()
         }
-        .onChange(of: reviewQueue?.id) { _, value in
-            if value == nil, selectedTask == nil { model.presentStoredHandoff() }
+        .onChange(of: phase) { _, value in
+            if value == .background { reviewPresentation = TaskReviewPresentation() }
+            if value == .active { presentReviewIfNeeded() }
         }
         .onOpenURL(perform: handleURL)
-        .task(id: activityNavigation?.id) {
+        .task(id: activityNavigation) {
             guard let pending = activityNavigation else { return }
-            let route = pending.route
-            let original = route.task(in: model.snapshots[route.sourceID])
-            if !presentation.preview { await model.refresh(sourceID: route.sourceID) }
-            guard !Task.isCancelled, activityNavigation?.id == pending.id,
-                  selectedSection == .work, path.isEmpty, workFilter == route.sourceID,
-                  selectedTask == nil, reviewQueue == nil, model.handoff == nil, !sidebarPresented else { return }
+            if !presentation.preview { _ = await model.refreshAll() }
+            guard !Task.isCancelled, activityNavigation == pending else { return }
             activityNavigation = nil
-            guard model.pairedSources.contains(where: { $0.sourceID == route.sourceID }),
-                  !model.revokedSources.contains(route.sourceID),
-                  let identity = route.task(in: model.snapshots[route.sourceID], previouslyResolved: original),
-                  let item = WorkCatalog.live(model: model, presentation: presentation, inbox: model.interactions)
-                    .first(where: { $0.id == identity }) else { return }
-            // Resolve the displayed task, never the first item in a review queue.
-            if item.opensActivityCard { selectedTask = identity }
+            presentReviewIfNeeded(includeDeferred: true)
         }
     }
 
@@ -136,8 +134,35 @@ struct CompanionRoot: View {
             if let selectedTask { return .activity(selectedTask) }
             return model.handoff.flatMap { $0.activityOnly == true ? nil : .handoff($0) }
         }, set: { value in
-            if value == nil { selectedTask = nil; reviewQueue = nil; model.dismissHandoff() }
+            if value == nil {
+                dismissingTaskCard = true
+                if phase == .active {
+                    reviewPresentation.deferRequestIDs(offeredRequestIDs)
+                }
+                offeredRequestIDs = []
+                selectedTask = nil; reviewQueue = nil
+                // Review has already offered the current decisions. A deferred
+                // Watch selection must not reopen a Working sheet afterward.
+                model.dismissHandoff(includingDeferred: true)
+            }
         })
+    }
+
+    private var reviewRequests: [PendingInput] {
+        TaskReviewQueue.requests(in: WorkCatalog.live(model: model, presentation: presentation, inbox: model.interactions), inbox: model.interactions)
+    }
+
+    private func presentReviewIfNeeded(includeDeferred: Bool = false) {
+        guard phase == .active, !dismissingTaskCard, selectedTask == nil, reviewQueue == nil, model.handoff == nil else { return }
+        let requests = includeDeferred ? reviewRequests : reviewPresentation.automaticRequests(reviewRequests)
+        let tasks = TaskReviewQueue.identities(for: requests)
+        guard !tasks.isEmpty else { return }
+        sidebarPresented = false
+        var queue = TaskReviewQueue(tasks: tasks,
+            excludedRequestIDs: includeDeferred ? [] : reviewPresentation.deferredRequestIDs)
+        queue.capture(requests, items: WorkCatalog.live(model: model, presentation: presentation, inbox: model.interactions), snapshots: model.snapshots)
+        offeredRequestIDs = Set(requests.map(\.id))
+        reviewQueue = queue
     }
 
     @ViewBuilder private var rootScreen: some View {
@@ -147,8 +172,8 @@ struct CompanionRoot: View {
                 CompanionWork(model: model, presentation: presentation, inbox: model.interactions,
                     theme: theme, filter: $workFilter, recentExpanded: $recentExpanded,
                     connectComputer: { path.append(FeedDestination.pairing) },
-                    inspectTask: { selectedTask = $0 },
-                    reviewTasks: { reviewQueue = TaskReviewQueue(tasks: $0) })
+                    inspectTask: { offeredRequestIDs = []; selectedTask = $0 },
+                    reviewTasks: { _ in presentReviewIfNeeded(includeDeferred: true) })
             case .devices:
                 CompanionDevices(model: model, monitoring: model.monitoring, presentation: presentation,
                     theme: theme) { path.append($0) }
@@ -248,7 +273,7 @@ struct CompanionRoot: View {
             path = NavigationPath()
             workFilter = model.pairedSources.contains(where: { $0.sourceID == route.sourceID }) ? route.sourceID : nil
             recentExpanded = true
-            if workFilter != nil { activityNavigation = PendingActivityNavigation(route: route) }
+            activityNavigation = UUID()
             return
         }
         if url.host == "computer", let id = url.pathComponents.dropFirst().first,
@@ -259,6 +284,7 @@ struct CompanionRoot: View {
             path = NavigationPath()
             workFilter = id
             recentExpanded = true
+            activityNavigation = UUID()
         } else {
             path = NavigationPath()
             if url.host == "connect" {

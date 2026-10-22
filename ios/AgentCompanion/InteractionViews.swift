@@ -5,6 +5,7 @@ struct InteractionDetail: View {
     let item: PendingInput
     @ObservedObject var inbox: InteractionInbox
     let theme: CompanionTheme
+    var availability: TaskCardRequestAvailability = .current
     var heading: TaskCardHeading? = nil
     var context: String? = nil
     var contentTopInset: CGFloat = 16
@@ -37,7 +38,13 @@ struct InteractionDetail: View {
         }
         return item.answersFitWireLimit(answers) ? nil : "The combined answer is too long. Shorten it to send."
     }
-    private var editable: Bool { response == nil && !sending && inbox.isCurrent(item) && phase == .active }
+    private var editable: Bool { response == nil && !sending && availability == .current && inbox.isCurrent(item) && phase == .active }
+    private var requestNotice: String? {
+        if retryable, message == nil { return "Response not confirmed. Retry sends the same response." }
+        guard !sent && !sending && !retryable && !editable && message == nil else { return nil }
+        return (response == nil ? availability.message : nil)
+            ?? "This request is no longer available. \(ResponseGuidance.continuation(for: item.request.provider))."
+    }
     private var inlineActions: Bool { approvalAction?.kind == .command || typeSize.isAccessibilitySize }
     private var hasDecisionControls: Bool {
         message != nil || (!sent && (sending || retryable || editable)) || openSession != nil || nextRequest != nil
@@ -71,8 +78,8 @@ struct InteractionDetail: View {
                     if editable, let validationMessage {
                         Text(validationMessage).companionText(.body, theme: theme)
                     }
-                    if !sent && !sending && !retryable && !editable && message == nil {
-                        Text("This request is no longer available. \(ResponseGuidance.continuation(for: item.request.provider)).").companionText(.body, theme: theme)
+                    if let requestNotice {
+                        Text(requestNotice).companionText(.body, theme: theme)
                     }
                     if inlineActions { decisionControls }
                 }.frame(maxWidth: .infinity, alignment: .leading)
