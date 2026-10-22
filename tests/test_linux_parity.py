@@ -37,7 +37,7 @@ class LinuxSourceParityTests(unittest.TestCase):
         self.processes.is_alive.side_effect = lambda owner: owner == self.owner
         self.clock = 100.0
         self.enabled = ['codex', 'claude']
-        self.source = self.enterContext(OmarchySource(self.store, socket_path=self.root / 'hook.sock',
+        self.source = self.enterContext(OmarchySource(self.store, allowance_reader=lambda: [], socket_path=self.root / 'hook.sock',
             state_dir=self.root, processes=self.processes, monotonic=lambda: self.clock,
             providers=self.enabled, settings_reader=lambda: self.enabled,
             title_reader=lambda _refs: {}, turn_metadata_reader=lambda _sessions: {}))

@@ -41,7 +41,7 @@ class SourceFixture:
                 allowance_reader=lambda: None, turn_status_reader=lambda _: {}, turn_metadata_reader=lambda _: {}))
             self.source.next_allowance_at = self.source.next_turn_status_at = float('inf')
         else:
-            self.source = stack.enter_context(OmarchySource(self.store, **common,
+            self.source = stack.enter_context(OmarchySource(self.store, allowance_reader=lambda: [], **common,
                 state_dir=root, processes=processes, turn_metadata_reader=lambda _: {}))
         self.raw = SESSION if provider == 'codex' else 'native-local'
         self.key = hashlib.sha256((provider + ':' + self.raw).encode()).hexdigest()
@@ -123,7 +123,7 @@ class PlatformDecisionParityTests(unittest.TestCase):
             f.event('Stop')
             previous = f.source
             previous.__exit__(None, None, None)
-            f.source = stack.enter_context(OmarchySource(f.store, socket_path=previous.socket_path,
+            f.source = stack.enter_context(OmarchySource(f.store, allowance_reader=lambda: [], socket_path=previous.socket_path,
                 state_dir=previous.state_dir, processes=previous.processes, providers=f.enabled,
                 settings_reader=lambda: f.enabled, monotonic=lambda: f.clock, title_reader=lambda _: {},
                 turn_metadata_reader=lambda _: {}))

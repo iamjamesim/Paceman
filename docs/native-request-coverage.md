@@ -48,8 +48,9 @@ matching hooks still supply attention; exact results resolve their matching scop
 
 Linux restores bounded hook attention only for the same verified live process;
 Claude native request identities and aggregate uncertainty are not restored.
-Mac restores Codex activity and decisions only after reattaching the native owner;
-Claude active sessions still start clean because hooks cannot verify process ownership.
+Mac restores Codex activity and decisions only after reattaching the native owner.
+Claude hook lifecycle restores for the same verified live Mac process and boot;
+unverified activity and native request identities are not restored.
 
 Versioned source inventories live in the [Codex desktop](../tests/fixtures/codex-desktop-inventory.json),
 [App Server](../tests/fixtures/codex-appserver-inventory.json) and

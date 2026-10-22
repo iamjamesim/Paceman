@@ -21,8 +21,10 @@ import threading
 import time
 
 from service.allowance import allowance_snapshots
+from service.codex_limits import read_codex_allowances
+from service.hook_delivery import validated_label
 from service.codex_turns import read_codex_turn_metadata
-from service.usage import readings, selected_reading
+from service.usage import readings, selected_reading, valid_reading
 from service.claude import ClaudeSession
 from service.native_attention import PendingDecisions, native_waiting, native_empty
 from service.session_history import completed_sessions, display_sessions, retained_completions, FINISHED_DISPLAY_DURATION
@@ -67,7 +69,7 @@ class EventHandler(socketserver.StreamRequestHandler):
 class OmarchySource:
     def __init__(self, store, *, socket_path: Path | None = None, state_dir: Path | None = None,
                  processes=None, computer_name: str | None = None, monotonic=time.monotonic, providers=("codex",), settings_reader=None, title_reader=read_session_titles,
-                 turn_metadata_reader=read_codex_turn_metadata):
+                 turn_metadata_reader=read_codex_turn_metadata, allowance_reader=read_codex_allowances):
         self.providers = tuple(providers)
         self.settings_reader = settings_reader
         self.last_event_by_provider = {}
@@ -91,6 +93,12 @@ class OmarchySource:
         self.turn_metadata_reader = turn_metadata_reader
         self.recovery_thread = None
         self.next_recovery_at = 0.0
+        self.allowance_reader = allowance_reader
+        self.allowances = []
+        self.allowance_thread = None
+        self.next_allowance_at = 0.0
+        self.usage_generation = 0
+        self.usage_enabled = 'codex' in self.providers
         self.monotonic = monotonic
         self.processes = processes if processes is not None else AgentProcesses()
         self.computer_name = (computer_name or socket.gethostname()).split(".")[0][:80] or "Computer"
@@ -124,6 +132,8 @@ class OmarchySource:
             with self.store.connect() as db:
                 db.execute("CREATE TABLE IF NOT EXISTS omarchy_sessions (id TEXT PRIMARY KEY, "
                            "provider TEXT NOT NULL, turn TEXT NOT NULL, state TEXT NOT NULL, updated REAL NOT NULL)")
+                if 'workspace_label' not in {row[1] for row in db.execute('PRAGMA table_info(omarchy_sessions)')}:
+                    db.execute('ALTER TABLE omarchy_sessions ADD COLUMN workspace_label TEXT')
                 db.execute("CREATE TABLE IF NOT EXISTS omarchy_processes (session_id TEXT PRIMARY KEY, "
                            "pid INTEGER NOT NULL, start_ticks TEXT NOT NULL, boot_id TEXT NOT NULL, "
                            "closed INTEGER NOT NULL DEFAULT 0)")
@@ -170,6 +180,8 @@ class OmarchySource:
             self.titles.close()
         if self.recovery_thread is not None:
             self.recovery_thread.join(timeout=2)
+        if self.allowance_thread is not None:
+            self.allowance_thread.join(timeout=2)
         if self.thread is not None:
             self.server.shutdown()
             self.thread.join(timeout=2)
@@ -209,6 +221,7 @@ class OmarchySource:
             if "codex" not in self.providers:
                 return self.publish(db, lifecycle_only=True)
             previous = db.execute("SELECT * FROM omarchy_sessions WHERE id=?", (key,)).fetchone()
+            label = validated_label(command.get('workspaceLabel')) or (previous['workspace_label'] if previous else None)
             binding = db.execute("SELECT * FROM omarchy_processes WHERE session_id=?", (key,)).fetchone()
             same_owner = binding is not None and self.identity(binding) == owner
             if (binding is not None and not same_owner
@@ -243,7 +256,7 @@ class OmarchySource:
                         batch = self.pending_turn_events.setdefault(key, {
                             "session": session, "previous": previous["turn"], "owner": owner, "events": []})
                         event_data = {field: command[field] for field in (
-                            "command", "source", "adapter", "session", "turn", "event", "hook", "attention")
+                            "command", "source", "adapter", "session", "turn", "event", "hook", "attention", "workspaceLabel")
                             if field in command}
                         batch["events"] = (batch["events"] + [event_data])[-64:]
                         self.next_recovery_at = 0.0
@@ -259,7 +272,7 @@ class OmarchySource:
                         return self.publish(db, lifecycle_only=True)
                     if (same_owner and previous["state"] == EVENTS[event]
                             and event != "ended" and not async_question
-                            and command.get("hook") != "UserPromptSubmit"):
+                            and command.get("hook") != "UserPromptSubmit" and previous['workspace_label'] == label):
                         if native:
                             self.native_turns[key] = turn
                         self.session_refs[key] = session
@@ -292,8 +305,8 @@ class OmarchySource:
                      else "working" if async_question else EVENTS[event])
             db.execute("INSERT OR REPLACE INTO omarchy_processes VALUES (?,?,?,?,0)",
                        (key, owner.pid, owner.start_ticks, owner.boot_id))
-            db.execute("INSERT OR REPLACE INTO omarchy_sessions VALUES (?,?,?,?,?)",
-                       (key, source, turn, state, time.time()))
+            db.execute("INSERT OR REPLACE INTO omarchy_sessions VALUES (?,?,?,?,?,?)",
+                       (key, source, turn, state, time.time(), label))
             self.titles.track(key, "codex", session)
             self.record_event(db, "codex")
             if event == "ended":
@@ -316,6 +329,12 @@ class OmarchySource:
             if any(p not in ("codex", "claude") for p in providers):
                 raise ValueError("Unknown agent provider")
             self.providers = providers
+        enabled = 'codex' in self.providers
+        if enabled != self.usage_enabled:
+            self.usage_generation += 1
+            self.next_allowance_at = 0.0
+            self.allowances = []
+            self.usage_enabled = enabled
         for row in db.execute("SELECT id,provider FROM omarchy_sessions").fetchall():
             if row["provider"] not in self.providers:
                 db.execute("DELETE FROM omarchy_processes WHERE session_id=?", (row["id"],))
@@ -325,6 +344,7 @@ class OmarchySource:
                 self.native_turns.pop(row["id"], None)
 
     def receive_claude(self, command, peer_pid):
+        command = {**command, 'workspaceLabel': validated_label(command.get('workspaceLabel'))}
         session, turn = command.get("session"), command.get("turn")
         if (not isinstance(session, str) or not IDENTIFIER.fullmatch(session)
                 or not isinstance(turn, str) or (turn and not IDENTIFIER.fullmatch(turn))):
@@ -379,7 +399,7 @@ class OmarchySource:
                 current.remote_session_id = None
                 current.waits.clear()
                 current.tools.clear()
-            elif not current.receive({**command, "workspaceLabel": None}, self.monotonic(), ATTENTION_DELAY) and not input_resolved:
+            elif not current.receive(command, self.monotonic(), ATTENTION_DELAY) and not input_resolved:
                 return self.publish(db, lifecycle_only=True)
             if previous_remote and current.remote_session_id != previous_remote:
                 self.native_attention.pop(key, None)
@@ -395,8 +415,8 @@ class OmarchySource:
                 db.execute("DELETE FROM omarchy_claude WHERE id=?", (row[0],))
             db.execute("INSERT OR REPLACE INTO omarchy_processes VALUES (?,?,?,?,?)",
                        (key, owner.pid, owner.start_ticks, owner.boot_id, int(event == "ended")))
-            db.execute("INSERT OR REPLACE INTO omarchy_sessions VALUES (?,?,?,?,?)",
-                       (key, "claude", current.turn, current.base_state, current.updated))
+            db.execute("INSERT OR REPLACE INTO omarchy_sessions VALUES (?,?,?,?,?,?)",
+                       (key, "claude", current.turn, current.base_state, current.updated, current.workspace_label))
             db.execute("INSERT OR REPLACE INTO omarchy_claude VALUES (?,?)",
                        (key, json.dumps(asdict(current), separators=(",", ":"))))
             self.session_refs[key] = session
@@ -450,6 +470,18 @@ class OmarchySource:
             if previous and not native_waiting(self.native_attention.get(key), turn):
                 db.execute("UPDATE omarchy_sessions SET updated=? WHERE id=? AND state IN ('finished','failed')",
                            (time.time(), key))
+            if isinstance(by_turn, PendingDecisions):
+                outcome = dict(by_turn.turn_states).get(turn)
+                state = {'completed': 'finished', 'failed': 'failed', 'interrupted': 'idle'}.get(outcome)
+                if state:
+                    # Pending decisions stay independent of the turn's outcome.
+                    # A generic completion cannot overwrite a confirmed failure.
+                    db.execute("UPDATE omarchy_sessions SET state=?,updated=? WHERE id=? AND turn=? "
+                               "AND state!=? AND NOT (state='failed' AND ?='finished')",
+                               (state, time.time(), key, turn, state, state))
+                    self.pending_questions.pop(key, None)
+                    if outcome in ('completed', 'failed'):
+                        self.confirmed_turns[key] = turn
             self.publish(db)
 
     def native_response_sessions(self):
@@ -583,9 +615,10 @@ class OmarchySource:
                     if (not current or current['closed'] or current['turn'] != row['turn']
                             or self.identity(current) != owner):
                         continue
-                    db.execute("UPDATE omarchy_sessions SET state=?,updated=? WHERE id=? AND state!=?",
-                               ('failed' if status == 'failed' else 'finished', time.time(), row['id'],
-                                'failed' if status == 'failed' else 'finished'))
+                    state = 'failed' if status == 'failed' else 'finished'
+                    db.execute("UPDATE omarchy_sessions SET state=?,updated=? WHERE id=? AND state!=? "
+                               "AND NOT (state='failed' AND ?='finished')",
+                               (state, time.time(), row['id'], state, state))
                     self.confirmed_turns[row['id']] = row['turn']
                     self.pending_questions.pop(row['id'], None)
                 self.publish(db, lifecycle_only=True)
@@ -635,6 +668,26 @@ class OmarchySource:
                     args=(tracked, dict(self.pending_turn_events)), daemon=True)
                 self.recovery_thread.start()
             self.next_poll = self.monotonic() + 1
+            if ('codex' in self.providers and self.monotonic() >= self.next_allowance_at
+                    and (self.allowance_thread is None or not self.allowance_thread.is_alive())):
+                self.next_allowance_at = self.monotonic() + 300
+                self.allowance_thread = threading.Thread(target=self._refresh_allowance,
+                    args=(self.usage_generation,), daemon=True)
+                self.allowance_thread.start()
+
+    def _refresh_allowance(self, generation):
+        try:
+            values = self.allowance_reader()
+        except Exception:
+            values = []
+        values = [values] if isinstance(values, dict) else values or []
+        with self.lock:
+            if self.closed or 'codex' not in self.providers or generation != self.usage_generation:
+                return
+            # Failure preserves observation times; it never makes cached usage fresh.
+            self.allowances = [value for value in values if valid_reading(value)]
+            with self.store.connect() as db:
+                self.publish(db)
 
     def _titles_changed(self):
         with self.lock, self.store.connect() as db:
@@ -661,6 +714,8 @@ class OmarchySource:
                      and question and question[0] == row["turn"] and question[1] <= now_monotonic
                      else row["state"])
             session = {"id": row["id"], "provider": row["provider"], "state": state}
+            if row['workspace_label']:
+                session['workspaceLabel'] = row['workspace_label']
             thread_id = self.session_refs.get(row["id"])
             if row["provider"] == "codex" and valid_session_id(thread_id):
                 session["threadID"] = thread_id
@@ -700,7 +755,9 @@ class OmarchySource:
         # A temporarily unavailable allowance file must not erase the last reading.
         current_allowances = (allowance_snapshots(self.state_dir / "agents/usage/codex.json", int(time.time()))
                               if "codex" in self.providers else [])
-        allowances = (current_allowances or readings(old)) if "codex" in self.providers else []
+        candidates = [values for values in (self.allowances, current_allowances, readings(old)) if values]
+        allowances = (max(candidates, key=lambda values: max(v['updatedAt'] for v in values))
+                      if candidates and 'codex' in self.providers else [])
         payload = {"sourceName": self.computer_name, "state": state, "sessions": sessions,
                    "configuredProviders": list(self.providers),
                    "allowance": selected_reading(allowances), "allowances": allowances}

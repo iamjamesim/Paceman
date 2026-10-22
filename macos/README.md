@@ -214,15 +214,18 @@ Use the Python 3.11+ interpreter printed by the source installer if needed. If r
 <details>
 <summary>Coverage limits</summary>
 
-Mac hooks cannot verify process ownership. Codex async-question attention can clear
+Codex activity uses hooks and native owner evidence. Async-question attention can clear
 on an unrelated user message. Completed turns clear main-turn hook-only
 attention; owner-confirmed pending decisions remain visible. Result display and
 Recent follow the [retention rules](../docs/data-lifecycle.md#freshness-and-recovery).
 
-Claude tracks the local main turn and scoped human requests from its children,
-not separate background-task progress or remote/cloud sessions. Questions and approvals appear after five seconds; an
-approved tool can retain attention until its observed calls return. An interrupt
-without another hook can retain the old state until a new prompt or `SessionEnd`.
+Claude tracks the local main turn and scoped human requests from its children.
+Verified process identity restores hook lifecycle after source restart and clears
+exited sessions; unverified hook-only activity clears on restart. It does not track
+separate background-task progress or remote/cloud sessions. Questions and approvals appear after five seconds; an
+approved tool can retain attention until its observed calls return. While its
+process remains alive, an interrupt without another hook can retain the old state
+until a new prompt or `SessionEnd`.
 Another Stop hook can briefly show Finished before a tool resumes the same turn.
 
 The source reads Codex usage through its local App Server every five minutes.

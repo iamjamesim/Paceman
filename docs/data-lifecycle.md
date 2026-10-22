@@ -119,9 +119,12 @@ start time and Linux boot. Saved Codex turn IDs and confirmed completed/failed
 outcomes recover missed hooks; a separate reader's interrupted status cannot
 finish live work.
 
-Mac retains up to 128 Codex lookup identities and lifecycle records in private
-SQLite. After restart, identities reattach the native adapters; active labels and
-decisions require fresh owner evidence. Saved history can establish completed or
+Mac retains up to 128 lookup identities and lifecycle records per provider in
+private SQLite. Codex identities reattach the native adapters; active labels and
+decisions require fresh owner evidence. Claude hook lifecycle and scoped waits
+restore only for the same live process, microsecond start time and Mac boot;
+native request identities remain memory-only. Process exit clears active Claude
+tracking without inventing an outcome. Saved Codex history can establish completed or
 failed outcomes, never continued work from an interrupted status. Source disable,
 session end and normal retirement clear tracking; unverified recovery bindings
 remain bounded so a delayed owner can restore an older pending plan decision.

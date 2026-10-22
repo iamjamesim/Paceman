@@ -822,7 +822,8 @@ def main():
                     from service.claude_remote import RemoteRequests
                     remote = RemoteRequests(server.interactions, server.adapter.native_claude_sessions,
                         attention=server.adapter.native_claude_requests_changed,
-                        resolved=server.adapter.native_claude_requests_resolved)
+                        resolved=server.adapter.native_claude_requests_resolved,
+                        owner_token=server.adapter.native_claude_owner)
                     stack.enter_context(remote)
                     if server.desktop_status is not None:
                         server.desktop_status.native_responders = {'codexDesktop': desktop, 'codexDaemon': daemon,

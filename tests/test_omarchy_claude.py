@@ -27,7 +27,7 @@ class ClaudeSourceTests(unittest.TestCase):
         self.processes.identify.side_effect = lambda pid, provider="codex": ProcessIdentity(
             100 if provider == "codex" else 200, "1", "boot") if pid else None
         self.processes.is_alive.return_value = True
-        self.source = OmarchySource(self.store, socket_path=self.root / "agent.sock",
+        self.source = OmarchySource(self.store, allowance_reader=lambda: [], socket_path=self.root / "agent.sock",
             state_dir=self.root, processes=self.processes, providers=self.enabled,
             settings_reader=lambda: self.enabled)
         self.source.__enter__()

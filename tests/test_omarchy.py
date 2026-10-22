@@ -30,7 +30,7 @@ class OmarchyTests(unittest.TestCase):
         self.processes = Mock(spec=AgentProcesses)
         self.processes.identify.return_value = ProcessIdentity(100, '1', 'test-boot')
         self.processes.is_alive.return_value = True
-        self.source = self.enterContext(OmarchySource(self.store,
+        self.source = self.enterContext(OmarchySource(self.store, allowance_reader=lambda: [],
             socket_path=self.root / 'omarchy-watch.sock', state_dir=self.root / 'omarchy',
             processes=self.processes, computer_name='build-station.example.net'))
 
@@ -244,10 +244,10 @@ class OmarchyTests(unittest.TestCase):
         self.event('completed')
         self.event('working', session='two')
         with self.store.connect() as db:
-            db.execute("INSERT INTO omarchy_sessions VALUES ('legacy','codex','old','finished',?)", (time.time(),))
+            db.execute("INSERT INTO omarchy_sessions(id,provider,turn,state,updated) VALUES ('legacy','codex','old','finished',?)", (time.time(),))
         self.source.__exit__(None, None, None)
         self.source.thread = None
-        with OmarchySource(Store(self.store.path), socket_path=self.root / 'other.sock',
+        with OmarchySource(Store(self.store.path), allowance_reader=lambda: [], socket_path=self.root / 'other.sock',
                            state_dir=self.root / 'omarchy', processes=self.processes):
             value = self.store.snapshot()
             self.assertEqual(value['state'], 'working')
@@ -262,7 +262,7 @@ class OmarchyTests(unittest.TestCase):
         self.source.__exit__(None, None, None)
         self.source.thread = None
         with patch('service.omarchy.time.time', return_value=now + 3600):
-            with OmarchySource(Store(self.store.path), socket_path=self.root / 'other.sock',
+            with OmarchySource(Store(self.store.path), allowance_reader=lambda: [], socket_path=self.root / 'other.sock',
                                state_dir=self.root / 'omarchy', processes=self.processes):
                 snapshot = self.store.snapshot()
                 self.assertEqual(snapshot['state'], 'idle')
@@ -288,13 +288,13 @@ class OmarchyTests(unittest.TestCase):
     def test_live_socket_and_unrelated_file_are_never_replaced(self):
         inode = self.source.socket_path.stat().st_ino
         with self.assertRaisesRegex(ValueError, 'in use'):
-            with OmarchySource(self.store, socket_path=self.source.socket_path):
+            with OmarchySource(self.store, allowance_reader=lambda: [], socket_path=self.source.socket_path):
                 pass
         self.assertEqual(self.source.socket_path.stat().st_ino, inode)
         path = self.root / 'regular-file'
         path.write_text('keep')
         with self.assertRaises(ValueError):
-            with OmarchySource(self.store, socket_path=path):
+            with OmarchySource(self.store, allowance_reader=lambda: [], socket_path=path):
                 pass
         self.assertEqual(path.read_text(), 'keep')
 

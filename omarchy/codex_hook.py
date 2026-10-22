@@ -16,6 +16,10 @@ import sys
 import time
 
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from service.hook_delivery import deliver, workspace_label
+
+
 EVENTS = {
     "UserPromptSubmit": "working",
     "Stop": "completed",
@@ -111,11 +115,10 @@ def process(payload: dict, session: str) -> None:
             if (payload.get("hook_event_name") == "PreToolUse"
                     and payload.get("tool_name") == "request_user_input_async"):
                 command["attention"] = "async"
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-                client.settimeout(0.1)
-                client.connect(str(socket_path()))
-                client.sendall((json.dumps(command) + "\n").encode())
-                client.recv(4096)
+            if label := workspace_label(payload.get('cwd')):
+                command['workspaceLabel'] = label
+            deliver(command, socket_path(), payload.get('hook_event_name'))
+
 
 
 def private_open(path, flags):

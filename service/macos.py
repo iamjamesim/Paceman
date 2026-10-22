@@ -6,6 +6,7 @@ payloads are reduced to session/turn IDs and lifecycle states before storage.
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import asdict
 import errno
 import hashlib
 import json
@@ -16,11 +17,14 @@ import re
 import socket
 import socketserver
 import stat
+import sys
 import threading
 import time
 import unicodedata
 
 from service.claude import ClaudeSession
+from service.macos_processes import MacAgentProcesses
+from service.processes import ProcessIdentity
 from service.session_history import completed_sessions, display_sessions, retained_completions, FINISHED_DISPLAY_DURATION
 from service.claude_hooks import EVENTS as CLAUDE_EVENTS, validate_message
 from service.codex_limits import read_codex_allowances
@@ -48,7 +52,8 @@ class HookHandler(socketserver.StreamRequestHandler):
             raw = self.rfile.readline(4097)
             if len(raw) > 4096 or not raw.endswith(b"\n"):
                 raise ValueError("Invalid hook event")
-            changed = self.server.source.receive(json.loads(raw))
+            peer_pid = self.connection.getsockopt(0, 2) if sys.platform == 'darwin' else None
+            changed = self.server.source.receive(json.loads(raw), peer_pid=peer_pid)
             response = {"ok": True, "changed": changed}
         except (ValueError, TypeError, TimeoutError):
             response = {"ok": False, "error": "invalid_event"}
@@ -63,7 +68,7 @@ class MacSource:
                  allowance_reader=read_codex_allowances,
                  turn_status_reader=read_codex_turn_statuses, monotonic=time.monotonic,
                  providers=("codex", "claude"), settings_reader=None,
-                 turn_metadata_reader=read_codex_turn_metadata, title_reader=read_session_titles):
+                 turn_metadata_reader=read_codex_turn_metadata, title_reader=read_session_titles, processes=None):
         self.store = store
         self.providers = tuple(p for p in providers if p in ("codex", "claude"))
         self.settings_reader = settings_reader
@@ -100,6 +105,10 @@ class MacSource:
         self.resolved_approval_tools = {}
         self.published_attention = set()
         self.claude_sessions = {}
+        self.claude_owners = {}
+        self.claude_refs = {}
+        self.processes = processes if processes is not None else MacAgentProcesses()
+        self.next_process_check = 0.0
         self.last_event_by_provider = {}
         # Async questions outlive the tool call, but end with their turn.
         # A later user message can clear one while the turn is still running.
@@ -182,7 +191,13 @@ class MacSource:
     def native_claude_sessions(self):
         with self.lock:
             return [(key, item.remote_session_id, item.turn) for key, item in self.claude_sessions.items()
-                    if not self.closed and 'claude' in self.providers and item.remote_session_id and item.turn]
+                    if not self.closed and 'claude' in self.providers and item.remote_session_id and item.turn
+                    and (key not in self.claude_owners or self.processes.is_alive(self.claude_owners[key]))]
+
+    def native_claude_owner(self, session, remote):
+        with self.lock:
+            current, owner = self.claude_sessions.get(session), self.claude_owners.get(session)
+            return owner if current and current.remote_session_id == remote and owner and self.processes.is_alive(owner) else None
 
     def native_claude_requests_changed(self, session, turn, waiting):
         with self.lock:
@@ -252,6 +267,21 @@ class MacSource:
                     for row in db.execute("SELECT * FROM mac_codex_tracking ORDER BY updated DESC LIMIT 128"):
                         self.recovering_sessions[row['id']] = dict(row)
                         self.turn_ids[row['id']] = (row['session'], row['turn'])
+                db.execute("CREATE TABLE IF NOT EXISTS mac_claude_tracking (id TEXT PRIMARY KEY, session TEXT NOT NULL, "
+                           "pid INTEGER NOT NULL, start_ticks TEXT NOT NULL, boot_id TEXT NOT NULL, lifecycle TEXT NOT NULL)")
+                if 'claude' in self.providers:
+                    for row in db.execute('SELECT * FROM mac_claude_tracking LIMIT 128'):
+                        owner = ProcessIdentity(row['pid'], row['start_ticks'], row['boot_id'])
+                        if not self.processes.is_alive(owner) or len(row['lifecycle']) > 65536:
+                            continue
+                        try:
+                            current = ClaudeSession(**json.loads(row['lifecycle']))
+                        except (TypeError, ValueError):
+                            continue
+                        self.claude_sessions[row['id']] = current
+                        self.claude_owners[row['id']] = owner
+                        self.claude_refs[row['id']] = row['session']
+                        self.titles.track(row['id'], 'claude', row['session'])
                 db.execute("INSERT OR REPLACE INTO metadata VALUES ('mode','macos')")
                 previous_event = db.execute("SELECT value FROM metadata WHERE key='mac_last_agent_event_at'").fetchone()
                 if previous_event:
@@ -337,7 +367,7 @@ class MacSource:
             return True
         return False
 
-    def receive(self, command: dict) -> bool:
+    def receive(self, command: dict, *, peer_pid=None) -> bool:
         if not isinstance(command, dict) or command.get("command") != "agent-event":
             raise ValueError("Unsupported command")
         provider = command.get("provider", "codex")
@@ -360,7 +390,7 @@ class MacSource:
                     or any(unicodedata.category(char).startswith("C") for char in workspace_label)):
                 workspace_label = None
         if provider == "claude":
-            return self._receive_claude({**command, "workspaceLabel": workspace_label})
+            return self._receive_claude({**command, "workspaceLabel": workspace_label}, peer_pid)
         key = hashlib.sha256(("codex:" + session).encode()).hexdigest()
         with self.lock, self.store.connect() as db:
             if "codex" not in self.providers:
@@ -501,18 +531,29 @@ class MacSource:
         if provider == 'codex':
             self._persist_codex_tracking(db, [dict(row) for row in db.execute('SELECT * FROM mac_sessions')])
 
-    def _receive_claude(self, command):
+    def _receive_claude(self, command, peer_pid=None):
         validate_message(command)
         event = command["event"]
         remote_id = command.get("remoteSessionID")
         key = hashlib.sha256(("claude:" + command["session"]).encode()).hexdigest()
+        owner = self.processes.identify(peer_pid, provider='claude') if peer_pid else None
         with self.lock, self.store.connect() as db:
             if self.closed or "claude" not in self.providers:
                 return False
             db.execute("BEGIN IMMEDIATE")
+            existing = self.claude_owners.get(key)
+            if existing and peer_pid and owner is None:
+                return False
+            if existing and owner and existing != owner and self.processes.is_alive(existing):
+                return False  # A late sender cannot replace a verified live owner.
+            if existing and not self.processes.is_alive(existing):
+                self._forget_claude(key)
+                self._publish(db, lifecycle_only=True)
             if event != "ended":
                 self.titles.track(key, "claude", command["session"])
             previous = self.claude_sessions.get(key)
+            if previous and event == 'ended' and command.get('turn') and command['turn'] != previous.turn:
+                return False
             if previous is None and command.get('actor') and command['hook'] in ('PostToolUse', 'PostToolUseFailure', 'SubagentStop'):
                 return False  # A late child result cannot recreate a removed session.
             previous_remote = previous.remote_session_id if previous else None
@@ -526,8 +567,7 @@ class MacSource:
                 if input_resolved and not updated and previous.base_state in ('finished', 'failed'):
                     previous.updated = time.time()
             if event == "ended":
-                self.claude_sessions.pop(key, None)
-                self.native_attention.pop(key, None)
+                self._forget_claude(key)
             elif event == "started":
                 if previous is None:
                     self.claude_sessions[key] = ClaudeSession(workspace_label=command.get("workspaceLabel"), remote_session_id=remote_id)
@@ -542,6 +582,12 @@ class MacSource:
                     return False
                 self.claude_sessions[key] = current
             current = self.claude_sessions.get(key)
+            if current:
+                if any(len(values) > 128 for values in (current.waits, current.tools, current.child_waits, current.child_tools)):
+                    raise ValueError('Too many pending Claude tools')
+                self.claude_refs[key] = command['session']
+                if owner:
+                    self.claude_owners[key] = owner
             if previous_remote and current and current.remote_session_id != previous_remote:
                 self.native_attention.pop(key, None)
             self._record_event(db, "claude")
@@ -581,6 +627,8 @@ class MacSource:
             for key in self.claude_sessions:
                 self.native_attention.pop(key, None)
             self.claude_sessions.clear()
+            self.claude_owners.clear()
+            self.claude_refs.clear()
         self.providers = providers
         self.publish_current()
 
@@ -592,6 +640,13 @@ class MacSource:
                 return
             self._apply_settings()
             now = self.monotonic()
+            if now >= self.next_process_check:
+                self.next_process_check = now + 1
+                expired = [key for key, owner in self.claude_owners.items() if not self.processes.is_alive(owner)]
+                for key in expired:
+                    self._forget_claude(key)
+                if expired:
+                    self.publish_current()
             self.titles.refresh()
             if self.claude_sessions:
                 retired_claude = [key for key, session in self.claude_sessions.items()
@@ -600,8 +655,7 @@ class MacSource:
                                   and not native_waiting(self.native_attention.get(key), session.turn)
                                   and not session.child_waits]
                 for key in retired_claude:
-                    del self.claude_sessions[key]
-                    self.native_attention.pop(key, None)
+                    self._forget_claude(key)
                 # Publish only if a debounced attention state actually changed.
                 with self.store.connect() as db:
                     db.execute("BEGIN IMMEDIATE")
@@ -842,11 +896,36 @@ class MacSource:
             if saved.get(key) != row:
                 db.execute('INSERT OR REPLACE INTO mac_codex_tracking VALUES (?,?,?,?,?,?)', row)
 
+    def _forget_claude(self, key):
+        self.claude_sessions.pop(key, None)
+        self.claude_owners.pop(key, None)
+        self.claude_refs.pop(key, None)
+        self.native_attention.pop(key, None)
+
+    def _persist_claude_tracking(self, db):
+        saved = {row['id']: tuple(row) for row in db.execute('SELECT * FROM mac_claude_tracking')}
+        candidates = {}
+        for key, current in sorted(self.claude_sessions.items(), key=lambda pair: -pair[1].updated):
+            owner, session = self.claude_owners.get(key), self.claude_refs.get(key)
+            if not owner or not session:
+                continue
+            lifecycle = json.dumps(asdict(current), separators=(',', ':'), sort_keys=True)
+            if len(lifecycle) <= 65536:
+                candidates[key] = (key, session, owner.pid, owner.start_ticks, owner.boot_id, lifecycle)
+            if len(candidates) == 128:
+                break
+        for key in saved.keys() - candidates.keys():
+            db.execute('DELETE FROM mac_claude_tracking WHERE id=?', (key,))
+        for key, row in candidates.items():
+            if saved.get(key) != row:
+                db.execute('INSERT OR REPLACE INTO mac_claude_tracking VALUES (?,?,?,?,?,?)', row)
+
     def _publish(self, db, *, lifecycle_only=False) -> bool:
         now_monotonic = self.monotonic()
         records = [{**dict(row), "provider": "codex"} for row in
                    db.execute("SELECT * FROM mac_sessions ORDER BY id")]
         self._persist_codex_tracking(db, records)
+        self._persist_claude_tracking(db)
         records.extend({"id": key, "turn": item.turn, "state": item.state(now_monotonic),
                         "updated": item.updated,
                         "workspace_label": item.workspace_label, "remote_session_id": item.remote_session_id, "provider": "claude"}
