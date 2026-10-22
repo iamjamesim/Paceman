@@ -469,9 +469,10 @@ struct TaskCard: View {
         case .unavailable: return "Paceman couldn’t retrieve this request. It will retry while the app is open."
         case .disabled: return "Review the full request and all response options in the agent."
         case .available:
+            let provider = item.session.provider == "claude" ? "Claude Code" : item.session.provider.capitalized
             return item.session.provider == "codex"
                 ? "If you use Codex desktop on a Mac, requests from remotely started sessions may not appear until you open the thread there. Then check Paceman again.\n\nAn assistant with access to your Mac may be able to open it for you."
-                : nil
+                : "Open this session in \(provider) to check whether it still needs your input."
         }
     }
 }
