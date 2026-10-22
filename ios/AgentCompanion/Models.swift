@@ -549,6 +549,7 @@ struct PendingWatchHandoff: Codable, Identifiable, Equatable {
     let createdAt: Date
     var appleWatch: Bool? = nil
     var activityOnly: Bool? = nil
+    var destination: WatchContinuationDestination? = nil
 
     init(watchID: String, request: WatchHandoffRequest, now: Date = Date(), appleWatch: Bool = false) {
         id = UUID(); self.watchID = watchID; source = request.source; session = request.session; createdAt = now

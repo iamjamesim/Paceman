@@ -70,6 +70,10 @@ enum SessionTimePolicy {
     }
 }
 
+enum WatchContinuationDestination: String, Codable {
+    case paceman, agent
+}
+
 enum ResponseGuidance {
     static func continuation(for provider: String) -> String {
         switch provider {
@@ -253,6 +257,11 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
     var id: String { "\(sourceID)/\(provider)/\(sessionID)" }
     var providerName: String {
         switch provider { case "claude": return "Claude Code"; case "codex": return "Codex"; default: return provider.capitalized }
+    }
+    func continuationDestinations(nativeOnly: Bool, at date: Date) -> [WatchContinuationDestination] {
+        guard provider == "codex" || provider == "claude" else { return [.paceman] }
+        return state == "needs_input" && !historical(at: date) && !nativeOnly
+            ? [.paceman, .agent] : [.agent]
     }
     func symbol(at date: Date) -> String {
         if !historical(at: date) {

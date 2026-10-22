@@ -665,17 +665,17 @@ private struct WatchTaskView: View {
                     }
                     if let error { Text(error).font(.body) }
                     if nativeOnly, currentTask.state == "needs_input", !currentTask.historical(at: Date()) {
-                        Text("An answerable request isn’t available on Apple Watch.")
+                        Text("Continue in \(currentTask.providerName) on iPhone.")
                             .font(.body).fixedSize(horizontal: false, vertical: true)
                     }
                     if prompt == nil, error != nil, !submitted, !rejected,
                        currentTask.state == "needs_input", !currentTask.historical(at: Date()) {
                         Button("Check again") { Task { await load() } }.disabled(sending)
                     }
-                    if (!submitted || currentTask.state == "needs_input")
-                        && !(prompt?.request.approvalAction?.kind == .command
-                            && prompt?.supportsWatchAnswer == true && !unconfirmed && !rejected) {
-                        WatchPhoneContinuation(store: store, task: task).disabled(sending && submission != nil)
+                    if !submitted || currentTask.state == "needs_input" {
+                        WatchPhoneContinuation(store: store, task: currentTask,
+                            destinations: currentTask.continuationDestinations(nativeOnly: nativeOnly, at: Date()))
+                            .disabled(sending && submission != nil)
                     }
                     if continuationOnly || reviewKey != nil && (nativeOnly || prompt?.supportsWatchAnswer == false) {
                         Button(hasNextQuestion ? "Next question" : "Done", action: skip).disabled(sending)
@@ -965,7 +965,7 @@ private struct WatchTaskView: View {
             let value = try JSONDecoder().decode(WatchWorkPrompt.self, from: data)
             guard "\(task.sourceID)/\(value.generation)/\(value.request.id)" == reviewKey,
                   expectedFingerprint.map({ $0 == value.request.reviewFingerprint }) ?? true else { unavailable(); return }
-            guard value.request.validContent else {
+            guard value.supportsWatchAnswer else {
                 confirming = nil
                 nativeOnly = true
                 prompt = nil
@@ -1100,40 +1100,47 @@ private struct WatchApprovalText: View {
 private struct WatchPhoneContinuation: View {
     @ObservedObject var store: WatchAllowanceStore
     var task: WatchWorkTask? = nil
+    var destinations: [WatchContinuationDestination] = [.paceman]
     @Environment(\.scenePhase) private var phase
-    @State private var preparing = false
+    @State private var preparing: WatchContinuationDestination?
     @State private var message: String?
     @State private var epoch = UUID()
 
     var body: some View {
         VStack(spacing: 10) {
-            Button {
-                Task { await prepare() }
-            } label: {
-                HStack(alignment: .center, spacing: 8) {
-                    Image(systemName: "iphone").fixedSize().accessibilityHidden(true)
-                    Text("Continue on iPhone")
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity)
-            }.buttonStyle(.bordered).disabled(preparing)
-            if preparing { ProgressView("Preparing iPhone") }
+            ForEach(destinations, id: \.rawValue) { destination in
+                continuationButton(destination).buttonStyle(.bordered).tint(Color.primary)
+            }
+            if preparing != nil { ProgressView("Preparing iPhone") }
             if let message { Text(message).font(.body).fixedSize(horizontal: false, vertical: true) }
         }
         .onChange(of: phase) { _, value in
-            if value == .background { epoch = UUID(); preparing = false; message = nil }
+            if value == .background { epoch = UUID(); preparing = nil; message = nil }
         }
-        .onDisappear { epoch = UUID(); preparing = false; message = nil }
+        .onDisappear { epoch = UUID(); preparing = nil; message = nil }
     }
 
-    @MainActor private func prepare() async {
-        guard !preparing else { return }
-        preparing = true
+    private func continuationButton(_ destination: WatchContinuationDestination) -> some View {
+        Button {
+            Task { await prepare(destination) }
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "iphone").fixedSize().accessibilityHidden(true)
+                Text(destination == .agent ? "Open \(task?.providerName ?? "agent app")"
+                    : "Open Paceman")
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }.frame(maxWidth: .infinity)
+        }.disabled(preparing != nil).accessibilityHint("Continue on your iPhone")
+    }
+
+    @MainActor private func prepare(_ destination: WatchContinuationDestination) async {
+        guard preparing == nil else { return }
+        preparing = destination
         message = nil
         let expected = epoch
-        defer { if epoch == expected { preparing = false } }
-        var payload: [String: Any] = ["operation": "continueOnPhone"]
+        defer { if epoch == expected { preparing = nil } }
+        var payload: [String: Any] = ["operation": "continueOnPhone", "destination": destination.rawValue]
         if let task {
             payload["sourceID"] = task.sourceID
             payload["sessionID"] = task.sessionID
@@ -1142,11 +1149,22 @@ private struct WatchPhoneContinuation: View {
         do {
             let reply = try await store.workMessage(payload)
             guard epoch == expected, phase == .active else { return }
-            if reply["selectionAvailable"] as? Bool == false, task != nil {
+            if destination == .agent, reply["destination"] as? String != destination.rawValue {
+                message = "Update Paceman on iPhone to open the agent app."
+            } else if reply["selectionAvailable"] as? Bool == false, task != nil {
                 message = "This session is no longer available. Open Paceman on iPhone for current activity."
             } else {
-                message = reply["handoff"] as? Int == 2 ? "Tap the Paceman notification on iPhone."
-                    : "Ready on iPhone."
+                switch reply["handoff"] as? Int {
+                case 2:
+                    message = destination == .agent
+                        ? "Tap the notification on iPhone to open \(task?.providerName ?? "the agent app")."
+                        : "Tap the Paceman notification on iPhone."
+                case 3:
+                    message = destination == .agent
+                        ? "Open Paceman on iPhone to continue in \(task?.providerName ?? "the agent app")."
+                        : "Open Paceman on iPhone."
+                default: message = "Ready on iPhone."
+                }
             }
         } catch {
             guard epoch == expected, phase == .active else { return }
@@ -1175,7 +1193,8 @@ private enum WatchWorkPreview {
     static func reply(_ payload: [String: Any]) throws -> [String: Any]? {
         guard let scenario else { return nil }
         if payload["operation"] as? String == "continueOnPhone" {
-            return ["handoff": 2, "selectionAvailable": payload["sessionID"] != nil]
+            return ["handoff": 2, "selectionAvailable": payload["sessionID"] != nil,
+                    "destination": payload["destination"] as? String ?? "paceman"]
         }
         if scenario == "disconnected" { throw WatchWorkError.message("Connect to your iPhone to review sessions and respond.") }
         func encoded<T: Encodable>(_ value: T) throws -> [String: Any] { ["data": try JSONEncoder().encode(value)] }
