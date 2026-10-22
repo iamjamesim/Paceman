@@ -1,7 +1,7 @@
 """Omarchy event receiver without Bluetooth ownership.
 
 Accepts Paceman's Codex and Claude hooks and the older omarchy-watch-codex protocol. Only
-opaque IDs and lifecycle states are retained from hooks; explicit provider
+opaque row IDs, app destination IDs and lifecycle states are retained from hooks; explicit provider
 titles are read separately. Hook arguments and conversation content are ignored.
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ from service.claude import ClaudeSession
 from service.native_attention import PendingDecisions, native_waiting, native_empty
 from service.session_history import completed_sessions, display_sessions, retained_completions, FINISHED_DISPLAY_DURATION
 from service.claude_hooks import validate_message
-from service.session_titles import SessionTitles, read_session_titles
+from service.session_titles import SessionTitles, read_session_titles, valid_session_id
 from service.processes import AgentProcesses, ProcessIdentity
 
 MAX_AGE = 24 * 60 * 60
@@ -195,7 +195,7 @@ class OmarchySource:
                 or not isinstance(turn, str)
                 or not (IDENTIFIER.fullmatch(turn) or (turn == "" and event in ("ended", "interrupted")))):
             raise ValueError("Invalid event")
-        # Namespaced opaque keys keep session IDs out of the phone's presentation.
+        # Namespaced opaque keys remain stable independently of app destinations.
         key = hashlib.sha256(f"{source}:{session}".encode()).hexdigest()
         owner = self.processes.identify(peer_pid) if source == "codex" else None
         if owner is None:
@@ -661,6 +661,9 @@ class OmarchySource:
                      and question and question[0] == row["turn"] and question[1] <= now_monotonic
                      else row["state"])
             session = {"id": row["id"], "provider": row["provider"], "state": state}
+            thread_id = self.session_refs.get(row["id"])
+            if row["provider"] == "codex" and valid_session_id(thread_id):
+                session["threadID"] = thread_id
             if title := self.titles.name(row["id"]):
                 session["name"] = title
             if row["provider"] == "claude":

@@ -25,7 +25,7 @@ from service.session_history import completed_sessions, display_sessions, retain
 from service.claude_hooks import EVENTS as CLAUDE_EVENTS, validate_message
 from service.codex_limits import read_codex_allowances
 from service.usage import selected_reading, valid_reading
-from service.session_titles import SessionTitles, read_session_titles
+from service.session_titles import SessionTitles, read_session_titles, valid_session_id
 from service.codex_turns import read_codex_turn_metadata, read_codex_turn_statuses
 from service.native_attention import PendingDecisions, native_waiting, native_empty
 
@@ -87,7 +87,8 @@ class MacSource:
         self.turn_recovery_thread = None
         self.next_turn_recovery_at = 0.0
         self.pending_turn_events = {}
-        # Raw Codex IDs are retained in memory only; published IDs stay hashed.
+        # Row IDs stay hashed; validated thread IDs also travel as app destinations.
+        self.thread_ids = {}
         self.turn_ids = {}
         self.confirmed_turns = {}
         self.closed = False
@@ -328,6 +329,8 @@ class MacSource:
                 value = command.get(field)
                 if value is not None and (not isinstance(value, str) or not IDENTIFIER.fullmatch(value)):
                     raise ValueError("Invalid approval identity")
+            if event != "ended" and valid_session_id(session):
+                self.thread_ids[key] = session
             if event == "ended":
                 self.native_attention.pop(key, None)
                 self.pending_turn_events.pop(key, None)
@@ -727,6 +730,8 @@ class MacSource:
                         "workspace_label": item.workspace_label, "remote_session_id": item.remote_session_id, "provider": "claude"}
                        for key, item in self.claude_sessions.items())
         records.sort(key=lambda row: row["id"])
+        retained_ids = {row["id"] for row in records}
+        self.thread_ids = {key: value for key, value in self.thread_ids.items() if key in retained_ids}
         self.titles.retain(row["id"] for row in records)
         sessions = []
         for row in records:
@@ -748,6 +753,8 @@ class MacSource:
                 state = ("needs_input" if native[1] else
                          "working" if state == "needs_input" else state)
             session = {"id": row["id"], "provider": row["provider"], "state": state}
+            if row["provider"] == "codex" and (thread_id := self.thread_ids.get(row["id"])):
+                session["threadID"] = thread_id
             if state in ("finished", "failed"):
                 # This is the received lifecycle observation, not provider wall time.
                 session["resultObservedAt"] = row["updated"]

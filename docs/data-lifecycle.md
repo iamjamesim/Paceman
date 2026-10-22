@@ -32,7 +32,11 @@ See the [source protocol](protocol.md) for freshness fields.
 | Apple Watch shared preferences | Per-computer Codex usage caches, observation times, phone revision and allowed source IDs | Phone removal of a source or newer accepted data from that source; expired readings remain unavailable |
 | Live Activity | Expiring ActivityKit display copy | Terminal grace, explicit removal or lifecycle end; stale content is marked Last known |
 
-Session titles are bounded to 80 characters. The source reads new session titles off the hook path and rechecks tracked title metadata every 30 seconds, to pick up generated titles and renames without blocking activity delivery. Title changes are presentation revisions, not new activity or alerts. Raw lookup IDs and title caches are held in source memory; titles also appear in stored event snapshots and the phone’s last-known snapshot. Missing metadata keeps the last successfully read title; an explicitly cleared title restores the provider fallback.
+Session titles are bounded to 80 characters. The source reads new session titles off the hook path and rechecks tracked title metadata every 30 seconds, to pick up generated titles and renames without blocking activity delivery. Title changes are presentation revisions, not new activity or alerts. Title caches are held in source memory; titles also appear in stored event snapshots and the phone’s last-known snapshot. Missing metadata keeps the last successfully read title; an explicitly cleared title restores the provider fallback.
+
+App destination IDs (Codex thread UUIDs and Claude Remote Control IDs) accompany
+session metadata in private snapshots, retained results and the phone cache.
+Opaque row IDs remain the keys for matching activity; APNs payloads stay aggregate.
 
 The watch keeps activity, including titles, in RAM, so reboot clears old alerts. The phone keeps
 no durable queue of BLE writes. Source restart behavior follows the

@@ -1090,10 +1090,11 @@ extension CompanionModel {
             name: screen.contains("long") ? "Investigate multi-machine source recovery after a long disconnect"
                 : screen.contains("titled") ? "Improve Pebble session browsing" : nil,
             workspaceLabel: screen.contains("long") ? "launch-creative-direction-and-visual-assets" : "paceman",
-            remoteSessionID: "session_previewHandoff")
+            remoteSessionID: "session_previewHandoff",
+            threadID: screen.contains("codex") ? "00000000-0000-0000-0000-000000000001" : nil)
         var sessions = [session]
         if screen.contains("multiple") {
-            sessions += [AgentSession(id: "other-codex", provider: "codex", state: .working, name: "Update the launch website", workspaceLabel: "website"),
+            sessions += [AgentSession(id: "other-codex", provider: "codex", state: .working, name: "Update the launch website", workspaceLabel: "website", threadID: "00000000-0000-0000-0000-000000000002"),
                          AgentSession(id: "other-claude", provider: "claude", state: .finished, name: "Explore launch visual directions", workspaceLabel: "assets")]
         }
         snapshots[sourceID] = Snapshot(schema: 1, sourceID: sourceID, generation: UUID().uuidString,
