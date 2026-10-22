@@ -85,6 +85,7 @@ Submission receipts show Response sent in Activity until native activity advance
 
 Live Activity taps open current Review, or source-filtered Activity when nothing
 is answerable. Watch resolves through iPhone and preserves an open form across
-another tap. Individual response sheets close after confirmation. Opening the agent
+another tap. Question row taps start the same Review at that session; passive
+rows open task details. Opening the agent
 app releases any pending phone request. Detail timestamps describe the computer
 snapshot, not session progress. A completed turn does not establish a successful outcome.

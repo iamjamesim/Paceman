@@ -58,12 +58,14 @@ struct TaskReviewQueue: Identifiable {
             inbox.pendingRequests(for: $0.id)
         }
     }
-    static func identities(for requests: [PendingInput]) -> [WorkIdentity] {
+    static func identities(for requests: [PendingInput], startingAt selected: WorkIdentity? = nil) -> [WorkIdentity] {
         var seen = Set<WorkIdentity>()
-        return requests.compactMap {
+        let tasks: [WorkIdentity] = requests.compactMap {
             let identity = WorkIdentity(sourceID: $0.source.sourceID, sessionID: $0.request.sessionID, provider: $0.request.provider)
             return seen.insert(identity).inserted ? identity : nil
         }
+        guard let selected, tasks.contains(selected) else { return tasks }
+        return [selected] + tasks.filter { $0 != selected }
     }
 }
 
@@ -190,10 +192,11 @@ struct TaskCard: View {
     @State private var visit: TaskCardVisit?
     private var displayedRequest: PendingInput? { requestLock.request }
     private var candidateRequest: PendingInput? {
+        guard isReview else { return nil }
         let captured = queuedVisit?.request
-        let candidate = isReview && displayedRequest == nil && captured.flatMap({ inbox.response(for: $0) })?.phase != .submitted
+        let candidate = displayedRequest == nil && captured.flatMap({ inbox.response(for: $0) })?.phase != .submitted
             ? captured ?? sessionRequests.first
-            : isReview ? sessionRequests.first ?? retainedSessionRequests.first : inbox.cardRequest(for: liveItem)
+            : sessionRequests.first ?? retainedSessionRequests.first
         guard let request = candidate,
               inbox.response(for: request)?.phase != .submitted else { return nil }
         return request

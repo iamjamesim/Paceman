@@ -100,8 +100,9 @@ struct CompanionRoot: View {
                     if model.handoff?.appleWatch == true { model.deferHandoff() }
                     else { model.dismissHandoff() }
                 } else if !reviewRequests.isEmpty {
+                    let startingAt = handoffIdentity
                     model.dismissHandoff()
-                    presentReviewIfNeeded(includeDeferred: true)
+                    presentReviewIfNeeded(includeDeferred: true, startingAt: startingAt)
                 } else if model.handoff?.activityOnly == true {
                     sidebarPresented = false
                     path = NavigationPath()
@@ -112,7 +113,15 @@ struct CompanionRoot: View {
             }
         }
         .onChange(of: reviewRequests.map(\.id), initial: true) { _, _ in
-            presentReviewIfNeeded()
+            // A details/handoff sheet contains no response form. If its own
+            // session becomes answerable, enter the same Review flow as a row tap.
+            if let identity = selectedTask, reviewTasksContain(identity) {
+                selectedTask = nil
+                presentReviewIfNeeded(includeDeferred: true, startingAt: identity)
+            } else if let identity = handoffIdentity, reviewTasksContain(identity) {
+                model.dismissHandoff()
+                presentReviewIfNeeded(includeDeferred: true, startingAt: identity)
+            } else { presentReviewIfNeeded() }
         }
         .onChange(of: phase) { _, value in
             if value == .background { reviewPresentation = TaskReviewPresentation() }
@@ -152,10 +161,27 @@ struct CompanionRoot: View {
         TaskReviewQueue.requests(in: WorkCatalog.live(model: model, presentation: presentation, inbox: model.interactions), inbox: model.interactions)
     }
 
-    private func presentReviewIfNeeded(includeDeferred: Bool = false) {
+    private var handoffIdentity: WorkIdentity? {
+        model.handoff.flatMap { model.handoffTarget($0) }.map {
+            WorkIdentity(sourceID: $0.sourceID, sessionID: $0.session.id, provider: $0.session.provider)
+        }
+    }
+
+    private func reviewTasksContain(_ identity: WorkIdentity) -> Bool {
+        TaskReviewQueue.identities(for: reviewRequests).contains(identity)
+    }
+
+    private func inspectTask(_ identity: WorkIdentity) {
+        offeredRequestIDs = []
+        if reviewTasksContain(identity) {
+            presentReviewIfNeeded(includeDeferred: true, startingAt: identity)
+        } else { selectedTask = identity }
+    }
+
+    private func presentReviewIfNeeded(includeDeferred: Bool = false, startingAt: WorkIdentity? = nil) {
         guard phase == .active, !dismissingTaskCard, selectedTask == nil, reviewQueue == nil, model.handoff == nil else { return }
         let requests = includeDeferred ? reviewRequests : reviewPresentation.automaticRequests(reviewRequests)
-        let tasks = TaskReviewQueue.identities(for: requests)
+        let tasks = TaskReviewQueue.identities(for: requests, startingAt: startingAt)
         guard !tasks.isEmpty else { return }
         sidebarPresented = false
         var queue = TaskReviewQueue(tasks: tasks,
@@ -172,7 +198,7 @@ struct CompanionRoot: View {
                 CompanionWork(model: model, presentation: presentation, inbox: model.interactions,
                     theme: theme, filter: $workFilter, recentExpanded: $recentExpanded,
                     connectComputer: { path.append(FeedDestination.pairing) },
-                    inspectTask: { offeredRequestIDs = []; selectedTask = $0 },
+                    inspectTask: inspectTask,
                     reviewTasks: { _ in presentReviewIfNeeded(includeDeferred: true) })
             case .devices:
                 CompanionDevices(model: model, monitoring: model.monitoring, presentation: presentation,
@@ -210,8 +236,8 @@ struct CompanionRoot: View {
             model.showHandoffPreview(presentation.previewScreen)
         }
         if ProcessInfo.processInfo.arguments.contains("--open-preview-request") {
-            selectedTask = WorkCatalog.live(model: model, presentation: presentation, inbox: model.interactions)
-                .first(where: { $0.request != nil })?.id
+            if let identity = WorkCatalog.live(model: model, presentation: presentation, inbox: model.interactions)
+                .first(where: { $0.request != nil })?.id { inspectTask(identity) }
         }
         #endif
         var previewPath: [FeedDestination] = []
