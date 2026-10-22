@@ -90,6 +90,30 @@ struct ApprovalResponseOption: Codable, Identifiable, Equatable {
     let id: String
     let label: String
     var confirmation: String? = nil
+    var commandPrefix: [String]? = nil
+    var prefixText: String? { commandPrefix.map(ApprovalShellDisplay.join) }
+    var prefixPreview: String? {
+        prefixText?.replacingOccurrences(of: "\r", with: "⏎").replacingOccurrences(of: "\n", with: "⏎")
+            .replacingOccurrences(of: "\t", with: "⇥")
+    }
+    var validCommandPrefix: Bool {
+        guard let commandPrefix else { return true }
+        return (1...256).contains(commandPrefix.count)
+            && commandPrefix.first?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            && commandPrefix.allSatisfy { InteractionWire.text($0, limit: 32768, empty: true) }
+    }
+}
+
+/// Display only: decisions are always submitted using their original opaque ID.
+/// Shell quoting makes argument boundaries readable without exposing JSON syntax.
+enum ApprovalShellDisplay {
+    static func join(_ arguments: [String]) -> String {
+        let safe = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./:@%+=,-")
+        return arguments.map { argument in
+            if !argument.isEmpty && argument.unicodeScalars.allSatisfy({ safe.contains($0) }) { return argument }
+            return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        }.joined(separator: " ")
+    }
 }
 
 /// Known tool contracts get a useful presentation. Arbitrary MCP arguments are
@@ -227,6 +251,9 @@ struct ApprovalActionContent {
 
     func title(_ original: String) -> String {
         guard original == "Allow \(tool ?? "")?" else { return original }
+        if kind == .command, let explanation, !explanation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return explanation
+        }
         switch kind {
         case .command: return "Run this command?"
         case .patch: return "Apply these changes?"
@@ -298,15 +325,37 @@ enum ApprovalPreviewFixtures {
     static let choices: [ApprovalResponseOption] = [
         .init(id: "once", label: "Allow once"), .init(id: "session", label: "Allow for this session"),
         .init(id: "decline", label: "Decline")]
-    static var policyCommand: String { "python3 -c '" + String(repeating: "print(\"Verify the output\")\n", count: 100) + "'" }
+    static let buildCommand = "xcodebuild -project ios/AgentCompanion.xcodeproj -scheme AgentCompanion -configuration Debug -destination 'platform=iOS Simulator,id=87F6D657-8EDA-442A-A87E-ADA0E27063E2' -derivedDataPath .runtime/retention-derived CODE_SIGNING_ALLOWED=NO build-for-testing > /private/tmp/paceman-retention-build.log 2>&1"
+    static var policyPrefix: [String] {
+        if ProcessInfo.processInfo.arguments.contains("--approval-original-command") { return ["/bin/zsh", "-lc", buildCommand] }
+        if ProcessInfo.processInfo.arguments.contains("--approval-long-prefix") {
+            return ["xcodebuild", "-project", "ios/AgentCompanion.xcodeproj", "-scheme", "AgentCompanion"]
+        }
+        if ProcessInfo.processInfo.arguments.contains("--approval-short-command") { return ["git"] }
+        return ["git", "worktree", "add"]
+    }
+    static var policyCommand: String {
+        if ProcessInfo.processInfo.arguments.contains("--approval-original-command") { return ApprovalShellDisplay.join(policyPrefix) }
+        if ProcessInfo.processInfo.arguments.contains("--approval-long-prefix") { return buildCommand }
+        if ProcessInfo.processInfo.arguments.contains("--approval-short-command") { return "git status --short" }
+        return "git worktree add -b codex/completion-retention /private/tmp/paceman-retention-pr origin/main"
+    }
     static var policy: ApprovalPayload {
-        ApprovalPayload(toolName: "commandExecution", inputJSON: json(["command": policyCommand]),
+        ApprovalPayload(toolName: "commandExecution",
+            reason: ProcessInfo.processInfo.arguments.contains("--approval-short-command") ? "May I check the working tree?"
+                : policyPrefix.first == "git" ? "May I create an isolated review branch for the retention changes while preserving the shared checkout?"
+                : "May I build the iOS test bundle?", inputJSON: json(["command": policyCommand]),
             action: .init(kind: "command", text: policyCommand), hasAdditionalInput: false)
     }
     static var policyChoices: [ApprovalResponseOption] {
-        [.init(id: "once", label: "Allow once"), .init(id: "policy", label: "Always allow this command prefix",
-            confirmation: "Allow future commands starting with these exact arguments:\n\n" + policyCommand),
-         .init(id: "decline", label: "Decline")]
+        var choices = [ApprovalResponseOption(id: "once", label: "Approve"),
+            .init(id: "policy", label: "Always approve", commandPrefix: policyPrefix),
+            .init(id: "decline", label: "Deny")]
+        if ProcessInfo.processInfo.arguments.contains("--approval-all-choices-preview") {
+            choices.insert(.init(id: "session", label: "Approve for this session"), at: 1)
+            choices.append(.init(id: "cancel", label: "Cancel this turn"))
+        }
+        return choices
     }
     static func terminal(_ operation: String = "interrupt", parent: Bool = true) -> ApprovalPayload {
         let text = operation == "interrupt" ? "\u{03}\u{03}" : operation == "poll" ? "" : "echo ready\n"

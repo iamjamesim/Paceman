@@ -519,7 +519,13 @@ Question content v3 requires a Boolean `allowsText` on each question, preserving
 selection-only requests without adding a custom-answer option. V1 questions
 continue to allow text. Secret entry and arbitrary forms require native review.
 
-GET advertises its maximum `X-Paceman-Content-Version` (currently `3`); Watch
+Approval content v4 permits a required `confirmation` review on a choice. V5 adds
+an optional `commandPrefix: [String]` to command choices, separate from their
+short label. It contains exact argument tokens, not JSON rendered as button copy;
+it cannot accompany `confirmation`. Clients show a bounded prefix excerpt and
+make its full value available with the command before submitting the original option ID.
+
+GET advertises its maximum `X-Paceman-Content-Version` (currently `5`); Watch
 request messages similarly advertise `contentVersion`. Older clients receive only
 supported profiles, with native continuation for newer content. Selecting a v2 choice submits
 `action: "choose", optionID`; the broker accepts only offered IDs. Empty choices

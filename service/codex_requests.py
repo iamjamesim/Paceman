@@ -6,7 +6,6 @@ opaque handles to the exact offered decision, never reconstructed permissions.
 from copy import deepcopy
 import hashlib
 import json
-import shlex
 import time
 import uuid
 from service.interaction_content import codex_terminal_input
@@ -120,6 +119,14 @@ def decode_request(session, request, items=(), *, browser_global_allowed=None):
             return None
         tool = "write_stdin"
     original = deepcopy(params)
+    if tool == "commandExecution":
+        if original.get("command") is None:
+            item = next((i for i in items if i.get("id") == params.get("itemId")
+                         and i.get("type") == "commandExecution"), None)
+            if item is not None:
+                original["command"] = item.get("command")
+        if not isinstance(original.get("command"), str) or not original["command"].strip():
+            return None  # The native request may omit content already sent in item/started.
     if tool == "fileChange":
         item = next((i for i in items if i.get("id") == params.get("itemId")
                      and i.get("type") == "fileChange"), None)
@@ -136,20 +143,20 @@ def decode_request(session, request, items=(), *, browser_global_allowed=None):
     if not isinstance(decisions, list) or not decisions or len(decisions) > 16:
         return None
     choices, mapped = [], {}
-    labels = {"accept": "Allow once", "acceptForSession": "Allow for this session",
-              "decline": "Decline", "cancel": "Cancel this turn"}
+    labels = {"accept": "Approve", "acceptForSession": "Approve for this session",
+              "decline": "Deny", "cancel": "Cancel this turn"}
     for i, decision in enumerate(decisions):
-        confirmation = None
+        command_prefix = None
         label = labels.get(decision) if isinstance(decision, str) else None
         if isinstance(decision, dict) and set(decision) == {"acceptWithExecpolicyAmendment"}:
             amendment = decision["acceptWithExecpolicyAmendment"]
             prefix = amendment.get("execpolicy_amendment") if isinstance(amendment, dict) else None
             if (isinstance(amendment, dict) and set(amendment) == {"execpolicy_amendment"} and isinstance(prefix, list)
                     and prefix and all(isinstance(p, str) for p in prefix)):
-                label = "Always allow commands starting with: " + json.dumps(prefix, ensure_ascii=False)
-                if len(label) > 512:
-                    label = "Always allow this command prefix"
-                    confirmation = "Allow future commands starting with these exact arguments:\n\n" + shlex.join(prefix)
+                if tool != "commandExecution":
+                    return None
+                label = "Always approve"
+                command_prefix = deepcopy(prefix)
         if isinstance(decision, dict) and set(decision) == {"applyNetworkPolicyAmendment"}:
             amendment = decision["applyNetworkPolicyAmendment"]
             rule = amendment.get("network_policy_amendment") if isinstance(amendment, dict) else None
@@ -163,7 +170,7 @@ def decode_request(session, request, items=(), *, browser_global_allowed=None):
             return None
         key = f"decision-{i}"
         mapped[key] = deepcopy(decision)
-        choices.append(dict(id=key, label=label, **({"confirmation": confirmation} if confirmation else {})))
+        choices.append(dict(id=key, label=label, **({"commandPrefix": command_prefix} if command_prefix is not None else {})))
     approval = dict(toolName=tool, input=original, inputKind="approvalRequest")
     if terminal:
         parent = next((i for i in items if i.get("type") == "commandExecution"
@@ -178,8 +185,8 @@ def decode_request(session, request, items=(), *, browser_global_allowed=None):
         approval["reason"] = params["reason"]
     public = dict(base, kind="approval", title=f"Allow {tool}?", contentVersion=2,
                   approval=approval, responseOptions=choices)
-    if any('confirmation' in option for option in choices):
-        public['contentVersion'] = 4
+    if any('commandPrefix' in option for option in choices):
+        public['contentVersion'] = 5
 
     def answer(response):
         if response["action"] != "choose" or response["optionID"] not in mapped:

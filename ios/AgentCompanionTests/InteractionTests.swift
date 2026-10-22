@@ -199,7 +199,7 @@ final class InteractionTests: XCTestCase {
         for tool in ["Bash", "PowerShell"] {
             let payload = try JSONSerialization.data(withJSONObject: ["command": command, "description": reason])
             let content = ApprovalActionContent("Tool: \(tool)\nWorking directory: /Projects/My App\n\n" + String(decoding: payload, as: UTF8.self))
-            XCTAssertEqual(content.title("Allow \(tool)?"), "Run this command?")
+            XCTAssertEqual(content.title("Allow \(tool)?"), reason)
             XCTAssertEqual(content.title("Run the test suite?"), "Run the test suite?")
             XCTAssertEqual(content.explanation, reason)
             XCTAssertEqual(content.body, command)
@@ -296,6 +296,41 @@ final class InteractionTests: XCTestCase {
         XCTAssertEqual(confirmed.request.approvalChoices[0].confirmation, request.responseOptions![0].confirmation)
         XCTAssertTrue(confirmed.supportsWatchAnswer)
         XCTAssertTrue(selected.valid(for: confirmed.request))
+    }
+
+    func testCommandPrefixesRoundTripToWatchAndCannotChangeWithoutAReReview() throws {
+        let prefix = ["/bin/zsh", "-lc", "printf '%s' \"日本語\"\nprintf done", ""]
+        var request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "codex",
+            sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow commandExecution?", detail: "",
+            questions: [], remainingSeconds: 60, contentVersion: 5, approval: ApprovalPreviewFixtures.policy,
+            responseOptions: [.init(id: "once", label: "Approve"),
+                .init(id: "prefix", label: "Always approve", commandPrefix: prefix),
+                .init(id: "cancel", label: "Cancel this turn")])
+        let wire = try JSONEncoder().encode(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60))
+        let watch = try JSONDecoder().decode(WatchWorkPrompt.self, from: wire)
+        XCTAssertTrue(watch.supportsWatchAnswer)
+        XCTAssertEqual(watch.request.approvalChoices[1].commandPrefix, prefix)
+        XCTAssertEqual(watch.request.approvalChoices[1].prefixText, ApprovalShellDisplay.join(prefix))
+        XCTAssertFalse(watch.request.approvalChoices[1].prefixPreview!.contains("\n"))
+        XCTAssertNil(watch.request.approvalChoices[1].confirmation)
+        let selected = InputSubmission(generation: "g", requestID: request.id, version: 1,
+            idempotencyKey: UUID().uuidString, action: "choose", answers: [:], optionID: "prefix")
+        XCTAssertTrue(selected.valid(for: request))
+        request.responseOptions![1].commandPrefix = ["git"]
+        XCTAssertFalse(request.hasSameReview(as: watch.request))
+        for version in [1, 2, 3, 4, 6] {
+            request.contentVersion = version
+            XCTAssertFalse(request.validContent, "Required prefix semantics cannot be ignored by an older or unknown profile")
+        }
+        request.contentVersion = 5
+        for invalid in [[], [""], ["  "], ["git", "bad\u{00}argument"], Array(repeating: "git", count: 257)] {
+            request.responseOptions![1].commandPrefix = invalid
+            XCTAssertFalse(request.validContent)
+        }
+        request.responseOptions![1].commandPrefix = prefix
+        request.responseOptions![1].confirmation = "Another scope"
+        XCTAssertFalse(request.validContent)
+        XCTAssertEqual(ApprovalShellDisplay.join(["git", "", "a b", "it's"]), "git '' 'a b' 'it'\\''s'")
     }
 
     func testCommonRequestsAcceptNewProviderNamespacesWithoutGuessingTheirToolSchemas() throws {
@@ -2422,7 +2457,7 @@ extension InteractionTests {
     }
 
     @MainActor func testContentProfilesRequireWatchCapabilityAndSourceNegotiation() async throws {
-        for version in [2, 3, 4] {
+        for version in [2, 3, 4, 5] {
             let source = PairedSource(endpoint: URL(string: "https://watch.example.test")!, sourceID: sourceID,
                 clientID: "client", credential: "fixture")
             let configuration = URLSessionConfiguration.ephemeral
@@ -2431,8 +2466,10 @@ extension InteractionTests {
             model.pairedSources = [source]
             let request = version != 3 ? InputRequest(requestID: UUID().uuidString, version: 1, provider: "claude",
                 sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow Edit?", detail: "",
-                questions: [], remainingSeconds: 60, contentVersion: version, approval: ApprovalPreviewFixtures.file(true),
-                responseOptions: version == 4 ? [.init(id: "confirm", label: "Allow this scope", confirmation: "Exact scope")]
+                questions: [], remainingSeconds: 60, contentVersion: version,
+                approval: version == 5 ? ApprovalPreviewFixtures.policy : ApprovalPreviewFixtures.file(true),
+                responseOptions: version == 5 ? ApprovalPreviewFixtures.policyChoices
+                    : version == 4 ? [.init(id: "confirm", label: "Allow this scope", confirmation: "Exact scope")]
                     : ApprovalPreviewFixtures.choices) : InputRequest(requestID: UUID().uuidString,
                 version: 1, provider: "claude", sessionID: String(repeating: "a", count: 64), kind: "question",
                 title: "Choose", detail: "", questions: [.init(id: "q", prompt: "Which?", multiple: false,
@@ -2444,9 +2481,9 @@ extension InteractionTests {
             InteractionURLProtocol.start = { transport in
                 Task { @MainActor in
                     if transport.request.url?.path == "/v1/snapshot" {
-                        transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true, contentVersion: 4))
+                        transport.finish(self.refreshSnapshot(source, state: "needs_input", interactions: true, contentVersion: 5))
                     } else {
-                        XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), "4")
+                        XCTAssertEqual(transport.request.value(forHTTPHeaderField: "X-Paceman-Content-Version"), "5")
                         transport.finish(listing)
                     }
                 }
@@ -2466,7 +2503,7 @@ extension InteractionTests {
             let modern = await model.handleWatchWork(message)
             let prompt = try JSONDecoder().decode(WatchWorkPrompt.self, from: XCTUnwrap(modern["data"] as? Data))
             XCTAssertEqual(prompt.request, request)
-            XCTAssertEqual(prompt.request.approvalChoices.count, version == 2 ? 3 : version == 4 ? 1 : 0)
+            XCTAssertEqual(prompt.request.approvalChoices.count, version == 2 || version == 5 ? 3 : version == 4 ? 1 : 0)
         }
     }
 

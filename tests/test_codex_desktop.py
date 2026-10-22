@@ -217,25 +217,61 @@ class DesktopRequestTests(unittest.TestCase):
         raw = command(); raw["params"]["availableDecisions"] = decisions
         public, encode = decode_request(SESSION, raw)
         self.assertEqual(len(public["responseOptions"]), 4)
-        self.assertIn('["git", "status"]', public["responseOptions"][1]["label"])
+        self.assertEqual(public["responseOptions"][1]["label"], "Always approve")
+        self.assertEqual(public["responseOptions"][1]["commandPrefix"], ["git", "status"])
         self.assertIn("Always deny", public["responseOptions"][2]["label"])
         self.assertEqual(encode(dict(action="choose", optionID="decision-1"))[1]["decision"], decisions[1])
         raw["params"]["availableDecisions"].append({"futureDecision": {}})
         self.assertIsNone(decode_request(SESSION, raw))
 
-    def test_long_command_policy_is_confirmed_without_dropping_the_whole_approval(self):
+    def test_original_build_prefix_below_old_label_limit_is_unpacked_and_submitted_exactly(self):
+        build = ("xcodebuild -project ios/AgentCompanion.xcodeproj -scheme AgentCompanion -configuration Debug "
+                 "-destination 'platform=iOS Simulator,id=87F6D657-8EDA-442A-A87E-ADA0E27063E2' "
+                 "-derivedDataPath .runtime/retention-derived CODE_SIGNING_ALLOWED=NO build-for-testing "
+                 "> /private/tmp/paceman-retention-build.log 2>&1")
+        prefix = ['/bin/zsh', '-lc', build]
+        self.assertLess(len('Always allow commands starting with: ' + json.dumps(prefix)), 512)
+        decision = {'acceptWithExecpolicyAmendment': {'execpolicy_amendment': prefix}}
+        raw = command()
+        raw['params']['command'] = shlex.join(prefix)
+        raw['params']['availableDecisions'] = ['accept', decision, 'decline', 'cancel']
+        public, encode = decode_request(SESSION, raw)
+        pending = self.broker.publish_live(public)
+        self.assertEqual(public['contentVersion'], 5)
+        self.assertEqual(pending.public['approval']['action']['text'], shlex.join(prefix))
+        self.assertEqual(pending.public['responseOptions'][1],
+                         {'id': 'decision-1', 'label': 'Always approve', 'commandPrefix': prefix})
+        self.broker.submit(submission(self.broker, pending.public, action='choose', optionID='decision-1'))
+        self.assertEqual(encode(pending.response)[1]['decision'], decision)
+
+    def test_command_omitted_from_approval_comes_only_from_its_matching_item(self):
+        raw = command()
+        del raw['params']['command']
+        items = [dict(id='other', type='commandExecution', command='wrong'),
+                 dict(id='item', type='commandExecution', command='git status --short')]
+        public, _ = decode_request(SESSION, raw, items)
+        handle = self.broker.publish_live(public)
+        self.assertEqual(handle.public['approval']['action'], dict(kind='command', text='git status --short'))
+        self.assertNotIn('command', raw['params'], 'Adapter enrichment must not mutate the native request')
+        self.assertIsNone(decode_request(SESSION, raw, items[:1]))
+        items[1]['type'] = 'fileChange'
+        self.assertIsNone(decode_request(SESSION, raw, items))
+
+    def test_long_command_policy_is_separate_from_copy_and_requires_capable_clients(self):
         prefix = ['/bin/zsh', '-lc', 'print("example")\n' * 150]
         decision = {'acceptWithExecpolicyAmendment': {'execpolicy_amendment': prefix}}
         raw = command()
         raw['params']['availableDecisions'] = ['accept', decision, 'decline']
         public, encode = decode_request(SESSION, raw)
         handle = self.broker.publish_live(public)
-        self.assertEqual(public['contentVersion'], 4)
-        self.assertEqual(self.broker.pending(content_version=3)['requests'], [])
+        self.assertEqual(public['contentVersion'], 5)
+        for version in (1, 2, 3, 4):
+            self.assertEqual(self.broker.pending(content_version=version)['requests'], [])
         options = handle.public['responseOptions']
         self.assertEqual(len(options), 3)
-        self.assertEqual(options[1]['label'], 'Always allow this command prefix')
-        self.assertEqual(shlex.split(options[1]['confirmation'].split('\n\n', 1)[1]), prefix)
+        self.assertEqual(options[1]['label'], 'Always approve')
+        self.assertEqual(options[1]['commandPrefix'], prefix)
+        self.assertNotIn('confirmation', options[1])
         self.assertEqual(encode(dict(action='choose', optionID='decision-1'))[1]['decision'], decision)
         self.assertEqual(json.loads(handle.public['approval']['inputJSON']), raw['params'])
 

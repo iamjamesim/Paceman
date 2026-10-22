@@ -479,6 +479,7 @@ private struct WatchTaskView: View {
     @State private var rejected = false
     @State private var nativeOnly = false
     @State private var confirming: ApprovalResponseOption?
+    @State private var showingCommand = false
 
     private var sending: Bool { operation.busy }
 
@@ -558,7 +559,9 @@ private struct WatchTaskView: View {
                        currentTask.state == "needs_input", !currentTask.historical(at: Date()) {
                         Button("Check again") { Task { await load() } }.disabled(sending)
                     }
-                    if !submitted || currentTask.state == "needs_input" {
+                    if (!submitted || currentTask.state == "needs_input")
+                        && !(prompt?.request.approvalAction?.kind == .command
+                            && prompt?.supportsWatchAnswer == true && !unconfirmed && !rejected) {
                         WatchPhoneContinuation(store: store, task: task).disabled(sending && submission != nil)
                     }
                     if prompt == nil, !submitted, !rejected {
@@ -568,10 +571,43 @@ private struct WatchTaskView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10).padding(.bottom, 8)
             }
+            #if DEBUG
+            .defaultScrollAnchor(ProcessInfo.processInfo.arguments.contains("--approval-actions-preview") ? UnitPoint(x: 0.5, y: 1) : .top)
+            #endif
 
         }
         .navigationTitle(prompt?.request.kind == "question" ? "Question" : prompt?.request.kind == "approval" ? "Approval" : "Session")
         .toolbarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: $showingCommand) {
+            if let request = prompt?.request, let action = request.approvalAction, action.kind == .command {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text(action.body).font(.system(.body, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ForEach(request.approvalChoices.filter { $0.commandPrefix != nil }) { option in
+                            if option.prefixText == action.body {
+                                Text("\(option.label) permits commands starting with the full command above.").font(.body)
+                            } else {
+                                Text("\(option.label) commands starting with").font(.headline)
+                                Text(option.prefixText ?? "").font(.system(.body, design: .monospaced))
+                            }
+                        }
+                        if let directory = action.directory {
+                            Text(directory).font(.caption).foregroundStyle(.secondary)
+                                .accessibilityLabel("Working directory: " + directory)
+                        }
+                        if action.otherArguments != nil {
+                            WatchApprovalText(text: action.originalInput, label: action.inputLabel, startsCollapsed: true)
+                        }
+                    }.fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10)
+                }
+                #if DEBUG
+                .defaultScrollAnchor(ProcessInfo.processInfo.arguments.contains("--approval-actions-preview") ? .bottom : .top)
+                #endif
+                .navigationTitle("Command").toolbarTitleDisplayMode(.inline)
+            }
+        }
         .sheet(item: $confirming) { option in
             VStack(spacing: 8) {
                 ScrollView {
@@ -583,7 +619,7 @@ private struct WatchTaskView: View {
                 Button("Confirm") {
                     confirming = nil
                     respond("choose", optionID: option.id)
-                }.buttonStyle(.borderedProminent).foregroundStyle(.black)
+                }.buttonStyle(WatchResponseButtonStyle(primary: true))
             }.padding(.horizontal, 10)
         }
         .task { await load() }
@@ -613,8 +649,13 @@ private struct WatchTaskView: View {
                 error = "Reconnect to your iPhone to respond."
             }
         }
+        .onChange(of: prompt?.request) { old, new in
+            if let old, new.map({ !old.hasSameReview(as: $0) }) ?? true { showingCommand = false }
+        }
         .onChange(of: scenePhase) { _, value in
             if value == .background {
+                showingCommand = false
+                confirming = nil
                 operation.invalidate()
                 prompt = nil
                 submission = nil
@@ -642,14 +683,25 @@ private struct WatchTaskView: View {
         let request = prompt.request
         if request.kind == "approval" {
             approvalContent(request)
-            ForEach(request.approvalChoices) { option in
-                Button(option.label) {
-                    if option.confirmation != nil { confirming = option }
-                    else {
-                        respond(request.usesApprovalChoices ? "choose" : option.id,
-                            optionID: request.usesApprovalChoices ? option.id : nil)
-                    }
-                }.buttonStyle(.bordered)
+            VStack(spacing: 8) {
+                ForEach(Array(request.approvalChoices.enumerated()), id: \.element.id) { index, option in
+                    Button {
+                        if option.confirmation != nil { confirming = option }
+                        else {
+                            respond(request.usesApprovalChoices ? "choose" : option.id,
+                                optionID: request.usesApprovalChoices ? option.id : nil)
+                        }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Text(option.label).fixedSize(horizontal: false, vertical: true)
+                            if let prefix = option.prefixPreview {
+                                Text(prefix).font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                            }
+                        }.frame(maxWidth: .infinity)
+                    }.buttonStyle(WatchResponseButtonStyle(primary: index == 0))
+                        .accessibilityLabel(option.prefixText.map { option.label + " commands starting with " + $0 } ?? option.label)
+                }
             }
             if request.approvalChoices.isEmpty { Text(ResponseGuidance.continuation(for: request.provider) + ".") }
         } else if !prompt.supportsWatchAnswer {
@@ -739,25 +791,39 @@ private struct WatchTaskView: View {
         if !content.explanation.isEmpty { WatchApprovalText(text: content.explanation, label: "Request details", code: false) }
         if let action {
             if let session = action.terminalSessionID { Text("Terminal session \(String(session))").font(.body) }
-            if let reason = action.explanation, reason != content.explanation { WatchApprovalText(text: reason, label: "Request details", code: false) }
-            if let path = action.targetPath {
-                Text(path).font(.body).fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel("File: " + path)
+            if let reason = action.explanation, reason != content.explanation, reason != action.title(request.title) {
+                WatchApprovalText(text: reason, label: "Request details", code: false)
             }
-            if action.replacesAll { Text("Replace all matching text.").font(.body) }
-            ForEach(Array(action.sections.enumerated()), id: \.offset) { _, section in
-                if action.sections.count > 1 { Text(section.label).font(.headline) }
-                WatchApprovalText(text: section.text, label: section.label, summarizeJSON: action.kind == .tool)
-            }
-            if action.otherArguments != nil {
-                WatchApprovalText(text: action.originalInput, label: action.inputLabel, startsCollapsed: true)
-            }
-            if let tool = action.tool, action.kind == .tool, request.title != "Allow \(tool)?" {
-                Text("Tool: " + tool).font(.caption).foregroundStyle(.secondary)
-            }
-            if let directory = action.directory {
-                Text(directory).font(.caption).foregroundStyle(.secondary)
-                    .accessibilityLabel("Working directory: " + directory)
+            if action.kind == .command {
+                Button { showingCommand = true } label: {
+                    HStack(spacing: 8) {
+                        Text(action.body).font(.system(.body, design: .monospaced))
+                            .lineLimit(2).truncationMode(.tail).frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
+                    }.padding(10).frame(minHeight: 44)
+                        .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
+                }.buttonStyle(.plain).accessibilityLabel("View full command and approval details").accessibilityValue(action.body)
+            } else {
+                if let path = action.targetPath {
+                    Text(path).font(.body).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("File: " + path)
+                }
+                if action.replacesAll { Text("Replace all matching text.").font(.body) }
+                ForEach(Array(action.sections.enumerated()), id: \.offset) { _, section in
+                    if action.sections.count > 1 { Text(section.label).font(.headline) }
+                    WatchApprovalText(text: section.text, label: section.label, summarizeJSON: action.kind == .tool)
+                }
+                if action.otherArguments != nil {
+                    WatchApprovalText(text: action.originalInput, label: action.inputLabel, startsCollapsed: true)
+                }
+                if let tool = action.tool, action.kind == .tool, request.title != "Allow \(tool)?" {
+                    Text("Tool: " + tool).font(.caption).foregroundStyle(.secondary)
+                }
+                if let directory = action.directory {
+                    Text(directory).font(.caption).foregroundStyle(.secondary)
+                        .accessibilityLabel("Working directory: " + directory)
+                }
             }
         }
     }
@@ -798,9 +864,11 @@ private struct WatchTaskView: View {
                 answers = [:]
                 submission = nil
                 confirming = nil
+                showingCommand = false
             }
             prompt = value
             #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--approval-command-details-preview") { showingCommand = true }
             if ProcessInfo.processInfo.arguments.contains("--approval-confirmation-preview") {
                 confirming = value.request.approvalChoices.first { $0.confirmation != nil }
             }
@@ -851,6 +919,24 @@ private struct WatchTaskView: View {
         if operation.finish(token), scenePhase == .active, !submitted {
             Task { await load() }
         }
+    }
+}
+
+/// Wrapped labels grow vertically; only the separate prefix excerpt is bounded.
+private struct WatchResponseButtonStyle: ButtonStyle {
+    var primary = false
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 16)
+        configuration.label
+            .font(.body).multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 12).padding(.vertical, 10).frame(minHeight: 44)
+            .foregroundStyle(primary ? Color.black : Color.primary)
+            .background(primary ? WatchPalette.tint : Color.primary.opacity(0.14), in: shape)
+            .contentShape(shape)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1) : 0.45)
     }
 }
 
@@ -1025,7 +1111,7 @@ private enum WatchWorkPreview {
         let payload: ApprovalPayload? = policy ? ApprovalPreviewFixtures.policy : terminal ? ApprovalPreviewFixtures.terminal(scenario == "approval-terminal-poll" ? "poll" : scenario == "approval-terminal-text" ? "write" : "interrupt")
             : ["approval-write", "approval-edit"].contains(scenario) ? ApprovalPreviewFixtures.file(scenario == "approval-edit") : nil
         let request = InputRequest(requestID: scenario == "queued" ? "preview-\(queueIndex)" : "preview", version: 1, provider: task.provider, sessionID: "task",
-            kind: approval ? "approval" : "question", title: terminal ? "Allow write_stdin?" : scenario == "approval-large" ? "Allow \(ApprovalPreviewFixtures.pageTool)?"
+            kind: approval ? "approval" : "question", title: policy ? "Allow commandExecution?" : terminal ? "Allow write_stdin?" : scenario == "approval-large" ? "Allow \(ApprovalPreviewFixtures.pageTool)?"
                 : scenario == "approval-write" ? "Allow Write?" : scenario == "approval-edit" ? "Allow Edit?"
                 : approval ? "Run the tests?" : "Question for you",
             detail: terminal || policy ? "" : scenario == "approval-large" ? ApprovalPreviewFixtures.largePageEdit
@@ -1036,7 +1122,7 @@ private enum WatchWorkPreview {
                 : approval ? "Tool: Bash\nWorking directory: /Projects/Paceman\nCommand: swift test" : "",
             questions: approval ? [] : scenario == "multiple" ? [question, .init(id: "q1", prompt: "Which screens?", multiple: true, options: [])]
                 : scenario == "free-text" ? [.init(id: "q0", prompt: "What should we improve next?", multiple: false, options: [])] : [question], remainingSeconds: 120,
-            contentVersion: scenario == "selection-only" ? 3 : policy ? 4 : payload == nil ? nil : 2, approval: payload,
+            contentVersion: scenario == "selection-only" ? 3 : policy ? 5 : payload == nil ? nil : 2, approval: payload,
             responseOptions: policy ? ApprovalPreviewFixtures.policyChoices
                 : terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : payload == nil ? nil : ApprovalPreviewFixtures.choices)
         requestReads += 1

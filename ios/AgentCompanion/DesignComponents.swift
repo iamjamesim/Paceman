@@ -39,16 +39,24 @@ struct TaskCardActionLabel: View {
     let title: String
     let theme: CompanionTheme
     var primary = true
+    var subtitle: String? = nil
     var body: some View {
-        Text(title).font(CompanionTextRole.action.font)
-            .fixedSize(horizontal: false, vertical: true)
+        let shape = RoundedRectangle(cornerRadius: CompanionLayout.actionMinimumHeight / 2)
+        VStack(spacing: 6) {
+            Text(title).font(CompanionTextRole.action.font)
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            if let subtitle {
+                Text(subtitle).font(CompanionTextRole.code.font).foregroundStyle(theme.secondaryInk)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+        }
             .frame(maxWidth: .infinity)
             .padding(.vertical, CompanionLayout.actionVerticalInset).padding(.horizontal, 16)
             .frame(minHeight: CompanionLayout.actionMinimumHeight)
             .foregroundStyle(primary ? theme.canvas : theme.ink)
-            .background(primary ? theme.ink : .clear, in: Capsule())
-            .overlay(Capsule().strokeBorder(theme.ink.opacity(primary ? 0 : 0.18), lineWidth: 1))
-            .contentShape(Capsule())
+            .background(primary ? theme.ink : .clear, in: shape)
+            .overlay(shape.strokeBorder(theme.ink.opacity(primary ? 0 : 0.18), lineWidth: 1))
+            .contentShape(shape)
     }
 }
 

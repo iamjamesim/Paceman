@@ -70,7 +70,7 @@ class InteractionHTTPTests(unittest.TestCase):
         self.assertEqual(pending.response, {'action': 'choose', 'optionID': 'session'})
 
     def test_approval_confirmation_requires_a_capable_client(self):
-        self.assertEqual(self.call('GET', '/v1/snapshot')[1]['interactionContentVersion'], 4)
+        self.assertEqual(self.call('GET', '/v1/snapshot')[1]['interactionContentVersion'], 5)
         from tests.test_interaction_content import request
         raw = request()
         raw['contentVersion'] = 4
@@ -85,6 +85,21 @@ class InteractionHTTPTests(unittest.TestCase):
             requestID=handle.public['requestID'], version=1, idempotencyKey='confirmed', action='choose', optionID='session'))
         self.assertEqual(status, 200)
         self.assertEqual(handle.response, {'action': 'choose', 'optionID': 'session'})
+
+    def test_command_prefix_requires_v5_and_preserves_the_exact_option(self):
+        from tests.test_interaction_content import request
+        raw = request(choices=[dict(id='prefix', label='Always approve', commandPrefix=['git', 'status'])])
+        raw['contentVersion'] = 5
+        handle = self.broker.publish_live(raw)
+        for version in (None, 1, 2, 3, 4):
+            self.assertEqual(self.call('GET', '/v1/interactions', content_version=version)[1]['requests'], [])
+        status, listing = self.call('GET', '/v1/interactions', content_version=5)
+        self.assertEqual(status, 200)
+        self.assertEqual(listing['requests'][0]['responseOptions'][0]['commandPrefix'], ['git', 'status'])
+        status, _ = self.call('POST', '/v1/interactions', dict(generation=listing['generation'],
+            requestID=handle.public['requestID'], version=1, idempotencyKey='prefix', action='choose', optionID='prefix'))
+        self.assertEqual(status, 200)
+        self.assertEqual(handle.response, dict(action='choose', optionID='prefix'))
 
     def test_selection_only_questions_negotiate_and_reject_unoffered_text(self):
         pending = self.broker.publish_live(dict(provider='codex', sessionID='a'*64, kind='question',
