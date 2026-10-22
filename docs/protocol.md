@@ -455,7 +455,8 @@ expired or removed-watch selections are discarded on access. Local notifications
 contain a request token and generic copy, not session content. Selecting a
 notification or foregrounding Paceman presents the handoff. An Apple Watch
 selection with destination `agent` instead opens the current provider link once
-the phone is active and has no other response form open. Provider URLs are
+the phone is active and has no other response form open, including when opened
+from a Live Activity. Provider URLs are
 resolved again at that point, never stored in the handoff.
 
 ## Accessory authorization baseline

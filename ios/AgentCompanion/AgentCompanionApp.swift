@@ -99,7 +99,7 @@ struct CompanionRoot: View {
         }
         .onChange(of: model.handoff?.id) { _, id in
             if id != nil {
-                if selectedTask != nil || reviewQueue != nil {
+                if dismissingTaskCard || selectedTask != nil || reviewQueue != nil {
                     if model.handoff?.appleWatch == true { model.deferHandoff() }
                     else { model.dismissHandoff() }
                 } else if let pending = model.handoff, pending.destination == .agent {
@@ -107,8 +107,12 @@ struct CompanionRoot: View {
                         handoffIssue = "This session is no longer available. Check the latest activity in Paceman."
                         return
                     }
+                    activityNavigation = nil
                     openURL(url) { accepted in
-                        if !accepted { handoffIssue = "Check that the agent app is installed on this iPhone, then try again from your Watch." }
+                        if !accepted {
+                            model.agentHandoffDidFailToOpen(pending.id)
+                            handoffIssue = "Check that the agent app is installed on this iPhone, then try again from your Watch."
+                        }
                     }
                 } else if !reviewRequests.isEmpty {
                     let startingAt = handoffIdentity
@@ -145,9 +149,11 @@ struct CompanionRoot: View {
         .onOpenURL(perform: handleURL)
         .task(id: activityNavigation) {
             guard let pending = activityNavigation else { return }
+            guard !model.prioritizeWatchHandoff() else { activityNavigation = nil; return }
             if !presentation.preview { _ = await model.refreshAll() }
             guard !Task.isCancelled, activityNavigation == pending else { return }
             activityNavigation = nil
+            guard !dismissingTaskCard, selectedTask == nil, reviewQueue == nil, !model.prioritizeWatchHandoff() else { return }
             presentReviewIfNeeded(includeDeferred: true)
         }
     }
@@ -195,6 +201,7 @@ struct CompanionRoot: View {
 
     private func presentReviewIfNeeded(includeDeferred: Bool = false, startingAt: WorkIdentity? = nil) {
         guard phase == .active, !dismissingTaskCard, selectedTask == nil, reviewQueue == nil, model.handoff == nil else { return }
+        guard !model.prioritizeWatchHandoff(includingOpenedAgent: !includeDeferred) else { return }
         let requests = includeDeferred ? reviewRequests : reviewPresentation.automaticRequests(reviewRequests)
         let tasks = TaskReviewQueue.identities(for: requests, startingAt: startingAt)
         guard !tasks.isEmpty else { return }
@@ -303,7 +310,10 @@ struct CompanionRoot: View {
         #else
         guard url.scheme == "paceman" else { return }
         #endif
-        guard selectedTask == nil, reviewQueue == nil, model.handoff == nil else { return }
+        guard !dismissingTaskCard, selectedTask == nil, reviewQueue == nil, model.handoff == nil else { return }
+        if LiveActivityRoute(url: url) != nil || url.host == "computer" {
+            if model.prioritizeWatchHandoff() { activityNavigation = nil; return }
+        }
         sidebarPresented = false
         activityNavigation = nil
         selectedTask = nil

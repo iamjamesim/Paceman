@@ -72,6 +72,10 @@ enum SessionTimePolicy {
 
 enum WatchContinuationDestination: String, Codable {
     case paceman, agent
+
+    static func confirmation(handoff: Int?) -> String {
+        handoff == 1 ? "Ready on iPhone." : "Ready on iPhone. Open Paceman to continue."
+    }
 }
 
 enum ResponseGuidance {

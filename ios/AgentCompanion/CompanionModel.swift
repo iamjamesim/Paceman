@@ -19,6 +19,7 @@ final class CompanionModel: ObservableObject {
     @Published var busy = false
     @Published private(set) var handoff: PendingWatchHandoff?
     private let handoffKey = "pending-watch-handoff-v1"
+    private var openedWatchAgentID: UUID?
 
     private(set) var canForgetAfterRemovalFailure = false
     private var usageSelectionRevision = UserDefaults.standard.integer(forKey: "usage-selection-revision")
@@ -526,7 +527,7 @@ final class CompanionModel: ObservableObject {
 
     func setForeground(_ value: Bool) {
         guard foreground != value else { return }
-        if !value { preserveWatchResponses() }
+        if !value { preserveWatchResponses(); openedWatchAgentID = nil }
         foreground = value
         interactions.setForeground(value)
         for link in accessories.links {
@@ -1036,6 +1037,18 @@ extension CompanionModel {
         return notified ? .notification : .openPhone
     }
 
+    /// Reserve the existing selection even if the view becomes active before
+    /// the model. An opened agent also owns late callbacks in this foreground.
+    func prioritizeWatchHandoff(includingOpenedAgent: Bool = true) -> Bool {
+        presentStoredHandoff()
+        return handoff != nil || storedHandoff.map(handoffIsCurrent) == true
+            || includingOpenedAgent && openedWatchAgentID != nil
+    }
+
+    func agentHandoffDidFailToOpen(_ id: UUID) {
+        if openedWatchAgentID == id { openedWatchAgentID = nil }
+    }
+
     func presentStoredHandoff(notificationID: String? = nil) {
         guard let pending = storedHandoff,
               notificationID == nil || pending.id.uuidString == notificationID else { return }
@@ -1086,6 +1099,7 @@ extension CompanionModel {
         }
         interactions.releaseRequest(for: WorkIdentity(sourceID: target.sourceID,
             sessionID: target.session.id, provider: target.session.provider))
+        openedWatchAgentID = pending.id
         dismissHandoff()
         return url
     }
