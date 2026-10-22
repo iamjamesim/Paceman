@@ -73,7 +73,7 @@ enum SessionTimePolicy {
     }
 
     static func activitySections<Row>(_ rows: [Row], at now: Date, calendar: Calendar = .current,
-                                      group: (Row) -> Group?, resultObservedAt: (Row) -> Double?) -> [ActivitySection<Row>] {
+                                      group: (Row) -> Group?, observedAt: (Row) -> Double?) -> [ActivitySection<Row>] {
         let today = calendar.startOfDay(for: now)
         return sections(rows, group: group).flatMap { section -> [ActivitySection<Row>] in
             guard section.group == .recent else {
@@ -81,7 +81,7 @@ enum SessionTimePolicy {
                                         title: section.group.rawValue, rows: section.rows)]
             }
             let days = Dictionary(grouping: section.rows) { row -> Date? in
-                guard let time = resultObservedAt(row), time.isFinite else { return nil }
+                guard let time = observedAt(row), time.isFinite, time > 0, time <= now.timeIntervalSince1970 else { return nil }
                 return calendar.startOfDay(for: Date(timeIntervalSince1970: time))
             }
             return days.keys.sorted { left, right in
@@ -307,6 +307,8 @@ struct WatchWorkTask: Codable, Identifiable, Hashable {
     var observedAt: Double? = nil
     var presentationSymbol: String? = nil
     var resultObservedAt: Double? = nil
+    var activityObservedAt: Double? = nil
+    var dayObservedAt: Double? { resultObservedAt ?? (state == "idle" ? activityObservedAt : nil) }
     var retainedCompletion: Bool? = nil
     var reviewable: Bool? = nil
     var id: String { "\(sourceID)/\(provider)/\(sessionID)" }

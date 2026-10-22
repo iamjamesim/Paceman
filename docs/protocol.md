@@ -111,6 +111,7 @@ example, an allowance change raised `revision` to 12 without changing activity
 | `state` | `idle`, `working`, `needs_input`, `finished`, or `failed`. |
 | `eventID` | Opaque activity identity, 1–128 UTF-8 bytes without control characters; stable across presentation-only revisions. |
 | `sessions` | Optional agent rows with opaque IDs, provider labels, states, and optional bounded session `name` titles, workspace labels, Codex `threadID` (UUID) and Claude `remoteSessionID` (Remote Control ID). App destination IDs are distinct from opaque row IDs; no prompts or transcripts. |
+| `sessions[].activityObservedAt` | Optional Unix time of the source's recorded lifecycle/state observation for an idle row. Used for calendar-day grouping; not provider last activity, completion, freshness, or retention. Missing/invalid dates remain Undated. |
 | `completedSessions` | Optional retained finished/failed rows, bounded to 128 entries and 24 KiB. Terminal rows may include `resultObservedAt` in Unix seconds. See [retention rules](data-lifecycle.md#freshness-and-recovery). |
 | `allowance` | Optional selected Codex reading; may advance `revision` without a new activity event. |
 | `allowances` | Optional array of up to two Codex usage windows, each with its own observation and reset time. |

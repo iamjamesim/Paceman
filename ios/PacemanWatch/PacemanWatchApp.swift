@@ -296,6 +296,7 @@ private struct WatchActivityView: View {
     @State private var refreshID = UUID()
     @State private var cacheReadID = UUID()
     @State private var consumedLaunchID: UUID?
+    @State private var collapsedSections: Set<SessionTimePolicy.ActivitySectionID> = []
     private var route: LiveActivityRoute? { launch?.route }
     private var source: WatchWorkSource? {
         snapshot?.sources?.first { $0.sourceID == route?.sourceID }
@@ -305,7 +306,7 @@ private struct WatchActivityView: View {
         return SessionTimePolicy.activitySections(tasks, at: date, group: {
             let temporal = $0.temporalPresentation(at: date)
             return temporal.visible ? temporal.group : nil
-        }, resultObservedAt: { $0.resultObservedAt })
+        }, observedAt: { $0.dayObservedAt })
     }
     private var receivedActivity: Bool {
         if route != nil { return source?.generation != nil }
@@ -325,21 +326,42 @@ private struct WatchActivityView: View {
                             Text("Connect to iPhone to respond.").font(.body)
                         }
                         ForEach(sections) { section in
+                            let expanded = !collapsedSections.contains(section.id)
                             Section {
-                                ForEach(section.rows) { task in
-                                    NavigationLink(value: WatchDestination.open(task, canReview: store.workReachable)) {
-                                        WatchActivityRow(task: task, showComputer: route == nil, date: context.date)
+                                if expanded {
+                                    ForEach(section.rows) { task in
+                                        NavigationLink(value: WatchDestination.open(task, canReview: store.workReachable)) {
+                                            WatchActivityRow(task: task, showComputer: route == nil, date: context.date)
+                                        }
                                     }
                                 }
                             } header: {
                                 let aggregate = section.rows.contains { $0.provider == "aggregate" }
-                                Text(aggregate ? section.title : "\(section.title) · \(section.count)")
+                                Button {
+                                    if expanded { collapsedSections.insert(section.id) }
+                                    else { collapsedSections.remove(section.id) }
+                                } label: {
+                                    HStack {
+                                        Text(aggregate ? section.title : "\(section.title) · \(section.count)")
+                                        Spacer(minLength: 8)
+                                        Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                                            .font(.caption.weight(.semibold))
+                                    }.frame(minHeight: 44).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
                                     .accessibilityLabel(aggregate ? section.title : section.accessibilityLabel)
+                                    .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                                    .accessibilityHint("Show or hide sessions in this section")
+                                    .accessibilityAddTraits(.isHeader)
                             }
                         }
                     }
                     #if DEBUG
                     .modifier(WatchWorkPreview.ScrollPosition(target: sections.last?.rows.last?.id))
+                    .onChange(of: sections.map(\.id), initial: true) { _, ids in
+                        if ProcessInfo.processInfo.arguments.contains("--sections-collapsed-preview") {
+                            collapsedSections.formUnion(ids)
+                        }
+                    }
                     #endif
                 }
             }
@@ -1254,6 +1276,12 @@ private enum WatchWorkPreview {
                         freshUntil: now + (scenario == "history-offline" ? -600 : 300), resultObservedAt: date)
                 }
                 values = scenario.hasPrefix("history-mixed") ? Array(tasks.prefix(2)) + history : history
+                if scenario.hasPrefix("history-idle") {
+                    values.append(WatchWorkTask(sourceID: "preview", sessionID: "idle", provider: "codex",
+                        title: "Investigate Pebble notification relay", computer: "MacBook Pro", state: "idle",
+                        freshUntil: now + 300,
+                        activityObservedAt: now - min(900, Date().timeIntervalSince(today) / 2)))
+                }
             }
             if responseSent || scenario == "response-sent", !values.isEmpty {
                 values[0].presentationStatus = "Response sent"

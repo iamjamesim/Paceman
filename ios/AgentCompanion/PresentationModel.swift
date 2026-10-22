@@ -72,6 +72,11 @@ final class PresentationModel: ObservableObject {
                     name: "Improve onboarding", workspaceLabel: "paceman", resultObservedAt: yesterday.addingTimeInterval(12 * 3600).timeIntervalSince1970),
                 AgentSession(id: "failed", provider: "codex", state: .failed,
                     name: "Run integration tests", resultObservedAt: now - 3 * 86400)]
+            if previewScreen.hasPrefix("history-idle") {
+                rows.append(AgentSession(id: "idle", provider: "codex", state: .idle,
+                    name: "Investigate Pebble notification relay", workspaceLabel: "paceman",
+                    activityObservedAt: now - min(900, Date().timeIntervalSince(today) / 2)))
+            }
             if previewScreen.hasPrefix("history-mixed") {
                 rows.insert(AgentSession(id: "current", provider: "claude", state: .working, name: "Build Mac client"), at: 0)
             }
@@ -149,6 +154,8 @@ struct AgentSession: Codable, Identifiable, Equatable {
     var remoteSessionID: String?
     var threadID: String? = nil
     var resultObservedAt: Double? = nil
+    var activityObservedAt: Double? = nil
+    var dayObservedAt: Double? { resultObservedAt ?? (state == .idle ? activityObservedAt : nil) }
     var hasResult: Bool { state == .finished || state == .failed }
     func timeFacts(freshUntil: Double = .infinity) -> SessionTimePolicy.Facts {
         .init(state: state.rawValue, resultObservedAt: resultObservedAt, freshUntil: freshUntil)

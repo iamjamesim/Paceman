@@ -737,6 +737,9 @@ class OmarchySource:
                   and row["state"] not in ("finished", "failed", "idle")):
                 session["state"] = "needs_input" if native[1] else "working"
             sessions.append(session)
+            if session["state"] == "idle":
+                # Received lifecycle/state observation, never snapshot fetch time or a result.
+                session["activityObservedAt"] = row["updated"]
             if session["state"] in ("finished", "failed"):
                 session["resultObservedAt"] = row["updated"]
         now = time.time()

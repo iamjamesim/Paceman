@@ -937,7 +937,8 @@ extension CompanionModel {
                     presentationGroup: item.group.rawValue,
                     project: session.detail.isEmpty ? nil : session.detail, observedAt: snapshot.observedAt,
                     presentationSymbol: item.statusToken.symbol ?? "circle.dotted",
-                    resultObservedAt: session.resultObservedAt, retainedCompletion: item.retainedCompletion,
+                    resultObservedAt: session.resultObservedAt, activityObservedAt: session.activityObservedAt,
+                    retainedCompletion: item.retainedCompletion,
                     reviewable: item.request != nil ? true : item.delivery != nil || item.inputAvailability == .available || item.inputAvailability == .disabled ? false : nil)
             }
         }
