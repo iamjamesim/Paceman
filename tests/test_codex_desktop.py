@@ -451,7 +451,15 @@ class DesktopRequestTests(unittest.TestCase):
             owner.settimeout(3)
             self.adapter.connection = client
             self.adapter.client = 'paceman-client'
-            for selected, answer_text, expected in [([1], '', 'Green'), ([], '日本語\ncustom answer', '日本語\ncustom answer')]:
+            for selected, answer_text, expected in [
+                    ([1], '', 'Green'),
+                    ([], '日本語\ncustom answer', '日本語\ncustom answer'),
+                    ([], 'Custom answer ', 'Custom answer'),
+                    ([], '\t\n 日本語\n  keep indentation\n\nlast line \n',
+                     '日本語\n  keep indentation\n\nlast line'),
+                    ([1], ' extra context \n', 'Green\n extra context'),
+                    ([], '\ufeff\u00a0Custom answer\u3000\ufeff', 'Custom answer'),
+                    ([], '\u0085Custom answer\u0085', '\u0085Custom answer\u0085')]:
                 with self.subTest(answer=expected):
                     message = snapshot([])
                     turn = dict(turnId='t', status='inProgress', items=[dict(type='agentMessage', id='a',
@@ -476,8 +484,10 @@ class DesktopRequestTests(unittest.TestCase):
                     text = params['input'][0]['text']
                     self.assertEqual(restore['text'], text)
                     self.assertEqual(restore['context']['prompt'], text)
-                    self.assertEqual(json.loads(text[len('<send_user_message_question_reply>'):
-                        -len('</send_user_message_question_reply>')])[0]['answer'], expected)
+                    reply = json.loads(text[len('<send_user_message_question_reply>'):
+                        -len('</send_user_message_question_reply>')])[0]
+                    self.assertEqual(reply, dict(questionItemId='["request_user_input_async","a",0]',
+                                                question='Which?', answer=expected))
                     self.assertTrue(attention[-1], 'Paceman acceptance is not native consumption')
                     self.adapter._receive(dict(type='response', requestId=call['requestId'], resultType='success'))
                     wait_until(lambda: not self.adapter.calls)

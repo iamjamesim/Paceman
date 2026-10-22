@@ -11,6 +11,11 @@ import uuid
 from service.interaction_content import codex_terminal_input
 
 
+# ECMAScript trim boundaries, including BOM but excluding Python-only controls.
+_DESKTOP_TRIM_CHARS = ("\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005"
+                       "\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff")
+
+
 def session_key(session):
     return hashlib.sha256(("codex:" + session).encode()).hexdigest()
 
@@ -44,6 +49,9 @@ def decode_async_question(session, turn, item, index, question):
             return None
         value = response["answers"]["answer"]
         text = "\n".join([*(options[i] for i in value["selected"]), *([value["text"]] if value["text"].strip() else [])])
+        # Match Desktop's draft.trim() send path. Its form reconciliation
+        # compares the trimmed draft with the submitted answer verbatim.
+        text = text.strip(_DESKTOP_TRIM_CHARS)
         reply = [dict(questionItemId=qid, question=question["title"], answer=text)]
         content = "<send_user_message_question_reply>\n" + json.dumps(reply, ensure_ascii=False) + "\n</send_user_message_question_reply>"
         message_id = "paceman-" + str(uuid.uuid4())
