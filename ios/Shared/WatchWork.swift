@@ -7,7 +7,7 @@ enum SessionTimePolicy {
     static let finishedDuration: TimeInterval = 30 * 60
     static let historyDuration: TimeInterval = 7 * 24 * 60 * 60
     enum Group: String, CaseIterable {
-        case attention = "Needs you", working = "Working", recent = "Recent", lastKnown = "Last known"
+        case attention = "Needs you", working = "Working", finished = "Finished", recent = "Recent", lastKnown = "Last known"
     }
     struct Facts {
         let state: String
@@ -42,13 +42,19 @@ enum SessionTimePolicy {
             glance = visible && age < finishedDuration
         }
         let historical = time >= facts.freshUntil && !retained
-        let group: Group = retained ? .recent : historical ? .lastKnown : overlayGroup ?? {
+        let baseGroup: Group = {
             switch facts.state {
             case "working": return .working
             case "needs_input", "failed": return .attention
+            case "finished": return facts.resultObservedAt != nil && glance ? .finished : .recent
             default: return .recent
             }
         }()
+        // Terminal placement follows the recorded result, including cached phone
+        // overlays from before Finished had its own section. Undated results stay history.
+        let overlay = facts.state == "finished" && (overlayGroup == .recent || overlayGroup == .finished)
+            ? nil : overlayGroup
+        let group: Group = retained ? .recent : historical ? .lastKnown : overlay ?? baseGroup
         return Presentation(visible: visible, historical: historical, retainedCompletion: retained,
                             glanceEligible: glance, group: group)
     }
@@ -59,7 +65,7 @@ enum SessionTimePolicy {
         return Group.allCases.compactMap { key in grouped[key].map { Section(group: key, rows: $0) } }
     }
 
-    /// List headings only. Temporal groups, retention, and caller-supplied row order stay intact.
+    /// List headings and result order. Temporal groups and retention stay intact.
     enum ActivitySectionID: Hashable {
         case group(Group), day(Date?)
     }
@@ -76,11 +82,18 @@ enum SessionTimePolicy {
                                       group: (Row) -> Group?, observedAt: (Row) -> Double?) -> [ActivitySection<Row>] {
         let today = calendar.startOfDay(for: now)
         return sections(rows, group: group).flatMap { section -> [ActivitySection<Row>] in
+            let sectionRows = section.group == .finished || section.group == .recent
+                ? section.rows.enumerated().sorted { left, right in
+                    let l = observedAt(left.element).flatMap { $0.isFinite ? $0 : nil } ?? -.infinity
+                    let r = observedAt(right.element).flatMap { $0.isFinite ? $0 : nil } ?? -.infinity
+                    if l != r { return l > r }
+                    return left.offset < right.offset
+                }.map(\.element) : section.rows
             guard section.group == .recent else {
                 return [ActivitySection(id: .group(section.group), group: section.group,
-                                        title: section.group.rawValue, rows: section.rows)]
+                                        title: section.group.rawValue, rows: sectionRows)]
             }
-            let days = Dictionary(grouping: section.rows) { row -> Date? in
+            let days = Dictionary(grouping: sectionRows) { row -> Date? in
                 guard let time = observedAt(row), time.isFinite, time > 0, time <= now.timeIntervalSince1970 else { return nil }
                 return calendar.startOfDay(for: Date(timeIntervalSince1970: time))
             }

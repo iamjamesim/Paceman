@@ -59,7 +59,7 @@ final class PresentationModel: ObservableObject {
         default: return .idle
         }
     }
-    var previewOffline: Bool { ["offline", "computer-offline", "computer-usage-stale", "single-offline", "offline-empty", "claude-offline", "history-offline"].contains(previewScreen) }
+    var previewOffline: Bool { ["offline", "computer-offline", "computer-usage-stale", "single-offline", "offline-empty", "claude-offline", "history-offline", "history-finished-offline"].contains(previewScreen) }
     var previewSessions: [AgentSession] {
         if previewScreen.hasPrefix("history") {
             let now = Date().timeIntervalSince1970
@@ -72,6 +72,12 @@ final class PresentationModel: ObservableObject {
                     name: "Improve onboarding", workspaceLabel: "paceman", resultObservedAt: yesterday.addingTimeInterval(12 * 3600).timeIntervalSince1970),
                 AgentSession(id: "failed", provider: "codex", state: .failed,
                     name: "Run integration tests", resultObservedAt: now - 3 * 86400)]
+            if previewScreen.hasPrefix("history-finished") {
+                rows.insert(AgentSession(id: "just-finished", provider: "codex", state: .finished,
+                    name: previewScreen.contains("long") ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : "Update the Watch app",
+                    workspaceLabel: "paceman", resultObservedAt: now - 60), at: 0)
+                rows.insert(AgentSession(id: "current", provider: "claude", state: .working, name: "Build Mac client"), at: 0)
+            }
             if previewScreen.hasPrefix("history-idle") {
                 rows.append(AgentSession(id: "idle", provider: "codex", state: .idle,
                     name: "Investigate Pebble notification relay", workspaceLabel: "paceman",

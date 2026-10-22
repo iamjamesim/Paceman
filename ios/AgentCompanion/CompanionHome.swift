@@ -109,7 +109,10 @@ struct WorkItem: Identifiable {
         }
     }
     var state: ActivityState { phase.activity }
-    var group: WorkGroup { timePresentation?.group ?? (historical ? .lastKnown : phase.group) }
+    var group: WorkGroup {
+        // A Finished section requires evaluated result timing; legacy rows stay in history.
+        timePresentation?.group ?? (historical ? .lastKnown : phase == .finished ? .recent : phase.group)
+    }
     var status: String {
         let title = phase == .continued ? ResponseGuidance.continuation(for: session.provider) : phase.title
         return historical ? "Last known: \(title)" : title
@@ -158,7 +161,8 @@ enum WorkPhase: Hashable {
     }
     var group: WorkGroup {
         switch self {
-        case .idle, .finished: return .recent
+        case .idle: return .recent
+        case .finished: return .finished
         case .working: return .working
         default: return .attention
         }
@@ -219,7 +223,7 @@ typealias WorkSectionData = SessionTimePolicy.Section<WorkItem>
             if left.group == .attention, (left.request != nil) != (right.request != nil) {
                 return left.request != nil
             }
-            if left.group == .recent, let l = left.session.resultObservedAt, let r = right.session.resultObservedAt, l != r {
+            if left.group == .recent || left.group == .finished, let l = left.session.resultObservedAt, let r = right.session.resultObservedAt, l != r {
                 return l > r
             }
             let l = left.group == .attention ? (left.requestOrder ?? left.activityOrder) : left.activityOrder
@@ -616,7 +620,7 @@ struct WorkStatusMark: View {
     var size: CGFloat = 18
     @Environment(\.colorScheme) private var colorScheme
     private var color: Color {
-        if item.historical || item.phase == .resolving || (item.request == nil && item.response != nil) || item.group == .recent || item.state == .working { return theme.secondaryInk }
+        if item.historical || item.phase == .resolving || (item.request == nil && item.response != nil) || item.group == .recent || item.group == .finished || item.state == .working { return theme.secondaryInk }
         return PhoneMonitoringStatusColor.color(for: item.state.rawValue, onDark: colorScheme == .dark, fallback: theme.secondaryInk)
     }
     var body: some View {

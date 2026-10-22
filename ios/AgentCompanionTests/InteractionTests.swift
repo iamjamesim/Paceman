@@ -133,6 +133,68 @@ final class InteractionTests: XCTestCase {
             from: Data(#"{"id":"old","provider":"codex","state":"idle"}"#.utf8)).activityObservedAt)
     }
 
+    @MainActor func testFinishedSectionAgesIntoCalendarHistoryWithCachedPhoneWatchParity() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        let result = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 21, hour: 23, minute: 50)))
+        let before = result.addingTimeInterval(1799)
+        let source = refreshSource("finished-section")
+        let model = CompanionModel(preview: true)
+        model.pairedSources = [source]
+        let sessions = [
+            AgentSession(id: "older", provider: "codex", state: .finished, resultObservedAt: result.timeIntervalSince1970 - 3600),
+            AgentSession(id: "boundary", provider: "codex", state: .finished, resultObservedAt: result.timeIntervalSince1970),
+            AgentSession(id: "working", provider: "claude", state: .working),
+            AgentSession(id: "newer", provider: "codex", state: .finished, resultObservedAt: result.timeIntervalSince1970 + 600),
+            AgentSession(id: "failed", provider: "claude", state: .failed, resultObservedAt: result.timeIntervalSince1970 + 600),
+            AgentSession(id: "legacy", provider: "codex", state: .finished)
+        ]
+        let snapshot = Snapshot(schema: 1, sourceID: source.sourceID, generation: source.sourceID,
+            revision: 1, sourceName: "Mac", observedAt: before.timeIntervalSince1970,
+            changedAt: before.timeIntervalSince1970, freshFor: 30, state: .working, eventID: "1", sessions: sessions)
+        model.snapshots[source.sourceID] = snapshot
+        // Capture once: both adapters must age the same data without a newer fetch/export.
+        let watch = model.watchWorkSnapshot(at: before)
+        for seconds in [1799.0, 1800, 1801] {
+            let now = result.addingTimeInterval(seconds)
+            let phone = WorkCatalog.sorted(sessions.map {
+                WorkCatalog.item(session: $0, source: source, model: model, inbox: model.interactions,
+                    computer: "Mac", connected: true, current: true, at: now)
+            })
+            let sections = WorkCatalog.activitySections(phone, at: now, calendar: calendar)
+            let watchSections = SessionTimePolicy.activitySections(watch.tasks, at: now, calendar: calendar,
+                group: { let value = $0.temporalPresentation(at: now); return value.visible ? value.group : nil },
+                observedAt: { $0.dayObservedAt })
+            XCTAssertEqual(sections.map(\.title), ["Needs you", "Working", "Finished", "Yesterday", "Undated"])
+            XCTAssertEqual(sections.map(\.id), watchSections.map(\.id))
+            XCTAssertEqual(sections.map { $0.rows.map(\.session.id) }, watchSections.map { $0.rows.map(\.sessionID) })
+            XCTAssertEqual(sections[2].rows.map(\.session.id), seconds < 1800 ? ["newer", "boundary"] : ["newer"])
+            XCTAssertEqual(sections[3].rows.map(\.session.id), seconds < 1800 ? ["older"] : ["boundary", "older"])
+            XCTAssertEqual(sections[0].rows.first?.session.state, .failed)
+            XCTAssertFalse(snapshot.shouldEndLiveActivity(at: now), "Independent working session keeps the glance alive")
+            XCTAssertEqual(snapshot.glanceSessions(at: now).contains { $0.id == "boundary" }, seconds < 1800,
+                "An unrelated aggregate change/newer result cannot renew this session")
+        }
+        let daytime = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 10, day: 22, hour: 10)))
+        let todayResult = AgentSession(id: "today", provider: "codex", state: .finished,
+            resultObservedAt: daytime.timeIntervalSince1970 - 1800)
+        let todayItem = WorkCatalog.item(session: todayResult, source: source, model: model, inbox: model.interactions,
+            computer: "Mac", connected: true, current: true, at: daytime)
+        XCTAssertEqual(WorkCatalog.activitySections([todayItem], at: daytime, calendar: calendar).first?.title, "Today")
+        XCTAssertEqual(WorkPhase.finished.group, .finished)
+        let stale = WorkCatalog.item(session: sessions[1], source: source, model: model, inbox: model.interactions,
+            computer: "Mac", connected: false, current: false, at: before)
+        XCTAssertEqual(stale.group, .lastKnown)
+        let legacy = try XCTUnwrap(watch.tasks.first { $0.sessionID == "legacy" })
+        XCTAssertNil(legacy.resultObservedAt)
+        XCTAssertEqual(legacy.temporalPresentation(at: before).group, .recent)
+        // A cached overlay from an older phone also follows the shared dated-result rule.
+        var oldOverlay = try XCTUnwrap(watch.tasks.first { $0.sessionID == "boundary" })
+        oldOverlay.presentationGroup = "Recent"
+        XCTAssertEqual(oldOverlay.temporalPresentation(at: before).group, .finished)
+        XCTAssertEqual(oldOverlay.temporalPresentation(at: result.addingTimeInterval(1800)).group, .recent)
+    }
+
     @MainActor func testSharedTemporalSectionsAndCountsAgeWithoutNetworkRefresh() throws {
         let model = CompanionModel(preview: true)
         let source = refreshSource("temporal")
@@ -1126,23 +1188,22 @@ final class InteractionTests: XCTestCase {
         var requests: [InteractionURLProtocol] = []
         InteractionURLProtocol.start = { request in requests.append(request); started.fulfill() }
         defer { InteractionURLProtocol.start = nil }
-        let sending = inbox.submit(item, action: "allowOnce")
+        let sending = try XCTUnwrap(inbox.submit(item, action: "allowOnce"))
         let original = try XCTUnwrap(inbox.response(for: item)?.submission)
         inbox.submit(item, action: "deny")
         XCTAssertEqual(inbox.response(for: item)?.submission, original)
         await fulfillment(of: [started], timeout: 2)
         XCTAssertEqual(requests.count, 1)
-        let uncertain = expectation(description: "Delivery unconfirmed")
-        let uncertainObserver = inbox.$responses.sink { values in
-            if values[item.id]?.phase == .unconfirmed { uncertain.fulfill() }
-        }
         requests[0].client?.urlProtocol(requests[0], didFailWithError: URLError(.timedOut))
-        await fulfillment(of: [uncertain], timeout: 2)
-        await sending?.value
-        uncertainObserver.cancel()
+        // The inbox-owned operation, not a publisher delivery deadline, defines
+        // when the transport error has been handled on the main actor.
+        await sending.value
+        XCTAssertEqual(inbox.response(for: item)?.phase, .unconfirmed)
+        XCTAssertEqual(inbox.response(for: item)?.submission, original)
+        XCTAssertFalse(inbox.isSubmitting(item))
         let retryStarted = expectation(description: "Retry started")
         InteractionURLProtocol.start = { request in requests.append(request); retryStarted.fulfill() }
-        let retryTask = inbox.retry(item)
+        let retryTask = try XCTUnwrap(inbox.retry(item))
         XCTAssertEqual(inbox.response(for: item)?.submission, original, "Retry preserves action, answers, and idempotency key")
         await fulfillment(of: [retryStarted], timeout: 2)
         let traces = try requests.map {
@@ -1150,10 +1211,6 @@ final class InteractionTests: XCTestCase {
         }
         XCTAssertTrue(traces.allSatisfy { UUID(uuidString: $0) != nil })
         XCTAssertNotEqual(traces[0], traces[1], "Each HTTP attempt has its own trace; the decision's idempotency key stays unchanged")
-        let confirmed = expectation(description: "Receipt accepted")
-        let confirmationObserver = inbox.$responses.sink { values in
-            if values[item.id]?.phase == .submitted { confirmed.fulfill() }
-        }
         let receipt = try JSONSerialization.data(withJSONObject: ["status": "submitted",
             "generation": original.generation, "requestID": original.requestID, "version": original.version])
         let retry = requests[1]
@@ -1161,9 +1218,10 @@ final class InteractionTests: XCTestCase {
             statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         retry.client?.urlProtocol(retry, didLoad: receipt)
         retry.client?.urlProtocolDidFinishLoading(retry)
-        await fulfillment(of: [confirmed], timeout: 2)
-        await retryTask?.value
-        confirmationObserver.cancel()
+        await retryTask.value
+        XCTAssertEqual(inbox.response(for: item)?.phase, .submitted)
+        XCTAssertEqual(inbox.response(for: item)?.submission, original)
+        XCTAssertFalse(inbox.isSubmitting(item))
         XCTAssertFalse(inbox.isCurrent(item))
     }
 
@@ -1580,7 +1638,8 @@ final class InteractionTests: XCTestCase {
             let sections = WorkCatalog.sections([item])
             XCTAssertEqual(sections.count, 1)
             XCTAssertEqual(sections[0].rows[0].state, state)
-            XCTAssertEqual(sections[0].group, item.phase.group)
+            XCTAssertEqual(sections[0].group, state == .finished ? .recent : item.phase.group,
+                "Undated legacy results cannot establish a timed Finished section")
             XCTAssertEqual(sections[0].rows[0].statusToken, item.phase.token)
             XCTAssertEqual(sections[0].group == .working, item.statusToken == .working)
             XCTAssertEqual(item.id, identity, "The selected task does not change when its phase changes")

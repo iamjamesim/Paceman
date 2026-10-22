@@ -493,7 +493,7 @@ private struct WatchActivityRow: View {
                     Text([task.providerName, showComputer ? task.computer : ""].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    if ["Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed"
+                    if ["Finished", "Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed"
                         || task.status(at: date) == "Response sent" {
                         if let resultObservedAt = task.resultObservedAt {
                             let completed = Date(timeIntervalSince1970: resultObservedAt)
@@ -1210,9 +1210,11 @@ private enum WatchWorkPreview {
         func body(content: Content) -> some View {
             ScrollViewReader { proxy in
                 content.task(id: target) {
-                    guard scenario?.hasSuffix("-bottom") == true, let target else { return }
+                    guard let target else { return }
+                    let result = scenario?.hasSuffix("-result") == true
+                    guard result || scenario?.hasSuffix("-bottom") == true else { return }
                     await Task.yield()
-                    proxy.scrollTo(target, anchor: .bottom)
+                    proxy.scrollTo(result ? "preview/codex/just-finished" : target, anchor: .bottom)
                 }
             }
         }
@@ -1277,9 +1279,18 @@ private enum WatchWorkPreview {
                         title: scenario.hasPrefix("history-long") && index == 0
                             ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : titles[index],
                         computer: "MacBook Pro", state: index == 2 ? "failed" : "finished",
-                        freshUntil: now + (scenario == "history-offline" ? -600 : 300), resultObservedAt: date)
+                        freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300), resultObservedAt: date)
                 }
                 values = scenario.hasPrefix("history-mixed") ? Array(tasks.prefix(2)) + history : history
+                if scenario.hasPrefix("history-finished") {
+                    values.insert(WatchWorkTask(sourceID: "preview", sessionID: "just-finished", provider: "codex",
+                        title: scenario.contains("long") ? "Investigate multi-computer reconnection and notification delivery after leaving the house" : "Update the Watch app",
+                        computer: "MacBook Pro", state: "finished", freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300),
+                        resultObservedAt: now - 60), at: 0)
+                    values.insert(WatchWorkTask(sourceID: "preview", sessionID: "working", provider: "claude",
+                        title: "Build Mac client", computer: "MacBook Pro", state: "working",
+                        freshUntil: now + (scenario.hasSuffix("-offline") ? -600 : 300)), at: 0)
+                }
                 if scenario.hasPrefix("history-idle") {
                     values.append(WatchWorkTask(sourceID: "preview", sessionID: "idle", provider: "codex",
                         title: "Investigate Pebble notification relay", computer: "MacBook Pro", state: "idle",

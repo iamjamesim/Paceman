@@ -85,7 +85,7 @@
       }
     ],
     "expectedGroups": {
-      "A": "Recent"
+      "A": "Finished"
     },
     "expectedGlance": {
       "finished": 1
