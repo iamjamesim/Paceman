@@ -91,7 +91,14 @@ struct ApprovalResponseOption: Codable, Identifiable, Equatable {
     let label: String
     var confirmation: String? = nil
     var commandPrefix: [String]? = nil
-    var prefixText: String? { commandPrefix.map(ApprovalShellDisplay.join) }
+    private static let legacyConfirmationHeader = "Allow future commands starting with these exact arguments:\n\n"
+    var prefixText: String? {
+        if let commandPrefix { return ApprovalShellDisplay.join(commandPrefix) }
+        if label == "Always approve", let confirmation, confirmation.hasPrefix(Self.legacyConfirmationHeader) {
+            return String(confirmation.dropFirst(Self.legacyConfirmationHeader.count))
+        }
+        return nil
+    }
     var prefixPreview: String? {
         prefixText?.replacingOccurrences(of: "\r", with: "⏎").replacingOccurrences(of: "\n", with: "⏎")
             .replacingOccurrences(of: "\t", with: "⇥")
@@ -101,6 +108,27 @@ struct ApprovalResponseOption: Codable, Identifiable, Equatable {
         return (1...256).contains(commandPrefix.count)
             && commandPrefix.first?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             && commandPrefix.allSatisfy { InteractionWire.text($0, limit: 32768, empty: true) }
+    }
+
+    /// Presentation compatibility for the exact copy emitted by older Paceman
+    /// Codex command adapters. The wire option and its opaque decision ID stay intact.
+    func legacyCodexCommandPresentation() -> Self {
+        switch label {
+        case "Allow once": return .init(id: id, label: "Approve", confirmation: confirmation)
+        case "Allow for this session": return .init(id: id, label: "Approve for this session", confirmation: confirmation)
+        case "Decline": return .init(id: id, label: "Deny", confirmation: confirmation)
+        case "Always allow this command prefix":
+            guard let confirmation, confirmation.hasPrefix(Self.legacyConfirmationHeader),
+                  confirmation.count > Self.legacyConfirmationHeader.count else { return self }
+            return .init(id: id, label: "Always approve", confirmation: confirmation)
+        default:
+            let header = "Always allow commands starting with: "
+            guard commandPrefix == nil, confirmation == nil, label.hasPrefix(header),
+                  let data = String(label.dropFirst(header.count)).data(using: .utf8),
+                  let prefix = try? JSONDecoder().decode([String].self, from: data) else { return self }
+            let presented = Self(id: id, label: "Always approve", commandPrefix: prefix)
+            return presented.validCommandPrefix ? presented : self
+        }
     }
 }
 
@@ -326,7 +354,10 @@ enum ApprovalPreviewFixtures {
         .init(id: "once", label: "Allow once"), .init(id: "session", label: "Allow for this session"),
         .init(id: "decline", label: "Decline")]
     static let buildCommand = "xcodebuild -project ios/AgentCompanion.xcodeproj -scheme AgentCompanion -configuration Debug -destination 'platform=iOS Simulator,id=87F6D657-8EDA-442A-A87E-ADA0E27063E2' -derivedDataPath .runtime/retention-derived CODE_SIGNING_ALLOWED=NO build-for-testing > /private/tmp/paceman-retention-build.log 2>&1"
+    static var legacySource: Bool { ProcessInfo.processInfo.arguments.contains("--approval-legacy-source") }
+    static var policyContentVersion: Int { legacySource ? 2 : 5 }
     static var policyPrefix: [String] {
+        if legacySource { return ["git", "apply", "--exclude=docs/architecture.md", "/private/tmp/paceman-review-flow-owned.patch"] }
         if ProcessInfo.processInfo.arguments.contains("--approval-original-command") { return ["/bin/zsh", "-lc", buildCommand] }
         if ProcessInfo.processInfo.arguments.contains("--approval-long-prefix") {
             return ["xcodebuild", "-project", "ios/AgentCompanion.xcodeproj", "-scheme", "AgentCompanion"]
@@ -335,6 +366,7 @@ enum ApprovalPreviewFixtures {
         return ["git", "worktree", "add"]
     }
     static var policyCommand: String {
+        if legacySource { return ApprovalShellDisplay.join(policyPrefix) }
         if ProcessInfo.processInfo.arguments.contains("--approval-original-command") { return ApprovalShellDisplay.join(policyPrefix) }
         if ProcessInfo.processInfo.arguments.contains("--approval-long-prefix") { return buildCommand }
         if ProcessInfo.processInfo.arguments.contains("--approval-short-command") { return "git status --short" }
@@ -342,12 +374,19 @@ enum ApprovalPreviewFixtures {
     }
     static var policy: ApprovalPayload {
         ApprovalPayload(toolName: "commandExecution",
-            reason: ProcessInfo.processInfo.arguments.contains("--approval-short-command") ? "May I check the working tree?"
+            reason: legacySource ? "May I apply only the saved review-flow hunks in the new isolated worktree? The sandbox blocks writes to its location."
+                : ProcessInfo.processInfo.arguments.contains("--approval-short-command") ? "May I check the working tree?"
                 : policyPrefix.first == "git" ? "May I create an isolated review branch for the retention changes while preserving the shared checkout?"
                 : "May I build the iOS test bundle?", inputJSON: json(["command": policyCommand]),
             action: .init(kind: "command", text: policyCommand), hasAdditionalInput: false)
     }
     static var policyChoices: [ApprovalResponseOption] {
+        if legacySource {
+            let prefixJSON = String(decoding: try! JSONEncoder().encode(policyPrefix), as: UTF8.self)
+            return [.init(id: "once", label: "Allow once"),
+                .init(id: "policy", label: "Always allow commands starting with: " + prefixJSON),
+                .init(id: "cancel", label: "Cancel this turn")]
+        }
         var choices = [ApprovalResponseOption(id: "once", label: "Approve"),
             .init(id: "policy", label: "Always approve", commandPrefix: policyPrefix),
             .init(id: "decline", label: "Deny")]

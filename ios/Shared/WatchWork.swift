@@ -150,7 +150,11 @@ struct InputRequest: Codable, Identifiable, Equatable {
     }
     var approvalChoices: [ApprovalResponseOption] {
         switch content {
-        case .approval(_, let choices): return choices
+        case .approval(let approval, let choices):
+            if provider == "codex", approval.action.kind == "command", [2, 4].contains(contentVersion ?? 0) {
+                return choices.map { $0.legacyCodexCommandPresentation() }
+            }
+            return choices
         case .legacyApproval: return [.init(id: "allowOnce", label: "Approve"), .init(id: "deny", label: "Deny")]
         default: return []
         }

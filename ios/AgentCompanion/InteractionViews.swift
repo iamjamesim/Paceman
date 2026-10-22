@@ -110,7 +110,7 @@ struct InteractionDetail: View {
                         VStack(alignment: .leading, spacing: 20) {
                             Text(action.body).companionText(.code, theme: theme).textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            ForEach(item.request.approvalChoices.filter { $0.commandPrefix != nil }) { option in
+                            ForEach(item.request.approvalChoices.filter { $0.prefixText != nil }) { option in
                                 VStack(alignment: .leading, spacing: 8) {
                                     if option.prefixText == action.body {
                                         Text("\(option.label) permits commands starting with the full command above.")

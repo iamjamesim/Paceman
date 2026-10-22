@@ -298,6 +298,67 @@ final class InteractionTests: XCTestCase {
         XCTAssertTrue(selected.valid(for: confirmed.request))
     }
 
+    func testOlderCodexCommandLabelsUseCurrentPresentationWithoutChangingWireChoices() throws {
+        let prefix = ["git", "apply", "--exclude=docs/architecture.md", "/private/tmp/paceman-review-flow-owned.patch"]
+        let encodedPrefix = String(decoding: try JSONEncoder().encode(prefix), as: UTF8.self)
+        let options: [ApprovalResponseOption] = [
+            .init(id: "decision-0", label: "Allow once"),
+            .init(id: "decision-1", label: "Always allow commands starting with: " + encodedPrefix),
+            .init(id: "decision-2", label: "Allow for this session"),
+            .init(id: "decision-3", label: "Decline"),
+            .init(id: "decision-4", label: "Cancel this turn")]
+        let request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "codex",
+            sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow commandExecution?", detail: "",
+            questions: [], remainingSeconds: 60, contentVersion: 2, approval: ApprovalPreviewFixtures.policy,
+            responseOptions: options)
+        let originalWire = try JSONEncoder().encode(WatchWorkPrompt(generation: "g", request: request, remainingSeconds: 60))
+        let watch = try JSONDecoder().decode(WatchWorkPrompt.self, from: originalWire)
+        for deviceRequest in [request, watch.request] {
+            XCTAssertTrue(deviceRequest.validContent)
+            XCTAssertEqual(deviceRequest.approvalChoices.map(\.label),
+                ["Approve", "Always approve", "Approve for this session", "Deny", "Cancel this turn"])
+            XCTAssertEqual(deviceRequest.approvalChoices.map(\.id), options.map(\.id))
+            XCTAssertEqual(deviceRequest.approvalChoices[1].commandPrefix, prefix)
+            XCTAssertEqual(deviceRequest.approvalChoices[1].prefixText,
+                "git apply --exclude=docs/architecture.md /private/tmp/paceman-review-flow-owned.patch")
+            XCTAssertEqual(deviceRequest.responseOptions, options, "Presentation must not rewrite the wire profile")
+            let selected = InputSubmission(generation: "g", requestID: request.id, version: 1,
+                idempotencyKey: UUID().uuidString, action: "choose", answers: [:], optionID: "decision-1")
+            XCTAssertTrue(selected.valid(for: deviceRequest))
+        }
+        XCTAssertTrue(watch.supportsWatchAnswer)
+        XCTAssertEqual(request, watch.request)
+    }
+
+    func testOlderCodexPrefixPresentationPreservesRequiredConfirmationAndUnknownLabels() throws {
+        var request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "codex",
+            sessionID: String(repeating: "a", count: 64), kind: "approval", title: "Allow commandExecution?", detail: "",
+            questions: [], remainingSeconds: 60, contentVersion: 4, approval: ApprovalPreviewFixtures.policy,
+            responseOptions: [.init(id: "decision-1", label: "Always allow this command prefix",
+                confirmation: "Allow future commands starting with these exact arguments:\n\ngit 'a b' ''")])
+        let original = request.responseOptions![0]
+        XCTAssertTrue(request.validContent)
+        XCTAssertEqual(request.approvalChoices[0].label, "Always approve")
+        XCTAssertEqual(request.approvalChoices[0].prefixText, "git 'a b' ''")
+        XCTAssertEqual(request.approvalChoices[0].confirmation, original.confirmation)
+        for label in ["Always allow commands starting with: [1]", "Always allow commands starting with: []",
+                      "Always allow commands starting with: [\"\"]", "Always allow commands starting with: not JSON",
+                      "Always allow this command prefix", "Allow network access"] {
+            request.responseOptions = [.init(id: "decision-1", label: label)]
+            XCTAssertEqual(request.approvalChoices, request.responseOptions)
+        }
+        request.responseOptions = [.init(id: "decision-0", label: "Allow once")]
+        request.contentVersion = 5
+        XCTAssertEqual(request.approvalChoices, request.responseOptions)
+        request.contentVersion = 2
+        request.approval = ApprovalPreviewFixtures.file(true)
+        XCTAssertEqual(request.approvalChoices, request.responseOptions)
+        let otherProvider = InputRequest(requestID: request.id, version: 1, provider: "claude", sessionID: request.sessionID,
+            kind: "approval", title: request.title, detail: "", questions: [], remainingSeconds: 60,
+            contentVersion: 2, approval: ApprovalPreviewFixtures.policy, responseOptions: request.responseOptions)
+        XCTAssertEqual(otherProvider.approvalChoices, otherProvider.responseOptions)
+    }
+
     func testCommandPrefixesRoundTripToWatchAndCannotChangeWithoutAReReview() throws {
         let prefix = ["/bin/zsh", "-lc", "printf '%s' \"日本語\"\nprintf done", ""]
         var request = InputRequest(requestID: UUID().uuidString, version: 1, provider: "codex",

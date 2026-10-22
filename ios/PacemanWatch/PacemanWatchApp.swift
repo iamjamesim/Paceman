@@ -584,7 +584,7 @@ private struct WatchTaskView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         Text(action.body).font(.system(.body, design: .monospaced))
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        ForEach(request.approvalChoices.filter { $0.commandPrefix != nil }) { option in
+                        ForEach(request.approvalChoices.filter { $0.prefixText != nil }) { option in
                             if option.prefixText == action.body {
                                 Text("\(option.label) permits commands starting with the full command above.").font(.body)
                             } else {
@@ -1122,7 +1122,7 @@ private enum WatchWorkPreview {
                 : approval ? "Tool: Bash\nWorking directory: /Projects/Paceman\nCommand: swift test" : "",
             questions: approval ? [] : scenario == "multiple" ? [question, .init(id: "q1", prompt: "Which screens?", multiple: true, options: [])]
                 : scenario == "free-text" ? [.init(id: "q0", prompt: "What should we improve next?", multiple: false, options: [])] : [question], remainingSeconds: 120,
-            contentVersion: scenario == "selection-only" ? 3 : policy ? 5 : payload == nil ? nil : 2, approval: payload,
+            contentVersion: scenario == "selection-only" ? 3 : policy ? ApprovalPreviewFixtures.policyContentVersion : payload == nil ? nil : 2, approval: payload,
             responseOptions: policy ? ApprovalPreviewFixtures.policyChoices
                 : terminal ? [.init(id: "once", label: "Allow once"), .init(id: "abort", label: "Cancel")] : payload == nil ? nil : ApprovalPreviewFixtures.choices)
         requestReads += 1
