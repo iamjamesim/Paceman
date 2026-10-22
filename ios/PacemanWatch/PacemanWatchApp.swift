@@ -336,19 +336,19 @@ private struct WatchActivityView: View {
                                     }
                                 }
                             } header: {
-                                let aggregate = section.rows.contains { $0.provider == "aggregate" }
                                 Button {
                                     if expanded { collapsedSections.insert(section.id) }
                                     else { collapsedSections.remove(section.id) }
                                 } label: {
-                                    HStack {
-                                        Text(aggregate ? section.title : "\(section.title) · \(section.count)")
-                                        Spacer(minLength: 8)
+                                    HStack(spacing: 8) {
+                                        Text(section.title)
+                                            .fixedSize(horizontal: false, vertical: true)
                                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
                                             .font(.caption.weight(.semibold))
-                                    }.frame(minHeight: 44).contentShape(Rectangle())
+                                            .fixedSize()
+                                    }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
                                 }.buttonStyle(.plain)
-                                    .accessibilityLabel(aggregate ? section.title : section.accessibilityLabel)
+                                    .accessibilityLabel(section.title)
                                     .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                                     .accessibilityHint("Show or hide sessions in this section")
                                     .accessibilityAddTraits(.isHeader)
@@ -490,11 +490,17 @@ private struct WatchActivityRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(task.title).font(.body).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
+                    Text([task.providerName, showComputer ? task.computer : ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     if ["Recent", "Last known"].contains(task.group(at: date)) || task.state == "failed"
                         || task.status(at: date) == "Response sent" {
                         if let resultObservedAt = task.resultObservedAt {
                             let completed = Date(timeIntervalSince1970: resultObservedAt)
-                            Text("\(task.status(at: date)) · seen \(completed.formatted(date: Calendar.current.isDateInToday(completed) ? .omitted : .abbreviated, time: .shortened))")
+                            let clockTime = completed.formatted(date: .omitted, time: .shortened)
+                            let time = completed.formatted(date: task.group(at: date) == "Recent" || Calendar.current.isDateInToday(completed) ? .omitted : .abbreviated, time: .shortened)
+                                .replacingOccurrences(of: clockTime, with: clockTime.replacingOccurrences(of: " ", with: "\u{00a0}"))
+                            Text("\(task.status(at: date)) · \(time)")
                                 .font(.caption).fixedSize(horizontal: false, vertical: true)
                         } else {
                             Text(task.status(at: date)).font(.caption)
@@ -502,8 +508,6 @@ private struct WatchActivityRow: View {
                     }
                 }
             }
-            Text([task.providerName, showComputer ? task.computer : ""].filter { !$0.isEmpty }.joined(separator: " · "))
-                .font(.caption2).foregroundStyle(.secondary)
         }
         .accessibilityElement(children: .combine)
         .accessibilityValue(task.status(at: date))
