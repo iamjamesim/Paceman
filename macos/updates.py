@@ -1,5 +1,5 @@
 """Explicit app-update handoff. Paths are supplied by the installed control boundary."""
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, nullcontext
 import fcntl
 import json
 import os
@@ -10,8 +10,9 @@ import sqlite3
 import subprocess
 import tempfile
 import time
+import uuid
 
-from service.update_control import request
+from service.update_control import admission, request
 
 LABEL = 'ai.paceman.source'
 
@@ -124,23 +125,23 @@ def prepare(root, plist, app):
         if _launch('print', f'gui/{os.getuid()}/ai.paceman.push').returncode == 0:
             raise ValueError('Reopen Paceman to finish upgrading its background item first.')
         journal = {'schema': 1, 'build': (root / 'installed-build').read_text().strip(),
-                   'revision': _revision(root / 'lib'), 'wasLoaded': loaded, 'phase': 'stopping'}
-        if loaded:
-            request(root / 'update.sock', 'prepare')
+                   'revision': _revision(root / 'lib'), 'wasLoaded': loaded,
+                   'phase': 'admitting', 'token': str(uuid.uuid4())}
         try:
             _write(root / 'update-pending.json', journal)
-            _write(root / 'update-stopped', True)
-            if loaded and _launch('bootout', _target()).returncode:
-                raise ValueError('Paceman could not stop its background item.')
-            _stopped(root)
-            journal.update(sourceID=_checkpoint(root), phase='prepared')
-            _write(root / 'update-pending.json', journal)
+            with admission(root / 'update.sock', journal['token']) if loaded else nullcontext():
+                journal['phase'] = 'stopping'
+                _write(root / 'update-pending.json', journal)
+                _write(root / 'update-stopped', True)
+                if loaded and _launch('bootout', _target()).returncode:
+                    raise ValueError('Paceman could not stop its background item.')
+                _stopped(root)
+                journal.update(sourceID=_checkpoint(root), phase='prepared')
+                _write(root / 'update-pending.json', journal)
         except Exception:
             # Resume the unchanged build only. Never restore migrated data here.
             if (root / 'update-pending.json').exists():
                 recover(root, plist, app, locked=True)
-            elif loaded:
-                request(root / 'update.sock', 'resume')
             raise
 
 
@@ -210,7 +211,7 @@ def recover(root, plist, app, *, locked=False):
             from service.compatibility import service_build
             wait_ready(root, service_build(root / 'lib'), source_id=journal.get('sourceID'), started=started)
         else:
-            request(root / 'update.sock', 'resume')
+            request(root / 'update.sock', 'resume', token=journal.get('token'))
             from service.compatibility import service_build
             wait_ready(root, service_build(root / 'lib'), source_id=journal.get('sourceID'))
     complete(root)

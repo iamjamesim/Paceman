@@ -326,7 +326,7 @@ class InteractionBroker:
         """Close admission only when no decision or uncertain submission exists."""
         with self._lock:
             self._prune()
-            if self._closed or self._pending or self._awaiting_native:
+            if self._closed or self._updating or self._pending or self._awaiting_native:
                 raise BrokerError("update_busy", 409)
             self._updating = True
 

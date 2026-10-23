@@ -14,6 +14,7 @@ private final class PacemanUpdater: NSObject, ObservableObject {
     @Published private(set) var configured = false
     @Published private(set) var updateAvailable = false
     private(set) var installationPending = false
+    func markInstallationPending() { installationPending = true }
     var hidePanel: () -> Void = {}
     var allowsUpdate: () -> Bool = { false }
     #if canImport(Sparkle)
@@ -55,16 +56,16 @@ extension PacemanUpdater: SPUUpdaterDelegate, @MainActor SPUStandardUserDriverDe
         }
     }
     func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
-        installationPending = true
+        markInstallationPending()
     }
     func updater(_ updater: SPUUpdater, didExtractUpdate item: SUAppcastItem) {
         // A staged installer can install on a later ordinary Quit, before the
         // willInstallUpdate callback. Guard that path as well as Install Now.
-        installationPending = true
+        markInstallationPending()
     }
     func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice,
                  forUpdate item: SUAppcastItem, state: SPUUserUpdateState) {
-        if state.stage == .installing && choice != .skip { installationPending = true }
+        if state.stage == .installing && choice != .skip { markInstallationPending() }
     }
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
         installationPending = false
@@ -1460,15 +1461,21 @@ private struct MenuActivityRobot: View {
 @MainActor
 private final class PacemanAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate {
     let model: PanelModel
-    private let updater = PacemanUpdater.shared
+    private let updater: PacemanUpdater
+    private let replyToTermination: @MainActor (NSApplication, Bool) -> Void
 
     override init() {
         model = PanelModel()
+        updater = .shared
+        replyToTermination = { $0.reply(toApplicationShouldTerminate: $1) }
         super.init()
     }
 
-    init(model: PanelModel) {
+    init(model: PanelModel, updater: PacemanUpdater? = nil,
+         replyToTermination: (@MainActor (NSApplication, Bool) -> Void)? = nil) {
         self.model = model
+        self.updater = updater ?? .shared
+        self.replyToTermination = replyToTermination ?? { $0.reply(toApplicationShouldTerminate: $1) }
         super.init()
     }
 
@@ -1514,9 +1521,10 @@ private final class PacemanAppDelegate: NSObject, NSApplicationDelegate, NSWindo
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if model.uninstalled { return .terminateNow }
-        guard updater.installationPending else { return model.busy ? .terminateCancel : .terminateNow }
+        guard !model.busy else { return .terminateCancel }
+        guard updater.installationPending else { return .terminateNow }
         model.updateHandoff { [weak self] ok in
-            sender.reply(toApplicationShouldTerminate: ok)
+            self?.replyToTermination(sender, ok)
             if !ok { self?.showPanel() }
         }
         return .terminateLater

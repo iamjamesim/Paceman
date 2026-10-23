@@ -562,6 +562,32 @@ private struct MacPanelTransitions {
             assert(c.count == 3 && !m.status.running && m.pairingCode == nil)
         }
         // Update termination waits for a successful handoff; refusal stays usable.
+        for success in [false, true] {
+            let c = ControlledCommands(); let m = model(c)
+            let updater = PacemanUpdater()
+            updater.markInstallationPending()
+            var mayReply = false
+            var replies: [Bool] = []
+            let delegate = PacemanAppDelegate(model: m, updater: updater, replyToTermination: { _, value in
+                assert(mayReply, "Termination reply occurred before terminateLater was returned")
+                replies.append(value)
+            })
+            m.updateHandoff(recover: true) { _ in }
+            await until("busy delegate operation") { c.count == 1 }
+            assert(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateCancel)
+            assert(replies.isEmpty && c.count == 1)
+            c.reply(0)
+            await until("busy delegate becomes idle") { !m.busy }
+            // An ordinary Quit still prepares a staged update once idle.
+            assert(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateLater)
+            assert(replies.isEmpty)
+            mayReply = true
+            await until("delegate update preparation") { c.count == 2 }
+            assert(c.args(1) == ["prepare-update"])
+            c.reply(1, success, "Pending responses remain.")
+            await until("deferred termination reply") { replies.count == 1 }
+            assert(replies == [success])
+        }
         #if canImport(Sparkle)
         // Optional Objective-C callbacks must use Sparkle's exact selectors.
         for selector in ["updater:didExtractUpdate:", "updater:willInstallUpdate:",
