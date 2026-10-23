@@ -476,7 +476,7 @@ class DesktopRequests:
                     threading.Thread(target=self._load_browser_policy, args=(self.policy_epoch,), daemon=True).start()
                 continue
             decoded = asynchronous[key] if key in asynchronous else decode_request(session, request, items,
-                browser_global_allowed=self.browser_policy)
+                browser_global_allowed=self.browser_policy, desktop=True)
             if key in self.pending and (self.pending[key][1] != request
                     or decoded is None or self.pending[key][2] != decoded[0]):
                 self.broker.withdraw(self.pending.pop(key)[0])
