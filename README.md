@@ -34,12 +34,15 @@ releases, and Paceman iOS is available through TestFlight.
 
 - **iPhone:** iOS 18+.
 - **Computer:** Apple Silicon Mac with macOS 15+, or Omarchy 4.0+ with Python 3.11+ and user systemd.
-- **Agent:** Codex or Claude Code 2.1.196+ installed on your computer.
+- **Agent:** Codex or Claude Code 2.1.196+ installed and running on a computer
+  with Paceman set up and paired to your iPhone.
 - **Claude Code responses:** an eligible claude.ai account with Remote Control
   enabled and active for the session. API-key-only and alternative-provider setups
   do not qualify; see [Anthropic’s requirements](https://code.claude.com/docs/en/remote-control#requirements).
 - **Connection:** [Tailscale](https://tailscale.com/download) on your computer and iPhone.
-- **Apple Watch (optional):** watchOS 26+.
+- **Apple Watch (optional):** watchOS 26+. Session browsing, request review and
+  answers require a live connection to the paired iPhone. Codex usage can update
+  directly for complications; see [Watch connections](docs/architecture.md#watches).
 
 Reviewed hooks provide activity monitoring separately; they do not enable
 responses.
