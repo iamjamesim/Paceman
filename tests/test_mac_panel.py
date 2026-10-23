@@ -42,3 +42,5 @@ class MacPanelTransitionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("upgrade detection cases passed", result.stdout)
             self.assertIn("transition scenarios passed", result.stdout)
+            self.assertIn("Menu update indicator priority and native template checks passed", result.stdout)
+            self.assertIn("Closed-panel update status, freshness and failed-read checks passed", result.stdout)

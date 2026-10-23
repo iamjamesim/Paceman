@@ -185,9 +185,134 @@ private struct MacPanelTransitions {
         app.delegate = nil
     }
 
+    @MainActor static func exerciseMenuUpdateIndicator() {
+        // Keep error/attention fixtures decoded through the real status model.
+        func decoded(_ value: String) -> SourceStatus {
+            try! JSONDecoder().decode(SourceStatus.self, from: Data(value.utf8))
+        }
+        func shows(_ state: SourceStatus, known: Bool = true, available: Bool = true,
+                   busy: Bool = false, setup: Bool = false, message: Bool = false) -> Bool {
+            MenuUpdateIndicator.showsBadge(status: state, statusKnown: known,
+                updateAvailable: available, busy: busy, setupPending: setup, hasMessage: message, now: 100)
+        }
+        var status = decoded(#"{"running":true,"sharingEnabled":true,"updatedAt":100,"activity":"idle"}"#)
+        assert(shows(status))
+        assert(!shows(status, available: false))
+        assert(!shows(status, known: false))
+        assert(!shows(status, busy: true))
+        assert(!shows(status, setup: true))
+        assert(!shows(status, message: true))
+        for activity in ["needs_input", "failed"] {
+            assert(!shows(decoded("{\"running\":true,\"sharingEnabled\":true,\"updatedAt\":100,\"activity\":\"\(activity)\"}")))
+            assert(!shows(decoded("{\"running\":true,\"sharingEnabled\":true,\"updatedAt\":100,\"activity\":\"working\",\"sessionCounts\":{\"\(activity)\":1}}")))
+        }
+        assert(!MenuUpdateIndicator.showsBadge(status: status, statusKnown: true, updateAvailable: true,
+            busy: false, setupPending: false, hasMessage: false, now: 120))
+        status.running = false
+        assert(!shows(status)) // Sharing unavailable outranks the update dot.
+        status.sharingEnabled = false
+        assert(shows(status)) // Intentionally paused is not a connection fault.
+
+        let button = NSButton(frame: NSRect(x: 0, y: 0, width: 22, height: 22))
+        let image = MenuUpdateIndicator.image()
+        button.image = image
+        let badge = MenuUpdateIndicator.addBadge(to: button)
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            button.appearance = NSAppearance(named: appearance)
+            MenuUpdateIndicator.update(button: button, badge: badge, show: true)
+            button.layoutSubtreeIfNeeded()
+            assert(!badge.isHidden && badge.hitTest(NSPoint(x: 4, y: 4)) == nil)
+            assert(button.image === image && image.isTemplate && image.size == NSSize(width: 18, height: 18))
+            assert(button.toolTip == "Update available" && button.accessibilityLabel() == "Paceman, update available")
+            assert(button.bounds.contains(badge.frame))
+            MenuUpdateIndicator.update(button: button, badge: badge, show: false)
+            assert(badge.isHidden && button.image === image)
+            assert(button.accessibilityLabel() == "Paceman")
+        }
+        print("Menu update indicator priority and native template checks passed")
+    }
+
+    @MainActor static func exerciseClosedPanelUpdateStatus() async {
+        // No Panel or polling view exists in this test. Watch the same atomic
+        // local status boundary as the real menu indicator.
+        let files = FileManager.default
+        let directory = files.temporaryDirectory.appendingPathComponent("paceman-menu-status-" + UUID().uuidString)
+        try! files.createDirectory(at: directory, withIntermediateDirectories: true)
+        let path = directory.appendingPathComponent("status.json")
+        func write(_ activity: String, running: Bool = true) {
+            let data = try! JSONSerialization.data(withJSONObject: ["schema": 1, "running": running,
+                "activity": activity, "updatedAt": Date().timeIntervalSince1970])
+            try! data.write(to: path, options: .atomic)
+        }
+        var observed: SourceStatus?
+        var reads = 0
+        var expired = false
+        var testNow: TimeInterval?
+        let observer = UpdateStatusObserver(directory: directory, changed: {
+            observed = MenuUpdateIndicator.readStatus(in: directory)
+            reads += 1
+        }, expired: {
+            expired = true
+            testNow = (observed?.updatedAt ?? Date().timeIntervalSince1970) + 20
+        })
+        defer { observer.stop(); try? files.removeItem(at: directory) }
+        func badge() -> Bool {
+            guard let status = observed else { return false }
+            return MenuUpdateIndicator.showsBadge(status: status, statusKnown: true, updateAvailable: true,
+                busy: false, setupPending: false, hasMessage: false,
+                now: testNow ?? Date().timeIntervalSince1970)
+        }
+        assert(MenuUpdateIndicator.readStatus(in: directory) == nil)
+        write("idle")
+        observer.start()
+        assert(observer.isWatching && badge())
+        for state in ["needs_input", "failed"] {
+            write(state)
+            await until("closed panel \(state)") { observed?.activity == state && !badge() }
+            write("idle")
+            await until("closed panel attention clears") { observed?.activity == "idle" && badge() }
+        }
+        write("idle", running: false)
+        await until("closed panel service unavailable") { observed?.running == false && !badge() }
+        write("idle")
+        await until("closed panel service returns") { observed?.running == true && badge() }
+        try! Data("invalid status".utf8).write(to: path, options: .atomic)
+        await until("closed panel failed status read") { observed == nil && !badge() }
+        write("idle")
+        await until("closed panel valid status returns") { badge() }
+        observer.expire(at: Date().addingTimeInterval(0.05))
+        await until("closed panel freshness expires without file events") { expired }
+        assert(!badge())
+        let beforeRecovery = reads
+        testNow = nil
+        write("idle")
+        await until("closed panel fresh publication restores badge") { reads > beforeRecovery && badge() }
+        observer.stop()
+        let stoppedReads = reads
+        write("needs_input")
+        try! await Task.sleep(nanoseconds: 100_000_000)
+        assert(!observer.isWatching && reads == stoppedReads)
+
+        let c = ControlledCommands(); let m = model(c)
+        m.refresh(); await until("first failed badge status read") { c.count == 1 }
+        c.reply(0, false, "fixture read failure")
+        await until("failed badge status recorded") { m.hasReadStatus }
+        assert(!m.statusReadSucceeded)
+        assert(!MenuUpdateIndicator.showsBadge(status: m.status, statusKnown: m.statusReadSucceeded,
+            updateAvailable: true, busy: false, setupPending: false, hasMessage: false))
+        m.refresh(); await until("paused badge status read") { c.count == 2 }
+        c.reply(1, true, paused)
+        await until("paused badge status validated") { m.statusReadSucceeded }
+        assert(MenuUpdateIndicator.showsBadge(status: m.status, statusKnown: m.statusReadSucceeded,
+            updateAvailable: true, busy: false, setupPending: false, hasMessage: false))
+        print("Closed-panel update status, freshness and failed-read checks passed")
+    }
+
     @MainActor static func main() async {
         exerciseUpgradeDetection()
+        exerciseMenuUpdateIndicator()
         exerciseSetupWindow()
+        await exerciseClosedPanelUpdateStatus()
         // Upgrades preserve setup, retry failed installs, and review changed hooks.
         for changedHooks in [false, true] {
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
