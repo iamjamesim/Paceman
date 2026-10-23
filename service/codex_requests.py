@@ -9,6 +9,7 @@ import json
 import time
 import uuid
 from service.interaction_content import codex_terminal_input
+from service.codex_permissions import decode_permissions
 
 
 # ECMAScript trim boundaries, including BOM but excluding Python-only controls.
@@ -67,11 +68,13 @@ def decode_async_question(session, turn, item, index, question):
     return public, answer
 
 
-def decode_request(session, request, items=(), *, browser_global_allowed=None):
+def decode_request(session, request, items=(), *, browser_global_allowed=None, desktop=False):
     method, params = request.get("method"), request.get("params")
     if not isinstance(params, dict) or params.get("threadId") != session:
         return None
     base = dict(provider="codex", sessionID=session_key(session), detail="")
+    if method == 'item/permissions/requestApproval':
+        return decode_permissions(base, params, desktop=desktop)
     if method == "mcpServer/elicitation/request":
         return _mcp_approval(base, params, browser_global_allowed=browser_global_allowed)
     if method == "item/tool/requestUserInput":

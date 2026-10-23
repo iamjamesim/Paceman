@@ -41,12 +41,14 @@ class InteractionHTTPTests(unittest.TestCase):
         self.server.shutdown()
         self.thread.join(2)
 
-    def call(self, method, path, payload=None, authorized=True, trace_id=None, content_version=None):
+    def call(self, method, path, payload=None, authorized=True, trace_id=None, content_version=None, origin=None):
         connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port, timeout=2)
         self.addCleanup(connection.close)
         headers = {'Authorization': 'Bearer ' + self.client['credential']} if authorized else {}
         if trace_id is not None:
             headers['X-Paceman-Trace-ID'] = trace_id
+        if origin is not None:
+            headers['X-Paceman-Input-Origin'] = origin
         if content_version is not None:
             headers['X-Paceman-Content-Version'] = str(content_version)
         body = json.dumps(payload) if payload is not None else None
@@ -152,6 +154,26 @@ class InteractionHTTPTests(unittest.TestCase):
         encoded = json.dumps(entries)
         for private in ['echo fixture', 'local-fixture', self.client['credential'], 'Allow Bash']:
             self.assertNotIn(private, encoded)
+
+    def test_submission_trace_distinguishes_answers_releases_and_watch_origin(self):
+        from tests.test_interactions import question
+        for action, origin, trace in (
+                ('answer', 'phone', '11111111-1111-4111-8111-111111111111'),
+                ('release', 'watch', '22222222-2222-4222-8222-222222222222')):
+            handle = self.broker.publish_live(question())
+            payload = dict(generation=self.broker.generation, requestID=handle.public['requestID'],
+                           version=1, idempotencyKey='same-response', action=action)
+            if action == 'answer':
+                payload['answers'] = {'q0': dict(selected=[0], text='PRIVATE ANSWER')}
+            for _ in range(2):
+                self.assertEqual(self.call('POST', '/v1/interactions', payload,
+                    trace_id=trace, origin=origin)[0], 200)
+            entries = [json.loads(line) for line in self.diagnostics.path.read_text().splitlines()]
+            for stage in ('response_submitted', 'response_replayed'):
+                event = next(e for e in reversed(entries) if e['stage'] == stage)
+                self.assertEqual((event['action'], event['origin'], event['traceID']), (action, origin, trace))
+            self.assertNotIn('PRIVATE ANSWER', json.dumps(entries))
+            self.assertNotIn(self.client['credential'], json.dumps(entries))
 
     def test_unauthorized_fetch_logs_status_without_credential(self):
         replies = self.completed_replies()
@@ -280,10 +302,10 @@ class InteractionHTTPTests(unittest.TestCase):
         listing = self.call('GET', '/v1/interactions')[1]
         entered, finish, revoked = threading.Event(), threading.Event(), threading.Event()
         original_submit = self.broker.submit
-        def held_submit(payload):
+        def held_submit(payload, **metadata):
             entered.set()
             if not finish.wait(2): raise RuntimeError('test timeout')
-            return original_submit(payload)
+            return original_submit(payload, **metadata)
         self.broker.submit = held_submit
         results = []
         sender = threading.Thread(target=lambda: results.append(

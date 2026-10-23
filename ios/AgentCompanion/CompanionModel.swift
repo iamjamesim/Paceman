@@ -1098,8 +1098,8 @@ extension CompanionModel {
             dismissHandoff()
             return nil
         }
-        interactions.releaseRequest(for: WorkIdentity(sourceID: target.sourceID,
-            sessionID: target.session.id, provider: target.session.provider))
+        // Navigation does not answer or relinquish a request. The native owner
+        // settles it; an old session handoff must not retire a newer question.
         openedWatchAgentID = pending.id
         dismissHandoff()
         return url
@@ -1418,7 +1418,7 @@ extension CompanionModel {
                 let inboxLifecycle = interactions.lifecycleID
                 interactions.observeWatchSubmission(item, submission: submission, phase: .sending)
                 do {
-                    try await client.submitInput(submission, source: source)
+                    try await client.submitInput(submission, source: source, origin: .watch)
                     guard !Task.isCancelled, epoch == sourceEpoch, !isRevoked(sourceID),
                           watchRequests[id]?.request == item.request else {
                         return ["error": "Connections changed. Check Paceman on iPhone."]

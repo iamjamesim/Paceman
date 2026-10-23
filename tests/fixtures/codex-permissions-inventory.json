@@ -1,0 +1,35 @@
+{
+  "desktop_version": "26.1016.51333",
+  "desktop_build": "21161",
+  "stream_version": 11,
+  "evidence": "Read-only owner observation confirms duplicate legacy arrays and typed entries. Native Ry/$y IPC response; pending-request cr supplies turn/session grants and empty-profile denial; kG/NG filters broad prose writes. Prose mode omits the session action. Network strictAutoReview depends on UI context absent from the stream.",
+  "sources": {
+    ".vite/build/src-CsH31EEu.js": "6a266611954c6f0c72aca09bb13c0c793959a69e8d6330778a7cdef21835a1db",
+    "webview/assets/pending-request-item-panel-472ed6430a7b.js": "4b5e8b71f9f7101dff5add9e65820d899e41cc67dd4bdf8d3474044437381fbf",
+    "webview/assets/permission-request-model-5651a96c7a72.js": "ce59718c239656f34b2731f8cc2e2e4fe1495d7502c399a10f8bf1e1603caf50"
+  },
+  "request": {
+    "id": "permission-callback",
+    "method": "item/permissions/requestApproval",
+    "params": {
+      "threadId": "session",
+      "turnId": "turn",
+      "itemId": "permission-item",
+      "cwd": "/Users/example",
+      "environmentId": null,
+      "startedAtMs": 1234,
+      "reason": "Read the Desktop and move loose files into organized folders.",
+      "permissions": {
+        "network": null,
+        "fileSystem": {
+          "read": ["/Users/example/Desktop"],
+          "write": ["/Users/example/Desktop"],
+          "entries": [
+            {"access": "read", "path": {"type": "path", "path": "/Users/example/Desktop"}},
+            {"access": "write", "path": {"type": "path", "path": "/Users/example/Desktop"}}
+          ]
+        }
+      }
+    }
+  }
+}

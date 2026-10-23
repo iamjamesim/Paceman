@@ -107,13 +107,6 @@ struct InputResponseState {
         guard let item, !item.historical, item.state == .needsInput else { return nil }
         return item.request ?? response(for: item.id)?.item
     }
-    @discardableResult func releaseRequest(for identity: WorkIdentity, client: SourceClient? = nil) -> Task<Void, Never>? {
-        guard let item = items.first(where: {
-            $0.source.sourceID == identity.sourceID && $0.request.provider == identity.provider
-                && $0.request.sessionID == identity.sessionID && isCurrent($0)
-        }) else { return nil }
-        return submit(item, action: "release", client: client)
-    }
     private var active = false
     private var epoch = UUID()
     var lifecycleID: UUID { epoch }
