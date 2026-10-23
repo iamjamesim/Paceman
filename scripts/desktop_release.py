@@ -42,7 +42,8 @@ UPDATER_QA_CHECKS = {
     "mac-signed-update": "Isolated signed test-feed update; preserve identity, pairings, choices, and history",
     "mac-signed-recovery": "Signed update busy deferral, cancellation, relaunch, and failed-handoff recovery",
 }
-FEED_BASE_URL = "https://iamjamesim.github.io/Paceman/updates"
+FEED_HOST = "updates.paceman.ai"
+FEED_BASE_URL = f"https://{FEED_HOST}"
 SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 ET.register_namespace("sparkle", SPARKLE_NS)
 
@@ -320,15 +321,17 @@ def feed_preflight(manifest, *, channel, pages_dir, sparkle_archive, account, ap
             or output("git", "-C", pages_dir, "remote", "get-url", "origin").casefold()
             not in (f"https://github.com/{REPOSITORY.casefold()}.git", f"git@github.com:{REPOSITORY.casefold()}.git")):
         raise ValueError("Use a separate gh-pages checkout of the public Paceman repository")
-    if (not (pages_dir / ".nojekyll").is_file() or (pages_dir / "CNAME").exists()):
-        raise ValueError("Use the default GitHub Pages host with .nojekyll; review any custom-domain change separately")
-    target = f"updates/macos/{channel}/appcast.xml"
+    cname = pages_dir / "CNAME"
+    if (not (pages_dir / ".nojekyll").is_file() or cname.is_symlink()
+            or not cname.is_file() or cname.read_text().strip() != FEED_HOST):
+        raise ValueError("Review the Pages custom domain and .nojekyll before staging a feed")
+    target = f"macos/{channel}/appcast.xml"
     changed = output("git", "-C", pages_dir, "diff", "--name-only", "HEAD").splitlines()
     untracked = output("git", "-C", pages_dir, "ls-files", "--others", "--exclude-standard").splitlines()
     if any(path != target for path in changed + untracked):
         raise ValueError("Pages checkout has unrelated changes")
     if any((pages_dir / path).is_symlink() for path in (
-            "updates", "updates/macos", f"updates/macos/{channel}", target)):
+            "macos", f"macos/{channel}", target)):
         raise ValueError("Feed paths must not be symlinks")
 
 
@@ -357,7 +360,7 @@ def record_feed_staging(directory, manifest, channel, target):
 def stage_feed(directory, manifest, names, *, channel, pages_dir, sparkle_archive, account):
     """Stage signed static bytes locally. Commit/push/Pages activation are separate approvals."""
     prefix = public_download_check(directory, manifest, names)
-    target = Path(pages_dir).expanduser().resolve() / "updates" / "macos" / channel / "appcast.xml"
+    target = Path(pages_dir).expanduser().resolve() / "macos" / channel / "appcast.xml"
     notes = "<pre>" + html.escape((directory / "RELEASE-NOTES.md").read_text()) + "</pre>"
     with tempfile.TemporaryDirectory(prefix="paceman-feed-") as temporary:
         scratch = Path(temporary)

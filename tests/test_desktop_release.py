@@ -271,7 +271,8 @@ class FeedTests(unittest.TestCase):
         self.pages = (self.directory / "pages").resolve()
         self.pages.mkdir()
         (self.pages / ".nojekyll").touch()
-        self.target = self.pages / "updates/macos/test/appcast.xml"
+        (self.pages / "CNAME").write_text("updates.paceman.ai\n")
+        self.target = self.pages / "macos/test/appcast.xml"
         self.options = dict(feed_channel="test", pages_dir=self.pages,
                             sparkle_archive=self.directory / "Sparkle.tar.xz",
                             keychain_account="paceman-release", approve_feed_signing=True)
@@ -366,29 +367,44 @@ class FeedTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "provenance"):
                 release.verify(self.directory, platform_checks=False)
 
-    def test_feed_preflight_accepts_only_nested_feed_changes_and_rejects_custom_domain(self):
+    def test_feed_preflight_requires_exact_custom_domain_and_root_feed_changes(self):
+        self.configure()
+        def changed_feed(*args):
+            if "diff" in args:
+                return "macos/test/appcast.xml"
+            return self.pages_output(*args)
+        with patch.object(release, "output", side_effect=changed_feed):
+            self.preflight()
+            cname = self.pages / "CNAME"
+            for value in ("paceman.ai", "other.example", ""):
+                cname.write_text(value + "\n")
+                with self.assertRaisesRegex(ValueError, "custom domain"):
+                    self.preflight()
+            cname.unlink()
+            with self.assertRaisesRegex(ValueError, "custom domain"):
+                self.preflight()
+            marker = self.directory / "domain-marker"
+            marker.write_text("updates.paceman.ai\n")
+            cname.symlink_to(marker)
+            with self.assertRaisesRegex(ValueError, "custom domain"):
+                self.preflight()
+            cname.unlink()
+            cname.write_text("updates.paceman.ai\n")
+            (self.pages / ".nojekyll").unlink()
+            with self.assertRaisesRegex(ValueError, "nojekyll"):
+                self.preflight()
+
+    def test_feed_preflight_rejects_old_nested_path_and_symlinked_macos_directory(self):
         self.configure()
         def nested(*args):
             if "diff" in args:
                 return "updates/macos/test/appcast.xml"
             return self.pages_output(*args)
-        with patch.object(release, "output", side_effect=nested):
-            self.preflight()
-            (self.pages / "CNAME").write_text("updates.paceman.ai\n")
-            with self.assertRaisesRegex(ValueError, "custom-domain"):
-                self.preflight()
-
-    def test_feed_preflight_rejects_legacy_root_path_and_symlinked_updates_directory(self):
-        self.configure()
-        def legacy(*args):
-            if "diff" in args:
-                return "macos/test/appcast.xml"
-            return self.pages_output(*args)
-        with patch.object(release, "output", side_effect=legacy), self.assertRaisesRegex(ValueError, "unrelated changes"):
+        with patch.object(release, "output", side_effect=nested), self.assertRaisesRegex(ValueError, "unrelated changes"):
             self.preflight()
         elsewhere = self.directory / "elsewhere"
         elsewhere.mkdir()
-        (self.pages / "updates").symlink_to(elsewhere, target_is_directory=True)
+        (self.pages / "macos").symlink_to(elsewhere, target_is_directory=True)
         with patch.object(release, "output", side_effect=self.pages_output), self.assertRaisesRegex(ValueError, "symlinks"):
             self.preflight()
 
@@ -527,7 +543,7 @@ class FeedTests(unittest.TestCase):
         evidence = json.loads((self.directory / "feed-staging.json").read_text())
         self.assertFalse(evidence["published"])
         self.assertEqual(evidence["feedSHA256"], release.sha256(self.target))
-        self.assertEqual(evidence["feedURL"], "https://iamjamesim.github.io/Paceman/updates/macos/test/appcast.xml")
+        self.assertEqual(evidence["feedURL"], "https://updates.paceman.ai/macos/test/appcast.xml")
 
     def test_repeated_staging_is_byte_identical_and_changed_notes_same_build_are_rejected(self):
         self.configure()

@@ -41,11 +41,12 @@ the exact public artifacts pass release QA. Do not replace versioned artifacts.
 ### Static update feed
 
 The public `iamjamesim/Paceman` repository publishes a separate `gh-pages` branch
-from its root, with an empty `.nojekyll`. The root landing page redirects to the
-marketing site; downloads and feeds live under
-`https://iamjamesim.github.io/Paceman/updates/`. No custom domain or DNS change is
-needed. The private marketing repository has no role. Feed staging rejects a
-`CNAME` file so a hosting change requires an explicit configuration review.
+from its root, with an empty `.nojekyll` and `CNAME` set to `updates.paceman.ai`.
+The root landing page links to desktop downloads in GitHub Releases; Mac feeds
+live at `https://updates.paceman.ai/macos/{test,stable}/appcast.xml`. Verify domain
+ownership, configure the repository custom domain and DNS, and confirm HTTPS
+before building an updater-enabled release. Feed staging requires this exact
+custom domain. The marketing site remains separately hosted at `paceman.ai`.
 
 Sparkle's pinned `generate_keys` stores the publisher key in the release Mac's
 Keychain under an explicitly chosen account. Establish an encrypted recovery copy
@@ -66,7 +67,7 @@ The explicit flag authorizes later Keychain use. This command never pushes Pages
 It publishes packages first, rechecks authenticated and anonymous HTTPS downloads,
 checks the existing Keychain public key, and uses official `sign_update` to sign
 the archive and appcast. Notes are embedded inside the signed appcast. Output is
-`updates/macos/test/appcast.xml`; `feed-staging.json` records the URL and local
+`macos/test/appcast.xml`; `feed-staging.json` records the URL and local
 hashes, not publication.
 Signing failure leaves the previous feed intact; retry reuses the public packages.
 
@@ -74,7 +75,7 @@ Use an isolated, updater-enabled baseline to test that feed against the exact
 candidate downloads. A stable-configured candidate may be offered on the test
 feed; after replacement it returns to its embedded stable URL. Record
 `mac-signed-update` and `mac-signed-recovery` against the same package checksums,
-then rerun with `--feed-channel stable` to stage `updates/macos/stable/appcast.xml`.
+then rerun with `--feed-channel stable` to stage `macos/stable/appcast.xml`.
 Stable rejects prereleases and requires both signed-trial checks. Test publication
 requires the existing package QA checks and a separately approved bounded trial.
 
