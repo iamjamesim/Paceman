@@ -21,6 +21,14 @@ private final class ControlledCommands: @unchecked Sendable {
     }
 }
 
+#if canImport(Sparkle)
+// Sparkle exposes update state through NSSecureCoding, not a public stage initializer.
+private final class InstallingUpdateStateCoder: NSCoder {
+    override func decodeInteger(forKey key: String) -> Int { SPUUserUpdateStage.installing.rawValue }
+    override func decodeBool(forKey key: String) -> Bool { true }
+}
+#endif
+
 @main
 private struct MacPanelTransitions {
     static let live = #"{"running":true,"sharingEnabled":true,"activity":"working","sessions":1,"clients":[{"id":"phone","name":"Test phone","platform":"ios","pairedAt":1,"lastContactAt":2}],"missingHooks":[],"lastAgentEventAt":1}"#
@@ -714,6 +722,47 @@ private struct MacPanelTransitions {
             assert(replies == [success])
         }
         #if canImport(Sparkle)
+        // Pinned Sparkle 2.10: Install on Quit (.dismiss/installing), followed by
+        // Skip This Version (.skip/installing), cancels without didAbortWithError.
+        let controller = SPUStandardUpdaterController(startingUpdater: false,
+            updaterDelegate: nil, userDriverDelegate: nil)
+        let archive = NSKeyedArchiver(requiringSecureCoding: true)
+        archive.encode(URL(string: "https://example.invalid/Paceman.dmg")! as NSURL, forKey: "fileURL")
+        archive.encode("application" as NSString, forKey: "SUAppcastItemInstallationType")
+        archive.encode("36" as NSString, forKey: "versionString")
+        archive.encode(NSDictionary(), forKey: "propertiesDictionary")
+        let decoder = try! NSKeyedUnarchiver(forReadingFrom: archive.encodedData)
+        decoder.decodingFailurePolicy = .setErrorAndReturn
+        let item = SUAppcastItem(coder: decoder)!
+        let installing = SPUUserUpdateState(coder: InstallingUpdateStateCoder())!
+        for skip in [true, false] {
+            let c = ControlledCommands(); let m = model(c)
+            let updater = PacemanUpdater()
+            var replies: [Bool] = []
+            let delegate = PacemanAppDelegate(model: m, updater: updater,
+                replyToTermination: { _, value in replies.append(value) })
+            assert(!updater.installationPending)
+            updater.updater(controller.updater, didExtractUpdate: item)
+            updater.updater(controller.updater, userDidMake: .dismiss, forUpdate: item, state: installing)
+            updater.standardUserDriverWillFinishUpdateSession()
+            assert(updater.installationPending, "Install on Quit must retain its guarded handoff")
+            if skip {
+                updater.updater(controller.updater, userDidMake: .skip, forUpdate: item, state: installing)
+                updater.standardUserDriverWillFinishUpdateSession()
+                assert(!updater.installationPending, "Skip must clear the canceled install without an error callback")
+                // Active source work must not block an ordinary Quit after Skip.
+                m.status = try! JSONDecoder().decode(SourceStatus.self, from: Data(live.utf8))
+                assert(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateNow)
+                assert(c.count == 0 && replies.isEmpty, "Ordinary Quit after Skip must not prepare an update")
+            } else {
+                assert(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateLater)
+                await until("Install on Quit guarded handoff") { c.count == 1 }
+                assert(c.args(0) == ["prepare-update"])
+                c.reply(0)
+                await until("Install on Quit termination reply") { replies == [true] }
+            }
+        }
+        print("Pinned Sparkle Skip cancellation and deferred Quit checks passed")
         // Optional Objective-C callbacks must use Sparkle's exact selectors.
         for selector in ["updater:didExtractUpdate:", "updater:willInstallUpdate:",
                          "updater:userDidMakeChoice:forUpdate:state:",

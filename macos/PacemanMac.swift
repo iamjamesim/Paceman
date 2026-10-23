@@ -67,7 +67,12 @@ extension PacemanUpdater: SPUUpdaterDelegate, @MainActor SPUStandardUserDriverDe
     }
     func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice,
                  forUpdate item: SUAppcastItem, state: SPUUserUpdateState) {
-        if state.stage == .installing && choice != .skip { markInstallationPending() }
+        if choice == .skip {
+            // Sparkle cancels a deferred installer without didAbortWithError.
+            installationPending = false
+        } else if state.stage == .installing {
+            markInstallationPending()
+        }
     }
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
         installationPending = false

@@ -44,3 +44,5 @@ class MacPanelTransitionTests(unittest.TestCase):
             self.assertIn("transition scenarios passed", result.stdout)
             self.assertIn("Menu update indicator priority and native template checks passed", result.stdout)
             self.assertIn("Closed-panel update status, freshness and failed-read checks passed", result.stdout)
+            if framework:
+                self.assertIn("Pinned Sparkle Skip cancellation and deferred Quit checks passed", result.stdout)

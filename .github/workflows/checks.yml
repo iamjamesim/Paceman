@@ -34,6 +34,21 @@ jobs:
           python-version: '3.12'
       - name: Test Mac panel state transitions
         run: python -m unittest tests.test_mac_panel -v
+      - name: Test Mac update callbacks with pinned Sparkle
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          from tempfile import TemporaryDirectory
+          from scripts.sparkle_dependency import framework
+
+          with TemporaryDirectory() as directory:
+              environment = dict(os.environ, PACEMAN_SPARKLE_FRAMEWORK=str(framework(None, Path(directory))))
+              subprocess.run([sys.executable, "-m", "unittest", "tests.test_mac_panel", "-v"],
+                             env=environment, check=True)
+          PY
       - name: Build Mac app and background helper
         run: |
           python - <<'PY'
