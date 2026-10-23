@@ -159,7 +159,7 @@ private struct UpdateAvailableButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "tray.and.arrow.down")
+            Image(systemName: "arrow.down")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 22, height: 22)
