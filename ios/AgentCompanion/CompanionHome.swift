@@ -425,7 +425,6 @@ struct CompanionWork: View {
             WorkTaskRow(item: item, theme: theme, date: now,
                 showComputer: filter == nil && Set(items.map { $0.id.sourceID }).count > 1,
                 inspect: { inspectTask(item.id) },
-                prepareToOpen: { inbox.releaseRequest(for: item.id) },
                 currentSession: { items.first { $0.id == item.id }?.session })
         }
     }
@@ -561,7 +560,6 @@ private struct WorkTaskRow: View {
     let date: Date
     let showComputer: Bool
     let inspect: () -> Void
-    let prepareToOpen: () -> Void
     let currentSession: () -> AgentSession?
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -584,7 +582,7 @@ private struct WorkTaskRow: View {
             }
             if item.session.appURL != nil {
                 SessionOpenButton(session: item.session, theme: theme,
-                    prepareToOpen: prepareToOpen, currentSession: currentSession)
+                    currentSession: currentSession)
             }
         }.padding(.horizontal, CompanionLayout.pageInset).padding(.vertical, 12)
     }

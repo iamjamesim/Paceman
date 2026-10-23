@@ -1326,38 +1326,27 @@ final class InteractionTests: XCTestCase {
         XCTAssertFalse(inbox.isCurrent(item))
     }
 
-    @MainActor func testOpenHandoffReleasesOnlyTheCurrentMatchingRequest() async throws {
-        let source = PairedSource(endpoint: URL(string: "https://example.test")!, sourceID: sourceID,
-                                  clientID: "client", credential: "fixture")
-        let inbox = InteractionInbox()
-        inbox.preview(source)
-        let item = try XCTUnwrap(inbox.items.first)
-        let identity = WorkIdentity(sourceID: sourceID, sessionID: item.request.sessionID, provider: "claude")
+    @MainActor func testSubmissionOriginIdentifiesPhoneAndWatchWithoutChangingTheEnvelope() async throws {
+        let source = PairedSource(endpoint: URL(string: "https://submission-origin.example")!, sourceID: sourceID,
+            clientID: "client", credential: "fixture")
+        let listing = try InputRequests.decode(JSONSerialization.data(withJSONObject: fixture()), sourceID: sourceID)
+        let request = try XCTUnwrap(listing.requests.first)
+        let submission = InputSubmission(generation: listing.generation, requestID: request.id, version: request.version,
+            idempotencyKey: UUID().uuidString, action: "answer", answers: ["q0": InputAnswer(selected: [0])])
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [InteractionURLProtocol.self]
         let client = SourceClient(configuration: configuration)
-        let started = expectation(description: "Release POST started")
-        var loading: InteractionURLProtocol?
-        InteractionURLProtocol.start = { request in loading = request; started.fulfill() }
+        var origins: [String] = []
+        InteractionURLProtocol.start = { transport in
+            origins.append(transport.request.value(forHTTPHeaderField: "X-Paceman-Input-Origin") ?? "missing")
+            let receipt: [String: Any] = ["status": "submitted", "generation": submission.generation,
+                "requestID": submission.requestID, "version": submission.version]
+            transport.finish(try! JSONSerialization.data(withJSONObject: receipt))
+        }
         defer { InteractionURLProtocol.start = nil }
-        XCTAssertNil(inbox.releaseRequest(for: .init(sourceID: "another Mac", sessionID: identity.sessionID, provider: "claude"), client: client))
-        XCTAssertNil(inbox.releaseRequest(for: .init(sourceID: sourceID, sessionID: identity.sessionID, provider: "codex"), client: client))
-        let sending = inbox.releaseRequest(for: identity, client: client)
-        let original = try XCTUnwrap(inbox.response(for: item)?.submission)
-        XCTAssertEqual(original.action, "release", "Opening the agent app never grants a permission")
-        XCTAssertTrue(original.answers.isEmpty)
-        XCTAssertNil(inbox.releaseRequest(for: identity, client: client))
-        XCTAssertNil(inbox.submit(item, action: "allowOnce", client: client), "An in-flight handoff cannot become an approval")
-        await fulfillment(of: [started], timeout: 2)
-        let transport = try XCTUnwrap(loading)
-        let receipt = try JSONSerialization.data(withJSONObject: ["status": "submitted", "generation": original.generation,
-            "requestID": original.requestID, "version": original.version])
-        transport.client?.urlProtocol(transport, didReceive: HTTPURLResponse(url: source.endpoint,
-            statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
-        transport.client?.urlProtocol(transport, didLoad: receipt)
-        transport.client?.urlProtocolDidFinishLoading(transport)
-        await sending?.value
-        XCTAssertEqual(inbox.receipt(for: identity), .released)
+        try await client.submitInput(submission, source: source)
+        try await client.submitInput(submission, source: source, origin: .watch)
+        XCTAssertEqual(origins, ["phone", "watch"])
     }
 
     @MainActor func testBackgroundCompletionCannotRestoreRequestOrReceipt() async throws {
@@ -3513,60 +3502,70 @@ extension InteractionTests {
 
 
 extension InteractionTests {
-    @MainActor func testAgentHandoffReleasesWatchRequestWithoutAnsweringIt() async throws {
+    @MainActor func testAgentNavigationPreservesPendingReplacementAndSiblingRequests() async throws {
         let key = "pending-watch-handoff-v1", defaults = UserDefaults.standard
         let original = defaults.data(forKey: key)
-        let source = PairedSource(endpoint: URL(string: "https://watch-agent-release.example")!, sourceID: sourceID,
+        let source = PairedSource(endpoint: URL(string: "https://watch-agent-navigation.example")!, sourceID: sourceID,
             clientID: "client", credential: "fixture")
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [InteractionURLProtocol.self]
-        let listing = try JSONSerialization.data(withJSONObject: fixture())
-        let snapshot = refreshSnapshot(source, state: "needs_input", interactions: true)
-        let released = expectation(description: "Release the native request for the provider app")
-        var actions: [String] = []
-        InteractionURLProtocol.start = { transport in
-            if transport.request.httpMethod == "POST" {
-                var data = transport.request.httpBody ?? Data()
-                if let stream = transport.request.httpBodyStream {
-                    stream.open()
-                    defer { stream.close() }
-                    var buffer = [UInt8](repeating: 0, count: 4096)
-                    while stream.hasBytesAvailable {
-                        let count = stream.read(&buffer, maxLength: buffer.count)
-                        guard count > 0 else { break }
-                        data.append(contentsOf: buffer.prefix(count))
-                    }
-                }
-                var payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-                actions.append(payload["action"] as? String ?? "missing")
-                payload["status"] = "submitted"
-                transport.finish((try? JSONSerialization.data(withJSONObject: payload)) ?? Data())
-                released.fulfill()
-                return
-            }
-            transport.finish(transport.request.url?.path == "/v1/snapshot" ? snapshot : listing)
-        }
-        let model = CompanionModel(preview: true, push: PushCoordinator(), client: SourceClient(configuration: config),
-            appleWatchIdentity: { "watch" }, postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
-        model.pairedSources = [source]
-        model.snapshots = [:]
         defer {
-            model.setForeground(false)
             InteractionURLProtocol.start = nil
             SourceSnapshotCache.remove(at: SourceSnapshotCache.url(for: sourceID))
             if let original { defaults.set(original, forKey: key) } else { defaults.removeObject(forKey: key) }
         }
-        let identity = WorkIdentity(sourceID: sourceID, sessionID: String(repeating: "a", count: 64), provider: "claude")
-        let request = await model.handleWatchWork(["operation": "request", "sourceID": sourceID,
-            "sessionID": identity.sessionID, "provider": identity.provider])
-        XCTAssertNotNil(request["data"])
-        _ = await model.handleWatchWork(["operation": "continueOnPhone", "destination": "agent", "sourceID": sourceID,
-            "sessionID": identity.sessionID, "provider": identity.provider])
-        model.setForeground(true)
-        let pending = try XCTUnwrap(model.handoff)
-        XCTAssertNotNil(model.consumeAgentHandoff(pending))
-        await fulfillment(of: [released], timeout: 2)
-        XCTAssertEqual(actions, ["release"])
+        for scenario in ["unchanged", "replacement", "siblings", "new-generation", "failed-open"] {
+            defaults.removeObject(forKey: key)
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [InteractionURLProtocol.self]
+            let client = SourceClient(configuration: config)
+            var listing = fixture()
+            let snapshotData = refreshSnapshot(source, state: "needs_input", interactions: true)
+            var posts = 0
+            InteractionURLProtocol.start = { transport in
+                if transport.request.httpMethod == "POST" {
+                    posts += 1
+                    transport.finish(Data(), status: 409)
+                } else {
+                    transport.finish(transport.request.url?.path == "/v1/snapshot"
+                        ? snapshotData : try! JSONSerialization.data(withJSONObject: listing))
+                }
+            }
+            let model = CompanionModel(preview: true, push: PushCoordinator(), client: client,
+                appleWatchIdentity: { "watch" }, postHandoffNotification: { _ in false }, clearHandoffNotification: { _ in })
+            model.pairedSources = [source]
+            model.snapshots = [:]
+            defer { model.setForeground(false) }
+            let identity = WorkIdentity(sourceID: sourceID, sessionID: String(repeating: "a", count: 64), provider: "claude")
+            let request = await model.handleWatchWork(["operation": "request", "sourceID": sourceID,
+                "sessionID": identity.sessionID, "provider": identity.provider])
+            XCTAssertNotNil(request["data"], scenario)
+            _ = await model.handleWatchWork(["operation": "continueOnPhone", "destination": "agent", "sourceID": sourceID,
+                "sessionID": identity.sessionID, "provider": identity.provider])
+            model.setForeground(true)
+            let pending = try XCTUnwrap(model.handoff, scenario)
+            var requests = try XCTUnwrap(listing["requests"] as? [[String: Any]])
+            if scenario == "replacement" || scenario == "new-generation" {
+                requests[0]["requestID"] = UUID().uuidString
+            } else if scenario == "siblings" {
+                var sibling = requests[0]
+                sibling["requestID"] = UUID().uuidString
+                requests.append(sibling)
+            }
+            if scenario == "new-generation" { listing["generation"] = UUID().uuidString }
+            listing["requests"] = requests
+            let snapshot = try XCTUnwrap(model.snapshots[sourceID])
+            _ = await model.interactions.refresh(source, snapshot: snapshot, client: client)
+            let ids = model.interactions.items.map(\.id)
+            XCTAssertEqual(ids.count, scenario == "siblings" ? 2 : 1, scenario)
+            XCTAssertNotNil(model.consumeAgentHandoff(pending), scenario)
+            if scenario == "failed-open" { model.agentHandoffDidFailToOpen(pending.id) }
+            XCTAssertTrue(model.interactions.responses.isEmpty, "Navigation must not create a release or answer: " + scenario)
+            XCTAssertEqual(model.interactions.items.map(\.id), ids, scenario)
+            XCTAssertTrue(model.interactions.items.allSatisfy { model.interactions.isCurrent($0) }, scenario)
+            await Task.yield()
+            XCTAssertEqual(posts, 0, scenario)
+            XCTAssertNil(model.consumeAgentHandoff(pending), "A late navigation callback cannot run twice")
+            model.setForeground(false)
+        }
     }
 }
 

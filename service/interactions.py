@@ -234,7 +234,7 @@ class InteractionBroker:
                                  for p in self._pending.values()
                                  if p.public.get("contentVersion", 1) <= content_version]}
 
-    def submit(self, payload):
+    def submit(self, payload, *, trace_id=None, origin=None):
         _keys(payload, ("generation", "requestID", "version", "idempotencyKey", "action"), ("answers", "optionID"))
         generation = _identifier(payload["generation"])
         request_id = _identifier(payload["requestID"])
@@ -281,7 +281,8 @@ class InteractionBroker:
                 if receipt[1:3] != (key, fingerprint):
                     raise BrokerError("response_conflict", 409)
                 if self.diagnostics is not None:
-                    self.diagnostics.record("response_replayed", requestFingerprint=support_fingerprint(request_id))
+                    self.diagnostics.record("response_replayed", requestFingerprint=support_fingerprint(request_id),
+                                            action=action, traceID=trace_id, origin=origin)
                 return dict(receipt[3])
             pending = self._pending.get(request_id)
             if pending is None:
@@ -318,7 +319,7 @@ class InteractionBroker:
             while len(self._receipts) > 256:
                 self._receipts.popitem(last=False)
             pending.ready.set()
-            self._record("response_submitted", request)
+            self._record("response_submitted", request, action=action, traceID=trace_id, origin=origin)
             return dict(result)
 
     def cancel_all(self, reason="access_changed"):

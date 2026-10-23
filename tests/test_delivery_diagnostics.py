@@ -15,7 +15,7 @@ class DeliveryDiagnosticsTests(unittest.TestCase):
     def test_only_bounded_metadata_is_retained(self):
         self.sink.record('http_replied', operation='snapshot', httpStatus=200,
                          command='SECRET', credential='SECRET', reason='SECRET',
-                         requestFingerprint='SECRET', traceID='SECRET', durationMs=-1)
+                         requestFingerprint='SECRET', traceID='SECRET', action='SECRET', origin='SECRET', durationMs=-1)
         entry = json.loads(self.path.read_text())
         self.assertEqual(set(entry), {'at', 'stage', 'operation', 'httpStatus'})
         self.sink.record('SECRET')

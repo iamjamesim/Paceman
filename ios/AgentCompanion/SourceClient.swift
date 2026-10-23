@@ -4,6 +4,8 @@ import UIKit
 import DeviceCheck
 import CryptoKit
 
+enum InputSubmissionOrigin: String { case phone, watch }
+
 extension ClientDevice {
     @MainActor static func current() throws -> ClientDevice {
         let key = "client-installation-id"
@@ -197,9 +199,10 @@ final class SourceClient {
         return try InputRequests.decode(data, sourceID: source.sourceID)
     }
 
-    func submitInput(_ value: InputSubmission, source: PairedSource) async throws {
+    func submitInput(_ value: InputSubmission, source: PairedSource, origin: InputSubmissionOrigin = .phone) async throws {
         var request = URLRequest(url: source.endpoint.appendingPathComponent("v1/interactions"))
         request.httpMethod = "POST"
+        request.setValue(origin.rawValue, forHTTPHeaderField: "X-Paceman-Input-Origin")
         request.setValue("Bearer \(source.credential)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(value)

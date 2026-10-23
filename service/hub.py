@@ -508,7 +508,7 @@ class Server(ThreadingHTTPServer):
                 self.interactions.cancel_all()
                 self.interaction_access = state
 
-    def submit_interaction(self, token, payload):
+    def submit_interaction(self, token, payload, *, trace_id=None, origin=None):
         from service.interactions import BrokerError
         # Serialize authorization and consumption against revocation, including
         # revocation from the desktop's separate process. No network IO in this lock.
@@ -521,7 +521,7 @@ class Server(ThreadingHTTPServer):
                 self.interaction_access = state
             if digest(token) not in clients:
                 raise BrokerError("unauthorized", 401)
-            return self.interactions.submit(payload)
+            return self.interactions.submit(payload, trace_id=trace_id, origin=origin)
 
     def service_actions(self):
         # The accept loop must not wait for adapter/database/status-file locks.
@@ -632,7 +632,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not 0 < length <= 65536 or self.headers.get("Transfer-Encoding"):
                     raise ValueError()
                 payload = json.loads(self.rfile.read(length))
-                self.reply(200, self.server.submit_interaction(token, payload))
+                self.reply(200, self.server.submit_interaction(token, payload,
+                    trace_id=self.headers.get("X-Paceman-Trace-ID"),
+                    origin=self.headers.get("X-Paceman-Input-Origin")))
             except BrokerError as error:
                 self.reply(error.status, {"error": error.code})
             except (ValueError, TypeError, AttributeError, TimeoutError, RecursionError):

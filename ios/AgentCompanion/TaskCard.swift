@@ -441,19 +441,13 @@ struct TaskCard: View {
 
     private var handoffOpen: SessionOpenButton? {
         guard case .handoff = selection, let item, item.session.appURL != nil else { return nil }
-        return SessionOpenButton(session: item.session, theme: theme, expanded: true,
-            prepareToOpen: releaseRequest) { self.item?.session }
+        return SessionOpenButton(session: item.session, theme: theme, expanded: true) { self.item?.session }
     }
 
     private var fallbackOpen: SessionOpenButton? {
         if let handoffOpen { return handoffOpen }
         guard needsAgentApp || isTaskDetail, let item, item.session.appURL != nil else { return nil }
-        return SessionOpenButton(session: item.session, theme: theme, expanded: true,
-            prepareToOpen: releaseRequest) { self.item?.session }
-    }
-
-    private func releaseRequest() {
-        if let identity = item?.id { inbox.releaseRequest(for: identity) }
+        return SessionOpenButton(session: item.session, theme: theme, expanded: true) { self.item?.session }
     }
 
     private func continuationTitle(_ item: WorkItem) -> String {
@@ -520,7 +514,6 @@ struct SessionOpenButton: View {
     let session: AgentSession
     let theme: CompanionTheme
     var expanded = false
-    var prepareToOpen: (() -> Void)? = nil
     let currentSession: () -> AgentSession?
     @Environment(\.openURL) private var openURL
     @State private var issue: String?
@@ -530,7 +523,6 @@ struct SessionOpenButton: View {
                 issue = "This session is no longer available. Check the latest activity in Paceman."
                 return
             }
-            prepareToOpen?()
             openURL(url) { accepted in
                 if !accepted { issue = "Couldn’t open the agent app. Check that it’s installed on this iPhone." }
             }
