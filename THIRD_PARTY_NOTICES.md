@@ -1,5 +1,11 @@
 # Third-party notices
 
+## Sparkle
+
+The Mac release embeds [Sparkle](https://github.com/sparkle-project/Sparkle)
+under the MIT license. `macos/sparkle.json` pins the official binary release
+and SHA-256; the app includes its original license and provenance in Notices.
+
 ## Omarchy Watch
 
 `firmware/esp32-watch/` includes code from Omarchy Watch v0.6.1,

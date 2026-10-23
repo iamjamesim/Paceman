@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import signal
 import sqlite3
 import threading
 import time
@@ -741,6 +742,9 @@ def main():
     args = parser.parse_args()
     if args.command == "serve" and args.interaction_socket and args.source != "synthetic":
         parser.error("Custom interaction sockets are synthetic-only; native sources use their owned adapters")
+    if args.command == 'serve' and args.source == 'macos':
+        from macos.updates import check_service_start
+        check_service_start(args.data_dir.parent)
     store = Store(args.data_dir / "hub.sqlite3")
     if args.command == "serve":
         from contextlib import ExitStack
@@ -843,6 +847,16 @@ def main():
                     stack.enter_context(remote)
                     if server.desktop_status is not None:
                         server.desktop_status.native_responders = {'codexDaemon': daemon, 'claudeRemote': remote}
+            if args.source == 'macos':
+                from service.update_control import UpdateControl
+                stack.enter_context(UpdateControl(args.data_dir.parent / 'update.sock', store,
+                                                   server.adapter, server.interactions))
+                # SIGTERM must unwind the same ExitStack as the interactive stop.
+                previous = signal.getsignal(signal.SIGTERM)
+                def terminate(_number, _frame):
+                    raise KeyboardInterrupt
+                signal.signal(signal.SIGTERM, terminate)
+                stack.callback(signal.signal, signal.SIGTERM, previous)
             print(f"{args.source.title()} source listening on 127.0.0.1:{server.server_port}", flush=True)
             try:
                 server.serve_forever(poll_interval=0.25)

@@ -2,6 +2,84 @@ import SwiftUI
 import CoreImage.CIFilterBuiltins
 import ServiceManagement
 import UniformTypeIdentifiers
+#if canImport(Sparkle)
+import Sparkle
+#endif
+
+@MainActor
+private final class PacemanUpdater: NSObject, ObservableObject {
+    static let shared = PacemanUpdater()
+    static let downloadURL = URL(string: "https://github.com/iamjamesim/Paceman/releases/latest")!
+    @Published private(set) var canCheck = false
+    @Published private(set) var configured = false
+    @Published private(set) var updateAvailable = false
+    private(set) var installationPending = false
+    var hidePanel: () -> Void = {}
+    var allowsUpdate: () -> Bool = { false }
+    #if canImport(Sparkle)
+    private var controller: SPUStandardUpdaterController?
+    private var observation: NSKeyValueObservation?
+    #endif
+
+    func start() {
+        #if canImport(Sparkle)
+        guard controller == nil, InstalledBuild.isInApplications,
+              !FileManager.default.fileExists(atPath: InstalledBuild.updateJournal),
+              Bundle.main.object(forInfoDictionaryKey: "SURequireSignedFeed") as? Bool == true,
+              Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String != nil,
+              Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String != nil else { return }
+        let controller = SPUStandardUpdaterController(startingUpdater: false,
+            updaterDelegate: self, userDriverDelegate: self)
+        self.controller = controller
+        configured = true
+        observation = controller.updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] updater, _ in
+            MainActor.assumeIsolated { self?.canCheck = updater.canCheckForUpdates }
+        }
+        controller.startUpdater()
+        #endif
+    }
+
+    func check() {
+        #if canImport(Sparkle)
+        controller?.checkForUpdates(nil)
+        #endif
+    }
+}
+
+#if canImport(Sparkle)
+extension PacemanUpdater: SPUUpdaterDelegate, @MainActor SPUStandardUserDriverDelegate {
+    func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
+        guard allowsUpdate() else {
+            throw NSError(domain: "PacemanUpdate", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Finish Paceman setup or the current operation before checking for updates."])
+        }
+    }
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        installationPending = true
+    }
+    func updater(_ updater: SPUUpdater, didExtractUpdate item: SUAppcastItem) {
+        // A staged installer can install on a later ordinary Quit, before the
+        // willInstallUpdate callback. Guard that path as well as Install Now.
+        installationPending = true
+    }
+    func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice,
+                 forUpdate item: SUAppcastItem, state: SPUUserUpdateState) {
+        if state.stage == .installing && choice != .skip { installationPending = true }
+    }
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        installationPending = false
+    }
+    func standardUserDriverWillShowModalAlert() { hidePanel() }
+    var supportsGentleScheduledUpdateReminders: Bool { true }
+    func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem,
+                                                              andInImmediateFocus immediateFocus: Bool) -> Bool { false }
+    func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool,
+                                                   forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
+        updateAvailable = !handleShowingUpdate
+    }
+    func standardUserDriverWillFinishUpdateSession() { updateAvailable = false }
+}
+#endif
 
 private enum SetupGuide {
     static let url = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md")!
@@ -84,6 +162,7 @@ private enum InstalledBuild {
     static let notificationMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/notification-setup-incomplete"
     static let loginAttentionMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/login-setup-incomplete"
     static let loginMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/menu-login-configured"
+    static let updateJournal = NSHomeDirectory() + "/Library/Application Support/Paceman/update-pending.json"
 
     static var needsUpgrade: Bool {
         requiresUpgrade(bundle: .main,
@@ -155,7 +234,7 @@ private final class PanelModel: ObservableObject {
     @Published var loginStatus = SMAppService.mainApp.status
     @Published var expanded: String?
     @Published var confirming: String?
-    enum Operation { case idle, installing, upgrading, command, pairing, savingReport, uninstalling, uninstalled }
+    enum Operation { case idle, installing, upgrading, updating, command, pairing, savingReport, uninstalling, uninstalled }
     @Published private(set) var operation = Operation.idle
     @Published var needsInstallation: Bool
     @Published private(set) var upgradePending: Bool
@@ -392,6 +471,22 @@ private final class PanelModel: ObservableObject {
         return true
     }
 
+    func updateHandoff(recover: Bool = false, onComplete: @escaping (Bool) -> Void) {
+        guard begin(.updating) else { onComplete(false); return }
+        let command = self.command
+        DispatchQueue.global(qos: .userInitiated).async {
+            let (ok, result) = command([recover ? "recover-update" : "prepare-update"])
+            DispatchQueue.main.async {
+                if recover || !ok { self.operation = .idle }
+                if !ok {
+                    self.message = result.split(separator: "\n").last.map(String.init)
+                        ?? "Paceman could not prepare the update. Your current installation was kept."
+                }
+                onComplete(ok)
+            }
+        }
+    }
+
     func installBundled() {
         guard (needsNotificationRepair || ((hasReadStatus || installationProviders != nil) && !setupProviders.isEmpty)), begin(.installing) else { return }
         let providers = needsNotificationRepair ? nil : setupProviders
@@ -510,6 +605,10 @@ private final class PanelModel: ObservableObject {
     }
 
     func uninstall(onSuccess: @escaping () -> Void) {
+        guard !PacemanUpdater.shared.installationPending else {
+            message = "Restart Paceman to finish the pending update before uninstalling."
+            return
+        }
         run(["uninstall", "--yes"], onSuccess: { _ in
             self.operation = .uninstalled
             self.endPairing()
@@ -1005,6 +1104,7 @@ private struct UninstallConfirmationView: View {
 
 private struct ManagementView: View {
     @ObservedObject var model: PanelModel
+    @ObservedObject private var updater = PacemanUpdater.shared
     var onReview: () -> Void = {}
     @State private var confirmingUninstall = false
 
@@ -1044,6 +1144,18 @@ private struct ManagementView: View {
                         NSApplication.shared.activate(ignoringOtherApps: true)
                     }.disabled(model.busy || model.status.selectedProviders.isEmpty)
                     Divider()
+                    HStack {
+                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        if updater.configured {
+                            Button(updater.updateAvailable ? "Update Available…" : "Check for Updates…") { updater.check() }
+                                .disabled(model.busy || !updater.canCheck)
+                        } else {
+                            Link("Download Latest…", destination: PacemanUpdater.downloadURL)
+                        }
+                    }
+                    Divider()
                     Button("Save support report…") { model.saveSupportReport() }
                         .disabled(model.busy)
                     BulletList(items: [
@@ -1080,6 +1192,7 @@ private struct ManagementView: View {
 
 private struct Panel: View {
     @ObservedObject var model: PanelModel
+    @ObservedObject private var updater = PacemanUpdater.shared
     var onOpenSetup: () -> Void = {}
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -1241,6 +1354,10 @@ private struct Panel: View {
                     Button("Restart Paceman") { model.run(["restart"]) }.font(.caption)
                 }
             }
+            if updater.configured && updater.updateAvailable {
+                Button("Update Available…") { updater.check() }
+                    .disabled(model.busy || !updater.canCheck)
+            }
             HStack {
                 Button("Manage Paceman…") { model.showingManagement = true }
                 Spacer()
@@ -1343,6 +1460,7 @@ private struct MenuActivityRobot: View {
 @MainActor
 private final class PacemanAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate {
     let model: PanelModel
+    private let updater = PacemanUpdater.shared
 
     override init() {
         model = PanelModel()
@@ -1372,14 +1490,36 @@ private final class PacemanAppDelegate: NSObject, NSApplicationDelegate, NSWindo
         statusItem = item
         popover.behavior = .transient
         popover.delegate = self
-        if model.upgradeBundled(onComplete: { [weak self] in
+        updater.allowsUpdate = { [weak self] in
+            guard let self else { return false }
+            return !self.model.busy && !self.model.shouldPresentSetup
+        }
+        updater.hidePanel = { [weak self] in self?.popover.performClose(nil) }
+        let finished: () -> Void = { [weak self] in
             guard let self else { return }
+            self.updater.start()
             if self.model.shouldPresentSetup { self.showSetup() }
             else { self.setupWindow?.close(); self.showPanel() }
-        }) {
+        }
+        if model.upgradeBundled(onComplete: finished) {
             showSetup()
-        } else if model.shouldPresentSetup || CommandLine.arguments.contains("--show-setup") { showSetup() }
+        } else if FileManager.default.fileExists(atPath: InstalledBuild.updateJournal) {
+            model.updateHandoff(recover: true) { _ in finished() }
+        } else {
+            updater.start()
+            if model.shouldPresentSetup || CommandLine.arguments.contains("--show-setup") { showSetup() }
+        }
         #endif
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if model.uninstalled { return .terminateNow }
+        guard updater.installationPending else { return model.busy ? .terminateCancel : .terminateNow }
+        model.updateHandoff { [weak self] ok in
+            sender.reply(toApplicationShouldTerminate: ok)
+            if !ok { self?.showPanel() }
+        }
+        return .terminateLater
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

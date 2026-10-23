@@ -15,6 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 
 from macos.codex_hook import QUESTION_MATCHER
 from macos.agents import CLAUDE_PURPOSES, provider_config, PROVIDERS, configured_providers, setup_providers, hook_path, installed_hook_command
@@ -196,14 +197,17 @@ def install_hooks(path: Path | None = None, *, provider="codex"):
 
 def build_app(destination: Path | None = None, *, version: str = "0.1",
               build_number: str = "1", minimum_macos: str = "15.0",
-              sign: bool = True):
+              sign: bool = True, sparkle_framework: Path | None = None, updater_settings: dict | None = None):
     destination = destination or APP
     executable = destination / "Contents/MacOS/Paceman"
     executable.parent.mkdir(parents=True, exist_ok=True)
+    framework_flags = (["-F", str(sparkle_framework.parent), "-framework", "Sparkle",
+                        "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]
+                       if sparkle_framework else [])
     subprocess.run(["/usr/bin/xcrun", "swiftc", "-O", "-parse-as-library", "-target",
                     f"arm64-apple-macosx{minimum_macos}", str(REPO / "macos/PacemanMac.swift"),
                     str(REPO / "ios/Shared/PacemanMark.swift"),
-                    "-o", str(executable)], check=True, cwd=REPO)
+                    *framework_flags, "-o", str(executable)], check=True, cwd=REPO)
     subprocess.run(["/usr/bin/xcrun", "clang", "-O2", "-Wall", "-Wextra", "-target",
                     f"arm64-apple-macos{minimum_macos}", str(REPO / "macos/PacemanBackground.c"),
                     "-o", str(executable.parent / "PacemanBackground")], check=True, cwd=REPO)
@@ -228,7 +232,14 @@ def build_app(destination: Path | None = None, *, version: str = "0.1",
             "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version,
             "CFBundleVersion": build_number, "LSMinimumSystemVersion": minimum_macos,
             "LSUIElement": True}
+    if updater_settings:
+        if sparkle_framework is None:
+            raise ValueError('Updater settings require the pinned Sparkle framework')
+        info.update(updater_settings)
     (destination / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
+    if sparkle_framework:
+        from scripts.sparkle_dependency import embed
+        embed(sparkle_framework, destination)
     if not sign:
         return
     identity = signing_identity() or "-"
@@ -350,7 +361,7 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
     document = {"Label": LABEL, "AssociatedBundleIdentifiers": [BUNDLE_ID],
                 "ProgramArguments": [str(APP / "Contents/MacOS/PacemanBackground"),
                                      PYTHON, str(ROOT), push_python],
-                "WorkingDirectory": str(lib), "RunAtLoad": True, "KeepAlive": True,
+                "WorkingDirectory": str(lib), "RunAtLoad": True, "KeepAlive": {"SuccessfulExit": False},
                 "StandardOutPath": str(ROOT / "background.log"),
                 "StandardErrorPath": str(ROOT / "background-error.log")}
     staged_plist.write_bytes(plistlib.dumps(document))
@@ -428,9 +439,17 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
         # The source reads its selected providers during startup. Commit this
         # before bootstrap so a fresh Claude install cannot start Codex-only.
         replace(staged_agents, ROOT / "agents.json", "agents.json")
+        started = time.time()
+        if upgrade:
+            from macos import updates
+            updates.before_start(ROOT)
         if not (ROOT / "sharing-paused").exists():
             subprocess.run(["/bin/launchctl", "enable", label], check=True)
             subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(PLIST)], check=True)
+            if upgrade:
+                journal = ROOT / 'update-pending.json'
+                source_id = json.loads(journal.read_text()).get('sourceID') if journal.exists() else None
+                updates.wait_ready(ROOT, install_build(REPO), source_id=source_id, started=started)
         if PUSH_PLIST.is_file():
             replace(None, PUSH_PLIST, "push.plist")
         for provider, (staged_hooks, hooks_path) in staged_hooks_by_provider.items():
@@ -450,7 +469,12 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                     backup.replace(target)
             except OSError as rollback_error:
                 rollback_errors.append(str(rollback_error))
-        if source_was_loaded and PLIST.is_file():
+        if upgrade:
+            # Sparkle already replaced the app/runtime. Do not restart restored
+            # older library code against that runtime or roll back its database.
+            from macos.updates import _write
+            _write(ROOT / 'update-stopped', True)
+        if source_was_loaded and PLIST.is_file() and not upgrade:
             try:
                 restored = subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(PLIST)],
                                           capture_output=True, text=True)
@@ -458,7 +482,7 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
                     rollback_errors.append(f"could not restart previous Paceman source: {restored.stderr.strip()}")
             except OSError as rollback_error:
                 rollback_errors.append(f"could not restart previous Paceman source: {rollback_error}")
-        if push_was_loaded and PUSH_PLIST.is_file():
+        if push_was_loaded and PUSH_PLIST.is_file() and not upgrade:
             try:
                 restored = subprocess.run(["/bin/launchctl", "bootstrap", f"gui/{os.getuid()}", str(PUSH_PLIST)],
                                           capture_output=True, text=True)
@@ -609,6 +633,9 @@ def _finish_install(staged_app: Path, *, relay_url: str | None = None,
             temporary.unlink(missing_ok=True)
     else:
         installed_build.unlink(missing_ok=True)
+    if upgrade:
+        from macos.updates import complete
+        complete(ROOT)
     notification_marker = ROOT / "notification-setup-incomplete"
     if notifications_ready:
         notification_marker.unlink(missing_ok=True)

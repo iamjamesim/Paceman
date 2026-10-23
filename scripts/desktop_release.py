@@ -173,6 +173,9 @@ def prepare(args):
                "--notes-file", args.notes_file.resolve()]
     if args.resume:
         command.append("--resume")
+    for name in ('sparkle_archive', 'updater_config'):
+        if getattr(args, name, None):
+            command += ['--' + name.replace('_', '-'), getattr(args, name).resolve()]
     run(*command)
     write_json(directory / "ci-evidence.json", checks[0])
     print(f"Prepared {directory}. Next: stage, test the downloaded artifacts, record QA, then publish.")
@@ -304,6 +307,8 @@ def main():
     build.add_argument("--notary-profile", default="paceman-release")
     build.add_argument("--output-dir", type=Path)
     build.add_argument("--notes-file", type=Path, required=True)
+    build.add_argument("--sparkle-archive", type=Path)
+    build.add_argument("--updater-config", type=Path, help="Public feedURL and publicEDKey only")
     build.add_argument("--resume", action="store_true")
     for name in ("stage", "verify", "status", "qa", "publish"):
         sub = commands.add_parser(name)

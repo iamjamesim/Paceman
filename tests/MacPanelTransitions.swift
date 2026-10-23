@@ -554,10 +554,38 @@ private struct MacPanelTransitions {
             await until("uninstall retry") { c.count == 3 }; c.reply(2)
             await until("uninstalled") { finished }
             assert(m.uninstalled && m.busy)
+            let delegate = PacemanAppDelegate(model: m)
+            assert(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateNow)
             m.refresh(); m.setSharing(true); m.beginPairing()
             c.reply(0, true, live)
             try! await Task.sleep(nanoseconds: 50_000_000)
             assert(c.count == 3 && !m.status.running && m.pairingCode == nil)
+        }
+        // Update termination waits for a successful handoff; refusal stays usable.
+        #if canImport(Sparkle)
+        // Optional Objective-C callbacks must use Sparkle's exact selectors.
+        for selector in ["updater:didExtractUpdate:", "updater:willInstallUpdate:",
+                         "updater:userDidMakeChoice:forUpdate:state:",
+                         "standardUserDriverShouldHandleShowingScheduledUpdate:andInImmediateFocus:",
+                         "standardUserDriverWillHandleShowingUpdate:forUpdate:state:"] {
+            assert(PacemanUpdater.shared.responds(to: NSSelectorFromString(selector)))
+        }
+        #endif
+        for recover in [false, true] {
+            for success in [false, true] {
+                let c = ControlledCommands(); let m = model(c)
+                var completion: Bool?
+                m.updateHandoff(recover: recover) { completion = $0 }
+                await until("update command") { c.count == 1 }
+                assert(c.args(0) == [recover ? "recover-update" : "prepare-update"])
+                m.setSharing(false) // Configuration cannot race the handoff.
+                assert(c.count == 1 && m.busy)
+                c.reply(0, success, "Finish pending responses first.")
+                await until("update handoff") { completion != nil }
+                assert(completion == success)
+                assert(m.busy == (success && !recover))
+                if !success { assert(m.message == "Finish pending responses first.") }
+            }
         }
         print("Mac panel transition scenarios passed")
     }

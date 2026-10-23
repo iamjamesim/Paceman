@@ -206,7 +206,7 @@ def configure_agents(providers):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "support", "pair", "share-on", "share-off", "restart", "remove-access", "uninstall", "agents"))
+    parser.add_argument("command", choices=("status", "support", "pair", "share-on", "share-off", "restart", "remove-access", "uninstall", "agents", "prepare-update", "recover-update"))
     parser.add_argument("--client-id")
     parser.add_argument("--providers", nargs="*", choices=PROVIDERS)
     parser.add_argument("--yes", action="store_true", help="Confirm complete Mac uninstall")
@@ -214,6 +214,10 @@ def main():
     try:
         if args.command == "status":
             print(json.dumps(status(), separators=(",", ":")))
+        elif args.command in ('prepare-update', 'recover-update'):
+            from macos import updates
+            operation = updates.prepare if args.command == 'prepare-update' else updates.recover
+            operation(ROOT, PLIST, installed_app())
         elif args.command == "support":
             from macos.support import report
             app = installed_app()

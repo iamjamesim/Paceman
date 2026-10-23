@@ -15,9 +15,28 @@ check phone/desktop compatibility before either update. Private GitHub releases
 require repository access.
 
 Mac updates replace the app using a newer DMG and preserve Application
-Support data. Omarchy updates rerun the newer archive. Integrated updates are
-future work. Keep `ai.paceman.macos` and `ai.paceman.source`
+Support data. Omarchy updates rerun the newer archive. Keep `ai.paceman.macos` and `ai.paceman.source`
 stable after the first release.
+
+Mac packages embed the official Sparkle framework pinned in `macos/sparkle.json`.
+To enable in-app updates, pass `--updater-config PATH` through release preparation;
+that JSON contains only `feedURL` (public HTTPS) and `publicEDKey` (base64 Ed25519
+public key). No feed or publisher key is bundled by default: those builds retain
+the download-page fallback. `--sparkle-archive PATH` uses the pinned archive offline.
+
+Configured builds check daily and show an Update Available notice without taking
+focus. Installation and restart are user-controlled;
+unattended installation is disabled. Active work or unresolved responses defer
+restart. The handoff stops Paceman's workers, checkpoints SQLite, preserves Sharing
+and agent choices, and verifies the new running service build. A failed handoff
+keeps recovery data and offers retry; it never automatically restores an older
+database. Existing manual installations need one manual updater-enabled upgrade.
+
+Updater publication additionally requires an approved publisher signing key and
+feed location. Use Sparkle's official tools to sign the final notarized archive,
+appcast and release notes. Signed feeds and pre-extraction verification are required;
+signature failure never falls back to unsigned updates. Promote the feed only after
+the exact public artifacts pass release QA. Do not replace versioned artifacts.
 
 The Mac bundle includes the runtime pinned in
 [`macos/python-runtime.json`](../macos/python-runtime.json) and wheels pinned in
