@@ -156,16 +156,15 @@ private struct PairingCode: Identifiable {
 
 private struct UpdateAvailableButton: View {
     let action: () -> Void
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button(action: action) {
             Image(systemName: "arrow.down")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.blue)
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(.blue, in: Circle())
                 .frame(width: 28, height: 28)
-                .background(.blue.opacity(colorScheme == .dark ? 0.25 : 0.14), in: Circle())
-                .overlay(Circle().strokeBorder(.blue.opacity(0.22), lineWidth: 1))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
