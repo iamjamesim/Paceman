@@ -9,6 +9,10 @@ Paceman brings Codex and Claude Code activity from your Mac or Omarchy computer
 to your iPhone Lock Screen and Apple Watch, so you can step away while your
 agents build.
 
+You can also respond to supported questions and approval requests on iPhone and
+Apple Watch. Unsupported requests continue in the agent’s app; see
+[coverage and limits](docs/native-request-coverage.md).
+
 <p align="center">
   <a href="docs/images/iphone-live-activity.png"><img src="docs/images/iphone-live-activity.png" alt="Paceman Live Activity on an iPhone Lock Screen" width="320"></a>
   <a href="docs/images/apple-watch-smart-stack.jpg"><img src="docs/images/apple-watch-smart-stack.jpg" alt="Paceman in the Apple Watch Smart Stack" width="320"></a>
@@ -30,20 +34,30 @@ releases, and Paceman iOS is available through TestFlight.
 
 - **iPhone:** iOS 18+.
 - **Computer:** Apple Silicon Mac with macOS 15+, or Omarchy 4.0+ with Python 3.11+ and user systemd.
-- **Agent:** Codex or Claude Code 2.1.196+ installed on your computer.
+- **Agent:** Codex or Claude Code 2.1.196+ installed and running on a computer
+  with Paceman set up and paired to your iPhone.
+- **Claude Code responses:** an eligible claude.ai account with Remote Control
+  enabled and active for the session. API-key-only and alternative-provider setups
+  do not qualify; see [Anthropic’s requirements](https://code.claude.com/docs/en/remote-control#requirements).
 - **Connection:** [Tailscale](https://tailscale.com/download) on your computer and iPhone.
-- **Apple Watch (optional):** watchOS 26+.
+- **Apple Watch (optional):** watchOS 26+. Session browsing, request review and
+  answers require a live connection to the paired iPhone. Codex usage can update
+  directly for complications; see [Watch connections](docs/architecture.md#watches).
+
+Reviewed hooks provide activity monitoring separately; they do not enable
+responses.
 
 ### How it connects
 
-Each computer runs a local status service. The iPhone reads authenticated HTTPS
-snapshots through [Tailscale](https://tailscale.com), so the service remains
-reachable away from the local network without exposing its API to the public
-internet.
+Each computer runs a local service. The iPhone reads activity and usage snapshots
+and exchanges supported requests and answers over authenticated HTTPS through
+[Tailscale](https://tailscale.com), so the service remains reachable away from
+the local network without exposing its API to the public internet.
 
 The service listens on loopback. Paceman configures Tailscale Serve and issues a
-separate credential for each paired phone. Notifications and Live Activities use
-Paceman's relay and Apple Push Notification service.
+separate credential for each paired phone. Notifications, Live Activities and
+Apple Watch activity updates use Paceman's relay and Apple Push Notification
+service.
 
 ### Availability gaps
 
@@ -75,12 +89,18 @@ above.
 
 ## Privacy
 
-- Current activity monitoring shares status, Codex usage, and limited metadata,
-  including optional session titles. It does not include prompts, agent replies,
-  or tool arguments.
-- Optional project labels can appear on your Lock Screen.
+- Activity snapshots and notification payloads contain status, Codex usage and
+  limited metadata, including optional session titles. They exclude prompts,
+  agent replies and tool arguments. Optional project labels can appear on your
+  Lock Screen.
+- Supported request content and your answers travel privately between your
+  computer and paired iPhone, and through the iPhone to Apple Watch. They are
+  excluded from activity snapshots and Paceman’s relay/APNs payloads.
+- Claude Code requests and responses also use its existing Remote Control
+  connection through Anthropic.
 
-See the [privacy policy](https://paceman.ai/privacy) for service providers,
+See [data and lifecycle](docs/data-lifecycle.md#questions-and-approvals) for data
+flow, and the [privacy policy](https://paceman.ai/privacy) for service providers,
 diagnostics, retention and privacy requests.
 
 ## Documentation
