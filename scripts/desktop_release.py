@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import html
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,12 @@ import re
 import subprocess
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
+
+if __package__:
+    from . import sparkle_dependency
+else:
+    import sparkle_dependency
 
 ROOT = Path(__file__).resolve().parent.parent
 REPOSITORY = "iamjamesim/Paceman"
@@ -31,6 +38,13 @@ QA_CHECKS = {
     "phone-compatibility": "Record TestFlight versions and old/new desktop compatibility",
 }
 UPGRADE_CHECKS = {"mac-upgrade", "omarchy-upgrade"}
+UPDATER_QA_CHECKS = {
+    "mac-signed-update": "Isolated signed test-feed update; preserve identity, pairings, choices, and history",
+    "mac-signed-recovery": "Signed update busy deferral, cancellation, relaunch, and failed-handoff recovery",
+}
+FEED_ORIGIN = "https://updates.paceman.ai"
+SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
+ET.register_namespace("sparkle", SPARKLE_NS)
 
 
 def run(*args, **kwargs):
@@ -82,6 +96,13 @@ def verify(directory, *, platform_checks=True, manifest=None):
         raise ValueError("Invalid release version or source revision")
     if manifest.get("mode") != "developer-id-notarized":
         raise ValueError("Only Developer ID signed and notarized packages can be staged")
+    if manifest.get("updater") is not None:
+        sparkle_dependency.public_update_settings(manifest["updater"])
+        if (manifest.get("sparkleLockSHA256") != sha256(ROOT / "macos/sparkle.json")
+                or not isinstance(manifest.get("buildNumber"), int) or manifest["buildNumber"] < 1):
+            raise ValueError("Updater provenance must match the pinned Sparkle and positive build number")
+    elif manifest.get("updaterConfigSHA256"):
+        raise ValueError("Updater-enabled manifest is missing its public updater configuration; prepare again")
     expected_artifacts = {f"Paceman-Omarchy-{version}.tar.gz",
                           f"Paceman-macos-arm64-{version}.dmg"}
     artifacts = manifest.get("artifacts", [])
@@ -268,24 +289,144 @@ def record_qa(args):
     print(f"Recorded {args.check}: {args.result}")
 
 
-def require_qa(record, *, previous_releases):
-    for name in QA_CHECKS:
+def require_qa(record, *, previous_releases, updater=False):
+    required = QA_CHECKS | (UPDATER_QA_CHECKS if updater else {})
+    for name in required:
         check = record.get("checks", {}).get(name, {})
         result = check.get("result")
         first_upgrade = name in UPGRADE_CHECKS and not previous_releases and result == "not-applicable"
         if (result != "passed" and not first_upgrade) or not check.get("notes", "").strip():
-            raise ValueError(f"Release QA incomplete: {name} — {QA_CHECKS[name]}")
+            raise ValueError(f"Release QA incomplete: {name} — {required[name]}")
 
 
-def publish(directory):
+def feed_preflight(manifest, *, channel, pages_dir, sparkle_archive, account, approved):
+    """No credential lookup or remote mutation until the opt-in is complete."""
+    if not any((channel, pages_dir, sparkle_archive, account, approved)):
+        if manifest.get("updater"):
+            raise ValueError("Updater releases require the guarded feed staging options")
+        return
+    if (not approved or channel not in ("stable", "test") or not pages_dir
+            or not sparkle_archive or not account or not manifest.get("updater")):
+        raise ValueError("Feed staging needs --approve-feed-signing, channel, Pages checkout, pinned archive, account, and updater config")
+    packaged_feed = manifest["updater"]["feedURL"]
+    if (packaged_feed not in {f"{FEED_ORIGIN}/macos/{name}/appcast.xml" for name in ("stable", "test")}
+            or (channel == "stable" and packaged_feed != f"{FEED_ORIGIN}/macos/stable/appcast.xml")):
+        raise ValueError("Feed channel differs from the packaged updater configuration")
+    if channel == "stable" and "-" in manifest["version"]:
+        raise ValueError("Prereleases belong on the isolated test feed")
+    pages_dir = Path(pages_dir).expanduser().resolve()
+    if (output("git", "-C", pages_dir, "rev-parse", "--show-toplevel") != str(pages_dir)
+            or output("git", "-C", pages_dir, "branch", "--show-current") != "gh-pages"
+            or output("git", "-C", pages_dir, "remote", "get-url", "origin").casefold()
+            not in (f"https://github.com/{REPOSITORY.casefold()}.git", f"git@github.com:{REPOSITORY.casefold()}.git")):
+        raise ValueError("Use a separate gh-pages checkout of the public Paceman repository")
+    if ((pages_dir / "CNAME").read_text().strip() != "updates.paceman.ai"
+            or not (pages_dir / ".nojekyll").is_file()):
+        raise ValueError("Review the Pages bootstrap (CNAME and .nojekyll) before staging a feed")
+    target = f"macos/{channel}/appcast.xml"
+    changed = output("git", "-C", pages_dir, "diff", "--name-only", "HEAD").splitlines()
+    untracked = output("git", "-C", pages_dir, "ls-files", "--others", "--exclude-standard").splitlines()
+    if any(path != target for path in changed + untracked):
+        raise ValueError("Pages checkout has unrelated changes")
+    if (pages_dir / "macos").is_symlink() or (pages_dir / "macos" / channel).is_symlink() or (pages_dir / target).is_symlink():
+        raise ValueError("Feed paths must not be symlinks")
+
+
+def public_download_check(directory, manifest, names):
+    """Check the anonymous HTTPS URLs the updater will actually use."""
+    prefix = f"https://github.com/{REPOSITORY}/releases/download/desktop-v{manifest['version']}/"
+    with tempfile.TemporaryDirectory(prefix="paceman-public-download-") as temporary:
+        for name in names:
+            path = Path(temporary) / name
+            run("curl", "--disable", "--fail", "--silent", "--show-error", "--location", "--proto", "=https",
+                "--proto-redir", "=https", "--output", path, prefix + name)
+            if sha256(path) != sha256(directory / name):
+                raise ValueError(f"Public release asset differs: {name}")
+    return prefix
+
+
+def record_feed_staging(directory, manifest, channel, target):
+    write_json(directory / "feed-staging.json", {
+        "channel": channel, "path": str(target), "feedSHA256": sha256(target),
+        "checksumsSHA256": sha256(directory / "SHA256SUMS"),
+        "sourceRevision": manifest["sourceRevision"], "published": False,
+    })
+
+
+def stage_feed(directory, manifest, names, *, channel, pages_dir, sparkle_archive, account):
+    """Stage signed static bytes locally. Commit/push/Pages activation are separate approvals."""
+    prefix = public_download_check(directory, manifest, names)
+    target = Path(pages_dir).expanduser().resolve() / "macos" / channel / "appcast.xml"
+    notes = "<pre>" + html.escape((directory / "RELEASE-NOTES.md").read_text()) + "</pre>"
+    with tempfile.TemporaryDirectory(prefix="paceman-feed-") as temporary:
+        scratch = Path(temporary)
+        tools = sparkle_dependency.framework(Path(sparkle_archive), scratch).parent / "bin"
+        if output(tools / "generate_keys", "--account", account, "-p") != manifest["updater"]["publicEDKey"]:
+            raise ValueError("Keychain publisher public key differs from the packaged key")
+        mac = directory / f"Paceman-macos-arm64-{manifest['version']}.dmg"
+        signature = output(tools / "sign_update", "--account", account, "-p", mac)
+        run(tools / "sign_update", "--account", account, "--verify", mac, signature)
+        if target.exists():
+            run(tools / "sign_update", "--account", account, "--verify", target)
+            feed = ET.parse(target).getroot()
+            if feed.tag != "rss" or feed.find("channel") is None:
+                raise ValueError("Existing feed is not an RSS appcast")
+        else:
+            feed = ET.Element("rss", {"version": "2.0"})
+            container = ET.SubElement(feed, "channel")
+            ET.SubElement(container, "title").text = "Paceman Mac updates"
+        container = feed.find("channel")
+        item = ET.Element("item")
+        ET.SubElement(item, "title").text = f"Paceman {manifest['version']}"
+        ET.SubElement(item, f"{{{SPARKLE_NS}}}version").text = str(manifest["buildNumber"])
+        ET.SubElement(item, f"{{{SPARKLE_NS}}}shortVersionString").text = manifest["version"].split("-")[0]
+        ET.SubElement(item, f"{{{SPARKLE_NS}}}minimumSystemVersion").text = "15.0"
+        ET.SubElement(item, "description").text = notes
+        ET.SubElement(item, "enclosure", {"url": prefix + mac.name, "length": str(mac.stat().st_size),
+                      "type": "application/octet-stream", f"{{{SPARKLE_NS}}}edSignature": signature})
+        for old in container.findall("item"):
+            old_build = int(old.findtext(f"{{{SPARKLE_NS}}}version", "0"))
+            if old_build > manifest["buildNumber"]:
+                raise ValueError("Never promote a lower build over a newer feed")
+            if old_build == manifest["buildNumber"]:
+                if (any(old.findtext(child.tag) != child.text for child in item if child.tag != "enclosure")
+                        or old.find("enclosure") is None
+                        or old.find("enclosure").attrib != item.find("enclosure").attrib):
+                    raise ValueError("Existing feed build differs; use a new version and build")
+                record_feed_staging(directory, manifest, channel, target)
+                print(f"Feed already staged: {target}. Not published.")
+                return
+        container.insert(1, item)
+        candidate = scratch / "appcast.xml"
+        ET.ElementTree(feed).write(candidate, encoding="utf-8", xml_declaration=True)
+        run(tools / "sign_update", "--account", account, candidate)
+        run(tools / "sign_update", "--account", account, "--verify", candidate)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as stream:
+            pending = Path(stream.name)
+        try:
+            pending.write_bytes(candidate.read_bytes())
+            pending.replace(target)
+        finally:
+            pending.unlink(missing_ok=True)
+        record_feed_staging(directory, manifest, channel, target)
+    print(f"Signed feed staged locally: {target}. Review and approve its separate Pages commit/push; not published.")
+
+
+def publish(directory, *, feed_channel=None, pages_dir=None, sparkle_archive=None,
+            keychain_account=None, approve_feed_signing=False):
     manifest, names = verify(directory)
+    pages_dir = Path(pages_dir).expanduser().resolve() if pages_dir else None
+    feed_preflight(manifest, channel=feed_channel, pages_dir=pages_dir, sparkle_archive=sparkle_archive,
+                   account=keychain_account, approved=approve_feed_signing)
     github_preflight()
     version = manifest["version"]
     remote_tag(version, manifest["sourceRevision"])
     previous = [item for item in releases() if not item["isDraft"]
                 and item["tagName"].startswith("desktop-v")
                 and item["tagName"] != f"desktop-v{version}"]
-    require_qa(qa_record(directory), previous_releases=previous)
+    require_qa(qa_record(directory), previous_releases=previous,
+               updater=bool(manifest.get("updater")) and feed_channel != "test")
     download_check(directory, manifest, names)
     release = release_view(version)
     if release["isDraft"]:
@@ -294,6 +435,9 @@ def publish(directory):
     elif release["isPrerelease"] != ("-" in version):
         raise ValueError("Published release classification differs from its version")
     download_check(directory, manifest, names)
+    if feed_channel:
+        stage_feed(directory, manifest, names, channel=feed_channel, pages_dir=pages_dir,
+                   sparkle_archive=sparkle_archive, account=keychain_account)
     print(release_view(version)["url"])
 
 
@@ -314,9 +458,16 @@ def main():
         sub = commands.add_parser(name)
         sub.add_argument("directory", type=lambda value: Path(value).expanduser().resolve())
         if name == "qa":
-            sub.add_argument("--check", choices=QA_CHECKS, required=True)
+            sub.add_argument("--check", choices=QA_CHECKS | UPDATER_QA_CHECKS, required=True)
             sub.add_argument("--result", choices=("passed", "failed", "not-applicable"), required=True)
             sub.add_argument("--notes", required=True)
+        if name == "publish":
+            sub.add_argument("--feed-channel", choices=("stable", "test"))
+            sub.add_argument("--pages-dir", type=Path)
+            sub.add_argument("--sparkle-archive", type=Path)
+            sub.add_argument("--keychain-account")
+            sub.add_argument("--approve-feed-signing", action="store_true",
+                             help="Explicitly authorize Keychain signing; stages locally, never pushes Pages")
     args = parser.parse_args()
     try:
         if args.command == "prepare":
@@ -331,13 +482,15 @@ def main():
         elif args.command == "qa":
             record_qa(args)
         elif args.command == "publish":
-            publish(args.directory)
+            publish(args.directory, feed_channel=args.feed_channel, pages_dir=args.pages_dir,
+                    sparkle_archive=args.sparkle_archive, keychain_account=args.keychain_account,
+                    approve_feed_signing=args.approve_feed_signing)
         else:
-            verify(args.directory)
+            manifest, _ = verify(args.directory)
             record = qa_record(args.directory)
-            for name, explanation in QA_CHECKS.items():
+            for name, explanation in (QA_CHECKS | (UPDATER_QA_CHECKS if manifest.get("updater") else {})).items():
                 print(f"{name}: {record['checks'].get(name, {}).get('result', 'pending')} — {explanation}")
-    except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, KeyError, TypeError, ET.ParseError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Desktop release stopped: {error}\n")
 
 

@@ -38,6 +38,53 @@ appcast and release notes. Signed feeds and pre-extraction verification are requ
 signature failure never falls back to unsigned updates. Promote the feed only after
 the exact public artifacts pass release QA. Do not replace versioned artifacts.
 
+### Static update feed (setup approval required)
+
+The public `iamjamesim/Paceman` repository owns the proposed Pages site, using a
+separate `gh-pages` branch, root `CNAME` containing `updates.paceman.ai`, and an empty
+`.nojekyll`. The private marketing repository has no role. Pages is not enabled by
+this code. After approval, verify domain ownership in the account's Pages settings
+using GitHub's actual TXT challenge, select `gh-pages` / root as the repository
+Pages source, save the custom domain, then set DNS `updates CNAME iamjamesim.github.io`.
+Wait for certificate issuance and enable Enforce HTTPS. Avoid wildcard DNS.
+
+Sparkle's pinned `generate_keys` stores the publisher key in the release Mac's
+Keychain under an explicitly chosen account. Approve key creation and an encrypted
+offline backup/recovery location before use; never commit or upload the private
+key. Builds and manifests contain only the feed URL and public key. Existing
+Developer ID and notary profiles remain separate credentials.
+
+After the ordinary package QA gate, `publish` can also stage a signed feed locally:
+
+```sh
+python3 scripts/desktop_release.py publish "dist/desktop-v$VERSION" \
+  --feed-channel test --pages-dir /path/to/separate-gh-pages-checkout \
+  --sparkle-archive /path/to/pinned-Sparkle.tar.xz \
+  --keychain-account paceman-release --approve-feed-signing
+```
+
+The explicit flag authorizes later Keychain use. This command never pushes Pages.
+It publishes packages first, rechecks authenticated and anonymous HTTPS downloads,
+checks the existing Keychain public key, and uses official `sign_update` to sign
+the archive and appcast. Notes are embedded inside the signed appcast. Output is
+`macos/test/appcast.xml`; `feed-staging.json` records local hashes, not publication.
+Signing failure leaves the previous feed intact; retry reuses the public packages.
+
+Use an isolated, updater-enabled baseline to test that feed against the exact
+candidate downloads. A stable-configured candidate may be offered on the test
+feed; after replacement it returns to its embedded stable URL. Record
+`mac-signed-update` and `mac-signed-recovery` against the same package checksums,
+then rerun with `--feed-channel stable` to stage `macos/stable/appcast.xml`.
+Stable rejects prereleases and requires both signed-trial checks. Test publication
+requires the existing package QA checks and a separately approved bounded trial.
+
+Before each separately approved feed push, fetch and fast-forward the dedicated
+checkout, rerun staging, review only the intended channel's diff and local evidence,
+and commit that feed. Push `gh-pages` without force; packages must already be public.
+Wait for the Pages deployment and compare the public HTTPS feed's exact SHA-256
+with `feed-staging.json` before reporting success. A failed deployment or mismatch
+remains pending; retry the same feed commit rather than replacing release assets.
+
 The Mac bundle includes the runtime pinned in
 [`macos/python-runtime.json`](../macos/python-runtime.json) and wheels pinned in
 [`requirements-client.txt`](../requirements-client.txt). Users need no separate

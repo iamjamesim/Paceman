@@ -14,7 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 def update_settings(path):
     if path is None:
         return {}
-    value = json.loads(Path(path).read_text())
+    return public_update_settings(json.loads(Path(path).read_text()))
+
+
+def public_update_settings(value):
     if (not isinstance(value, dict) or set(value) != {'feedURL', 'publicEDKey'}
             or not all(isinstance(item, str) for item in value.values())):
         raise ValueError('Updater configuration contains only feedURL and publicEDKey; never a private key')

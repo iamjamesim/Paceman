@@ -274,6 +274,7 @@ def main() -> None:
                         "clientLockSHA256": digest(ROOT / "requirements-client.txt"),
                         "sparkleLockSHA256": digest(ROOT / 'macos/sparkle.json'),
                         "updaterConfigSHA256": digest(args.updater_config) if args.updater_config else None,
+                        "updater": json.loads(args.updater_config.read_text()) if args.updater_config else None,
                         "clientWheels": client_wheels(),
                         "xcodeVersion": output("xcodebuild", "-version"),
                         "hostMacOS": platform.mac_ver()[0], "artifacts": files}

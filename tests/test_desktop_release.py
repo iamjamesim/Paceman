@@ -1,4 +1,5 @@
 import argparse
+from contextlib import chdir
 import json
 from pathlib import Path
 import subprocess
@@ -257,6 +258,312 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "current downloads"):
                 release.record_qa(args)
         self.assertFalse((self.directory / "qa.json").exists())
+
+class FeedTests(unittest.TestCase):
+    setUp = ReleaseTests.setUp
+    checksums = ReleaseTests.checksums
+
+    def configure(self):
+        self.manifest.update(updater={
+            "feedURL": release.FEED_ORIGIN + "/macos/stable/appcast.xml",
+            "publicEDKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        }, buildNumber=42, sparkleLockSHA256=release.sha256(release.ROOT / "macos/sparkle.json"))
+        self.pages = (self.directory / "pages").resolve()
+        self.pages.mkdir()
+        (self.pages / "CNAME").write_text("updates.paceman.ai\n")
+        (self.pages / ".nojekyll").touch()
+        self.target = self.pages / "macos/test/appcast.xml"
+        self.options = dict(feed_channel="test", pages_dir=self.pages,
+                            sparkle_archive=self.directory / "Sparkle.tar.xz",
+                            keychain_account="paceman-release", approve_feed_signing=True)
+        self.prefix = f"https://github.com/{release.REPOSITORY}/releases/download/desktop-v{self.version}/"
+        self.events = []
+
+    def preflight(self, **overrides):
+        args = dict(channel="test", pages_dir=self.pages,
+                    sparkle_archive=self.directory / "Sparkle.tar.xz", account="paceman-release", approved=True)
+        args.update(overrides)
+        return release.feed_preflight(self.manifest, **args)
+
+    def pages_output(self, *args):
+        if "--show-toplevel" in args:
+            return str(self.pages)
+        if "--show-current" in args:
+            return "gh-pages"
+        if "get-url" in args:
+            return f"https://github.com/{release.REPOSITORY}.git"
+        return ""
+
+    def signed_output(self, *args):
+        self.events.append((Path(args[0]).name, *args[1:]))
+        if Path(args[0]).name == "generate_keys":
+            return self.manifest["updater"]["publicEDKey"]
+        return "MOCK_SIGNATURE_NO_CRYPTO_EXECUTED"
+
+    def signed_run(self, *args, **kwargs):
+        self.events.append((Path(args[0]).name, *args[1:]))
+        if Path(args[0]).name == "sign_update" and "--verify" not in args and Path(args[-1]).suffix == ".xml":
+            path = Path(args[-1])
+            path.write_bytes(path.read_bytes() + b"\n<!-- MOCK signing warning; no real signature -->\n")
+
+    def stage(self):
+        with patch.object(release, "public_download_check", return_value=self.prefix), \
+             patch.object(release.sparkle_dependency, "framework", return_value=Path("/mock/Sparkle.framework")), \
+             patch.object(release, "output", side_effect=self.signed_output), \
+             patch.object(release, "run", side_effect=self.signed_run):
+            release.stage_feed(self.directory, self.manifest, self.names, channel="test",
+                               pages_dir=self.pages, sparkle_archive=Path("/mock/archive"), account="paceman-release")
+
+    def qa(self, *, updater=True):
+        return {"checksumsSHA256": release.sha256(self.directory / "SHA256SUMS"),
+                "checks": {name: {"result": "passed", "notes": "Observed in isolated signed trial"}
+                           for name in release.QA_CHECKS | (release.UPDATER_QA_CHECKS if updater else {})}}
+
+    def test_configured_release_requires_explicit_signing_opt_in_before_any_live_work(self):
+        self.configure()
+        with patch.object(release, "verify", return_value=(self.manifest, self.names)), \
+             patch.object(release, "github_preflight") as github, patch.object(release, "run") as run:
+            with self.assertRaisesRegex(ValueError, "guarded feed"):
+                release.publish(self.directory)
+            with self.assertRaisesRegex(ValueError, "approve-feed-signing"):
+                release.publish(self.directory, **{**self.options, "approve_feed_signing": False})
+            github.assert_not_called()
+            run.assert_not_called()
+
+    def test_pages_preflight_rejects_wrong_repo_branch_unrelated_changes_and_channel(self):
+        self.configure()
+        with patch.object(release, "output", side_effect=self.pages_output):
+            self.preflight()  # Stable candidate can be trialed through the isolated test feed.
+            with self.assertRaisesRegex(ValueError, "Prereleases"):
+                self.preflight(channel="stable")
+        for replaced in ("other/marketing.git", "main", "unrelated.txt"):
+            def wrong(*args):
+                if replaced == "other/marketing.git" and "get-url" in args:
+                    return "https://github.com/other/marketing.git"
+                if replaced == "main" and "--show-current" in args:
+                    return "main"
+                if replaced == "unrelated.txt" and "diff" in args:
+                    return replaced
+                return self.pages_output(*args)
+            with patch.object(release, "output", side_effect=wrong), self.assertRaises(ValueError):
+                self.preflight()
+        self.manifest["version"] = "0.1.0"
+        self.manifest["updater"]["feedURL"] = release.FEED_ORIGIN + "/macos/test/appcast.xml"
+        with self.assertRaisesRegex(ValueError, "channel differs"):
+            self.preflight(channel="stable")
+
+    def test_updater_provenance_requires_current_lock_and_public_only_config(self):
+        self.configure()
+        release.write_json(self.directory / "release-manifest.json", self.manifest)
+        with patch.object(release, "output", side_effect=ReleaseTests.git_output.__get__(self)):
+            release.verify(self.directory, platform_checks=False)
+            self.manifest["updater"]["privateKey"] = "must never be accepted"
+            release.write_json(self.directory / "release-manifest.json", self.manifest)
+            with self.assertRaisesRegex(ValueError, "never a private key"):
+                release.verify(self.directory, platform_checks=False)
+            del self.manifest["updater"]["privateKey"]
+            self.manifest["sparkleLockSHA256"] = "outdated"
+            release.write_json(self.directory / "release-manifest.json", self.manifest)
+            with self.assertRaisesRegex(ValueError, "provenance"):
+                release.verify(self.directory, platform_checks=False)
+
+    def test_stable_requires_signed_qa_while_test_feed_bootstraps_trial(self):
+        self.configure()
+        release.require_qa(self.qa(updater=False), previous_releases=[], updater=False)
+        with self.assertRaisesRegex(ValueError, "mac-signed-update"):
+            release.require_qa(self.qa(updater=False), previous_releases=[], updater=True)
+        release.require_qa(self.qa(), previous_releases=[], updater=True)
+
+    def test_incomplete_qa_and_failed_downloads_block_all_signing_and_release_mutation(self):
+        self.configure()
+        for complete in (False, True):
+            with patch.object(release, "verify", return_value=(self.manifest, self.names)), \
+                 patch.object(release, "feed_preflight"), patch.object(release, "github_preflight"), \
+                 patch.object(release, "remote_tag"), patch.object(release, "releases", return_value=[]), \
+                 patch.object(release, "qa_record", return_value=self.qa() if complete else {}), \
+                 patch.object(release, "download_check", side_effect=ValueError("download mismatch")), \
+                 patch.object(release, "stage_feed") as signing, patch.object(release, "run") as run:
+                with self.assertRaises(ValueError):
+                    release.publish(self.directory, **self.options)
+                signing.assert_not_called()
+                run.assert_not_called()
+
+    def test_publish_orders_assets_before_feed_and_retries_feed_without_replacing_packages(self):
+        self.configure()
+        events = []
+        public = [False]
+        def view(*args):
+            return {"isDraft": not public[0], "isPrerelease": True, "url": "public-release"}
+        def run(*args, **kwargs):
+            events.append("publish-assets")
+            self.assertEqual(args[:3], ("gh", "release", "edit"))
+            public[0] = True
+        attempts = [0]
+        def feed(*args, **kwargs):
+            events.append("sign-feed")
+            attempts[0] += 1
+            if attempts[0] == 1:
+                raise ValueError("signing failed; no feed")
+        with patch.object(release, "verify", return_value=(self.manifest, self.names)), \
+             patch.object(release, "feed_preflight"), patch.object(release, "github_preflight"), \
+             patch.object(release, "remote_tag"), patch.object(release, "releases", return_value=[]), \
+             patch.object(release, "qa_record", return_value=self.qa()), \
+             patch.object(release, "download_check", side_effect=lambda *args: events.append("check-assets")), \
+             patch.object(release, "release_view", side_effect=view), \
+             patch.object(release, "run", side_effect=run), patch.object(release, "stage_feed", side_effect=feed):
+            with self.assertRaisesRegex(ValueError, "signing failed"):
+                release.publish(self.directory, **self.options)
+            release.publish(self.directory, **self.options)
+        self.assertEqual(events, ["check-assets", "publish-assets", "check-assets", "sign-feed",
+                                  "check-assets", "check-assets", "sign-feed"])
+
+    def test_public_mismatch_blocks_key_lookup_and_preserves_feed(self):
+        self.configure()
+        self.target.parent.mkdir(parents=True)
+        self.target.write_bytes(b"previous signed feed")
+        with patch.object(release, "public_download_check", side_effect=ValueError("public bytes differ")), \
+             patch.object(release.sparkle_dependency, "framework") as framework:
+            with self.assertRaisesRegex(ValueError, "public bytes differ"):
+                release.stage_feed(self.directory, self.manifest, self.names, channel="test",
+                                   pages_dir=self.pages, sparkle_archive=Path("/mock/archive"), account="release")
+            framework.assert_not_called()
+        self.assertEqual(self.target.read_bytes(), b"previous signed feed")
+
+    def test_relative_pages_checkout_from_external_cwd_survives_existing_feed_retry(self):
+        self.configure()
+        def signing(*args, **kwargs):
+            if Path(args[0]).name == "sign_update" and Path(args[-1]).suffix == ".xml":
+                effective = release.ROOT / Path(args[-1])
+                self.assertTrue(Path(args[-1]).is_absolute())
+                self.assertTrue(effective.is_file(), f"Real signer cwd cannot read {effective}")
+            self.signed_run(*args, **kwargs)
+        with chdir(self.directory), \
+             patch.object(release, "public_download_check", return_value=self.prefix), \
+             patch.object(release.sparkle_dependency, "framework", return_value=Path("/mock/Sparkle.framework")), \
+             patch.object(release, "output", side_effect=self.signed_output), \
+             patch.object(release, "run", side_effect=signing):
+            for _ in range(2):
+                release.stage_feed(self.directory.resolve(), self.manifest, self.names, channel="test",
+                                   pages_dir=Path("pages"), sparkle_archive=Path("/mock/archive"), account="release")
+        self.assertTrue(self.target.is_file())
+
+    def test_failed_postpublication_download_check_blocks_feed(self):
+        self.configure()
+        with patch.object(release, "verify", return_value=(self.manifest, self.names)), \
+             patch.object(release, "feed_preflight"), patch.object(release, "github_preflight"), \
+             patch.object(release, "remote_tag"), patch.object(release, "releases", return_value=[]), \
+             patch.object(release, "qa_record", return_value=self.qa()), \
+             patch.object(release, "download_check", side_effect=[None, ValueError("post-publication mismatch")]), \
+             patch.object(release, "release_view", return_value={"isDraft": True}), \
+             patch.object(release, "run") as run, patch.object(release, "stage_feed") as feed:
+            with self.assertRaisesRegex(ValueError, "post-publication mismatch"):
+                release.publish(self.directory, **self.options)
+            self.assertEqual(run.call_count, 1)  # Assets became public; feed remains untouched.
+            feed.assert_not_called()
+
+    def test_wrong_archive_hash_stops_before_any_keychain_lookup(self):
+        self.configure()
+        archive = self.directory / "wrong-sparkle.tar.xz"
+        archive.write_bytes(b"not the pinned archive")
+        with patch.object(release, "public_download_check", return_value=self.prefix), \
+             patch.object(release, "output") as output:
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                release.stage_feed(self.directory, self.manifest, self.names, channel="test",
+                                   pages_dir=self.pages, sparkle_archive=archive, account="release")
+            output.assert_not_called()
+
+    def test_public_downloads_use_anonymous_https_and_exact_bytes(self):
+        self.configure()
+        def curl(*args, **kwargs):
+            self.assertEqual(args[0], "curl")
+            self.assertIn("--proto-redir", args)
+            self.assertTrue(args[-1].startswith(self.prefix))
+            target = Path(args[args.index("--output") + 1])
+            target.write_bytes((self.directory / target.name).read_bytes())
+        with patch.object(release, "run", side_effect=curl):
+            self.assertEqual(release.public_download_check(self.directory, self.manifest, self.names), self.prefix)
+        def bad(*args, **kwargs):
+            curl(*args, **kwargs)
+            Path(args[args.index("--output") + 1]).write_bytes(b"changed remotely")
+        with patch.object(release, "run", side_effect=bad), self.assertRaisesRegex(ValueError, "Public release asset differs"):
+            release.public_download_check(self.directory, self.manifest, self.names)
+
+    def test_signing_uses_pinned_tools_keychain_only_and_embeds_notes(self):
+        self.configure()
+        self.stage()
+        root = release.ET.parse(self.target).getroot()
+        item = root.find("channel/item")
+        self.assertEqual(item.findtext(f"{{{release.SPARKLE_NS}}}version"), "42")
+        self.assertIn("First alpha", item.findtext("description"))
+        self.assertEqual(item.find("enclosure").get("url"), self.prefix + self.artifact_names[0])
+        self.assertTrue(any(event[0] == "generate_keys" and "-p" in event for event in self.events))
+        self.assertTrue(any(event[0] == "sign_update" and "--verify" in event for event in self.events))
+        self.assertFalse(any("--ed-key-file" in event or "-s" in event or "git" == event[0] for event in self.events))
+        evidence = json.loads((self.directory / "feed-staging.json").read_text())
+        self.assertFalse(evidence["published"])
+        self.assertEqual(evidence["feedSHA256"], release.sha256(self.target))
+
+    def test_repeated_staging_is_byte_identical_and_changed_notes_same_build_are_rejected(self):
+        self.configure()
+        self.stage()
+        original = self.target.read_bytes()
+        (self.directory / "feed-staging.json").unlink()
+        self.stage()
+        self.assertEqual(self.target.read_bytes(), original)
+        self.assertTrue((self.directory / "feed-staging.json").is_file())
+        (self.directory / "RELEASE-NOTES.md").write_text("Changed same build")
+        with self.assertRaisesRegex(ValueError, "Existing feed build differs"):
+            self.stage()
+        self.assertEqual(self.target.read_bytes(), original)
+
+    def test_equivalent_pretty_printed_feed_is_preserved_without_resigning(self):
+        self.configure()
+        self.stage()
+        tree = release.ET.parse(self.target)
+        release.ET.indent(tree)
+        tree.write(self.target, encoding="utf-8", xml_declaration=True)
+        original = self.target.read_bytes()
+        self.stage()
+        self.assertEqual(self.target.read_bytes(), original)
+
+    def test_new_feed_keeps_old_items_and_rejects_downgrade(self):
+        self.configure()
+        self.stage()
+        self.manifest["buildNumber"] += 1
+        self.stage()
+        items = release.ET.parse(self.target).findall("channel/item")
+        self.assertEqual([item.findtext(f"{{{release.SPARKLE_NS}}}version") for item in items], ["43", "42"])
+        original = self.target.read_bytes()
+        self.manifest["buildNumber"] = 41
+        with self.assertRaisesRegex(ValueError, "lower build"):
+            self.stage()
+        self.assertEqual(self.target.read_bytes(), original)
+
+    def test_wrong_key_failed_signing_or_verification_never_replace_current_feed(self):
+        self.configure()
+        self.stage()
+        original = self.target.read_bytes()
+        self.manifest["buildNumber"] += 1
+        for failure in ("key", "sign", "verify-existing", "verify-new"):
+            def output(*args):
+                if failure == "key" and Path(args[0]).name == "generate_keys":
+                    return "OTHER_PUBLIC_KEY"
+                return self.signed_output(*args)
+            def run(*args, **kwargs):
+                if Path(args[0]).name == "sign_update":
+                    if failure == "sign" and "--verify" not in args:
+                        raise ValueError("sign failed")
+                    if (failure.startswith("verify-") and "--verify" in args
+                            and Path(args[-1]).name == "appcast.xml"
+                            and (Path(args[-1]) == self.target) == (failure == "verify-existing")):
+                        raise ValueError("verify failed")
+            with patch.object(release, "public_download_check", return_value=self.prefix), \
+                 patch.object(release.sparkle_dependency, "framework", return_value=Path("/mock/Sparkle.framework")), \
+                 patch.object(release, "output", side_effect=output), patch.object(release, "run", side_effect=run):
+                with self.assertRaises(ValueError):
+                    release.stage_feed(self.directory, self.manifest, self.names, channel="test",
+                                       pages_dir=self.pages, sparkle_archive=Path("/mock/archive"), account="release")
+            self.assertEqual(self.target.read_bytes(), original)
 
 
 class NotarizationTests(unittest.TestCase):
