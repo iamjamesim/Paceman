@@ -26,6 +26,8 @@ class DeliveryDiagnostics:
                       "response_submitted", "response_replayed", "native_requests_observed"},
             "operation": {"snapshot", "requests", "submit"},
             "provider": {"codex", "claude"}, "kind": {"approval", "question"},
+            "action": {"answer", "choose", "allowOnce", "deny", "release"},
+            "origin": {"phone", "watch"},
             "reason": {"deadline", "provider_disabled", "hook_disconnected", "access_changed", "shutdown",
                        "invalid_request", "unavailable", "busy"},
             "outcome": {"native", "responded"},
