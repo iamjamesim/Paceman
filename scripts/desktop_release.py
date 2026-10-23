@@ -42,7 +42,7 @@ UPDATER_QA_CHECKS = {
     "mac-signed-update": "Isolated signed test-feed update; preserve identity, pairings, choices, and history",
     "mac-signed-recovery": "Signed update busy deferral, cancellation, relaunch, and failed-handoff recovery",
 }
-FEED_ORIGIN = "https://updates.paceman.ai"
+FEED_BASE_URL = "https://iamjamesim.github.io/Paceman/updates"
 SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 ET.register_namespace("sparkle", SPARKLE_NS)
 
@@ -309,8 +309,8 @@ def feed_preflight(manifest, *, channel, pages_dir, sparkle_archive, account, ap
             or not sparkle_archive or not account or not manifest.get("updater")):
         raise ValueError("Feed staging needs --approve-feed-signing, channel, Pages checkout, pinned archive, account, and updater config")
     packaged_feed = manifest["updater"]["feedURL"]
-    if (packaged_feed not in {f"{FEED_ORIGIN}/macos/{name}/appcast.xml" for name in ("stable", "test")}
-            or (channel == "stable" and packaged_feed != f"{FEED_ORIGIN}/macos/stable/appcast.xml")):
+    if (packaged_feed not in {f"{FEED_BASE_URL}/macos/{name}/appcast.xml" for name in ("stable", "test")}
+            or (channel == "stable" and packaged_feed != f"{FEED_BASE_URL}/macos/stable/appcast.xml")):
         raise ValueError("Feed channel differs from the packaged updater configuration")
     if channel == "stable" and "-" in manifest["version"]:
         raise ValueError("Prereleases belong on the isolated test feed")
@@ -320,15 +320,15 @@ def feed_preflight(manifest, *, channel, pages_dir, sparkle_archive, account, ap
             or output("git", "-C", pages_dir, "remote", "get-url", "origin").casefold()
             not in (f"https://github.com/{REPOSITORY.casefold()}.git", f"git@github.com:{REPOSITORY.casefold()}.git")):
         raise ValueError("Use a separate gh-pages checkout of the public Paceman repository")
-    if ((pages_dir / "CNAME").read_text().strip() != "updates.paceman.ai"
-            or not (pages_dir / ".nojekyll").is_file()):
-        raise ValueError("Review the Pages bootstrap (CNAME and .nojekyll) before staging a feed")
-    target = f"macos/{channel}/appcast.xml"
+    if (not (pages_dir / ".nojekyll").is_file() or (pages_dir / "CNAME").exists()):
+        raise ValueError("Use the default GitHub Pages host with .nojekyll; review any custom-domain change separately")
+    target = f"updates/macos/{channel}/appcast.xml"
     changed = output("git", "-C", pages_dir, "diff", "--name-only", "HEAD").splitlines()
     untracked = output("git", "-C", pages_dir, "ls-files", "--others", "--exclude-standard").splitlines()
     if any(path != target for path in changed + untracked):
         raise ValueError("Pages checkout has unrelated changes")
-    if (pages_dir / "macos").is_symlink() or (pages_dir / "macos" / channel).is_symlink() or (pages_dir / target).is_symlink():
+    if any((pages_dir / path).is_symlink() for path in (
+            "updates", "updates/macos", f"updates/macos/{channel}", target)):
         raise ValueError("Feed paths must not be symlinks")
 
 
@@ -349,6 +349,7 @@ def record_feed_staging(directory, manifest, channel, target):
     write_json(directory / "feed-staging.json", {
         "channel": channel, "path": str(target), "feedSHA256": sha256(target),
         "checksumsSHA256": sha256(directory / "SHA256SUMS"),
+        "feedURL": f"{FEED_BASE_URL}/macos/{channel}/appcast.xml",
         "sourceRevision": manifest["sourceRevision"], "published": False,
     })
 
@@ -356,7 +357,7 @@ def record_feed_staging(directory, manifest, channel, target):
 def stage_feed(directory, manifest, names, *, channel, pages_dir, sparkle_archive, account):
     """Stage signed static bytes locally. Commit/push/Pages activation are separate approvals."""
     prefix = public_download_check(directory, manifest, names)
-    target = Path(pages_dir).expanduser().resolve() / "macos" / channel / "appcast.xml"
+    target = Path(pages_dir).expanduser().resolve() / "updates" / "macos" / channel / "appcast.xml"
     notes = "<pre>" + html.escape((directory / "RELEASE-NOTES.md").read_text()) + "</pre>"
     with tempfile.TemporaryDirectory(prefix="paceman-feed-") as temporary:
         scratch = Path(temporary)

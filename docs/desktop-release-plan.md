@@ -38,20 +38,19 @@ appcast and release notes. Signed feeds and pre-extraction verification are requ
 signature failure never falls back to unsigned updates. Promote the feed only after
 the exact public artifacts pass release QA. Do not replace versioned artifacts.
 
-### Static update feed (setup approval required)
+### Static update feed
 
-The public `iamjamesim/Paceman` repository owns the proposed Pages site, using a
-separate `gh-pages` branch, root `CNAME` containing `updates.paceman.ai`, and an empty
-`.nojekyll`. The private marketing repository has no role. Pages is not enabled by
-this code. After approval, verify domain ownership in the account's Pages settings
-using GitHub's actual TXT challenge, select `gh-pages` / root as the repository
-Pages source, save the custom domain, then set DNS `updates CNAME iamjamesim.github.io`.
-Wait for certificate issuance and enable Enforce HTTPS. Avoid wildcard DNS.
+The public `iamjamesim/Paceman` repository publishes a separate `gh-pages` branch
+from its root, with an empty `.nojekyll`. The root landing page redirects to the
+marketing site; downloads and feeds live under
+`https://iamjamesim.github.io/Paceman/updates/`. No custom domain or DNS change is
+needed. The private marketing repository has no role. Feed staging rejects a
+`CNAME` file so a hosting change requires an explicit configuration review.
 
 Sparkle's pinned `generate_keys` stores the publisher key in the release Mac's
-Keychain under an explicitly chosen account. Approve key creation and an encrypted
-offline backup/recovery location before use; never commit or upload the private
-key. Builds and manifests contain only the feed URL and public key. Existing
+Keychain under an explicitly chosen account. Establish an encrypted recovery copy
+before release; never include the private key in the repository, builds, or feed.
+Builds and manifests contain only the feed URL and public key. Existing
 Developer ID and notary profiles remain separate credentials.
 
 After the ordinary package QA gate, `publish` can also stage a signed feed locally:
@@ -67,14 +66,15 @@ The explicit flag authorizes later Keychain use. This command never pushes Pages
 It publishes packages first, rechecks authenticated and anonymous HTTPS downloads,
 checks the existing Keychain public key, and uses official `sign_update` to sign
 the archive and appcast. Notes are embedded inside the signed appcast. Output is
-`macos/test/appcast.xml`; `feed-staging.json` records local hashes, not publication.
+`updates/macos/test/appcast.xml`; `feed-staging.json` records the URL and local
+hashes, not publication.
 Signing failure leaves the previous feed intact; retry reuses the public packages.
 
 Use an isolated, updater-enabled baseline to test that feed against the exact
 candidate downloads. A stable-configured candidate may be offered on the test
 feed; after replacement it returns to its embedded stable URL. Record
 `mac-signed-update` and `mac-signed-recovery` against the same package checksums,
-then rerun with `--feed-channel stable` to stage `macos/stable/appcast.xml`.
+then rerun with `--feed-channel stable` to stage `updates/macos/stable/appcast.xml`.
 Stable rejects prereleases and requires both signed-trial checks. Test publication
 requires the existing package QA checks and a separately approved bounded trial.
 
