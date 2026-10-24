@@ -4,24 +4,36 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>Paceman</title>
         <item>
-            <title>0.4.1</title>
-            <pubDate>Fri, 23 Oct 2026 15:48:31 -0700</pubDate>
-            <sparkle:version>36</sparkle:version>
-            <sparkle:shortVersionString>0.4.1</sparkle:shortVersionString>
+            <title>0.4.2</title>
+            <pubDate>Fri, 23 Oct 2026 21:24:29 -0700</pubDate>
+            <sparkle:version>38</sparkle:version>
+            <sparkle:shortVersionString>0.4.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Paceman 0.4.1-alpha.6
+            <description sparkle:format="markdown"><![CDATA[## What’s new
 
-Pre-release for the signed macOS updater trial. This is the candidate build, prepared from the commit that passed the complete Checks workflow.
+- Adds in-app update support on Mac, with an update button when a new version is available. You choose when to install and restart.
+- Adds support for answering supported Codex filesystem permission requests.
+- Keeps pending requests available in Paceman when you open Codex or Claude Code.
 
-The Mac app is Developer ID signed and notarized. Requires Apple Silicon and macOS 15 or newer. The update trial uses updates.paceman.ai; the stable feed is not being published as part of this trial.
+## Updating
 
-Both desktop archives are built from the same source commit. The Omarchy archive is included for release consistency; Sparkle updating applies only to macOS.
+**Mac:** Quit Paceman, open the new DMG, replace Paceman in Applications, and reopen it. This manual upgrade enables future in-app updates. Existing pairings, settings, and activity history are retained. Review changed agent hooks if prompted.
+
+The Mac app is Developer ID signed and notarized. Requires Apple Silicon and macOS 15 or newer.
+
+**Omarchy:** Download the source archive and SHA256SUMS from this release, verify the archive’s checksum, then extract it and rerun the installer. Existing state is preserved. The checksum detects corruption; it is not a separate publisher signature.
+
+## Availability
+
+This release provides the Mac updater for future releases. Existing installations need the manual upgrade above. The stable update feed will be activated after the remaining updater validation.
+
+Some requests still need to be handled in the original agent app.
 ]]></description>
-            <enclosure url="https://github.com/iamjamesim/Paceman/releases/download/desktop-v0.4.1-alpha.6/Paceman-macos-arm64-0.4.1-alpha.6.dmg" length="29359931" type="application/octet-stream" sparkle:edSignature="+2hVvwFDNeMSVz8UyzBrzVyrLenJaY5Kf86NFw6hTPpNx9dns3NO9ojdrteXp/y3xmv1kO5DRKcI8V/N7lvkAg=="></enclosure>
+            <enclosure url="https://github.com/iamjamesim/Paceman/releases/download/desktop-v0.4.2/Paceman-macos-arm64-0.4.2.dmg" length="31464190" type="application/octet-stream" sparkle:edSignature="TTDT65pNeONFaXD1pYpZitTDo5bIdxfFKsWojdcW93GbQytZorMvkVA1gjTJhqTIjFI8q4M/gQyxoMHACtxnBA=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: /ElLQe6ia2YheR7HFDLNDZ20nZfEVVAmNdB3apCAxOckE6RojYlJ1dHChR67corYGeVzxdCKZCXW3wDsqCf2DQ==
-length: 1764
+edSignature: X+I/PfgmkI2KAfczVQ5eCZDDmcZU1x/vZD1K+vcZnIOGfuoDETvarK8X1nYV+SXx5654yuQErITPkalHuUzpDg==
+length: 2415
 -->
