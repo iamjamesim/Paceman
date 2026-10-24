@@ -1,6 +1,7 @@
 import argparse
-from contextlib import chdir
+from contextlib import chdir, ExitStack
 import json
+import plistlib
 from pathlib import Path
 import subprocess
 import tempfile
@@ -164,7 +165,8 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(release, "release_view", return_value={
                 "assets": [{"name": name} for name in self.names], "url": "draft"}), \
              patch.object(release, "run", side_effect=download), \
-             patch.object(release, "output", side_effect=self.git_output):
+             patch.object(release, "output", side_effect=self.git_output), \
+             patch.object(release, "verify_embedded_settings"):
             release.download_check(self.directory, self.manifest, self.names)
         record = json.loads((self.directory / "download-verification.json").read_text())
         downloaded = Path(record["directory"])
@@ -254,7 +256,7 @@ class ReleaseTests(unittest.TestCase):
         release.write_json(self.directory / "download-verification.json", {"checksumsSHA256": "outdated"})
         args = argparse.Namespace(directory=self.directory, check="mac-fresh",
                                   result="passed", notes="Observed on macOS 26.7")
-        with patch.object(release, "verify"):
+        with patch.object(release, "verify", return_value=(self.manifest, self.names)):
             with self.assertRaisesRegex(ValueError, "current downloads"):
                 release.record_qa(args)
         self.assertFalse((self.directory / "qa.json").exists())
@@ -302,13 +304,28 @@ class FeedTests(unittest.TestCase):
 
     def signed_run(self, *args, **kwargs):
         self.events.append((Path(args[0]).name, *args[1:]))
-        if Path(args[0]).name == "sign_update" and "--verify" not in args and Path(args[-1]).suffix == ".xml":
-            path = Path(args[-1])
-            path.write_bytes(path.read_bytes() + b"\n<!-- MOCK signing warning; no real signature -->\n")
+        if Path(args[0]).name == "generate_appcast":
+            path = Path(args[args.index("-o") + 1])
+            root = release.ET.parse(path).getroot() if path.exists() else release.ET.fromstring("<rss><channel/></rss>")
+            item = release.ET.Element("item")
+            release.ET.SubElement(item, f"{{{release.SPARKLE_NS}}}version").text = str(self.manifest["buildNumber"])
+            release.ET.SubElement(item, f"{{{release.SPARKLE_NS}}}shortVersionString").text = self.version.split("-")[0]
+            notes = next(path.parent.glob("*.md")).read_text()
+            release.ET.SubElement(item, "description").text = notes
+            mac = next(path.parent.glob("*.dmg"))
+            release.ET.SubElement(item, "enclosure", {"url": self.prefix + mac.name,
+                "length": str(mac.stat().st_size), f"{{{release.SPARKLE_NS}}}edSignature": "MOCK_SIGNATURE"})
+            root.find("channel").insert(0, item)
+            release.ET.ElementTree(root).write(path, encoding="utf-8")
+
+    def verified_feed(self, path, *args):
+        # Signature execution is mocked; content and publication guards run normally.
+        return release.ET.parse(path).getroot()
 
     def stage(self):
         with patch.object(release, "public_download_check", return_value=self.prefix), \
              patch.object(release.sparkle_dependency, "framework", return_value=Path("/mock/Sparkle.framework")), \
+             patch.object(release, "verify_signed_feed", side_effect=self.verified_feed), \
              patch.object(release, "output", side_effect=self.signed_output), \
              patch.object(release, "run", side_effect=self.signed_run):
             release.stage_feed(self.directory, self.manifest, self.names, channel="test",
@@ -482,7 +499,8 @@ class FeedTests(unittest.TestCase):
              patch.object(release, "public_download_check", return_value=self.prefix), \
              patch.object(release.sparkle_dependency, "framework", return_value=Path("/mock/Sparkle.framework")), \
              patch.object(release, "output", side_effect=self.signed_output), \
-             patch.object(release, "run", side_effect=signing):
+             patch.object(release, "run", side_effect=signing), \
+             patch.object(release, "verify_signed_feed", side_effect=self.verified_feed):
             for _ in range(2):
                 release.stage_feed(self.directory.resolve(), self.manifest, self.names, channel="test",
                                    pages_dir=Path("pages"), sparkle_archive=Path("/mock/archive"), account="release")
@@ -537,8 +555,8 @@ class FeedTests(unittest.TestCase):
         self.assertEqual(item.findtext(f"{{{release.SPARKLE_NS}}}version"), "42")
         self.assertIn("First alpha", item.findtext("description"))
         self.assertEqual(item.find("enclosure").get("url"), self.prefix + self.artifact_names[0])
-        self.assertTrue(any(event[0] == "generate_keys" and "-p" in event for event in self.events))
-        self.assertTrue(any(event[0] == "sign_update" and "--verify" in event for event in self.events))
+        self.assertEqual(sum(event[0] == "generate_appcast" for event in self.events), 1)
+        self.assertFalse(any(event[0] in ("generate_keys", "sign_update") for event in self.events))
         self.assertFalse(any("--ed-key-file" in event or "-s" in event or "git" == event[0] for event in self.events))
         evidence = json.loads((self.directory / "feed-staging.json").read_text())
         self.assertFalse(evidence["published"])
@@ -558,7 +576,7 @@ class FeedTests(unittest.TestCase):
             self.stage()
         self.assertEqual(self.target.read_bytes(), original)
 
-    def test_equivalent_pretty_printed_feed_is_preserved_without_resigning(self):
+    def test_equivalent_signed_semantics_survive_formatting_without_resigning(self):
         self.configure()
         self.stage()
         tree = release.ET.parse(self.target)
@@ -567,6 +585,47 @@ class FeedTests(unittest.TestCase):
         original = self.target.read_bytes()
         self.stage()
         self.assertEqual(self.target.read_bytes(), original)
+
+    def test_semantic_digest_preserves_markdown_whitespace(self):
+        original = release.ET.fromstring("<item><description>release notes</description></item>")
+        changed = release.ET.fromstring("<item><description>    release notes</description></item>")
+        self.assertNotEqual(release.semantic_digest(original), release.semantic_digest(changed))
+
+    def test_interrupted_evidence_write_recovers_reviewed_signed_feed_without_resigning(self):
+        self.configure()
+        with patch.object(release, "record_feed_staging", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                self.stage()
+        original = self.target.read_bytes()
+        self.assertFalse((self.directory / "feed-test-staging.json").exists())
+        self.assertTrue((self.directory / "feed-test-intent.json").exists())
+        self.stage()
+        self.assertEqual(self.target.read_bytes(), original)
+        self.assertEqual(sum(event[0] == "generate_appcast" for event in self.events), 1)
+        record = json.loads((self.directory / "feed-test-staging.json").read_text())
+        self.assertEqual(record["feedSHA256"], release.sha256(self.target))
+
+    def test_interrupted_evidence_cannot_adopt_conflicting_signed_metadata_or_notes(self):
+        self.configure()
+        with patch.object(release, "record_feed_staging", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.stage()
+        original = self.target.read_bytes()
+        for field in ("description", f"{{{release.SPARKLE_NS}}}minimumSystemVersion"):
+            root = release.ET.fromstring(original)
+            item = root.find("channel/item")
+            node = item.find(field)
+            if node is None:
+                node = release.ET.SubElement(item, field)
+            node.text = "conflicting signed value"
+            self.target.write_bytes(release.ET.tostring(root))
+            changed = self.target.read_bytes()
+            with self.assertRaisesRegex(ValueError, "Existing feed build differs"):
+                self.stage()
+            self.assertEqual(self.target.read_bytes(), changed)
+        self.target.write_bytes(original)
+        self.stage()
+        self.assertEqual(sum(event[0] == "generate_appcast" for event in self.events), 1)
 
     def test_new_feed_keeps_old_items_and_rejects_downgrade(self):
         self.configure()
@@ -586,22 +645,21 @@ class FeedTests(unittest.TestCase):
         self.stage()
         original = self.target.read_bytes()
         self.manifest["buildNumber"] += 1
-        for failure in ("key", "sign", "verify-existing", "verify-new"):
-            def output(*args):
-                if failure == "key" and Path(args[0]).name == "generate_keys":
-                    return "OTHER_PUBLIC_KEY"
-                return self.signed_output(*args)
+        for failure in ("wrong-key", "sign", "verify-existing", "verify-new"):
             def run(*args, **kwargs):
-                if Path(args[0]).name == "sign_update":
-                    if failure == "sign" and "--verify" not in args:
-                        raise ValueError("sign failed")
-                    if (failure.startswith("verify-") and "--verify" in args
-                            and Path(args[-1]).name == "appcast.xml"
-                            and (Path(args[-1]) == self.target) == (failure == "verify-existing")):
-                        raise ValueError("verify failed")
+                if failure == "sign" and Path(args[0]).name == "generate_appcast":
+                    raise ValueError("sign failed")
+                return self.signed_run(*args, **kwargs)
+            def verify(path, *args):
+                existing = path == self.target
+                if (failure == "wrong-key" or (failure == "verify-existing" and existing)
+                        or (failure == "verify-new" and not existing)):
+                    raise ValueError("public signature mismatch")
+                return self.verified_feed(path, *args)
             with patch.object(release, "public_download_check", return_value=self.prefix), \
                  patch.object(release.sparkle_dependency, "framework", return_value=Path("/mock/Sparkle.framework")), \
-                 patch.object(release, "output", side_effect=output), patch.object(release, "run", side_effect=run):
+                 patch.object(release, "verify_signed_feed", side_effect=verify), \
+                 patch.object(release, "run", side_effect=run):
                 with self.assertRaises(ValueError):
                     release.stage_feed(self.directory, self.manifest, self.names, channel="test",
                                        pages_dir=self.pages, sparkle_archive=Path("/mock/archive"), account="release")
@@ -660,3 +718,327 @@ class NotarizationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+class CandidateTests(unittest.TestCase):
+    setUp_artifacts = ReleaseTests.setUp
+    checksums = ReleaseTests.checksums
+    configure = FeedTests.configure
+    pages_output = FeedTests.pages_output
+    signed_run = FeedTests.signed_run
+    verified_feed = FeedTests.verified_feed
+    qa = FeedTests.qa
+
+    def setUp(self):
+        self.setUp_artifacts()
+        self.configure()
+        old_version = self.version
+        self.version = "0.9.0"
+        for asset in self.manifest["artifacts"]:
+            old_name = asset["name"]
+            asset["name"] = old_name.replace(old_version, self.version)
+            (self.directory / old_name).rename(self.directory / asset["name"])
+        self.manifest["version"] = self.version
+        self.artifact_names = [asset["name"] for asset in self.manifest["artifacts"]]
+        self.names = self.artifact_names + ["SHA256SUMS"]
+        self.checksums()
+        release.write_json(self.directory / "release-manifest.json", self.manifest)
+        self.prefix = f"https://github.com/{release.REPOSITORY}/releases/download/desktop-v{self.version}/"
+        self.remote = None
+        self.tag_object = "b" * 40
+        self.live_feeds = {}
+        self.calls = []
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        for name, kwargs in {
+            "verify": {"return_value": (self.manifest, self.names)},
+            "github_preflight": {}, "remote_tag": {}, "download_check": {},
+            "releases": {"side_effect": lambda: [self.remote] if self.remote else []},
+            "release_view": {"side_effect": lambda _version: self.remote},
+            "output": {"side_effect": self.candidate_output},
+            "run": {"side_effect": self.command},
+            "public_download_check": {"return_value": self.prefix},
+            "fetch_public_feed": {"side_effect": self.fetch},
+            "verify_signed_feed": {"side_effect": self.verified_feed},
+        }.items():
+            self.stack.enter_context(patch.object(release, name, **kwargs))
+        self.stack.enter_context(patch.object(release.sparkle_dependency, "framework", return_value=Path("/mock/Sparkle.framework")))
+        release.write_json(self.directory / "qa.json", self.qa(updater=False))
+        release.write_json(self.directory / "download-verification.json", {"checksumsSHA256": release.sha256(self.directory / "SHA256SUMS")})
+
+    def candidate_output(self, *args):
+        if args[:2] == ("git", "rev-parse"):
+            return self.tag_object
+        return self.pages_output(*args)
+
+    def command(self, *args, **kwargs):
+        self.calls.append(args)
+        if args[:3] == ("gh", "release", "create"):
+            self.remote = {"tagName": f"desktop-v{self.version}", "databaseId": 99,
+                "isDraft": True, "isPrerelease": "--prerelease" in args, "url": "fixture",
+                "assets": [{"name": name, "size": (self.directory / name).stat().st_size,
+                            "apiUrl": f"https://api.github.com/repos/{release.REPOSITORY}/releases/assets/{i}"}
+                           for i, name in enumerate(self.names, 1)]}
+        elif args[:3] == ("gh", "release", "edit"):
+            if "--draft=false" in args:
+                self.remote["isDraft"] = False
+            self.remote["isPrerelease"] = "--prerelease=true" in args
+        elif Path(args[0]).name == "generate_appcast":
+            self.signed_run(*args, **kwargs)
+        else:
+            raise AssertionError(f"Unexpected live operation: {args}")
+
+    def fetch(self, channel, destination, *, allow_missing=False):
+        if channel not in self.live_feeds:
+            if allow_missing:
+                return False
+            raise ValueError("Public test feed not yet published")
+        destination.write_bytes(self.live_feeds[channel])
+        return True
+
+    def test_stage_test_and_promote_keep_exact_assets_and_feed(self):
+        self.publish_and_qa()
+        original = self.target.read_bytes()
+        identity = release.checked_candidate(self.directory, self.manifest)["identity"]
+        release.promote(self.directory, pages_dir=self.pages)
+        stable = self.pages / "macos/stable/appcast.xml"
+        self.assertEqual(stable.read_bytes(), original)
+        self.assertEqual(release.checked_candidate(self.directory, self.manifest)["identity"], identity)
+        self.assertFalse(self.remote["isPrerelease"])
+        self.assertTrue(any("--latest=false" in call for call in self.calls))
+        self.assertIn("--latest=true", self.calls[-1])
+        self.assertEqual(sum(Path(call[0]).name == "generate_appcast" for call in self.calls), 1)
+        self.assertFalse(any("upload" in call or "build" in call or "push" in call for call in self.calls))
+        release.promote(self.directory, pages_dir=self.pages)  # Metadata/feed retry, no re-signing.
+        self.assertEqual(stable.read_bytes(), original)
+
+    def publish_and_qa(self):
+        release.stage(self.directory, candidate=True)
+        self.assertTrue(self.remote["isPrerelease"])
+        release.publish_test(self.directory, **{key: value for key, value in self.options.items() if key != "feed_channel"})
+        self.assertFalse(self.remote["isDraft"])
+        self.assertTrue(self.remote["isPrerelease"])
+        self.live_feeds["test"] = self.target.read_bytes()  # Model the separately approved Pages push.
+        for name in release.UPDATER_QA_CHECKS:
+            release.record_qa(argparse.Namespace(directory=self.directory, check=name, result="passed",
+                                                 notes="Observed exact candidate on physical test Mac"))
+
+    def test_candidate_cannot_use_legacy_publish_to_bypass_promotion(self):
+        release.stage(self.directory, candidate=True)
+        count = len(self.calls)
+        with self.assertRaisesRegex(ValueError, "publish-test then promote"):
+            release.publish(self.directory, **self.options)
+        self.assertEqual(len(self.calls), count)
+
+    def test_failed_package_qa_and_postpublish_anonymous_download_stop_test_feed(self):
+        release.stage(self.directory, candidate=True)
+        record = self.qa(updater=False)
+        record["checks"]["mac-upgrade"]["result"] = "failed"
+        release.write_json(self.directory / "qa.json", record)
+        count = len(self.calls)
+        options = {key: value for key, value in self.options.items() if key != "feed_channel"}
+        with self.assertRaisesRegex(ValueError, "QA incomplete"):
+            release.publish_test(self.directory, **options)
+        self.assertEqual(len(self.calls), count)
+        release.write_json(self.directory / "qa.json", self.qa(updater=False))
+        with patch.object(release, "public_download_check", side_effect=ValueError("anonymous mismatch")):
+            with self.assertRaisesRegex(ValueError, "anonymous mismatch"):
+                release.publish_test(self.directory, **options)
+        self.assertTrue(self.remote["isPrerelease"])
+        self.assertFalse(self.target.exists())
+        self.assertFalse((self.pages / "macos/stable/appcast.xml").exists())
+
+    def test_test_feed_retry_reuses_signed_bytes_without_signing_again(self):
+        self.publish_and_qa()
+        original = self.target.read_bytes()
+        self.target.unlink()
+        with patch.object(release, "stage_feed") as signer:
+            release.publish_test(self.directory, **{key: value for key, value in self.options.items() if key != "feed_channel"})
+            signer.assert_not_called()
+        self.assertEqual(self.target.read_bytes(), original)
+
+    def test_alpha_and_test_embedded_settings_cannot_be_promoted(self):
+        for version, feed in (("0.9.0-alpha.1", "stable"), ("0.9.0", "test")):
+            with self.subTest(version=version, feed=feed):
+                self.manifest["version"] = version
+                self.manifest["updater"]["feedURL"] = f"{release.FEED_BASE_URL}/macos/{feed}/appcast.xml"
+                with self.assertRaisesRegex(ValueError, "final numeric"):
+                    release.stage(self.directory, candidate=True)
+        self.assertEqual(self.calls, [])
+
+    def test_asset_replacement_manifest_notes_and_tag_changes_stop_before_mutation(self):
+        release.stage(self.directory, candidate=True)
+        for kind in ("asset", "release", "tag", "tag-object", "manifest", "notes"):
+            with self.subTest(kind=kind):
+                before = json.loads(json.dumps(self.remote))
+                path = self.directory / ("RELEASE-NOTES.md" if kind == "notes" else "release-manifest.json")
+                original = path.read_bytes()
+                if kind == "asset": self.remote["assets"][0]["apiUrl"] += "-replacement"
+                elif kind == "release": self.remote["databaseId"] += 1
+                elif kind == "tag": self.remote["tagName"] += "-other"
+                elif kind == "tag-object": self.tag_object = "c" * 40
+                else: path.write_bytes(original + b"\n")
+                count = len(self.calls)
+                with self.assertRaisesRegex(ValueError, "identity changed|tag differs"):
+                    release.publish_test(self.directory, **{key: value for key, value in self.options.items() if key != "feed_channel"})
+                self.assertEqual(len(self.calls), count)
+                self.remote = before
+                self.tag_object = "b" * 40
+                path.write_bytes(original)
+
+    def test_signing_failure_retry_reuses_public_release_assets(self):
+        release.stage(self.directory, candidate=True)
+        with patch.object(release, "stage_feed", side_effect=ValueError("signing failed")):
+            with self.assertRaisesRegex(ValueError, "signing failed"):
+                release.publish_test(self.directory, **{key: value for key, value in self.options.items() if key != "feed_channel"})
+        self.assertFalse(self.remote["isDraft"])
+        self.assertTrue(self.remote["isPrerelease"])
+        self.assertFalse(self.target.exists())
+        release.publish_test(self.directory, **{key: value for key, value in self.options.items() if key != "feed_channel"})
+        self.assertEqual(sum(call[:3] == ("gh", "release", "create") for call in self.calls), 1)
+        self.assertEqual(sum(Path(call[0]).name == "generate_appcast" for call in self.calls), 1)
+
+    def test_public_feed_and_qa_binding_block_promotion_and_leave_stable_intact(self):
+        self.publish_and_qa()
+        stable = self.pages / "macos/stable/appcast.xml"
+        stable.parent.mkdir(parents=True)
+        stable.write_bytes(b"original stable bytes")
+        for failure in ("failed-qa", "unbound-qa", "changed-public-feed", "changed-assets"):
+            with self.subTest(failure=failure):
+                qa = release.qa_record(self.directory)
+                original = json.loads(json.dumps(qa))
+                feed = self.live_feeds["test"]
+                if failure == "failed-qa": qa["checks"]["mac-signed-recovery"]["result"] = "failed"
+                if failure == "unbound-qa": qa["checks"]["mac-signed-update"].pop("candidateIdentity")
+                if failure == "changed-public-feed": self.live_feeds["test"] += b"\n"
+                if failure == "changed-assets": self.remote["assets"][0]["apiUrl"] += "other"
+                release.write_json(self.directory / "qa.json", qa)
+                count = len(self.calls)
+                with self.assertRaises(ValueError):
+                    release.promote(self.directory, pages_dir=self.pages)
+                self.assertEqual(len(self.calls), count)
+                self.assertEqual(stable.read_bytes(), b"original stable bytes")
+                release.write_json(self.directory / "qa.json", original)
+                self.live_feeds["test"] = feed
+                if failure == "changed-assets": self.remote["assets"][0]["apiUrl"] = self.remote["assets"][0]["apiUrl"][:-5]
+
+    def test_unpublished_trial_cannot_be_recorded_as_passed(self):
+        release.stage(self.directory, candidate=True)
+        with self.assertRaises((ValueError, KeyError)):
+            release.record_qa(argparse.Namespace(directory=self.directory, check="mac-signed-update",
+                                                 result="passed", notes="Not really observed"))
+        self.assertNotIn("mac-signed-update", release.qa_record(self.directory)["checks"])
+
+    def test_same_build_conflicting_signed_item_cannot_be_promoted(self):
+        self.publish_and_qa()
+        original = self.target.read_bytes()
+        stable = self.pages / "macos/stable/appcast.xml"
+        stable.parent.mkdir(parents=True)
+        for field in ("description", f"{{{release.SPARKLE_NS}}}minimumSystemVersion",
+                      f"{{{release.SPARKLE_NS}}}hardwareRequirements", f"{{{release.SPARKLE_NS}}}channel"):
+            root = release.ET.fromstring(original)
+            item = root.find("channel/item")
+            node = item.find(field)
+            if node is None:
+                node = release.ET.SubElement(item, field)
+            node.text = "different signed semantics"
+            conflicting = release.ET.tostring(root)
+            for location in ("public", "local"):
+                with self.subTest(field=field, location=location):
+                    stable.write_bytes(conflicting if location == "local" else original)
+                    self.live_feeds["stable"] = conflicting if location == "public" else original
+                    count = len(self.calls)
+                    with self.assertRaisesRegex(ValueError, "signed item semantics"):
+                        release.promote(self.directory, pages_dir=self.pages)
+                    self.assertEqual(len(self.calls), count)
+                    self.assertEqual(stable.read_bytes(), conflicting if location == "local" else original)
+        stable.write_bytes(original)
+        self.live_feeds["stable"] = original
+        release.promote(self.directory, pages_dir=self.pages)
+        self.assertEqual(stable.read_bytes(), original)
+
+    def test_postpromotion_failure_is_retryable_without_activating_stable(self):
+        self.publish_and_qa()
+        with patch.object(release, "public_download_check", side_effect=[self.prefix, ValueError("anonymous download failed")]):
+            with self.assertRaisesRegex(ValueError, "anonymous download failed"):
+                release.promote(self.directory, pages_dir=self.pages)
+        self.assertFalse(self.remote["isPrerelease"])
+        self.assertFalse((self.pages / "macos/stable/appcast.xml").exists())
+        release.promote(self.directory, pages_dir=self.pages)
+        self.assertEqual((self.pages / "macos/stable/appcast.xml").read_bytes(), self.target.read_bytes())
+
+    def test_newer_public_build_prevents_candidate_publication(self):
+        self.publish_and_qa()
+        newer = release.ET.fromstring(self.live_feeds["test"])
+        newer.find(f"channel/item/{{{release.SPARKLE_NS}}}version").text = "43"
+        self.live_feeds["test"] = release.ET.tostring(newer)
+        count = len(self.calls)
+        with self.assertRaisesRegex(ValueError, "lower build"):
+            release.publish_test(self.directory, **{key: value for key, value in self.options.items() if key != "feed_channel"})
+        self.assertEqual(len(self.calls), count)
+
+
+class EmbeddedSettingsTests(unittest.TestCase):
+    def test_actual_bundle_settings_build_source_and_signature_are_checked(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            manifest = {"version": "0.9.0", "buildNumber": 43, "sourceRevision": "a" * 40,
+                        "updater": {"feedURL": release.FEED_BASE_URL + "/macos/stable/appcast.xml",
+                                    "publicEDKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}}
+            mismatch = [None]
+            calls = []
+            def run(*args, **_kwargs):
+                calls.append(args)
+                if args[:2] != ("/usr/bin/hdiutil", "attach"):
+                    return
+                app = Path(args[args.index("-mountpoint") + 1]) / "Paceman.app"
+                library = app / "Contents/Resources/lib"
+                library.mkdir(parents=True)
+                info = {"CFBundleIdentifier": "ai.paceman.macos", "CFBundleShortVersionString": "0.9.0",
+                        "CFBundleVersion": "43", **release.sparkle_dependency.public_update_settings(manifest["updater"])}
+                if mismatch[0] and mismatch[0] != "sourceRevision": info[mismatch[0]] = "wrong"
+                (app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
+                (library / "build-info.json").write_text(json.dumps({"sourceRevision": "bad" if mismatch[0] == "sourceRevision" else "a" * 40, "release": "0.9.0"}))
+            with patch.object(release, "run", side_effect=run):
+                release.verify_embedded_settings(directory, manifest)
+                self.assertTrue(any(call[0] == "/usr/bin/codesign" for call in calls))
+                for key in ("SUFeedURL", "SUPublicEDKey", "SURequireSignedFeed", "CFBundleVersion", "sourceRevision"):
+                    mismatch[0] = key
+                    with self.assertRaisesRegex(ValueError, "embedded"):
+                        release.verify_embedded_settings(directory, manifest)
+                    self.assertEqual(calls[-1][:2], ("/usr/bin/hdiutil", "detach"))
+
+class PublicFeedVerificationTests(unittest.TestCase):
+    def test_http_errors_are_not_treated_as_empty_channels(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "feed.xml"
+            for status in ("404", "500", "403", "000"):
+                with patch.object(release, "run", return_value=subprocess.CompletedProcess([], 0, status, "")) as command:
+                    if status == "404":
+                        self.assertFalse(release.fetch_public_feed("stable", path, allow_missing=True))
+                    else:
+                        with self.assertRaisesRegex(ValueError, "returned HTTP"):
+                            release.fetch_public_feed("stable", path, allow_missing=True)
+                    self.assertIn("--disable", command.call_args.args)
+                    self.assertIn("=https", command.call_args.args)
+                    self.assertNotIn("--insecure", command.call_args.args)
+
+    def test_malformed_signature_footer_stops_before_crypto_process(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "feed.xml"
+            for content in (b"<rss/>", b"<rss/><!-- sparkle-signatures:\nedSignature: AAAA\nlength: 1\n-->\n"):
+                path.write_bytes(content)
+                with patch.object(release, "run") as command, self.assertRaisesRegex(ValueError, "footer"):
+                    release.verify_signed_feed(path, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                command.assert_not_called()
+
+    @unittest.skipUnless(release.sys.platform == "darwin", "CryptoKit verification requires the release Mac")
+    def test_public_signed_fixture_verifies_and_tampered_bytes_fail(self):
+        # Public alpha.6 feed from the completed trial, used only as a signature-format fixture.
+        # No signing tool, keychain, private key, network access or installed app is involved.
+        fixture = release.ROOT / "tests/fixtures/sparkle/signed-appcast.xml"
+        key = "owgq9+CVp60Ka1ml4tbGep5Hl8QdtDNerMcVm6+0E/s="
+        release.verify_signed_feed(fixture, key)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "feed.xml"
+            path.write_bytes(fixture.read_bytes().replace(b"<title>Paceman", b"<title>Xaceman", 1))
+            with self.assertRaises(subprocess.CalledProcessError):
+                release.verify_signed_feed(path, key)

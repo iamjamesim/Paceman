@@ -32,6 +32,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+      - name: Test desktop release staging and promotion
+        run: python -m unittest tests.test_desktop_release tests.test_sparkle_dependency tests.test_mac_release_verification -v
       - name: Test Mac panel state transitions
         run: python -m unittest tests.test_mac_panel -v
       - name: Test Mac update callbacks with pinned Sparkle

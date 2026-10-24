@@ -1,232 +1,257 @@
 # Desktop release runbook
 
-## Delivery and dependencies
+## Scope and stop rules
 
-| Platform | Download | Supported systems |
-| --- | --- | --- |
-| Mac | Self-contained Apple Silicon DMG | macOS 15+; test 15, 26, and 27 |
-| Omarchy | Versioned source archive | Omarchy 4.0+, user systemd, Python 3.11+ |
+One annotated `desktop-vVERSION` tag and **Desktop VERSION** GitHub release hold
+an Apple Silicon Mac DMG (macOS 15+) and an Omarchy archive (Omarchy 4+, Python
+3.11+, user systemd). iPhone releases are independent. Test macOS 15, 26 and 27
+and phone compatibility; record actual coverage, never infer a pass from CI.
 
-The Mac floor limits the initial compatibility matrix; current APIs can target
-older systems. Revisit the floor and Intel support when demand justifies testing.
-Both downloads share an annotated `desktop-vVERSION` tag and a
-**Desktop VERSION** release. iPhone releases are independent;
-check phone/desktop compatibility before either update. Private GitHub releases
-require repository access.
+Use Python 3.11+ (`python3` below must resolve to that environment) and a clean
+checkout of the intended commit with green **Checks**. Choose an
+unused final marketing version and a `CFBundleVersion` higher than every prepared
+or published build. A fix needs a new version/tag and higher build, including a
+fix found during prerelease QA. Old trial evidence does not cover changed source.
+Never move tags, rename/replace public assets, rebuild for promotion, or silently
+turn an alpha/beta version into stable. Preserve `ai.paceman.macos` and
+`ai.paceman.source` identities. Stop on any unexpected settings, hash, signature,
+source, asset-identity or QA mismatch. Resolve the cause before retrying.
 
-Mac updates replace the app using a newer DMG and preserve Application
-Support data. Omarchy updates rerun the newer archive. Keep `ai.paceman.macos` and `ai.paceman.source`
-stable after the first release.
+Agents may prepare code and local evidence. Obtain the user's authorization for
+signing, GitHub writes, Pages pushes and installations; do not change account,
+repository, DNS or credential settings as part of release preparation. CLI release
+commands below need existing `gh` authentication. The web route remains supported;
+no CLI login is required when the user performs GitHub writes.
 
-Mac packages embed the official Sparkle framework pinned in `macos/sparkle.json`.
-To enable in-app updates, pass `--updater-config PATH` through release preparation;
-that JSON contains only `feedURL` (public HTTPS) and `publicEDKey` (base64 Ed25519
-public key). No feed or publisher key is bundled by default: those builds retain
-the download-page fallback. `--sparkle-archive PATH` uses the pinned archive offline.
+## Build once
 
-Configured builds check daily and show an Update Available notice without taking
-focus. Installation and restart are user-controlled;
-unattended installation is disabled. Active work or unresolved responses defer
-restart. The handoff stops Paceman's workers, checkpoints SQLite, preserves Sharing
-and agent choices, and verifies the new running service build. A failed handoff
-keeps recovery data and offers retry; it never automatically restores an older
-database. Existing manual installations need one manual updater-enabled upgrade.
+Set `VERSION`, `BUILD`, `NOTES`, `UPDATER`, `SPARKLE` and `PAGES` to reviewed local
+values. `PAGES` is a separate, fetched/fast-forwarded `gh-pages` checkout of this
+repository. Its root has `.nojekyll` and `CNAME` containing `updates.paceman.ai`.
+Hosting and HTTPS must already work. Marketing stays at `paceman.ai`.
+`UPDATER` contains only the stable public URL and existing publisher **public** key:
 
-Updater publication additionally requires an approved publisher signing key and
-feed location. Use Sparkle's official tools to sign the final notarized archive,
-appcast and release notes. Signed feeds and pre-extraction verification are required;
-signature failure never falls back to unsigned updates. Promote the feed only after
-the exact public artifacts pass release QA. Do not replace versioned artifacts.
+```json
+{"feedURL":"https://updates.paceman.ai/macos/stable/appcast.xml","publicEDKey":"EXISTING_PUBLIC_ED25519_KEY"}
+```
 
-### Static update feed
-
-The public `iamjamesim/Paceman` repository publishes a separate `gh-pages` branch
-from its root, with an empty `.nojekyll` and `CNAME` set to `updates.paceman.ai`.
-The root landing page links to desktop downloads in GitHub Releases; Mac feeds
-live at `https://updates.paceman.ai/macos/{test,stable}/appcast.xml`. Verify domain
-ownership, configure the repository custom domain and DNS, and confirm HTTPS
-before building an updater-enabled release. Feed staging requires this exact
-custom domain. The marketing site remains separately hosted at `paceman.ai`.
-
-Sparkle's pinned `generate_keys` stores the publisher key in the release Mac's
-Keychain under an explicitly chosen account. Establish an encrypted recovery copy
-before release; never include the private key in the repository, builds, or feed.
-Builds and manifests contain only the feed URL and public key. Existing
-Developer ID and notary profiles remain separate credentials.
-
-After the ordinary package QA gate, `publish` can also stage a signed feed locally:
+Use the existing Keychain publisher account `paceman-release` and its verified
+recovery copy; never export keys into a release directory. Developer ID signing
+and notarization use separate credentials. `SPARKLE` is the official archive whose
+SHA-256 is pinned in `macos/sparkle.json`. Both feed URLs use the same publisher key.
 
 ```sh
-python3 scripts/desktop_release.py publish "dist/desktop-v$VERSION" \
-  --feed-channel test --pages-dir /path/to/separate-gh-pages-checkout \
-  --sparkle-archive /path/to/pinned-Sparkle.tar.xz \
+python3 scripts/desktop_release.py prepare "$VERSION" --build-number "$BUILD" \
+  --notes-file "$NOTES" --updater-config "$UPDATER" --sparkle-archive "$SPARKLE"
+RELEASE="dist/desktop-v$VERSION"
+python3 scripts/desktop_release.py stage "$RELEASE" --candidate
+```
+
+Expected: signed/notarized packages, exact local source/tag, then a draft marked
+**prerelease, not latest**; downloaded bytes verified against the local manifest.
+`stage --candidate` supports a final numeric version while it is being tested.
+Its `candidate.json` binds source/build/notes/checksums and GitHub release/asset
+identities. Do not edit it. Repeating stage can resume missing draft uploads;
+conflicting existing bytes or changed candidate identities stop it.
+
+For preparation without GitHub CLI, check CI in the web UI, create an unused
+annotated tag locally, then run the lower-level packager:
+
+```sh
+git tag -a "desktop-v$VERSION" -m "Paceman desktop $VERSION"
+python3 scripts/prepare-desktop-release.py --version "$VERSION" \
+  --build-number "$BUILD" --output-dir "dist/desktop-v$VERSION" \
+  --identity 'Developer ID Application: Chang Hyun Im (ZTG42P5438)' \
+  --notary-profile paceman-release --notes-file "$NOTES" \
+  --updater-config "$UPDATER" --sparkle-archive "$SPARKLE"
+```
+
+With permission, push only that tag and use GitHub **Draft a new release**. Attach
+only `Paceman-macos-arm64-VERSION.dmg`, `Paceman-Omarchy-VERSION.tar.gz` and
+`SHA256SUMS`. Keep manifest, notes, signing and QA evidence local. Download all
+three to a new directory; compare SHA256SUMS with the local original before
+checking its package hashes. The unsigned checksum file alone is not a signature.
+The web route requires the same checks below; it does not enforce CLI gates.
+
+## Publish a test candidate
+
+First test the downloaded packages: fresh and prior-version upgrades, hooks and
+phone delivery, recovery/uninstall, supported macOS versions, Omarchy fresh/upgrade,
+and phone compatibility. Follow the installation READMEs. Record each **observed**
+result with its OS/device versions; do not bulk-mark tests passed:
+
+```sh
+python3 scripts/desktop_release.py status "$RELEASE"
+python3 scripts/desktop_release.py qa "$RELEASE" --check mac-fresh \
+  --result passed --notes 'Actual result and tested OS version'
+python3 scripts/desktop_release.py publish-test "$RELEASE" \
+  --pages-dir "$PAGES" --sparkle-archive "$SPARKLE" \
   --keychain-account paceman-release --approve-feed-signing
 ```
 
-The explicit flag authorizes later Keychain use. This command never pushes Pages.
-It publishes packages first, rechecks authenticated and anonymous HTTPS downloads,
-checks the existing Keychain public key, and uses official `sign_update` to sign
-the archive and appcast. Notes are embedded inside the signed appcast. Output is
-`macos/test/appcast.xml`; `feed-staging.json` records the URL and local
-hashes, not publication.
-Signing failure leaves the previous feed intact; retry reuses the public packages.
+The ordinary eight QA checks must pass (only first-release upgrade checks may be
+not applicable). Draft assets are not anonymously downloadable. `publish-test`
+therefore publishes the existing draft as **prerelease, not latest**, rechecks
+anonymous HTTPS asset hashes, and runs pinned official `generate_appcast` once.
+It embeds notes and signs the feed and DMG; public-only CryptoKit verification
+checks both signatures against the actual bundled key. A signed one-item feed is
+staged locally at `macos/test/appcast.xml`, with evidence and a saved exact copy
+beside the packages. Signing failure preserves the previous feed; retry reuses
+public assets. A reviewed intent record is saved before feed replacement, so an
+interrupted evidence write can recover matching signed bytes without signing again. No Pages push or landing-page generation is automated.
 
-Use an isolated, updater-enabled baseline to test that feed against the exact
-candidate downloads. A stable-configured candidate may be offered on the test
-feed; after replacement it returns to its embedded stable URL. Record
-`mac-signed-update` and `mac-signed-recovery` against the same package checksums,
-then rerun with `--feed-channel stable` to stage `macos/stable/appcast.xml`.
-Stable rejects prereleases and requires both signed-trial checks. Test publication
-requires the existing package QA checks and a separately approved bounded trial.
+With separate approval, review/commit/push **only** that test feed in `PAGES`.
+Wait for deployment, then compare its public HTTPS SHA-256 to
+`feed-test-staging.json`. A mismatch is pending, not a successful publication.
+The web equivalent is publishing the same assets with **This is a pre-release**
+selected and **Set as latest release** off, then using pinned `generate_appcast`
+with the existing publisher account and verifying signatures/public bytes as above.
+Do not hand-write unsigned XML or promote through the legacy command to bypass QA.
 
-Before each separately approved feed push, fetch and fast-forward the dedicated
-checkout, rerun staging, review only the intended channel's diff and local evidence,
-and commit that feed. Push `gh-pages` without force; packages must already be public.
-Wait for the Pages deployment and compare the public HTTPS feed's exact SHA-256
-with `feed-staging.json` before reporting success. A failed deployment or mismatch
-remains pending; retry the same feed commit rather than replacing release assets.
+## Test on the user's Mac
 
-The Mac bundle includes the runtime pinned in
-[`macos/python-runtime.json`](../macos/python-runtime.json) and wheels pinned in
-[`requirements-client.txt`](../requirements-client.txt). Users need no separate
-Python or package installation. It excludes pip, optional direct-APNs packages,
-and hosted relay server dependencies. Review bundled native libraries, licenses,
-and security advisories when updating dependencies; hashes alone do not check
-for vulnerabilities. Keep exact versions in the lock files and build measurements
-in generated release evidence.
+An existing updater-enabled, lower-build Paceman can test the candidate. A separate
+account is useful for fresh-install isolation but is not a Sparkle requirement.
+Get approval before replacing the working app. Preserve a consistent private
+backup of `~/Library/Application Support/Paceman` first; never display private keys or pairing secrets.
+Confirm the installed bundle's `SUFeedURL`/`SUPublicEDKey` and the candidate's
+read-only mounted bundle match the intended stable URL/key and source/build.
+The CLI verifier reopens the DMG and checks those embedded values and codesign.
 
-## Prepare
-
-Use a clean checkout of the release commit on an Apple Silicon Mac. Confirm its
-**Checks** workflow passed. Choose an unused version, increase the build number,
-and write customer-facing notes to a local file. Signing requires a Developer ID
-Application identity for team `ZTG42P5438` and the `paceman-release` notarization
-profile in Keychain.
-
-### With GitHub CLI
-
-Run `gh auth login` once if using CLI release automation:
+Quit Paceman. Record whether the **per-user** override exists and its exact value
+before changing it (use a private local directory for this evidence):
 
 ```sh
-VERSION=0.1.0
-python3 scripts/desktop_release.py prepare "$VERSION" \
-  --build-number 1 --notes-file /tmp/paceman-release-notes.md
+umask 077
+TRIAL=$(mktemp -d "${TMPDIR:-/tmp}/paceman-feed-trial.XXXXXX")
+if defaults read ai.paceman.macos SUFeedURL > "$TRIAL/SUFeedURL.before" 2> "$TRIAL/read-error"; then
+  defaults read-type ai.paceman.macos SUFeedURL
+  touch "$TRIAL/had-override"
+fi
 ```
 
-This checks CI and credentials, creates or verifies the annotated tag, builds both
-clients, signs the Mac app and DMG, notarizes, staples, and verifies the packages.
-Set `--identity` if there is more than one matching signing identity.
-
-### Without GitHub CLI
-
-Check CI in GitHub's web UI, then create the annotated tag and build locally:
+Proceed only if the existing type is a string, or the error explicitly says the
+key/domain does not exist. Stop for other errors; retain `TRIAL` until restoration.
+Then, with the app quit:
 
 ```sh
-VERSION=0.1.0
-git tag -a "desktop-v$VERSION" -m "Paceman desktop $VERSION"
-python3 scripts/prepare-desktop-release.py \
-  --version "$VERSION" --build-number 1 --output-dir "dist/desktop-v$VERSION" \
-  --identity 'Developer ID Application: Chang Hyun Im (ZTG42P5438)' \
-  --notary-profile paceman-release --notes-file /tmp/paceman-release-notes.md
+defaults write ai.paceman.macos SUFeedURL -string 'https://updates.paceman.ai/macos/test/appcast.xml'
+open /Applications/Paceman.app
 ```
 
-This performs the same packaging and Apple verification without GitHub API access.
-If the local tag already exists, confirm it points to the chosen commit; do not
-recreate or move it.
+Choose **Check for Updates**, install/restart through Sparkle, and verify the exact
+candidate build and running source. This override survives app replacement and
+relaunch: embedding stable in the candidate does **not** reset it. Check retained
+identity, phone pairings, Sharing/agent choices and history; busy deferral, Skip,
+cancel, relaunch and failed-handoff recovery. Follow `macos/README.md` through
+user hook review and a fresh saved local task that replies successfully and shows
+Finished; verify `lastAgentEventAt` advances. APNs acceptance and physical iPhone
+notification display are separate checks. Clean up any diagnostic orphaned activity.
 
-## Stage and test
-
-**CLI:** run `python3 scripts/desktop_release.py stage "dist/desktop-v$VERSION"`.
-It pushes the tag, uploads a draft release, and downloads and verifies the
-assets. Test the printed `downloaded-*` directory. Repeating `stage` resumes an
-interrupted upload; differing existing assets are rejected.
-
-**Web UI:** push the prepared tag with `git push origin "desktop-v$VERSION"`. In GitHub
-**Releases → Draft a new release**, select that existing tag, use **Desktop VERSION**
-as the title, paste `RELEASE-NOTES.md` into the description, and attach these three files from
-`dist/desktop-v$VERSION/`:
-
-- `Paceman-macos-arm64-VERSION.dmg`
-- `Paceman-Omarchy-VERSION.tar.gz`
-- `SHA256SUMS`
-
-Keep `release-manifest.json` and `RELEASE-NOTES.md` in the local release directory.
-The manifest records build provenance and is used to verify downloaded packages;
-the notes supply the release description. Neither is uploaded as an attachment.
-`SHA256SUMS` covers only the two packages, so editing the description does not
-invalidate package QA.
-
-Save the draft. Download all three files into a new directory, confirm the downloaded
-`SHA256SUMS` matches the local original, then run these checks from that directory:
+Quit Paceman again and restore the previous override exactly:
 
 ```sh
-shasum -a 256 -c SHA256SUMS
-xcrun stapler validate "Paceman-macos-arm64-$VERSION.dmg"
-spctl --assess --type open --context context:primary-signature \
-  "Paceman-macos-arm64-$VERSION.dmg"
+if test -f "$TRIAL/had-override"; then
+  defaults write ai.paceman.macos SUFeedURL -string "$(cat "$TRIAL/SUFeedURL.before")"
+else
+  defaults delete ai.paceman.macos SUFeedURL
+fi
+open /Applications/Paceman.app
 ```
 
-For either route, test these exact downloads and record results and OS/device
-versions beside the release artifacts:
+Confirm the restored preference (or absence); only an absent override selects the
+embedded stable URL. Record `mac-signed-update` and `mac-signed-recovery` using `qa`
+as above. The CLI verifies the public test feed and binds each passing result to
+its exact signature-bearing bytes and candidate identity. Failed or old QA blocks
+promotion. Keep the tested candidate installed; do not downgrade a migrated database.
 
-- Upgrade the previous public Mac and Omarchy installations, retaining pairings,
-  settings, and unrelated hooks. The first public release has no upgrade baseline.
-- Test fresh installations separately, using a clean account or VM. Check the
-  supported macOS versions and a real Omarchy installation.
-- Follow the [Mac](../macos/README.md) and [Omarchy](../omarchy/README.md) installation
-  checks: reviewed hooks, a real Codex event, pairing, APNs acceptance, and a
-  notification displayed on a physical iPhone.
-- Check login startup, Sharing off/on, restart/reconnection, failed-update recovery,
-  and uninstall. Check connected, empty, stale, and multiple-phone menu states.
-- Check old/new phone and desktop compatibility and review dependency/license changes.
-
-## Publish
-
-**CLI:** `status` lists pending checks; record each observed result with `qa`:
+## Promote the same bytes
 
 ```sh
-python3 scripts/desktop_release.py status "dist/desktop-v$VERSION"
-python3 scripts/desktop_release.py qa "dist/desktop-v$VERSION" \
-  --check mac-fresh --result passed --notes 'Observed result and OS version'
-python3 scripts/desktop_release.py publish "dist/desktop-v$VERSION"
+python3 scripts/desktop_release.py promote "$RELEASE" --pages-dir "$PAGES"
 ```
 
-Publication requires all checks. Only first-release upgrade checks may be
-`not-applicable`. QA is tied to package checksums. `publish` verifies downloads
-before and after publication. Versions with `-alpha.N` or `-beta.N` are prereleases;
-plain versions such as `0.1.0` are regular releases.
+This requires all ten checks, unchanged source/tag/release/asset identities,
+authenticated and anonymous package hashes, the unchanged public test feed and
+valid feed/DMG signatures. Newer public builds block an older promotion. It changes
+only the existing release's prerelease/latest metadata, rechecks the downloads,
+then stages the **exact tested signed feed bytes** at `macos/stable/appcast.xml`.
+It does not build, sign again, upload, rename packages, or move tags. Review and
+push stable separately **last**; verify its deployed hash. Update the landing
+page's links manually with separate approval. Same-byte retries are supported;
+a failed check leaves stable unstaged, even if release metadata already changed.
 
-**Web UI:** after completing the same checks, open the saved draft and select
-**Publish release**. Select **This is a pre-release** only for alpha/beta versions.
-Browser publication does not enforce the script's QA gate;
-review the recorded results first. Recheck the published downloads afterward.
+Legacy/manual releases remain supported by `stage` and `publish` without
+`--candidate`: hyphenated alpha/beta versions stay prereleases; plain versions
+publish normally after QA. That path is not the final-version test/promotion flow.
+Updater feed staging still requires explicit signing options. Do not use it to
+circumvent a candidate record or reuse QA for rebuilt packages.
 
-Publish the tested files without rebuilding or replacing them. Never move a
-public release tag. Do not upload the entire output directory: signing evidence
-and local QA records stay local. Generated files under `dist/` are ignored by Git.
+## Omarchy: agent-led manual upgrade
 
-## Recovery and local dry runs
-
-If Apple is still processing after five minutes, repeat the packaging command
-with `--resume` (do not repeat tag creation). The original DMG and submission ID
-are retained in `dist/.desktop-vVERSION.pending/`. If an upload failed before an ID was
-saved, inspect Apple history before resubmitting. Rejected builds require a fix
-and a new candidate. After a publication network error, recheck the existing
-release instead of replacing its assets.
-
-For a local packaging test without Developer ID or notarization:
+No Linux auto-updater is included. With the user's approval, choose the official
+release at `github.com/iamjamesim/Paceman/releases`, then download its archive and
+`SHA256SUMS` over HTTPS into a fresh directory. Compare the checksum file with the
+trusted publisher's release evidence when available; a hash fetched beside an
+archive detects corruption, not compromise of that same source.
 
 ```sh
-python3 scripts/prepare-desktop-release.py \
-  --version "$VERSION" --build-number 1 \
-  --output-dir "dist/$VERSION-candidate" --adhoc
+BASE="https://github.com/iamjamesim/Paceman/releases/download/desktop-v$VERSION"
+curl --disable --fail --location --proto '=https' --proto-redir '=https' \
+  --output SHA256SUMS "$BASE/SHA256SUMS"
+curl --disable --fail --location --proto '=https' --proto-redir '=https' \
+  --output "Paceman-Omarchy-$VERSION.tar.gz" "$BASE/Paceman-Omarchy-$VERSION.tar.gz"
+awk -v name="Paceman-Omarchy-$VERSION.tar.gz" '$2 == name {print; n++} END {if (n != 1) exit 1}' \
+  SHA256SUMS > SHA256SUMS.omarchy
+sha256sum --check --strict SHA256SUMS.omarchy
+tar -xzf "Paceman-Omarchy-$VERSION.tar.gz"
+cd "Paceman-Omarchy-$VERSION"
+pacemanctl status
+python3 -c 'from service.compatibility import service_build; print(service_build("."))'
 ```
 
-Omarchy archive creation also runs on the Mac release host. Linux CI requires
-`systemd-analyze verify` on the unit templates extracted from the archive; Mac CI
-checks archive creation without that Linux-only validation. Both jobs verify the
-archive checksum.
+Run the download/check commands one at a time; stop on any failure. Require exactly
+one matching checksum row and an `OK` result before extraction.
+Record the archive version/hash and expected service fingerprint (archives may
+report an unknown Git revision). Wait for active work/pending responses to finish.
+Preserve a private consistent backup of `~/.local/lib/paceman`, the actual
+`${XDG_STATE_HOME:-$HOME/.local/state}/paceman` state, and existing agent hook configs;
+stop the source for the snapshot (`pacemanctl stop` also stops its push worker).
+Include `~/.codex/hooks.json` and the configured Claude directory’s `settings.json`
+when present; keep backup permissions private and record its path.
+Do not uninstall, reset pairings or print notification credentials.
 
-These `UNSIGNED` candidates are not eligible for distribution. Keep this runbook
-updated with changes to the scripts or supported platforms; keep per-release QA
-and measurements with that release's evidence.
+```sh
+bash scripts/install-omarchy.sh
+pacemanctl status
+pacemanctl support
+systemctl --user status paceman-source.service paceman-push.service --no-pager
+```
+
+The installer reloads systemd and restarts enabled Sharing itself, preserving
+pairings/history, notification config, agent choices and unrelated hooks. Sharing
+previously off must stay off; stopped services then are expected. With Sharing on,
+require a fresh running status, matching `serviceBuild.serviceFingerprint` and
+support `runningService` observation, retained phones/settings and healthy panel.
+Use `pacemanctl logs` for failures; do not repeatedly restart to hide a mismatch.
+Follow `omarchy/README.md` for user-reviewed hooks and a fresh successful/Finished
+local task. For one supported-request smoke test, use the user's existing supported
+native session, ask one harmless input question, have the **user** answer from
+iPhone/watch, and verify the task receives it and clears attention. Never answer
+or approve on the user's behalf. Verify APNs acceptance and a new physical-phone
+notification separately; unavailable native prerequisites remain an explicit QA gap.
+
+## Failures and recovery
+
+Stop publication on a failed trial. Withdraw the bad test-feed commit or replace
+it with a previously verified signed feed, with approval; verify deployment. Do
+not delete/move public tags or replace published packages. Fix forward with a new
+version and higher build. Keep recovery snapshots; do not restore an old database
+under new code or run older code against migrated state without an explicitly
+verified compatible recovery procedure. Omarchy uses the same forward-fix rule.
+
+Apple processing timeout: rerun the original preparation command with `--resume`;
+do not recreate the tag or submit again blindly. After any network error inspect
+the existing release/Pages state and retry the same artifacts. A local `--adhoc`
+packager run is unsigned, ineligible for publication, and does not test Sparkle
+trust or Apple distribution. Keep per-release measurements in local QA/PR evidence.
