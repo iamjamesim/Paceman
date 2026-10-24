@@ -3521,12 +3521,14 @@ extension InteractionTests {
             let snapshotData = refreshSnapshot(source, state: "needs_input", interactions: true)
             var posts = 0
             InteractionURLProtocol.start = { transport in
-                if transport.request.httpMethod == "POST" {
-                    posts += 1
-                    transport.finish(Data(), status: 409)
-                } else {
-                    transport.finish(transport.request.url?.path == "/v1/snapshot"
-                        ? snapshotData : try! JSONSerialization.data(withJSONObject: listing))
+                Task { @MainActor in
+                    if transport.request.httpMethod == "POST" {
+                        posts += 1
+                        transport.finish(Data(), status: 409)
+                    } else {
+                        transport.finish(transport.request.url?.path == "/v1/snapshot"
+                            ? snapshotData : try! JSONSerialization.data(withJSONObject: listing))
+                    }
                 }
             }
             let model = CompanionModel(preview: true, push: PushCoordinator(), client: client,
@@ -3542,6 +3544,9 @@ extension InteractionTests {
                 "sessionID": identity.sessionID, "provider": identity.provider])
             model.setForeground(true)
             let pending = try XCTUnwrap(model.handoff, scenario)
+            // Drain the foreground owner's initial read before changing its response.
+            _ = await model.refresh(sourceID: sourceID)
+            _ = await model.handleWatchWork(["operation": "review"])
             var requests = try XCTUnwrap(listing["requests"] as? [[String: Any]])
             if scenario == "replacement" || scenario == "new-generation" {
                 requests[0]["requestID"] = UUID().uuidString
@@ -3552,8 +3557,10 @@ extension InteractionTests {
             }
             if scenario == "new-generation" { listing["generation"] = UUID().uuidString }
             listing["requests"] = requests
-            let snapshot = try XCTUnwrap(model.snapshots[sourceID])
-            _ = await model.interactions.refresh(source, snapshot: snapshot, client: client)
+            // Refresh through the same owner as polling; a parallel inbox read can
+            // be superseded before its caller resumes, leaving stale assertions.
+            _ = await model.refresh(sourceID: sourceID)
+            _ = await model.handleWatchWork(["operation": "review"])
             let ids = model.interactions.items.map(\.id)
             XCTAssertEqual(ids.count, scenario == "siblings" ? 2 : 1, scenario)
             XCTAssertNotNil(model.consumeAgentHandoff(pending), scenario)

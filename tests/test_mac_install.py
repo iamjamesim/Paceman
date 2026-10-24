@@ -395,6 +395,7 @@ class MacInstallTests(unittest.TestCase):
                      RouteSetupError("Tailscale needs HTTPS") if fail_route else None),
                      return_value="https://test.ts.net:8443"), \
                  patch("macos.install_push.install", side_effect=configure_push), \
+                 patch('macos.updates.wait_ready') as readiness, \
                  patch("builtins.print") as output:
                 if fail_start:
                     with self.assertRaises(subprocess.CalledProcessError):
@@ -431,7 +432,10 @@ class MacInstallTests(unittest.TestCase):
             self.assertEqual(push_plist.exists(), failed)
             self.assertEqual((root / "notification-setup-incomplete").exists(),
                              fail_push and not failed)
-            self.assertEqual(len(bootstraps), 3 if failed else 0 if sharing_paused else 1)
+            self.assertEqual(len(bootstraps), (1 if upgrade else 3) if failed else 0 if sharing_paused else 1)
+            if upgrade:
+                self.assertEqual(readiness.call_count, 0 if fail_start or sharing_paused else 1)
+                self.assertEqual((root / 'update-stopped').exists(), failed)
             if upgrade and not failed:
                 changed = hooks.read_bytes() != old_hooks
                 self.assertEqual((root / "setup-step").read_text(), "hooks\n" if changed else "finished\n")

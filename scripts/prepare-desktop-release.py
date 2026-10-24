@@ -76,7 +76,7 @@ def verify_omarchy(archive: Path, version: str) -> None:
 
 
 def verify_mac(dmg: Path, revision: str, version: str, build_number: int,
-               runtime: dict) -> None:
+               runtime: dict, updater: dict | None = None) -> None:
     run("/usr/bin/hdiutil", "verify", "-quiet", dmg)
     with tempfile.TemporaryDirectory(prefix="paceman-verify-") as directory:
         mount = Path(directory) / "mount"
@@ -93,6 +93,10 @@ def verify_mac(dmg: Path, revision: str, version: str, build_number: int,
             for key, value in expected.items():
                 if info.get(key) != value:
                     raise ValueError(f"Mac bundle {key}: expected {value!r}, found {info.get(key)!r}")
+            for key in ('SUFeedURL', 'SUPublicEDKey', 'SURequireSignedFeed', 'SUVerifyUpdateBeforeExtraction',
+                        'SUAllowsAutomaticUpdates', 'SUSignedFeedFailureExpirationInterval'):
+                if info.get(key) != (updater or {}).get(key):
+                    raise ValueError(f'Mac updater setting differs from release input: {key}')
             build = json.loads((app / "Contents/Resources/lib/build-info.json").read_text())
             if (build.get("sourceRevision") != revision or build.get("release") != version
                     or build.get("pythonVersion") != runtime["version"]
@@ -110,12 +114,14 @@ def verify_mac(dmg: Path, revision: str, version: str, build_number: int,
             for binary in binaries:
                 architectures = subprocess.check_output(
                     ["/usr/bin/lipo", "-archs", str(binary)], text=True).split()
-                if architectures != ["arm64"]:
+                is_sparkle = binary.is_relative_to(app / 'Contents/Frameworks/Sparkle.framework')
+                allowed = {'arm64', 'x86_64'} if is_sparkle else {'arm64'}
+                if 'arm64' not in architectures or not set(architectures) <= allowed:
                     raise ValueError(f"Unexpected {binary.name} architectures: {architectures}")
                 build = subprocess.check_output(["/usr/bin/vtool", "-show-build", str(binary)],
                                                 text=True)
-                minimum = re.search(r"\bminos\s+(\d+(?:\.\d+)*)", build)
-                if minimum is None or tuple(map(int, minimum.group(1).split(".")[:2])) > (15, 0):
+                minimums = re.findall(r"\bminos\s+(\d+(?:\.\d+)*)", build)
+                if not minimums or any(tuple(map(int, value.split('.')[:2])) > (15, 0) for value in minimums):
                     raise ValueError(f"Native binary exceeds macOS 15 floor: {binary}")
             run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
         finally:
@@ -186,6 +192,8 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--python-archive", type=Path)
     parser.add_argument("--wheelhouse", type=Path)
+    parser.add_argument("--sparkle-archive", type=Path)
+    parser.add_argument("--updater-config", type=Path, help="Public feedURL and publicEDKey only")
     parser.add_argument("--notes-file", type=Path, help="Reviewed release description; used as supplied")
     signing = parser.add_mutually_exclusive_group(required=True)
     signing.add_argument("--adhoc", action="store_true")
@@ -208,6 +216,8 @@ def main() -> None:
             raise ValueError(f"Output directory already exists: {destination}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         runtime = json.loads((ROOT / "macos/python-runtime.json").read_text())
+        from sparkle_dependency import update_settings
+        updater = update_settings(args.updater_config)
         change_notes = args.notes_file.read_text().strip() if args.notes_file else ""
         if args.notes_file and not change_notes:
             raise ValueError("Release notes file is empty")
@@ -217,6 +227,8 @@ def main() -> None:
             state = {"sourceRevision": revision, "version": args.version,
                      "buildNumber": args.build_number, "adhoc": args.adhoc,
                      "identity": args.identity, "pythonArchiveSHA256": runtime["sha256"],
+                     "sparkleLockSHA256": digest(ROOT / 'macos/sparkle.json'),
+                     "updaterConfigSHA256": digest(args.updater_config) if args.updater_config else None,
                      "notesSHA256": hashlib.sha256(change_notes.encode()).hexdigest()}
             if args.resume:
                 if json.loads((staging / "preparation.json").read_text()) != state:
@@ -233,6 +245,9 @@ def main() -> None:
                 command += ["--python-archive", str(args.python_archive.expanduser().resolve())]
             if args.wheelhouse:
                 command += ["--wheelhouse", str(args.wheelhouse.expanduser().resolve())]
+            for name in ('sparkle_archive', 'updater_config'):
+                if getattr(args, name):
+                    command += ['--' + name.replace('_', '-'), str(getattr(args, name).expanduser().resolve())]
             command += (["--adhoc"] if args.adhoc else
                         ["--identity", args.identity, "--notary-profile", args.notary_profile])
             if args.resume:
@@ -248,7 +263,7 @@ def main() -> None:
                 if digest(path) != expected_hash:
                     raise ValueError(f"Checksum mismatch: {path}")
             verify_omarchy(omarchy, args.version)
-            verify_mac(mac, revision, args.version, args.build_number, runtime)
+            verify_mac(mac, revision, args.version, args.build_number, runtime, updater)
             files = [artifact(omarchy, public=not args.adhoc),
                      artifact(mac, public=not args.adhoc)]
             manifest = {"schemaVersion": 1, "version": args.version,
@@ -257,6 +272,9 @@ def main() -> None:
                         "pythonVersion": runtime["version"],
                         "pythonArchiveSHA256": runtime["sha256"],
                         "clientLockSHA256": digest(ROOT / "requirements-client.txt"),
+                        "sparkleLockSHA256": digest(ROOT / 'macos/sparkle.json'),
+                        "updaterConfigSHA256": digest(args.updater_config) if args.updater_config else None,
+                        "updater": json.loads(args.updater_config.read_text()) if args.updater_config else None,
                         "clientWheels": client_wheels(),
                         "xcodeVersion": output("xcodebuild", "-version"),
                         "hostMacOS": platform.mac_ver()[0], "artifacts": files}

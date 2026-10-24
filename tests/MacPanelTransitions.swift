@@ -21,6 +21,14 @@ private final class ControlledCommands: @unchecked Sendable {
     }
 }
 
+#if canImport(Sparkle)
+// Sparkle exposes update state through NSSecureCoding, not a public stage initializer.
+private final class InstallingUpdateStateCoder: NSCoder {
+    override func decodeInteger(forKey key: String) -> Int { SPUUserUpdateStage.installing.rawValue }
+    override func decodeBool(forKey key: String) -> Bool { true }
+}
+#endif
+
 @main
 private struct MacPanelTransitions {
     static let live = #"{"running":true,"sharingEnabled":true,"activity":"working","sessions":1,"clients":[{"id":"phone","name":"Test phone","platform":"ios","pairedAt":1,"lastContactAt":2}],"missingHooks":[],"lastAgentEventAt":1}"#
@@ -185,9 +193,134 @@ private struct MacPanelTransitions {
         app.delegate = nil
     }
 
+    @MainActor static func exerciseMenuUpdateIndicator() {
+        // Keep error/attention fixtures decoded through the real status model.
+        func decoded(_ value: String) -> SourceStatus {
+            try! JSONDecoder().decode(SourceStatus.self, from: Data(value.utf8))
+        }
+        func shows(_ state: SourceStatus, known: Bool = true, available: Bool = true,
+                   busy: Bool = false, setup: Bool = false, message: Bool = false) -> Bool {
+            MenuUpdateIndicator.showsBadge(status: state, statusKnown: known,
+                updateAvailable: available, busy: busy, setupPending: setup, hasMessage: message, now: 100)
+        }
+        var status = decoded(#"{"running":true,"sharingEnabled":true,"updatedAt":100,"activity":"idle"}"#)
+        assert(shows(status))
+        assert(!shows(status, available: false))
+        assert(!shows(status, known: false))
+        assert(!shows(status, busy: true))
+        assert(!shows(status, setup: true))
+        assert(!shows(status, message: true))
+        for activity in ["needs_input", "failed"] {
+            assert(!shows(decoded("{\"running\":true,\"sharingEnabled\":true,\"updatedAt\":100,\"activity\":\"\(activity)\"}")))
+            assert(!shows(decoded("{\"running\":true,\"sharingEnabled\":true,\"updatedAt\":100,\"activity\":\"working\",\"sessionCounts\":{\"\(activity)\":1}}")))
+        }
+        assert(!MenuUpdateIndicator.showsBadge(status: status, statusKnown: true, updateAvailable: true,
+            busy: false, setupPending: false, hasMessage: false, now: 120))
+        status.running = false
+        assert(!shows(status)) // Sharing unavailable outranks the update dot.
+        status.sharingEnabled = false
+        assert(shows(status)) // Intentionally paused is not a connection fault.
+
+        let button = NSButton(frame: NSRect(x: 0, y: 0, width: 22, height: 22))
+        let image = MenuUpdateIndicator.image()
+        button.image = image
+        let badge = MenuUpdateIndicator.addBadge(to: button)
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            button.appearance = NSAppearance(named: appearance)
+            MenuUpdateIndicator.update(button: button, badge: badge, show: true)
+            button.layoutSubtreeIfNeeded()
+            assert(!badge.isHidden && badge.hitTest(NSPoint(x: 4, y: 4)) == nil)
+            assert(button.image === image && image.isTemplate && image.size == NSSize(width: 18, height: 18))
+            assert(button.toolTip == "Update available" && button.accessibilityLabel() == "Paceman, update available")
+            assert(button.bounds.contains(badge.frame))
+            MenuUpdateIndicator.update(button: button, badge: badge, show: false)
+            assert(badge.isHidden && button.image === image)
+            assert(button.accessibilityLabel() == "Paceman")
+        }
+        print("Menu update indicator priority and native template checks passed")
+    }
+
+    @MainActor static func exerciseClosedPanelUpdateStatus() async {
+        // No Panel or polling view exists in this test. Watch the same atomic
+        // local status boundary as the real menu indicator.
+        let files = FileManager.default
+        let directory = files.temporaryDirectory.appendingPathComponent("paceman-menu-status-" + UUID().uuidString)
+        try! files.createDirectory(at: directory, withIntermediateDirectories: true)
+        let path = directory.appendingPathComponent("status.json")
+        func write(_ activity: String, running: Bool = true) {
+            let data = try! JSONSerialization.data(withJSONObject: ["schema": 1, "running": running,
+                "activity": activity, "updatedAt": Date().timeIntervalSince1970])
+            try! data.write(to: path, options: .atomic)
+        }
+        var observed: SourceStatus?
+        var reads = 0
+        var expired = false
+        var testNow: TimeInterval?
+        let observer = UpdateStatusObserver(directory: directory, changed: {
+            observed = MenuUpdateIndicator.readStatus(in: directory)
+            reads += 1
+        }, expired: {
+            expired = true
+            testNow = (observed?.updatedAt ?? Date().timeIntervalSince1970) + 20
+        })
+        defer { observer.stop(); try? files.removeItem(at: directory) }
+        func badge() -> Bool {
+            guard let status = observed else { return false }
+            return MenuUpdateIndicator.showsBadge(status: status, statusKnown: true, updateAvailable: true,
+                busy: false, setupPending: false, hasMessage: false,
+                now: testNow ?? Date().timeIntervalSince1970)
+        }
+        assert(MenuUpdateIndicator.readStatus(in: directory) == nil)
+        write("idle")
+        observer.start()
+        assert(observer.isWatching && badge())
+        for state in ["needs_input", "failed"] {
+            write(state)
+            await until("closed panel \(state)") { observed?.activity == state && !badge() }
+            write("idle")
+            await until("closed panel attention clears") { observed?.activity == "idle" && badge() }
+        }
+        write("idle", running: false)
+        await until("closed panel service unavailable") { observed?.running == false && !badge() }
+        write("idle")
+        await until("closed panel service returns") { observed?.running == true && badge() }
+        try! Data("invalid status".utf8).write(to: path, options: .atomic)
+        await until("closed panel failed status read") { observed == nil && !badge() }
+        write("idle")
+        await until("closed panel valid status returns") { badge() }
+        observer.expire(at: Date().addingTimeInterval(0.05))
+        await until("closed panel freshness expires without file events") { expired }
+        assert(!badge())
+        let beforeRecovery = reads
+        testNow = nil
+        write("idle")
+        await until("closed panel fresh publication restores badge") { reads > beforeRecovery && badge() }
+        observer.stop()
+        let stoppedReads = reads
+        write("needs_input")
+        try! await Task.sleep(nanoseconds: 100_000_000)
+        assert(!observer.isWatching && reads == stoppedReads)
+
+        let c = ControlledCommands(); let m = model(c)
+        m.refresh(); await until("first failed badge status read") { c.count == 1 }
+        c.reply(0, false, "fixture read failure")
+        await until("failed badge status recorded") { m.hasReadStatus }
+        assert(!m.statusReadSucceeded)
+        assert(!MenuUpdateIndicator.showsBadge(status: m.status, statusKnown: m.statusReadSucceeded,
+            updateAvailable: true, busy: false, setupPending: false, hasMessage: false))
+        m.refresh(); await until("paused badge status read") { c.count == 2 }
+        c.reply(1, true, paused)
+        await until("paused badge status validated") { m.statusReadSucceeded }
+        assert(MenuUpdateIndicator.showsBadge(status: m.status, statusKnown: m.statusReadSucceeded,
+            updateAvailable: true, busy: false, setupPending: false, hasMessage: false))
+        print("Closed-panel update status, freshness and failed-read checks passed")
+    }
+
     @MainActor static func main() async {
         exerciseUpgradeDetection()
+        exerciseMenuUpdateIndicator()
         exerciseSetupWindow()
+        await exerciseClosedPanelUpdateStatus()
         // Upgrades preserve setup, retry failed installs, and review changed hooks.
         for changedHooks in [false, true] {
             let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -554,10 +687,105 @@ private struct MacPanelTransitions {
             await until("uninstall retry") { c.count == 3 }; c.reply(2)
             await until("uninstalled") { finished }
             assert(m.uninstalled && m.busy)
+            let delegate = PacemanAppDelegate(model: m)
+            assert(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateNow)
             m.refresh(); m.setSharing(true); m.beginPairing()
             c.reply(0, true, live)
             try! await Task.sleep(nanoseconds: 50_000_000)
             assert(c.count == 3 && !m.status.running && m.pairingCode == nil)
+        }
+        // Update termination waits for a successful handoff; refusal stays usable.
+        for success in [false, true] {
+            let c = ControlledCommands(); let m = model(c)
+            let updater = PacemanUpdater()
+            updater.markInstallationPending()
+            var mayReply = false
+            var replies: [Bool] = []
+            let delegate = PacemanAppDelegate(model: m, updater: updater, replyToTermination: { _, value in
+                assert(mayReply, "Termination reply occurred before terminateLater was returned")
+                replies.append(value)
+            })
+            m.updateHandoff(recover: true) { _ in }
+            await until("busy delegate operation") { c.count == 1 }
+            assert(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateCancel)
+            assert(replies.isEmpty && c.count == 1)
+            c.reply(0)
+            await until("busy delegate becomes idle") { !m.busy }
+            // An ordinary Quit still prepares a staged update once idle.
+            assert(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateLater)
+            assert(replies.isEmpty)
+            mayReply = true
+            await until("delegate update preparation") { c.count == 2 }
+            assert(c.args(1) == ["prepare-update"])
+            c.reply(1, success, "Pending responses remain.")
+            await until("deferred termination reply") { replies.count == 1 }
+            assert(replies == [success])
+        }
+        #if canImport(Sparkle)
+        // Pinned Sparkle 2.10: Install on Quit (.dismiss/installing), followed by
+        // Skip This Version (.skip/installing), cancels without didAbortWithError.
+        let controller = SPUStandardUpdaterController(startingUpdater: false,
+            updaterDelegate: nil, userDriverDelegate: nil)
+        let archive = NSKeyedArchiver(requiringSecureCoding: true)
+        archive.encode(URL(string: "https://example.invalid/Paceman.dmg")! as NSURL, forKey: "fileURL")
+        archive.encode("application" as NSString, forKey: "SUAppcastItemInstallationType")
+        archive.encode("36" as NSString, forKey: "versionString")
+        archive.encode(NSDictionary(), forKey: "propertiesDictionary")
+        let decoder = try! NSKeyedUnarchiver(forReadingFrom: archive.encodedData)
+        decoder.decodingFailurePolicy = .setErrorAndReturn
+        let item = SUAppcastItem(coder: decoder)!
+        let installing = SPUUserUpdateState(coder: InstallingUpdateStateCoder())!
+        for skip in [true, false] {
+            let c = ControlledCommands(); let m = model(c)
+            let updater = PacemanUpdater()
+            var replies: [Bool] = []
+            let delegate = PacemanAppDelegate(model: m, updater: updater,
+                replyToTermination: { _, value in replies.append(value) })
+            assert(!updater.installationPending)
+            updater.updater(controller.updater, didExtractUpdate: item)
+            updater.updater(controller.updater, userDidMake: .dismiss, forUpdate: item, state: installing)
+            updater.standardUserDriverWillFinishUpdateSession()
+            assert(updater.installationPending, "Install on Quit must retain its guarded handoff")
+            if skip {
+                updater.updater(controller.updater, userDidMake: .skip, forUpdate: item, state: installing)
+                updater.standardUserDriverWillFinishUpdateSession()
+                assert(!updater.installationPending, "Skip must clear the canceled install without an error callback")
+                // Active source work must not block an ordinary Quit after Skip.
+                m.status = try! JSONDecoder().decode(SourceStatus.self, from: Data(live.utf8))
+                assert(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateNow)
+                assert(c.count == 0 && replies.isEmpty, "Ordinary Quit after Skip must not prepare an update")
+            } else {
+                assert(delegate.applicationShouldTerminate(NSApplication.shared) == .terminateLater)
+                await until("Install on Quit guarded handoff") { c.count == 1 }
+                assert(c.args(0) == ["prepare-update"])
+                c.reply(0)
+                await until("Install on Quit termination reply") { replies == [true] }
+            }
+        }
+        print("Pinned Sparkle Skip cancellation and deferred Quit checks passed")
+        // Optional Objective-C callbacks must use Sparkle's exact selectors.
+        for selector in ["updater:didExtractUpdate:", "updater:willInstallUpdate:",
+                         "updater:userDidMakeChoice:forUpdate:state:",
+                         "standardUserDriverShouldHandleShowingScheduledUpdate:andInImmediateFocus:",
+                         "standardUserDriverWillHandleShowingUpdate:forUpdate:state:"] {
+            assert(PacemanUpdater.shared.responds(to: NSSelectorFromString(selector)))
+        }
+        #endif
+        for recover in [false, true] {
+            for success in [false, true] {
+                let c = ControlledCommands(); let m = model(c)
+                var completion: Bool?
+                m.updateHandoff(recover: recover) { completion = $0 }
+                await until("update command") { c.count == 1 }
+                assert(c.args(0) == [recover ? "recover-update" : "prepare-update"])
+                m.setSharing(false) // Configuration cannot race the handoff.
+                assert(c.count == 1 && m.busy)
+                c.reply(0, success, "Finish pending responses first.")
+                await until("update handoff") { completion != nil }
+                assert(completion == success)
+                assert(m.busy == (success && !recover))
+                if !success { assert(m.message == "Finish pending responses first.") }
+            }
         }
         print("Mac panel transition scenarios passed")
     }

@@ -38,6 +38,7 @@ class DesktopStatus:
             phone_seen = self.phone_seen
         value = {
             "schema": 1, "running": not stopped, "updatedAt": time.time(),
+            "sourceID": self.store.metadata('source_id'),
             "startedAt": self.started, "mode": local_mode,
             "computerName": socket.gethostname(),
             "activity": snapshot["state"], "sessions": len(snapshot["sessions"]),

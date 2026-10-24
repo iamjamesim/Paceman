@@ -1,5 +1,6 @@
 """Exercise the real Swift panel model with controlled, out-of-order command completions."""
 from pathlib import Path
+import os
 import subprocess
 import platform
 import sys
@@ -29,12 +30,19 @@ class MacPanelTransitionTests(unittest.TestCase):
             swift = directory / "Transitions.swift"
             swift.write_text(source)
             binary = directory / "transitions"
+            framework = os.environ.get('PACEMAN_SPARKLE_FRAMEWORK')
+            flags = (['-F', str(Path(framework).parent), '-framework', 'Sparkle',
+                      '-Xlinker', '-rpath', '-Xlinker', str(Path(framework).parent)] if framework else [])
             build = subprocess.run(["/usr/bin/xcrun", "swiftc", "-parse-as-library", "-warnings-as-errors",
                             "-target", platform.machine() + "-apple-macosx15.0",
                             str(swift), str(root / "ios/Shared/PacemanMark.swift"),
-                            "-o", str(binary)], capture_output=True, text=True)
+                            *flags, "-o", str(binary)], capture_output=True, text=True)
             self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
             result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("upgrade detection cases passed", result.stdout)
             self.assertIn("transition scenarios passed", result.stdout)
+            self.assertIn("Menu update indicator priority and native template checks passed", result.stdout)
+            self.assertIn("Closed-panel update status, freshness and failed-read checks passed", result.stdout)
+            if framework:
+                self.assertIn("Pinned Sparkle Skip cancellation and deferred Quit checks passed", result.stdout)

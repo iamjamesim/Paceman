@@ -61,6 +61,9 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Paceman Background needs its Python and data paths.\n");
         return 2;
     }
+    char update_stopped[4096];
+    snprintf(update_stopped, sizeof(update_stopped), "%s/update-stopped", argv[2]);
+    if (access(update_stopped, F_OK) == 0) return 0;
     struct sigaction action = {.sa_handler = stop_children};
     sigemptyset(&action.sa_mask);
     sigaction(SIGTERM, &action, NULL);

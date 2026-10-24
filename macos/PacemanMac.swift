@@ -2,6 +2,92 @@ import SwiftUI
 import CoreImage.CIFilterBuiltins
 import ServiceManagement
 import UniformTypeIdentifiers
+import Combine
+import Darwin
+#if canImport(Sparkle)
+import Sparkle
+#endif
+
+@MainActor
+private final class PacemanUpdater: NSObject, ObservableObject {
+    static let shared = PacemanUpdater()
+    static let downloadURL = URL(string: "https://github.com/iamjamesim/Paceman/releases/latest")!
+    @Published private(set) var canCheck = false
+    @Published private(set) var configured = false
+    @Published private(set) var updateAvailable = false
+    private(set) var installationPending = false
+    func markInstallationPending() { installationPending = true }
+    var hidePanel: () -> Void = {}
+    var allowsUpdate: () -> Bool = { false }
+    #if canImport(Sparkle)
+    private var controller: SPUStandardUpdaterController?
+    private var observation: NSKeyValueObservation?
+    #endif
+
+    func start() {
+        #if canImport(Sparkle)
+        guard controller == nil, InstalledBuild.isInApplications,
+              !FileManager.default.fileExists(atPath: InstalledBuild.updateJournal),
+              Bundle.main.object(forInfoDictionaryKey: "SURequireSignedFeed") as? Bool == true,
+              Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") as? String != nil,
+              Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String != nil else { return }
+        let controller = SPUStandardUpdaterController(startingUpdater: false,
+            updaterDelegate: self, userDriverDelegate: self)
+        self.controller = controller
+        configured = true
+        observation = controller.updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] updater, _ in
+            MainActor.assumeIsolated { self?.canCheck = updater.canCheckForUpdates }
+        }
+        controller.startUpdater()
+        #endif
+    }
+
+    func check() {
+        #if canImport(Sparkle)
+        controller?.checkForUpdates(nil)
+        #endif
+    }
+}
+
+#if canImport(Sparkle)
+extension PacemanUpdater: SPUUpdaterDelegate, @MainActor SPUStandardUserDriverDelegate {
+    func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
+        guard allowsUpdate() else {
+            throw NSError(domain: "PacemanUpdate", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Finish Paceman setup or the current operation before checking for updates."])
+        }
+    }
+    func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+        markInstallationPending()
+    }
+    func updater(_ updater: SPUUpdater, didExtractUpdate item: SUAppcastItem) {
+        // A staged installer can install on a later ordinary Quit, before the
+        // willInstallUpdate callback. Guard that path as well as Install Now.
+        markInstallationPending()
+    }
+    func updater(_ updater: SPUUpdater, userDidMake choice: SPUUserUpdateChoice,
+                 forUpdate item: SUAppcastItem, state: SPUUserUpdateState) {
+        if choice == .skip {
+            // Sparkle cancels a deferred installer without didAbortWithError.
+            installationPending = false
+        } else if state.stage == .installing {
+            markInstallationPending()
+        }
+    }
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        installationPending = false
+    }
+    func standardUserDriverWillShowModalAlert() { hidePanel() }
+    var supportsGentleScheduledUpdateReminders: Bool { true }
+    func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem,
+                                                              andInImmediateFocus immediateFocus: Bool) -> Bool { false }
+    func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool,
+                                                   forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
+        updateAvailable = !handleShowingUpdate
+    }
+    func standardUserDriverWillFinishUpdateSession() { updateAvailable = false }
+}
+#endif
 
 private enum SetupGuide {
     static let url = URL(string: "https://github.com/iamjamesim/paceman/blob/main/macos/README.md")!
@@ -73,6 +159,167 @@ private struct PairingCode: Identifiable {
     let text: String
 }
 
+private struct UpdateAvailableButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.down")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(.blue, in: Circle())
+                .frame(width: 28, height: 28)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("Update available")
+        .accessibilityLabel("Update available")
+    }
+}
+
+@MainActor
+private enum MenuUpdateIndicator {
+    static func readStatus(in directory: URL) -> SourceStatus? {
+        let paused = FileManager.default.fileExists(atPath: directory.appendingPathComponent("sharing-paused").path)
+        let status = directory.appendingPathComponent("status.json")
+        if !FileManager.default.fileExists(atPath: status.path) { return paused ? .empty : nil }
+        guard let data = try? Data(contentsOf: status),
+              var value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              value["schema"] as? Int == 1 else { return nil }
+        value["sharingEnabled"] = !paused
+        guard let encoded = try? JSONSerialization.data(withJSONObject: value) else { return nil }
+        return try? JSONDecoder().decode(SourceStatus.self, from: encoded)
+    }
+
+    static func showsBadge(status: SourceStatus, statusKnown: Bool, updateAvailable: Bool,
+                           busy: Bool, setupPending: Bool, hasMessage: Bool,
+                           now: TimeInterval = Date().timeIntervalSince1970) -> Bool {
+        guard updateAvailable, statusKnown, !busy, !setupPending, !hasMessage,
+              !status.sharingEnabled || status.running else { return false }
+        if status.sharingEnabled {
+            guard let updated = status.updatedAt, updated.isFinite,
+                  0 <= now - updated, now - updated < 20 else { return false }
+        }
+        return !["needs_input", "failed"].contains(status.activity ?? "")
+            && (status.sessionCounts?["needs_input"] ?? 0) == 0
+            && (status.sessionCounts?["failed"] ?? 0) == 0
+    }
+
+    static func image() -> NSImage {
+        let renderer = ImageRenderer(content: PacemanMark().foregroundStyle(.black).frame(width: 18, height: 18))
+        renderer.scale = 2
+        let icon = renderer.nsImage ?? NSImage(size: NSSize(width: 18, height: 18))
+        icon.isTemplate = true
+        return icon
+    }
+
+    static func addBadge(to button: NSButton) -> MenuUpdateBadgeView {
+        let badge = MenuUpdateBadgeView()
+        badge.translatesAutoresizingMaskIntoConstraints = false
+        badge.isHidden = true
+        badge.setAccessibilityElement(false)
+        button.addSubview(badge)
+        NSLayoutConstraint.activate([
+            badge.widthAnchor.constraint(equalToConstant: 8),
+            badge.heightAnchor.constraint(equalToConstant: 8),
+            badge.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -0.5),
+            badge.topAnchor.constraint(equalTo: button.topAnchor, constant: 1),
+        ])
+        return badge
+    }
+
+    static func update(button: NSButton, badge: MenuUpdateBadgeView, show: Bool) {
+        badge.isHidden = !show
+        button.toolTip = show ? "Update available" : "Paceman"
+        button.setAccessibilityLabel(show ? "Paceman, update available" : "Paceman")
+    }
+}
+
+// Observe the source's existing atomic status writes only while an update reminder
+// exists. The one-shot deadline expires presentation; it does not keep a service alive.
+@MainActor
+private final class UpdateStatusObserver {
+    private let directory: URL
+    private let changed: () -> Void
+    private let expired: () -> Void
+    private var source: DispatchSourceFileSystemObject?
+    private var deadline: DispatchWorkItem?
+    private var deadlineAt: Date?
+    private var generation = 0
+    var isWatching: Bool { source != nil }
+
+    init(directory: URL, changed: @escaping () -> Void, expired: @escaping () -> Void) {
+        self.directory = directory
+        self.changed = changed
+        self.expired = expired
+    }
+
+    func start() {
+        guard source == nil else { return }
+        let descriptor = open(directory.path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        generation += 1
+        let current = generation
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor,
+            eventMask: [.write, .rename, .delete], queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.generation == current, self.source != nil else { return }
+                if self.source?.data.contains(.delete) == true || self.source?.data.contains(.rename) == true {
+                    self.stop()
+                }
+                self.changed()
+            }
+        }
+        source.setCancelHandler { close(descriptor) }
+        self.source = source
+        source.resume()
+        changed()
+    }
+
+    func expire(at date: Date?) {
+        guard date != deadlineAt else { return }
+        deadline?.cancel()
+        deadline = nil
+        deadlineAt = date
+        guard let date, source != nil else { return }
+        let current = generation
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.generation == current, self.source != nil else { return }
+                self.deadlineAt = nil
+                self.expired()
+            }
+        }
+        deadline = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, date.timeIntervalSinceNow), execute: work)
+    }
+
+    func stop() {
+        generation += 1
+        deadline?.cancel()
+        deadline = nil
+        deadlineAt = nil
+        source?.cancel()
+        source = nil
+    }
+}
+
+private final class MenuUpdateBadgeView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
+    }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.setFill()
+        NSBezierPath(ovalIn: bounds).fill()
+        NSColor.systemBlue.setFill()
+        NSBezierPath(ovalIn: bounds.insetBy(dx: 1, dy: 1)).fill()
+    }
+}
+
 private enum InstalledBuild {
     static let appLocations = ["/Applications/Paceman.app", NSHomeDirectory() + "/Applications/Paceman.app"]
     static var appPath: String {
@@ -84,6 +331,7 @@ private enum InstalledBuild {
     static let notificationMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/notification-setup-incomplete"
     static let loginAttentionMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/login-setup-incomplete"
     static let loginMarker = NSHomeDirectory() + "/Library/Application Support/Paceman/menu-login-configured"
+    static let updateJournal = NSHomeDirectory() + "/Library/Application Support/Paceman/update-pending.json"
 
     static var needsUpgrade: Bool {
         requiresUpgrade(bundle: .main,
@@ -155,11 +403,12 @@ private final class PanelModel: ObservableObject {
     @Published var loginStatus = SMAppService.mainApp.status
     @Published var expanded: String?
     @Published var confirming: String?
-    enum Operation { case idle, installing, upgrading, command, pairing, savingReport, uninstalling, uninstalled }
+    enum Operation { case idle, installing, upgrading, updating, command, pairing, savingReport, uninstalling, uninstalled }
     @Published private(set) var operation = Operation.idle
     @Published var needsInstallation: Bool
     @Published private(set) var upgradePending: Bool
     @Published private(set) var hasReadStatus = false
+    @Published private(set) var statusReadSucceeded = false
     @Published var confirmingSetupUninstall = false
     var busy: Bool { operation != .idle }
     var uninstalled: Bool { operation == .uninstalled }
@@ -308,6 +557,7 @@ private final class PanelModel: ObservableObject {
                 self.hasReadStatus = true
                 if result.0, let data = result.1.data(using: .utf8),
                    let state = try? JSONDecoder().decode(SourceStatus.self, from: data) {
+                    self.statusReadSucceeded = true
                     self.status = state
                     self.checkPairingCompletion(state)
                     if let id = self.expanded, state.clients?.contains(where: { $0.id == id }) != true {
@@ -315,6 +565,7 @@ private final class PanelModel: ObservableObject {
                         self.confirming = nil
                     }
                 } else {
+                    self.statusReadSucceeded = false
                     // Preserve pairings and the Sharing preference, but never present a failed read as live.
                     self.status = self.status.unavailable()
                 }
@@ -390,6 +641,22 @@ private final class PanelModel: ObservableObject {
             }
         }
         return true
+    }
+
+    func updateHandoff(recover: Bool = false, onComplete: @escaping (Bool) -> Void) {
+        guard begin(.updating) else { onComplete(false); return }
+        let command = self.command
+        DispatchQueue.global(qos: .userInitiated).async {
+            let (ok, result) = command([recover ? "recover-update" : "prepare-update"])
+            DispatchQueue.main.async {
+                if recover || !ok { self.operation = .idle }
+                if !ok {
+                    self.message = result.split(separator: "\n").last.map(String.init)
+                        ?? "Paceman could not prepare the update. Your current installation was kept."
+                }
+                onComplete(ok)
+            }
+        }
     }
 
     func installBundled() {
@@ -510,6 +777,10 @@ private final class PanelModel: ObservableObject {
     }
 
     func uninstall(onSuccess: @escaping () -> Void) {
+        guard !PacemanUpdater.shared.installationPending else {
+            message = "Restart Paceman to finish the pending update before uninstalling."
+            return
+        }
         run(["uninstall", "--yes"], onSuccess: { _ in
             self.operation = .uninstalled
             self.endPairing()
@@ -1005,6 +1276,7 @@ private struct UninstallConfirmationView: View {
 
 private struct ManagementView: View {
     @ObservedObject var model: PanelModel
+    @ObservedObject private var updater = PacemanUpdater.shared
     var onReview: () -> Void = {}
     @State private var confirmingUninstall = false
 
@@ -1044,6 +1316,18 @@ private struct ManagementView: View {
                         NSApplication.shared.activate(ignoringOtherApps: true)
                     }.disabled(model.busy || model.status.selectedProviders.isEmpty)
                     Divider()
+                    HStack {
+                        Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        if updater.configured {
+                            Button(updater.updateAvailable ? "Update Available…" : "Check for Updates…") { updater.check() }
+                                .disabled(model.busy || !updater.canCheck)
+                        } else {
+                            Link("Download Latest…", destination: PacemanUpdater.downloadURL)
+                        }
+                    }
+                    Divider()
                     Button("Save support report…") { model.saveSupportReport() }
                         .disabled(model.busy)
                     BulletList(items: [
@@ -1080,6 +1364,7 @@ private struct ManagementView: View {
 
 private struct Panel: View {
     @ObservedObject var model: PanelModel
+    @ObservedObject private var updater = PacemanUpdater.shared
     var onOpenSetup: () -> Void = {}
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -1180,15 +1465,21 @@ private struct Panel: View {
                         .font(.system(size: 10, weight: .semibold)).tracking(1.6).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button {
-                    model.connectingPhone = true
-                    onOpenSetup()
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                } label: { Image(systemName: "qrcode") }
-                    .help("Connect a phone").disabled(!model.status.sharingEnabled || !model.status.running || model.busy)
-                Toggle("Sharing", isOn: Binding(get: { model.status.sharingEnabled },
-                                                set: { model.setSharing($0) }))
-                    .labelsHidden().toggleStyle(.switch).disabled(model.busy)
+                HStack(spacing: 6) {
+                    if updater.configured && updater.updateAvailable {
+                        UpdateAvailableButton { updater.check() }
+                            .disabled(model.busy || !updater.canCheck)
+                    }
+                    Button {
+                        model.connectingPhone = true
+                        onOpenSetup()
+                        NSApplication.shared.activate(ignoringOtherApps: true)
+                    } label: { Image(systemName: "qrcode") }
+                        .help("Connect a phone").disabled(!model.status.sharingEnabled || !model.status.running || model.busy)
+                    Toggle("Sharing", isOn: Binding(get: { model.status.sharingEnabled },
+                                                    set: { model.setSharing($0) }))
+                        .labelsHidden().toggleStyle(.switch).disabled(model.busy)
+                }
             }
             Divider()
             VStack(alignment: .leading, spacing: 10) {
@@ -1343,43 +1634,109 @@ private struct MenuActivityRobot: View {
 @MainActor
 private final class PacemanAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSPopoverDelegate {
     let model: PanelModel
+    private let updater: PacemanUpdater
+    private let replyToTermination: @MainActor (NSApplication, Bool) -> Void
 
     override init() {
         model = PanelModel()
+        updater = .shared
+        replyToTermination = { $0.reply(toApplicationShouldTerminate: $1) }
         super.init()
     }
 
-    init(model: PanelModel) {
+    init(model: PanelModel, updater: PacemanUpdater? = nil,
+         replyToTermination: (@MainActor (NSApplication, Bool) -> Void)? = nil) {
         self.model = model
+        self.updater = updater ?? .shared
+        self.replyToTermination = replyToTermination ?? { $0.reply(toApplicationShouldTerminate: $1) }
         super.init()
     }
 
     private var statusItem: NSStatusItem?
+    private var updateBadge: MenuUpdateBadgeView?
+    private var observedMenuStatus: SourceStatus?
+    private var iconSubscriptions = Set<AnyCancellable>()
+    private lazy var updateStatusObserver = UpdateStatusObserver(
+        directory: URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/Paceman"),
+        changed: { [weak self] in self?.readObservedMenuStatus() },
+        expired: { [weak self] in self?.readObservedMenuStatus() })
     private let popover = NSPopover()
     private var setupWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if !PACEMAN_PREVIEW_WINDOW
-        let renderer = ImageRenderer(content: PacemanMark().foregroundStyle(.black).frame(width: 18, height: 18))
-        renderer.scale = 2
-        let icon = renderer.nsImage ?? NSImage(size: NSSize(width: 18, height: 18))
-        icon.isTemplate = true
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = icon
+        item.button?.image = MenuUpdateIndicator.image()
         item.button?.setAccessibilityLabel("Paceman")
         item.button?.target = self
         item.button?.action = #selector(togglePanel)
         statusItem = item
+        if let button = item.button { updateBadge = MenuUpdateIndicator.addBadge(to: button) }
+        model.objectWillChange.merge(with: updater.objectWillChange).sink { [weak self] in
+            // ObservableObject publishes before mutation. Draw after the new state is applied.
+            DispatchQueue.main.async { self?.refreshStatusIcon() }
+        }.store(in: &iconSubscriptions)
+        refreshStatusIcon()
         popover.behavior = .transient
         popover.delegate = self
-        if model.upgradeBundled(onComplete: { [weak self] in
+        updater.allowsUpdate = { [weak self] in
+            guard let self else { return false }
+            return !self.model.busy && !self.model.shouldPresentSetup
+        }
+        updater.hidePanel = { [weak self] in self?.popover.performClose(nil) }
+        let finished: () -> Void = { [weak self] in
             guard let self else { return }
+            self.updater.start()
             if self.model.shouldPresentSetup { self.showSetup() }
             else { self.setupWindow?.close(); self.showPanel() }
-        }) {
+        }
+        if model.upgradeBundled(onComplete: finished) {
             showSetup()
-        } else if model.shouldPresentSetup || CommandLine.arguments.contains("--show-setup") { showSetup() }
+        } else if FileManager.default.fileExists(atPath: InstalledBuild.updateJournal) {
+            model.updateHandoff(recover: true) { _ in finished() }
+        } else {
+            updater.start()
+            if model.shouldPresentSetup || CommandLine.arguments.contains("--show-setup") { showSetup() }
+        }
         #endif
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if model.uninstalled { return .terminateNow }
+        guard !model.busy else { return .terminateCancel }
+        guard updater.installationPending else { return .terminateNow }
+        model.updateHandoff { [weak self] ok in
+            self?.replyToTermination(sender, ok)
+            if !ok { self?.showPanel() }
+        }
+        return .terminateLater
+    }
+
+    private func refreshStatusIcon() {
+        guard let button = statusItem?.button, let badge = updateBadge else { return }
+        let available = updater.configured && updater.updateAvailable
+        if available { updateStatusObserver.start() } else { updateStatusObserver.stop() }
+        let now = Date().timeIntervalSince1970
+        let status = observedMenuStatus ?? .empty
+        let updated = status.updatedAt ?? 0
+        let lease = available && model.statusReadSucceeded && status.running && status.sharingEnabled
+            && updated.isFinite && 0 <= now - updated && now - updated < 20
+            ? Date(timeIntervalSince1970: updated + 20) : nil
+        updateStatusObserver.expire(at: lease)
+        let show = MenuUpdateIndicator.showsBadge(status: status,
+            statusKnown: model.statusReadSucceeded && updateStatusObserver.isWatching && observedMenuStatus != nil,
+            updateAvailable: available, busy: model.busy,
+            setupPending: model.shouldPresentSetup, hasMessage: model.message != nil)
+        MenuUpdateIndicator.update(button: button, badge: badge, show: show)
+    }
+
+    private func readObservedMenuStatus() {
+        observedMenuStatus = MenuUpdateIndicator.readStatus(in:
+            URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/Paceman"))
+        refreshStatusIcon()
+        // Validate the control boundary initially/after a failed read. Normal
+        // status-file notifications need no subprocess or foreground polling view.
+        if !model.statusReadSucceeded { model.refresh() }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

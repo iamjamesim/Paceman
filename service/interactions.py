@@ -150,6 +150,7 @@ class InteractionBroker:
         self._receipts = OrderedDict()
         self._awaiting_native = OrderedDict()
         self._closed = False
+        self._updating = False
         self._provider_enabled = provider_enabled or (lambda provider: True)
         self.diagnostics = diagnostics
 
@@ -193,7 +194,7 @@ class InteractionBroker:
             raise BrokerError("invalid_request")
         with self._lock:
             self._prune()
-            if self._closed:
+            if self._closed or self._updating:
                 raise BrokerError("unavailable", 503)
             if not self._enabled(normalized["provider"]):
                 raise BrokerError("unavailable", 503)
@@ -272,7 +273,7 @@ class InteractionBroker:
         fingerprint = hashlib.sha256(json.dumps(response, sort_keys=True).encode()).hexdigest()
         with self._lock:
             self._prune()
-            if self._closed:
+            if self._closed or self._updating:
                 raise BrokerError("unavailable", 503)
             if generation != self.generation:
                 raise BrokerError("stale_request", 409)
@@ -321,6 +322,18 @@ class InteractionBroker:
             pending.ready.set()
             self._record("response_submitted", request, action=action, traceID=trace_id, origin=origin)
             return dict(result)
+
+    def prepare_update(self):
+        """Close admission only when no decision or uncertain submission exists."""
+        with self._lock:
+            self._prune()
+            if self._closed or self._updating or self._pending or self._awaiting_native:
+                raise BrokerError("update_busy", 409)
+            self._updating = True
+
+    def resume_after_update(self):
+        with self._lock:
+            self._updating = False
 
     def cancel_all(self, reason="access_changed"):
         """Invalidate phone credentials/config-era requests without reopening any."""

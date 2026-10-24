@@ -20,6 +20,7 @@ import tempfile
 from urllib.request import urlopen
 
 from notarize_release import notarize
+from sparkle_dependency import framework as sparkle_framework, update_settings, sign_nested
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -115,7 +116,7 @@ def copy_source(app: Path, revision: str, runtime: dict, label: str):
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.png"))
     shutil.copy2(CLIENT_LOCK, library / CLIENT_LOCK.name)
     notices = app / "Contents/Resources/Notices"
-    notices.mkdir()
+    notices.mkdir(exist_ok=True)
     shutil.copy2(ROOT / "LICENSE", notices / "Paceman-LICENSE")
     shutil.copy2(ROOT / "THIRD_PARTY_NOTICES.md", notices / "Paceman-third-party.md")
     shutil.copytree(ROOT / "macos/runtime-notices/python", notices / "python")
@@ -171,6 +172,7 @@ def sign_app(app: Path, identity: str, *, adhoc: bool):
     for binary in sorted(binaries, key=lambda path: len(path.parts), reverse=True):
         run("/usr/bin/codesign", *options, binary, stdout=subprocess.DEVNULL)
     run("/usr/bin/codesign", *options, app / "Contents/MacOS/PacemanBackground")
+    sign_nested(app, run, options)
     run("/usr/bin/codesign", *options, app)
     run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
 
@@ -214,6 +216,8 @@ def main():
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--python-archive", type=Path, help="Use a cached copy of the pinned runtime")
     parser.add_argument("--wheelhouse", type=Path, help="Use predownloaded wheels offline")
+    parser.add_argument("--sparkle-archive", type=Path, help="Cached official archive pinned by macos/sparkle.json")
+    parser.add_argument("--updater-config", type=Path, help="Public HTTPS feedURL and publicEDKey JSON; no private keys")
     signing = parser.add_mutually_exclusive_group(required=True)
     signing.add_argument("--adhoc", action="store_true", help="Local dry run; never distribute")
     signing.add_argument("--identity", help="Developer ID Application identity for public release")
@@ -235,6 +239,7 @@ def main():
         if args.identity:
             verify_developer_id(args.identity)
         revision = checkout_revision(args.release_label, adhoc=args.adhoc)
+        updater = update_settings(args.updater_config)
         args.output_dir.mkdir(parents=True, exist_ok=True)
         suffix = "-UNSIGNED" if args.adhoc else ""
         dmg = args.output_dir / f"Paceman-macos-arm64-{args.release_label}{suffix}.dmg"
@@ -246,10 +251,12 @@ def main():
                 os.environ["CLANG_MODULE_CACHE_PATH"] = str(scratch / "clang-cache")
                 os.environ["SWIFT_MODULE_CACHE_PATH"] = str(scratch / "swift-cache")
                 archive, runtime = runtime_archive(args.python_archive, scratch)
+                sparkle = sparkle_framework(args.sparkle_archive, scratch)
                 from macos.install import build_app
                 app = scratch / "Paceman.app"
                 build_app(app, version=marketing_version, build_number=str(args.build_number),
-                          minimum_macos=MINIMUM_MACOS, sign=False)
+                          minimum_macos=MINIMUM_MACOS, sign=False,
+                          sparkle_framework=sparkle, updater_settings=updater)
                 python = copy_runtime(archive, app, scratch)
                 install_client_packages(python, args.wheelhouse, scratch)
                 copy_source(app, revision, runtime, args.release_label)

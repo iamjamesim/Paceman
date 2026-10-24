@@ -9,6 +9,8 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
+import sys
 import time
 import uuid
 from urllib.parse import urlsplit
@@ -716,6 +718,9 @@ def main():
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--once", action="store_true", help="Process the newest eligible event, then exit")
     args = parser.parse_args()
+    if sys.platform == 'darwin' and (args.data_dir.parent / 'installed-app').is_file():
+        from macos.updates import check_service_start
+        check_service_start(args.data_dir.parent)
     store = Store(args.data_dir / "hub.sqlite3")
     # One worker per source DB prevents duplicate sends from accidental double-starts.
     with (args.data_dir / "push.lock").open("a") as lock:
@@ -737,6 +742,10 @@ def main():
         except (ValueError, OSError, ImportError):
             parser.error("Cannot load push config. Check source identity, private config, and requirements-push.txt.")
         worker = Worker(store, sender, args.data_dir / "push-delivery.jsonl")
+        previous = signal.getsignal(signal.SIGTERM)
+        def terminate(_number, _frame):
+            raise KeyboardInterrupt
+        signal.signal(signal.SIGTERM, terminate)
         print("Push worker running. APNs acceptance is not device delivery or a background wake.", flush=True)
         try:
             while True:
@@ -748,6 +757,7 @@ def main():
             pass
         finally:
             sender.close()
+            signal.signal(signal.SIGTERM, previous)
 
 
 if __name__ == "__main__":
